@@ -2,7 +2,7 @@ import { Check, ArrowRight } from "lucide-react";
 
 const PricingPage = () => {
   const handleGetStarted = () => {
-    window.location.href = import.meta.env.VITE_APP_URL ?? "localhost:3001";
+    window.location.href = import.meta.env.VITE_APP_URL;
   };
 
   const plans = [

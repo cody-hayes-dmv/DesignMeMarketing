@@ -39,7 +39,7 @@ const LoginPage = () => {
   };
 
   const goBackToMarketing = () => {
-    window.location.href = "http://localhost:3000";
+    window.location.href = import.meta.env.VITE_MARKETING_URL;
   };
 
   return (

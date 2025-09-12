@@ -43,6 +43,7 @@ router.post("/register", async (req, res) => {
         name,
         passwordHash,
         role: "AGENCY",
+        verified: true,
       },
     });
 
@@ -60,7 +61,6 @@ router.post("/register", async (req, res) => {
         token: verificationToken,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
         userId: user.id,
-        verified: true,
       },
     });
 
