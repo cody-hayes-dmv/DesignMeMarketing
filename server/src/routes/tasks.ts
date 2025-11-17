@@ -5,6 +5,12 @@ import { authenticateToken } from "../middleware/auth.js";
 
 const router = express.Router();
 
+const proofItemSchema = z.object({
+  type: z.enum(["image", "video", "url"]),
+  value: z.string().url(), // URL to the file or external URL
+  name: z.string().optional(), // Optional name/description
+});
+
 const createTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
@@ -13,6 +19,9 @@ const createTaskSchema = z.object({
   dueDate: z.coerce.date().optional(), // accepts ISO string or Date
   assigneeId: z.string().optional(),
   clientId: z.string().optional(),
+  priority: z.string().optional(),
+  estimatedHours: z.number().int().positive().optional(),
+  proof: z.array(proofItemSchema).optional(), // Array of proof items
 });
 
 const updateTaskSchema = z.object({
@@ -23,13 +32,41 @@ const updateTaskSchema = z.object({
   dueDate: z.coerce.date().nullable().optional(),
   assigneeId: z.string().nullable().optional(),
   clientId: z.string().nullable().optional(),
+  priority: z.string().optional(),
+  estimatedHours: z.number().int().positive().optional(),
+  proof: z.array(proofItemSchema).nullable().optional(), // Array of proof items
+});
+
+const bulkCreateTaskSchema = z.object({
+  tasks: z.array(z.object({
+    title: z.string().min(1),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+    dueDate: z.coerce.date().nullable().optional(),
+    assigneeId: z.string().nullable().optional(),
+    clientId: z.string().nullable().optional(),
+    estimatedHours: z.number().optional(),
+    priority: z.string().optional(),
+  }))
 });
 
 // Common include for consistency
 const taskInclude = {
   assignee: { select: { id: true, name: true, email: true } },
   agency: { select: { id: true, name: true } },
-  client: { select: { id: true, name: true, domain: true } },
+  client: { 
+    select: { 
+      id: true, 
+      name: true, 
+      domain: true,
+      loginUrl: true,
+      username: true,
+      password: true,
+      notes: true
+    } 
+  },
+  // Note: proof is a JSON field, so it's automatically included
 };
 
 // Get tasks
@@ -133,6 +170,9 @@ router.post("/", authenticateToken, async (req, res) => {
         createdById: req.user.userId,
         assigneeId: parsed.assigneeId,
         clientId: parsed.clientId,
+        priority: parsed.priority,
+        estimatedHours: parsed.estimatedHours,
+        proof: parsed.proof || undefined, // Store as JSON
       },
       include: taskInclude,
     });
@@ -161,9 +201,15 @@ router.put("/:id", authenticateToken, async (req, res) => {
     const inAgency = task.agency.members.some((m) => m.userId === req.user.userId);
     if (!isAdmin && !inAgency) return res.status(403).json({ message: "Access denied" });
 
+    // Handle proof field - ensure it's properly formatted
+    const updateData: any = { ...updates };
+    if (updates.proof !== undefined) {
+      updateData.proof = updates.proof || null;
+    }
+
     const updatedTask = await prisma.task.update({
       where: { id },
-      data: updates,
+      data: updateData,
       include: taskInclude,
     });
 
@@ -223,6 +269,68 @@ router.delete("/:id", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Delete task error:", error);
     res.status(500).json({ message: "Failed to delete task" });
+  }
+});
+
+// Bulk create tasks (for onboarding templates)
+router.post("/bulk", authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    
+    if (user.role !== "AGENCY" && user.role !== "ADMIN" && user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const { tasks } = bulkCreateTaskSchema.parse(req.body);
+
+    // Get user's agency for task creation
+    let agencyId;
+    if (user.role === "SUPER_ADMIN") {
+      // For super admin, use the first agency
+      const agency = await prisma.agency.findFirst();
+      if (!agency) {
+        return res.status(400).json({ message: "No agency found" });
+      }
+      agencyId = agency.id;
+    } else {
+      const userAgency = await prisma.userAgency.findFirst({
+        where: { userId: user.userId }
+      });
+      
+      if (!userAgency) {
+        return res.status(404).json({ message: "Agency not found" });
+      }
+      
+      agencyId = userAgency.agencyId;
+    }
+
+    // Create all tasks
+    const createdTasks = await prisma.task.createMany({
+      data: tasks.map(task => ({
+        title: task.title,
+        description: task.description,
+        category: task.category,
+        status: task.status || "TODO",
+        dueDate: task.dueDate,
+        assigneeId: task.assigneeId,
+        clientId: task.clientId,
+        agencyId,
+        createdById: user.userId,
+        estimatedHours: task.estimatedHours,
+        priority: task.priority,
+      }))
+    });
+
+    res.status(201).json({ 
+      message: `${createdTasks.count} tasks created successfully`,
+      count: createdTasks.count 
+    });
+  } catch (error) {
+    console.error("Bulk create tasks error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid data", errors: error.errors });
+    }
+    res.status(500).json({ message: "Failed to create tasks" });
   }
 });
 

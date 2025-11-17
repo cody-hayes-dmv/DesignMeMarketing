@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Users,
   Plus,
@@ -10,64 +10,93 @@ import {
   Edit,
   Trash2,
 } from "lucide-react";
+import api from "../lib/api";
+import { useSelector } from "react-redux";
+import { RootState } from "../store";
+import toast from "react-hot-toast";
+
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  verified: boolean;
+  invited: boolean;
+  lastActive: string | null;
+  createdAt: string;
+  agencies: Array<{ id: string; name: string; role: string }>;
+  clientCount?: number;
+  taskCount?: number;
+}
 
 const TeamPage = () => {
+  const { user } = useSelector((state: RootState) => state.auth);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({
     email: "",
     name: "",
-    role: "WORKER",
+    role: "WORKER" as "WORKER" | "AGENCY" | "ADMIN",
   });
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock team data
-  const teamMembers = [
-    {
-      id: "1",
-      name: "John Smith",
-      email: "john@agency.com",
-      role: "AGENCY",
-      status: "Active",
-      lastActive: "2024-01-15",
-      projects: ["E-commerce Store", "Local Business"],
-      avatar: "JS",
-    },
-    {
-      id: "2",
-      name: "Sarah Johnson",
-      email: "sarah@agency.com",
-      role: "WORKER",
-      status: "Active",
-      lastActive: "2024-01-15",
-      projects: ["Tech Blog"],
-      avatar: "SJ",
-    },
-    {
-      id: "3",
-      name: "Mike Chen",
-      email: "mike@agency.com",
-      role: "WORKER",
-      status: "Invited",
-      lastActive: null,
-      projects: [],
-      avatar: "MC",
-    },
-    {
-      id: "4",
-      name: "Emily Davis",
-      email: "emily@agency.com",
-      role: "WORKER",
-      status: "Active",
-      lastActive: "2024-01-14",
-      projects: ["E-commerce Store", "Local Business"],
-      avatar: "ED",
-    },
-  ];
+  useEffect(() => {
+    fetchTeamMembers();
+  }, []);
+
+  const fetchTeamMembers = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get("/team");
+      setTeamMembers(response.data);
+      setError(null);
+    } catch (error: any) {
+      console.error("Failed to fetch team members:", error);
+      setError(error.response?.data?.message || "Failed to fetch team members");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleInviteTeamMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Inviting team member:", inviteForm);
-    setInviteForm({ email: "", name: "", role: "WORKER" });
-    setShowInviteModal(false);
+    try {
+      await api.post("/team/invite", inviteForm);
+      setInviteForm({ email: "", name: "", role: "WORKER" });
+      setShowInviteModal(false);
+      toast.success("Team member invited successfully!");
+      // Refresh team members
+      fetchTeamMembers();
+    } catch (error: any) {
+      console.error("Failed to invite team member:", error);
+      // Toast is already shown by API interceptor
+    }
+  };
+
+  const handleDeleteTeamMember = async (id: string) => {
+    if (!window.confirm("Are you sure you want to remove this team member? This action cannot be undone.")) {
+      return;
+    }
+    try {
+      await api.delete(`/team/${id}`);
+      toast.success("Team member removed successfully!");
+      // Refresh team members
+      fetchTeamMembers();
+    } catch (error: any) {
+      console.error("Failed to delete team member:", error);
+      // Toast is already shown by API interceptor
+    }
+  };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
   };
 
   const getRoleBadge = (role: string) => {
@@ -79,13 +108,18 @@ const TeamPage = () => {
     return styles[role as keyof typeof styles] || "bg-gray-100 text-gray-800";
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (member: TeamMember) => {
+    const status = member.verified ? "Active" : member.invited ? "Invited" : "Inactive";
     const styles = {
       Active: "bg-green-100 text-green-800",
       Invited: "bg-yellow-100 text-yellow-800",
       Inactive: "bg-gray-100 text-gray-800",
     };
     return styles[status as keyof typeof styles] || "bg-gray-100 text-gray-800";
+  };
+
+  const getStatusText = (member: TeamMember) => {
+    return member.verified ? "Active" : member.invited ? "Invited" : "Inactive";
   };
 
   return (
@@ -98,13 +132,15 @@ const TeamPage = () => {
             Manage your team members and their access
           </p>
         </div>
-        <button
-          onClick={() => setShowInviteModal(true)}
-          className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
-        >
-          <Plus className="h-5 w-5" />
-          <span>Invite Member</span>
-        </button>
+        {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || user?.role === "AGENCY") && (
+          <button
+            onClick={() => setShowInviteModal(true)}
+            className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+          >
+            <Plus className="h-5 w-5" />
+            <span>Invite Member</span>
+          </button>
+        )}
       </div>
 
       {/* Team Stats */}
@@ -114,7 +150,7 @@ const TeamPage = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Total Members</p>
               <p className="text-2xl font-bold text-primary-600">
-                {teamMembers.length}
+                {loading ? "..." : teamMembers.length}
               </p>
             </div>
             <Users className="h-8 w-8 text-primary-600" />
@@ -125,7 +161,7 @@ const TeamPage = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Active</p>
               <p className="text-2xl font-bold text-secondary-600">
-                {teamMembers.filter((m) => m.status === "Active").length}
+                {loading ? "..." : teamMembers.filter((m) => m.verified).length}
               </p>
             </div>
             <UserCheck className="h-8 w-8 text-secondary-600" />
@@ -136,7 +172,7 @@ const TeamPage = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Pending</p>
               <p className="text-2xl font-bold text-accent-600">
-                {teamMembers.filter((m) => m.status === "Invited").length}
+                {loading ? "..." : teamMembers.filter((m) => m.invited && !m.verified).length}
               </p>
             </div>
             <Mail className="h-8 w-8 text-accent-600" />
@@ -147,13 +183,19 @@ const TeamPage = () => {
             <div>
               <p className="text-sm font-medium text-gray-600">Admins</p>
               <p className="text-2xl font-bold text-gray-900">
-                {teamMembers.filter((m) => m.role === "AGENCY").length}
+                {loading ? "..." : teamMembers.filter((m) => m.role === "AGENCY" || m.role === "ADMIN" || m.role === "SUPER_ADMIN").length}
               </p>
             </div>
             <Shield className="h-8 w-8 text-gray-600" />
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg mb-8">
+          {error}
+        </div>
+      )}
 
       {/* Team Members Table */}
       <div className="bg-white rounded-xl border border-gray-200">
@@ -174,7 +216,7 @@ const TeamPage = () => {
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Projects
+                  Clients / Tasks
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Last Active
@@ -185,70 +227,97 @@ const TeamPage = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {teamMembers.map((member) => (
-                <tr key={member.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                        <span className="text-sm font-medium text-primary-700">
-                          {member.avatar}
-                        </span>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          {member.name}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {member.email}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 py-1 text-xs font-medium rounded-full ${getRoleBadge(
-                        member.role
-                      )}`}
-                    >
-                      {member.role}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusBadge(
-                        member.status
-                      )}`}
-                    >
-                      {member.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-600">
-                      {member.projects.length > 0
-                        ? `${member.projects.length} project${member.projects.length !== 1 ? "s" : ""
-                        }`
-                        : "None"}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-600">
-                      {member.lastActive
-                        ? new Date(member.lastActive).toLocaleDateString()
-                        : "Never"}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center space-x-2">
-                      <button className="p-1 text-gray-400 hover:text-primary-600 transition-colors">
-                        <Edit className="h-4 w-4" />
-                      </button>
-                      <button className="p-1 text-gray-400 hover:text-red-600 transition-colors">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                    Loading team members...
                   </td>
                 </tr>
-              ))}
+              ) : teamMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                    No team members found
+                  </td>
+                </tr>
+              ) : (
+                teamMembers.map((member) => (
+                  <tr key={member.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
+                          <span className="text-sm font-medium text-primary-700">
+                            {getInitials(member.name)}
+                          </span>
+                        </div>
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {member.name}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {member.email}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${getRoleBadge(
+                          member.role
+                        )}`}
+                      >
+                        {member.role}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusBadge(
+                          member
+                        )}`}
+                      >
+                        {getStatusText(member)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-600">
+                        {member.clientCount !== undefined
+                          ? `${member.clientCount} client${member.clientCount !== 1 ? "s" : ""}`
+                          : "-"}
+                      </div>
+                      {member.taskCount !== undefined && member.taskCount > 0 && (
+                        <div className="text-xs text-gray-500">
+                          {member.taskCount} task{member.taskCount !== 1 ? "s" : ""}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-600">
+                        {member.lastActive
+                          ? new Date(member.lastActive).toLocaleDateString()
+                          : "Never"}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center space-x-2">
+                        {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || user?.role === "AGENCY") && (
+                          <>
+                            <button className="p-1 text-gray-400 hover:text-primary-600 transition-colors">
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            {member.role !== "SUPER_ADMIN" && (
+                              <button
+                                onClick={() => handleDeleteTeamMember(member.id)}
+                                className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

@@ -10,7 +10,7 @@ import {
 
 const HomePage = () => {
   const handleGetStarted = () => {
-    window.location.href = import.meta.env.VITE_APP_URL;
+    window.location.href = import.meta.env.VITE_APP_URL ?? "localhost:3001";
   };
 
   return (

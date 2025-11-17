@@ -1,5 +1,10 @@
 import axios from "axios";
+import toast from "react-hot-toast";
 const BASE = import.meta.env.VITE_API_URL;
+
+// Track recent errors to prevent duplicate toasts
+const recentErrors = new Map<string, number>();
+const ERROR_DEBOUNCE_MS = 2000; // Show same error max once per 2 seconds
 
 // Create axios instance with base configuration
 const api = axios.create({
@@ -17,6 +22,10 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Don't override Content-Type for FormData (file uploads)
+    if (config.data instanceof FormData) {
+      delete config.headers["Content-Type"];
+    }
     return config;
   },
   (error) => {
@@ -31,10 +40,49 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url = error.config?.url ?? "";
     const isAuth = /\/auth\/(login|register|verify)$/i.test(url);
-    if (status === 401 && !isAuth) {
-      localStorage.removeItem("token");
-      // optionally route to /login (client-side)
+    
+    // Get error message from response
+    const errorMessage = error.response?.data?.message || error.message || "An error occurred";
+    
+    // Create a unique key for this error to prevent duplicates
+    const errorKey = `${url}-${status}-${errorMessage}`;
+    const now = Date.now();
+    const lastShown = recentErrors.get(errorKey);
+    
+    // Don't show toast for auth errors (handled by login/register pages)
+    if (!isAuth) {
+      // Only show toast if we haven't shown this exact error recently
+      if (!lastShown || now - lastShown > ERROR_DEBOUNCE_MS) {
+        recentErrors.set(errorKey, now);
+        
+        // Clean up old entries periodically
+        if (recentErrors.size > 50) {
+          const cutoff = now - ERROR_DEBOUNCE_MS * 2;
+          for (const [key, timestamp] of recentErrors.entries()) {
+            if (timestamp < cutoff) {
+              recentErrors.delete(key);
+            }
+          }
+        }
+        
+        if (!error.response) {
+          // Network error or timeout
+          toast.error("Network error. Please check your connection and try again.");
+        } else if (status === 401) {
+          localStorage.removeItem("token");
+          toast.error("Session expired. Please login again.");
+        } else if (status === 403) {
+          toast.error("Access denied. You don't have permission to perform this action.");
+        } else if (status === 404) {
+          toast.error("Resource not found.");
+        } else if (status >= 500) {
+          toast.error("Server error. Please try again later.");
+        } else if (status >= 400) {
+          toast.error(errorMessage);
+        }
+      }
     }
+    
     return Promise.reject(error); // keep rejections for RTK to handle
   }
 );

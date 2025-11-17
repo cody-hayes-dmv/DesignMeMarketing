@@ -43,7 +43,7 @@ const SettingsPage = () => {
 
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
-    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY"] },
+    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
     { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
     { id: "billing", label: "Billing", icon: CreditCard, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },

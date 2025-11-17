@@ -61,8 +61,8 @@ model User {
   tokens Token[]
 
   // Tasks assigned (optional)
-  assignedTasks Task[] @relation("TaskAssignee")
-  createdTasks  Task[] @relation("TaskCreator")
+  assignedTaksks Task[] @relation("TaskAssignee")
+  createdTass    Task[] @relation("TaskCreator")
 
   @@map("users")
 }
@@ -83,6 +83,9 @@ model Agency {
 
   // Tokens for invitations
   tokens Token[]
+
+  // Onboarding templates
+  onboardingTemplates OnboardingTemplate[]
 
   @@map("agencies")
 }
@@ -110,11 +113,17 @@ model Task {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  title       String
-  description String?
-  category    String?
-  dueDate     DateTime?
-  status      TaskStatus @default(TODO)
+  title          String
+  description    String?
+  category       String?
+  dueDate        DateTime?
+  status         TaskStatus @default(TODO)
+  priority       String? // "high", "medium", "low"
+  estimatedHours Int?
+  
+  // Proof/Attachments: Array of objects with type (image/video/url) and value (file URL or URL string)
+  // Example: [{ type: "image", value: "https://...", name: "screenshot.png" }, { type: "url", value: "https://example.com" }]
+  proof Json? @db.Json
 
   // Tenant scope
   agencyId String
@@ -173,10 +182,183 @@ model Client {
   targets  Json?   @db.Json
   status   Status  @default(PENDING)
 
+  // Login credentials for workers
+  loginUrl String?
+  username String?
+  password String?
+  notes    String?
+
   userId String
   user   User   @relation(fields: [userId], references: [id])
   Task   Task[]
 
+  // SEO Data
+  seoReports SeoReport[]
+  keywords   Keyword[]
+  backlinks  Backlink[]
+  rankedKeywordsHistory RankedKeywordsHistory[]
+
   @@index([name, domain])
   @@map("clients")
+}
+
+model SeoReport {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Report metadata
+  reportDate DateTime
+  period     String // "daily", "weekly", "monthly"
+
+  // Traffic metrics
+  totalSessions    Int
+  organicSessions  Int
+  paidSessions     Int
+  directSessions   Int
+  referralSessions Int
+
+  // SEO metrics
+  totalClicks      Int
+  totalImpressions Int
+  averageCtr       Float
+  averagePosition  Float
+
+  // Engagement metrics
+  bounceRate         Float
+  avgSessionDuration Float
+  pagesPerSession    Float
+
+  // Conversion metrics
+  conversions    Int
+  conversionRate Float
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, reportDate, period])
+  @@index([clientId, reportDate])
+  @@map("seo_reports")
+}
+
+model Keyword {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  keyword      String
+  searchVolume Int
+  difficulty   Float?
+  cpc          Float?
+  competition  String?
+
+  // Ranking data
+  currentPosition  Int?
+  previousPosition Int?
+  bestPosition     Int?
+
+  // Google SERP data
+  googleUrl     String? // The URL that ranks for this keyword
+  serpFeatures  Json?   // Array of SERP features (e.g., ["video", "images", "local_pack"])
+  totalResults  Int?    // Total number of search results
+
+  // Performance data
+  clicks      Int   @default(0)
+  impressions Int   @default(0)
+  ctr         Float @default(0)
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, keyword])
+  @@index([clientId, currentPosition])
+  @@map("keywords")
+}
+
+model RankedKeywordsHistory {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Total keywords ranked for the domain
+  totalKeywords Int
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Month and year for tracking
+  month Int // 1-12
+  year  Int
+
+  @@unique([clientId, month, year])
+  @@index([clientId, year, month])
+  @@map("ranked_keywords_history")
+}
+
+model Backlink {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sourceUrl    String
+  targetUrl    String
+  anchorText   String?
+  domainRating Float?
+  urlRating    Float?
+  traffic      Int?
+  isFollow     Boolean   @default(true)
+  isLost       Boolean   @default(false)
+  firstSeen    DateTime?
+  lastSeen     DateTime?
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, isLost])
+  @@index([clientId, domainRating])
+  @@map("backlinks")
+}
+
+model OnboardingTemplate {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name        String
+  description String?
+  isDefault   Boolean @default(false)
+
+  // Agency relationship
+  agencyId String
+  agency   Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  // Template tasks
+  tasks OnboardingTask[]
+
+  @@index([agencyId])
+  @@map("onboarding_templates")
+}
+
+model OnboardingTask {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  title          String
+  description    String?
+  category       String?
+  priority       String? // "high", "medium", "low"
+  estimatedHours Int?
+  order          Int     @default(0)
+
+  // Template relationship
+  templateId String
+  template   OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, order])
+  @@map("onboarding_tasks")
 }

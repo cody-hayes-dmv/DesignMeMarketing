@@ -8,16 +8,16 @@ import {
   Home,
   FolderOpen,
   Search,
-  TrendingUp,
   FileText,
   Settings,
   LogOut,
   Users,
   Building2,
-  Target,
   Menu,
   ChevronLeft,
-  PersonStanding
+  PersonStanding,
+  UserCog,
+  type LucideIcon,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -41,112 +41,87 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     setOpenMenu(openMenu === path ? null : path);
   };
 
-  const menuItems = [
-    // Agency
+  type MenuItem = {
+    icon: LucideIcon;
+    label: string;
+    path: string;
+    hasSubMenu: boolean;
+    roles: string[];
+    subMenus?: { label: string; path: string }[];
+  };
+
+  const menuItems: MenuItem[] = [
+    // Dashboard, Agencies, Clients, Keywords, Rankings, Reports, Team, Settings
+    // Accessible by AGENCY, ADMIN, and SUPER_ADMIN
     {
       icon: Home,
       label: "Dashboard",
       path: "/agency/dashboard",
       hasSubMenu: false,
-      roles: ["AGENCY"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+    },
+    {
+      icon: Building2,
+      label: "Agencies",
+      path: "/agency/agencies",
+      hasSubMenu: false,
+      roles: ["ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: PersonStanding,
       label: "Clients",
       path: "/agency/clients",
       hasSubMenu: false,
-      roles: ["AGENCY"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+    },
+    {
+      icon: UserCog,
+      label: "Workers",
+      path: "/agency/workers",
+      hasSubMenu: false,
+      roles: ["ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: FolderOpen,
       label: "Tasks",
       path: "/agency/tasks",
       hasSubMenu: false,
-      roles: ["AGENCY"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: Search,
       label: "Keywords",
       path: "/agency/keywords",
       hasSubMenu: false,
-      roles: ["AGENCY"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
-    {
-      icon: Target,
-      label: "Rankings",
-      path: "/agency/rankings",
-      hasSubMenu: false,
-      roles: ["AGENCY"],
-    },
+    // {
+    //   icon: Target,
+    //   label: "Rankings",
+    //   path: "/agency/rankings",
+    //   hasSubMenu: false,
+    //   roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+    // },
     {
       icon: FileText,
       label: "Reports",
       path: "/agency/reports",
       hasSubMenu: false,
-      roles: ["AGENCY"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: Users,
       label: "Team",
       path: "/agency/team",
       hasSubMenu: false,
-      roles: ["AGENCY"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: Settings,
       label: "Settings",
       path: "/agency/settings",
       hasSubMenu: false,
-      roles: ["AGENCY"],
-    },
-
-    // Super Admin
-    {
-      icon: Home,
-      label: "Dashboard",
-      path: "/superadmin/dashboard",
-      hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
-    },
-    {
-      icon: Building2,
-      label: "Agencies",
-      path: "/superadmin/agencies",
-      hasSubMenu: true,
-      roles: ["SUPER_ADMIN"],
-      subMenus: [
-        {
-          label: "My Agency",
-          path: "/superadmin/agencies/myagency",
-          hasSubMenu: false,
-        },
-        {
-          label: "All Agencies",
-          path: "/superadmin/agencies/allagencies",
-          hasSubMenu: false,
-        }
-      ]
-    },
-    {
-      icon: PersonStanding,
-      label: "Clients",
-      path: "/superadmin/clients",
-      hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
-    },
-    {
-      icon: FolderOpen,
-      label: "Tasks",
-      path: "/superadmin/tasks",
-      hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
-    },
-    {
-      icon: Settings,
-      label: "Settings",
-      path: "/superadmin/settings",
-      hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
 
     // Worker
@@ -168,6 +143,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       icon: FolderOpen,
       label: "Tasks",
       path: "/worker/tasks",
+      hasSubMenu: false,
+      roles: ["WORKER"],
+    },
+    {
+      icon: Users,
+      label: "Team",
+      path: "/worker/team",
       hasSubMenu: false,
       roles: ["WORKER"],
     },

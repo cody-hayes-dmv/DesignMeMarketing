@@ -4,13 +4,7 @@ import { format } from "date-fns";
 import { RootState } from "@/store";
 
 import {
-    Users,
     Plus,
-    Mail,
-    MoreVertical,
-    Shield,
-    UserCheck,
-    UserX,
     Edit,
     Trash2,
     Table,
@@ -18,13 +12,19 @@ import {
     Filter,
     Search,
     ListTodo,
-    ListEndIcon,
-    MoveRightIcon,
-    Check,
     CheckCircle,
-    CheckSquare,
-    LucideBedDouble,
-    CheckCheck
+    CheckCheck,
+    Globe,
+    Key,
+    Eye,
+    EyeOff,
+    Clock,
+    AlertTriangle,
+    Calendar,
+    Image as ImageIcon,
+    Video as VideoIcon,
+    Link as LinkIcon,
+    ExternalLink
 } from "lucide-react";
 
 import "react-datepicker/dist/react-datepicker.css";
@@ -32,8 +32,10 @@ import "react-datepicker/dist/react-datepicker.css";
 import { getStatusBadge } from "@/utils";
 import KanbanBoard from "./KanbanBoard";
 import TaskModal from "@/components/TaskModal";
-import { fetchTasks, patchTaskStatus } from "@/store/slices/taskSlice";
+import OnboardingTemplateModal from "@/components/OnboardingTemplateModal";
+import { fetchTasks, patchTaskStatus, deleteTask } from "@/store/slices/taskSlice";
 import { ROLE, Task } from "@/utils/types";
+import toast from "react-hot-toast";
 
 const TasksPage = () => {
     const dispatch = useDispatch();
@@ -42,6 +44,9 @@ const TasksPage = () => {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [enabled, setEnabled] = useState(false);
+    const [showCredentials, setShowCredentials] = useState<Record<string, boolean>>({});
+    const [filterStatus, setFilterStatus] = useState<string>("all");
+    const [showOnboardingModal, setShowOnboardingModal] = useState(false);
     const { tasks } = useSelector((state: RootState) => state.task)
     const { user } = useSelector((state: RootState) => state.auth);
 
@@ -60,18 +65,51 @@ const TasksPage = () => {
         setOpen(true);
     };
 
-    const handleDeleteTask = (id: string) => {
+  const handleDeleteTask = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this task? This action cannot be undone.")) {
+      return;
     }
+    try {
+      await dispatch(deleteTask(id) as any);
+      toast.success("Task deleted successfully!");
+      // Task list will be updated automatically via Redux
+    } catch (error: any) {
+      console.error("Failed to delete task:", error);
+      // Toast is already shown by API interceptor
+    }
+  };
+
+    const toggleCredentials = (id: string) => {
+        setShowCredentials(prev => ({
+            ...prev,
+            [id]: !prev[id]
+        }));
+    };
+
+    const isOverdue = (dueDate: string | null | undefined) => {
+        if (!dueDate) return false;
+        return new Date(dueDate) < new Date();
+    };
+
+    const getOverdueCount = () => {
+        return tasks.filter(task => isOverdue(task.dueDate)).length;
+    };
 
     const filtered = tasks.filter((t) => {
         const q = searchTerm.toLowerCase();
-        return (
+        const matchesSearch = (
             t.title.toLowerCase().includes(q) ||
             (t.description ?? "").toLowerCase().includes(q) ||
             (t.category ?? "").toLowerCase().includes(q) ||
             (t.assignee?.name ?? "").toLowerCase().includes(q) ||
             (t.client?.name ?? "").toLowerCase().includes(q)
         );
+        
+        const matchesStatus = filterStatus === "all" || 
+            (filterStatus === "overdue" && isOverdue(t.dueDate)) ||
+            t.status.toLowerCase() === filterStatus.toLowerCase();
+        
+        return matchesSearch && matchesStatus;
     });
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
@@ -85,16 +123,33 @@ const TasksPage = () => {
                     <p className="text-gray-600 mt-2">
                         Manage all tasks and assign to the workers
                     </p>
+                    {getOverdueCount() > 0 && (
+                        <div className="mt-2 flex items-center text-red-600">
+                            <AlertTriangle className="h-4 w-4 mr-1" />
+                            <span className="text-sm font-medium">
+                                {getOverdueCount()} overdue task{getOverdueCount() !== 1 ? 's' : ''}
+                            </span>
+                        </div>
+                    )}
                 </div>
-                {canCreate &&
-                    <button
-                        onClick={handleCreateClick}
-                        className={"bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"}
-                    >
-                        <Plus className="h-5 w-5" />
-                        <span>Create Task</span>
-                    </button>
-                }
+                {canCreate && (
+                    <div className="flex items-center space-x-3">
+                        <button
+                            onClick={() => setShowOnboardingModal(true)}
+                            className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
+                        >
+                            <ListTodo className="h-5 w-5" />
+                            <span>Onboarding Tasks</span>
+                        </button>
+                        <button
+                            onClick={handleCreateClick}
+                            className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+                        >
+                            <Plus className="h-5 w-5" />
+                            <span>Create Task</span>
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Task */}
@@ -107,7 +162,7 @@ const TasksPage = () => {
                                 {tasks.length}
                             </p>
                         </div>
-                        <Users className="h-8 w-8 text-primary-600" />
+                        <ListTodo className="h-8 w-8 text-primary-600" />
                     </div>
                 </div>
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
@@ -171,6 +226,24 @@ const TasksPage = () => {
                             />
                         </div>
                     </div>
+                    
+                    {/* Status Filter */}
+                    <div className="flex items-center space-x-2">
+                        <Filter className="h-5 w-5 text-gray-400" />
+                        <select
+                            value={filterStatus}
+                            onChange={(e) => setFilterStatus(e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                            <option value="all">All Tasks</option>
+                            <option value="overdue">Overdue</option>
+                            <option value="TODO">TODO</option>
+                            <option value="IN_PROGRESS">IN_PROGRESS</option>
+                            <option value="REVIEW">REVIEW</option>
+                            <option value="DONE">DONE</option>
+                        </select>
+                    </div>
+                    
                     {/* Select Mode (Table | Kanban) */}
                     <div className="flex flex-row items-center">
                         <button
@@ -198,43 +271,151 @@ const TasksPage = () => {
                         <table className="w-full">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
-                                    {/* <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th> */}
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due Date</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {filtered.map((task) => (
-                                    <tr key={task.id} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs">{task.title}</td>
+                                    <tr key={task.id} className={`hover:bg-gray-50 ${isOverdue(task.dueDate) ? 'bg-red-50' : ''}`}>
+                                        <td className="px-6 py-4">
+                                            <div className="flex flex-col">
+                                                <div className="text-sm font-medium text-gray-900">{task.title}</div>
+                                                <div className="text-xs text-gray-500">{task.category ?? "No category"}</div>
+                                                {task.description && (
+                                                    <div className="text-xs text-gray-400 mt-1 truncate max-w-xs">
+                                                        {task.description}
+                                                    </div>
+                                                )}
+                                                {/* Proof/Attachments */}
+                                                {task.proof && task.proof.length > 0 && (
+                                                    <div className="mt-2 flex flex-wrap gap-2">
+                                                        {task.proof.map((item: any, idx: number) => (
+                                                            <a
+                                                                key={idx}
+                                                                href={item.value}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="flex items-center space-x-1 text-xs text-primary-600 hover:text-primary-800"
+                                                            >
+                                                                {item.type === "image" && <ImageIcon className="h-3 w-3" />}
+                                                                {item.type === "video" && <VideoIcon className="h-3 w-3" />}
+                                                                {item.type === "url" && <LinkIcon className="h-3 w-3" />}
+                                                                <span className="truncate max-w-[100px]">
+                                                                    {item.name || "Proof"}
+                                                                </span>
+                                                                <ExternalLink className="h-3 w-3" />
+                                                            </a>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {task.client ? (
+                                                <div className="flex flex-col">
+                                                    <div className="flex items-center space-x-2">
+                                                        <Globe className="h-4 w-4 text-gray-400" />
+                                                        <span className="text-sm font-medium text-gray-900">{task.client.name}</span>
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">{task.client.domain}</div>
+                                                    
+                                                    {/* Login Credentials */}
+                                                    {((task.client as any).loginUrl || (task.client as any).username) && (
+                                                        <div className="mt-2">
+                                                            <button
+                                                                onClick={() => toggleCredentials(task.id)}
+                                                                className="flex items-center space-x-1 text-xs text-primary-600 hover:text-primary-800"
+                                                            >
+                                                                <Key className="h-3 w-3" />
+                                                                <span>Login Info</span>
+                                                                {showCredentials[task.id] ? (
+                                                                    <EyeOff className="h-3 w-3" />
+                                                                ) : (
+                                                                    <Eye className="h-3 w-3" />
+                                                                )}
+                                                            </button>
+                                                            
+                                                            {showCredentials[task.id] && (
+                                                                <div className="mt-1 p-2 bg-gray-100 rounded text-xs">
+                                                                    {(task.client as any).loginUrl && (
+                                                                        <div className="mb-1">
+                                                                            <span className="font-medium">URL:</span> 
+                                                                            <a href={(task.client as any).loginUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline ml-1">
+                                                                                {(task.client as any).loginUrl}
+                                                                            </a>
+                                                                        </div>
+                                                                    )}
+                                                                    {(task.client as any).username && (
+                                                                        <div className="mb-1">
+                                                                            <span className="font-medium">Username:</span> 
+                                                                            <span className="ml-1">{(task.client as any).username}</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {(task.client as any).password && (
+                                                                        <div className="mb-1">
+                                                                            <span className="font-medium">Password:</span> 
+                                                                            <span className="ml-1 font-mono">{(task.client as any).password}</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {(task.client as any).notes && (
+                                                                        <div>
+                                                                            <span className="font-medium">Notes:</span> 
+                                                                            <span className="ml-1">{(task.client as any).notes}</span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-sm text-gray-400">No client assigned</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(task.status)}`}>
-                                                {task.status}
-                                            </span>
+                                            <div className="flex flex-col items-start">
+                                                <span className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(task.status)}`}>
+                                                    {task.status}
+                                                </span>
+                                                {isOverdue(task.dueDate) && (
+                                                    <span className="text-xs text-red-600 mt-1 flex items-center">
+                                                        <Clock className="h-3 w-3 mr-1" />
+                                                        Overdue
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs">{task.category ?? "-"}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs">{task.client?.name ?? "-"}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs">{task.assignee?.name ?? "-"}</td>
-                                        {/* <td className="px-6 py-4 whitespace-nowrap text-xs">{task.description ?? "-"}</td> */}
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs">
-                                            {task.dueDate ? format(new Date(task.dueDate), "yyyy-MM-dd") : "-"}
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            {task.assignee?.name ?? "Unassigned"}
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                            {task.dueDate ? (
+                                                <div className={`flex items-center ${isOverdue(task.dueDate) ? 'text-red-600' : 'text-gray-900'}`}>
+                                                    <Calendar className="h-4 w-4 mr-1" />
+                                                    {format(new Date(task.dueDate), "MMM dd, yyyy")}
+                                                </div>
+                                            ) : (
+                                                <span className="text-gray-400">No due date</span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
                                             <div className="flex items-center space-x-2">
                                                 <button
                                                     className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
                                                     onClick={() => handleEditClick(task)}
+                                                    title="Edit task"
                                                 >
                                                     <Edit className="h-4 w-4" />
                                                 </button>
                                                 <button
                                                     className="p-1 text-gray-400 hover:text-red-600 transition-colors"
                                                     onClick={() => handleDeleteTask(task.id)}
+                                                    title="Delete task"
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </button>
@@ -250,6 +431,7 @@ const TasksPage = () => {
                 <KanbanBoard
                     tasks={filtered}
                     onMove={(id, status) => dispatch(patchTaskStatus({ id, status }) as any)}
+                    onTaskClick={handleEditClick}
                 />
             )}
 
@@ -260,6 +442,16 @@ const TasksPage = () => {
                 open={open}
                 setOpen={setOpen}
                 task={selectedTask ?? undefined}
+            />
+
+            {/* Onboarding Template Modal */}
+            <OnboardingTemplateModal
+                open={showOnboardingModal}
+                setOpen={setShowOnboardingModal}
+                onTasksCreated={() => {
+                    dispatch(fetchTasks() as any);
+                    setShowOnboardingModal(false);
+                }}
             />
         </div>
     );

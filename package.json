@@ -1,23 +1,41 @@
 {
-  "name": "yourseodashboard-platform",
-  "private": true,
+  "name": "seo-dashboard-server",
   "version": "1.0.0",
+  "description": "Backend server for SEO Dashboard Platform",
   "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev:marketing\" \"npm run dev:app\" \"npm run dev:server\"",
-    "dev:marketing": "cd marketing && npm run dev",
-    "dev:app": "cd app && npm run dev",
-    "dev:server": "cd server && npm run dev",
-    "build": "npm run build:marketing && npm run build:app",
-    "build:marketing": "cd marketing && npm run build",
-    "build:app": "cd app && npm run build",
-    "install:all": "npm install && cd marketing && npm install && cd ../app && npm install && cd ../server && npm install"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma db push --force-reset",
+    "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "react-grid-layout": "^1.5.2",
-    "recharts": "^3.2.1"
+    "@prisma/client": "^5.6.0",
+    "@types/multer": "^2.0.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "mysql2": "^3.6.5",
+    "nodemailer": "^6.9.7",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.9.0",
+    "@types/nodemailer": "^6.4.14",
+    "prisma": "^5.6.0",
+    "tsx": "^4.4.0",
+    "typescript": "^5.5.3"
   }
 }

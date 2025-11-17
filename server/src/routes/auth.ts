@@ -212,4 +212,49 @@ router.post("/verify", async (req, res) => {
   }
 });
 
+// Get workers for task assignment
+router.get("/workers", authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    
+    if (user.role !== "AGENCY" && user.role !== "ADMIN" && user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    let workers;
+    if (user.role === "SUPER_ADMIN") {
+      // Super admin can see all workers
+      workers = await prisma.user.findMany({
+        where: { role: "WORKER" },
+        select: { id: true, name: true, email: true }
+      });
+    } else {
+      // Get workers from user's agency
+      const userAgency = await prisma.userAgency.findFirst({
+        where: { userId: user.userId },
+        select: { agencyId: true }
+      });
+      
+      if (!userAgency) {
+        return res.status(404).json({ message: "Agency not found" });
+      }
+
+      workers = await prisma.user.findMany({
+        where: {
+          role: "WORKER",
+          // agencies: {
+          //   some: { agencyId: userAgency.agencyId }
+          // }
+        },
+        select: { id: true, name: true, email: true }
+      });
+    }
+
+    res.json(workers);
+  } catch (error) {
+    console.error("Error fetching workers:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 export default router;

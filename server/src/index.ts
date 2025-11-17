@@ -5,6 +5,10 @@ import authRoutes from "./routes/auth.js";
 import agencyRoutes from "./routes/agencies.js";
 import taskRoutes from "./routes/tasks.js";
 import clientRoutes from "./routes/clients.js";
+import seoRoutes from "./routes/seo.js";
+import onboardingRoutes from "./routes/onboarding.js";
+import teamRoutes from "./routes/team.js";
+import uploadRoutes from "./routes/upload.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
 dotenv.config();
@@ -31,6 +35,11 @@ app.use("/api/auth", authRoutes);
 app.use("/api/agencies", agencyRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/clients", clientRoutes);
+app.use("/api/seo", seoRoutes);
+app.use("/api/onboarding", onboardingRoutes);
+app.use("/api/team", teamRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/uploads", express.static("uploads")); // Serve uploaded files
 
 // Health check
 app.get("/health", (req, res) => {

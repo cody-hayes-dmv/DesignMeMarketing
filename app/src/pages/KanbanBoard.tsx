@@ -8,9 +8,10 @@ import { format } from "date-fns";
 interface KanbanBoardProps {
     tasks: Task[];
     onMove?: (id: string, status: "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE") => void;
+    onTaskClick?: (task: Task) => void;
 }
 
-const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, onMove }) => {
+const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, onMove, onTaskClick }) => {
     const columns = {
         TODO: tasks.filter((t) => t.status === "TODO"),
         IN_PROGRESS: tasks.filter((t) => t.status === "IN_PROGRESS"),
@@ -50,8 +51,8 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, onMove }) => {
                                                 ref={provided.innerRef}
                                                 {...provided.draggableProps}
                                                 {...provided.dragHandleProps}
-                                                className={`space-y-2 p-3 mb-2 bg-white rounded shadow-sm ${snapshot.isDragging ? "ring-2 ring-blue-400" : ""
-                                                    }`}
+                                                className={`space-y-2 p-3 mb-2 bg-white rounded shadow-sm cursor-pointer transition-transform ${snapshot.isDragging ? "ring-2 ring-blue-400" : "hover:shadow-md"}`}
+                                                onClick={() => onTaskClick?.(task)}
                                             >
                                                 <div className="flex flex-row justify-between">
                                                     <div>
@@ -76,7 +77,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, onMove }) => {
                                                     </div>
                                                     <div className="flex flex-row gap-1 items-center text-sm font-semibold">
                                                         <Link size={18} />
-                                                        <span className="text-sm text-gray-400">0 proofs</span>
+                                                        <span className="text-sm text-gray-400">{task.proof?.length ?? 0} proof{(task.proof?.length ?? 0) === 1 ? "" : "s"}</span>
                                                     </div>
                                                 </div>
                                                 {task.dueDate &&

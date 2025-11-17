@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store";
-import { fetchClients, createClient, updateClient, Client } from "../store/slices/clientSlice";
+import { fetchClients, createClient, updateClient, deleteClient, Client } from "../store/slices/clientSlice";
 import {
   Plus,
   Globe,
@@ -20,12 +20,16 @@ import {
   Building,
   Building2,
   Eye,
+  Share2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
+import api from "@/lib/api";
 
 const ClientsPage = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate()
   const { clients } = useSelector(
     (state: RootState) => state.client
   );
@@ -37,8 +41,12 @@ const ClientsPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [openStatusId, setOpenStatusId] = useState("")
   const [enabled, setEnabled] = useState(false);
-  const [clientForm, setClientForm] = useState({ name: "", domain: "" });
-  const navigate = useNavigate();
+  const [clientForm, setClientForm] = useState({ 
+    name: "", 
+    domain: "",
+    industry: "",
+    targets: [] as string[]
+  });
 
   useEffect(() => {
     dispatch(fetchClients() as any);
@@ -46,14 +54,49 @@ const ClientsPage = () => {
 
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    // await dispatch(createClient(clientForm) as any);
-    setClientForm({ name: "", domain: "" });
-    setShowCreateModal(false);
+    try {
+      await dispatch(createClient({ data: {
+        name: clientForm.name,
+        domain: clientForm.domain,
+        industry: clientForm.industry || undefined,
+        targets: clientForm.targets.length > 0 ? clientForm.targets : undefined,
+      } }) as any);
+      setClientForm({ name: "", domain: "", industry: "", targets: [] });
+      setShowCreateModal(false);
+      toast.success("Client created successfully!");
+      // Refresh clients list
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Failed to create client:", error);
+      // Toast is already shown by API interceptor
+    }
+  };
+
+  const handleShareClick = async (client: Client) => {
+    try {
+      const res = await api.post(`/seo/share-link/${client.id}`);
+      const token = res.data?.token;
+      if (!token) {
+        toast.error("Failed to generate share link");
+        return;
+      }
+      const url = `${window.location.origin}/share/${encodeURIComponent(token)}`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast.success("Shareable link copied to clipboard!");
+      } else {
+        // Fallback
+        prompt("Copy this shareable link:", url);
+      }
+    } catch (error: any) {
+      console.error("Share link error", error);
+      // Toast is handled by interceptor; provide extra context here if desired
+    }
   };
 
   const handleViewClick = (client: Client) => {
-    navigate("/agency/report");
-  }
+    navigate(`/agency/clients/${client.id}`, { state: { client } });
+  };
 
   const handleEditClick = (client: Client) => {
     setSelectedClient(client);
@@ -61,8 +104,19 @@ const ClientsPage = () => {
     setOpen(true);
   };
 
-  const handleDeleteTask = (id: string) => {
-  }
+  const handleDeleteClient = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this client? This action cannot be undone.")) {
+      return;
+    }
+    try {
+      await dispatch(deleteClient(id) as any);
+      toast.success("Client deleted successfully!");
+      // Client list will be updated automatically via Redux
+    } catch (error: any) {
+      console.error("Failed to delete client:", error);
+      // Toast is already shown by API interceptor
+    }
+  };
 
   const modifiedClients = clients.map((p) => ({
     ...p,
@@ -201,7 +255,18 @@ const ClientsPage = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {modifiedClients.map((client) => (
+                {modifiedClients
+                  .filter((client) => {
+                    if (!searchTerm) return true;
+                    const searchLower = searchTerm.toLowerCase();
+                    return (
+                      client.name.toLowerCase().includes(searchLower) ||
+                      client.domain.toLowerCase().includes(searchLower) ||
+                      (client.industry && client.industry.toLowerCase().includes(searchLower)) ||
+                      (client.targets && client.targets.some((t: string) => t.toLowerCase().includes(searchLower)))
+                    );
+                  })
+                  .map((client) => (
                   <tr key={client.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-xs flex items-center gap-1">
                       <Building2 className="text-blue-600" size={18} />
@@ -240,13 +305,20 @@ const ClientsPage = () => {
                         </button>
                         <button
                           className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                          onClick={() => handleShareClick(client)}
+                          title="Share"
+                        >
+                          <Share2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
                           onClick={() => handleEditClick(client)}
                         >
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
                           className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                          onClick={() => handleDeleteTask(client.id)}
+                          onClick={() => handleDeleteClient(client.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -260,7 +332,18 @@ const ClientsPage = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {modifiedClients.map((client) => (
+          {modifiedClients
+            .filter((client) => {
+              if (!searchTerm) return true;
+              const searchLower = searchTerm.toLowerCase();
+              return (
+                client.name.toLowerCase().includes(searchLower) ||
+                client.domain.toLowerCase().includes(searchLower) ||
+                (client.industry && client.industry.toLowerCase().includes(searchLower)) ||
+                (client.targets && client.targets.some((t: string) => t.toLowerCase().includes(searchLower)))
+              );
+            })
+            .map((client) => (
             <div
               key={client.id}
               className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow"
@@ -329,6 +412,13 @@ const ClientsPage = () => {
                   >
                     {client.status}
                   </span> */}
+                    <button
+                      className="p-1 text-gray-400 hover:text-primary-600"
+                      onClick={() => handleShareClick(client)}
+                      title="Share"
+                    >
+                      <Share2 className="h-4 w-4" />
+                    </button>
                     <button className="p-1 text-gray-400 hover:text-gray-600">
                       <MoreVertical className="h-4 w-4" />
                     </button>
@@ -410,14 +500,28 @@ const ClientsPage = () => {
                   Domain
                 </label>
                 <input
-                  type="url"
+                  type="text"
                   value={clientForm.domain}
                   onChange={(e) =>
                     setClientForm({ ...clientForm, domain: e.target.value })
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="https://example.com"
+                  placeholder="example.com or https://example.com"
                   required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Industry (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={clientForm.industry}
+                  onChange={(e) =>
+                    setClientForm({ ...clientForm, industry: e.target.value })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="e.g., E-commerce, Healthcare, Finance"
                 />
               </div>
               <div className="flex space-x-4 pt-4">

@@ -1,6 +1,12 @@
 export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
 export type ROLE = "SUPER_ADMIN" | "ADMIN" | "AGENCY" | "WORKER";
 
+export interface ProofItem {
+  type: "image" | "video" | "url";
+  value: string; // URL to the file or external URL
+  name?: string; // Optional name/description
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -9,6 +15,7 @@ export interface Task {
   status: TaskStatus;
   createdAt: string;
   dueDate?: string | null;
+  proof?: ProofItem[] | null; // Array of proof items
   assignee?: {
     id: string;
     name: string | null;
@@ -18,6 +25,10 @@ export interface Task {
     id: string;
     name: string;
     domain: string;
+    loginUrl?: string | null;
+    username?: string | null;
+    password?: string | null;
+    notes?: string | null;
   } | null;
   agency?: {
     id: string;

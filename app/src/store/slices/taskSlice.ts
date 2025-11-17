@@ -5,6 +5,12 @@ import api from "@/lib/api";
 // Keep Task in sync with API shape (nullable optionals allowed)
 export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
 
+export interface ProofItem {
+  type: "image" | "video" | "url";
+  value: string; // URL to the file or external URL
+  name?: string; // Optional name/description
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -13,6 +19,7 @@ export interface Task {
   status: TaskStatus;
   createdAt: string;
   dueDate?: string | null;
+  proof?: ProofItem[] | null; // Array of proof items
   assignee?: {
     id: string;
     name: string | null;
@@ -68,6 +75,9 @@ export const createTask = createAsyncThunk<
     dueDate?: string; // ISO
     assigneeId?: string;
     clientId?: string;
+    priority?: string;
+    estimatedHours?: number;
+    proof?: ProofItem[];
   }
 >("task/createTask", async (payload) => {
   try {
@@ -89,6 +99,9 @@ export const updateTask = createAsyncThunk<
     dueDate: string | null;
     assigneeId: string | null;
     clientId: string | null;
+    priority: string;
+    estimatedHours: number;
+    proof: ProofItem[] | null;
   }>
 >("task/updateTask", async ({ id, ...updates }) => {
   try {
