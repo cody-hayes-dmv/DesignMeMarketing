@@ -26,17 +26,18 @@ import { format } from "date-fns";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import toast from "react-hot-toast";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store";
 import {
   sampleReports,
-  trafficSourceData,
   visitorSourceData,
-  topPagesData,
   eventsData,
   conversionsData,
   backlinksData,
   workLogData,
 } from "@/data/reportSamples";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
+import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 
 interface TrafficSourceSlice {
   name: string;
@@ -149,6 +150,7 @@ const ClientDashboardPage: React.FC = () => {
   const { clientId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useSelector((state: RootState) => state.auth);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"dashboard" | "report" | "backlinks" | "worklog">("dashboard");
@@ -173,6 +175,9 @@ const ClientDashboardPage: React.FC = () => {
   const [serverReport, setServerReport] = useState<any | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [refreshingDashboard, setRefreshingDashboard] = useState(false);
+  const [refreshingTopPages, setRefreshingTopPages] = useState(false);
+  const [refreshingBacklinks, setRefreshingBacklinks] = useState(false);
   const handleExportPdf = useCallback(async () => {
     if (!dashboardContentRef.current) {
       toast.error("Switch to the Dashboard tab to export.");
@@ -231,6 +236,87 @@ const ClientDashboardPage: React.FC = () => {
       setExportingPdf(false);
     }
   }, [activeTab, client?.name]);
+
+  const handleRefreshDashboard = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setRefreshingDashboard(true);
+      await api.post(`/seo/dashboard/${clientId}/refresh`);
+      toast.success("Dashboard data refreshed successfully!");
+      // Refetch dashboard data
+      const res = await api.get(`/seo/dashboard/${clientId}?period=${dateRange}`);
+      const payload = res.data || {};
+      setDashboardSummary({
+        ...payload,
+        totalSessions: payload?.totalSessions !== undefined && payload?.totalSessions !== null ? Number(payload.totalSessions) : null,
+        organicSessions: payload?.organicSessions !== undefined && payload?.organicSessions !== null ? Number(payload.organicSessions) : null,
+        averagePosition: payload?.averagePosition !== undefined && payload?.averagePosition !== null ? Number(payload.averagePosition) : null,
+        conversions: payload?.conversions !== undefined && payload?.conversions !== null ? Number(payload.conversions) : null,
+        dataSources: payload?.dataSources,
+        trafficSourceSummary: payload?.trafficSourceSummary,
+        latestReport: payload?.latestReport,
+        keywordStats: payload?.keywordStats,
+        backlinkStats: payload?.backlinkStats,
+        topKeywords: payload?.topKeywords,
+      });
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
+    } finally {
+      setRefreshingDashboard(false);
+    }
+  }, [clientId, dateRange]);
+
+  const handleRefreshTopPages = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setRefreshingTopPages(true);
+      await api.post(`/seo/top-pages/${clientId}/refresh`);
+      toast.success("Top pages refreshed successfully!");
+      // Refetch top pages
+      const res = await api.get(`/seo/top-pages/${clientId}`);
+      setTopPages(res.data || []);
+      setTopPagesError(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to refresh top pages");
+    } finally {
+      setRefreshingTopPages(false);
+    }
+  }, [clientId]);
+
+  const handleRefreshBacklinks = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setRefreshingBacklinks(true);
+      await api.post(`/seo/backlinks/${clientId}/refresh`);
+      toast.success("Backlinks refreshed successfully!");
+      // Refetch backlink timeseries
+      const dateTo = new Date();
+      const dateFrom = new Date();
+      dateFrom.setDate(dateFrom.getDate() - 30);
+      const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
+        params: {
+          dateFrom: dateFrom.toISOString().split('T')[0],
+          dateTo: dateTo.toISOString().split('T')[0],
+          groupRange: "day",
+        },
+      });
+      const normalized = (res.data || []).map((item: any) => ({
+        date: item.date,
+        newBacklinks: item.newBacklinks || 0,
+        lostBacklinks: item.lostBacklinks || 0,
+        newReferringDomains: item.newReferringDomains || 0,
+        lostReferringDomains: item.lostReferringDomains || 0,
+      })).sort((a: any, b: any) => {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+      setBacklinkTimeseries(normalized.slice(0, 15));
+      setBacklinkTimeseriesError(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to refresh backlinks");
+    } finally {
+      setRefreshingBacklinks(false);
+    }
+  }, [clientId]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;
@@ -485,7 +571,7 @@ const ClientDashboardPage: React.FC = () => {
 
       if (formatted.length === 0) {
         setTrafficSources([]);
-        setTrafficSourcesError("No traffic sources data available from API");
+        setTrafficSourcesError(null);
       } else {
         setTrafficSources(formatted);
         setTrafficSourcesError(null);
@@ -562,35 +648,13 @@ const ClientDashboardPage: React.FC = () => {
   };
 
   const resolvedTopPages = useMemo<TopPageItem[]>(() => {
-    if (topPages.length > 0) {
-      return topPages;
-    }
-
-    return topPagesData.map((item) => ({
-      url: item.page,
-      keywords: Number(item.totalUsers ?? 0),
-      estimatedTraffic: Number(item.visitors ?? 0),
-      top1: Number(item.visitors ?? 0),
-      top3: Number(item.totalUsers ?? 0),
-      top10: 0,
-      newKeywords: 0,
-      upKeywords: 0,
-      downKeywords: 0,
-      lostKeywords: 0,
-      paidTraffic: 0,
-    }));
+    // Return actual data only, no sample data fallback
+    return topPages;
   }, [topPages]);
 
   const resolvedTrafficSources = useMemo<TrafficSourceSlice[]>(() => {
-    if (trafficSources.length > 0) {
-      return trafficSources;
-    }
-
-    return trafficSourceData.map((item) => ({
-      name: item.name,
-      value: item.value,
-      color: item.color ?? TRAFFIC_SOURCE_COLORS[item.name] ?? TRAFFIC_SOURCE_COLORS.Other,
-    }));
+    // Return actual data only, no sample data fallback
+    return trafficSources;
   }, [trafficSources]);
 
   const totalVisitorsDisplay = useMemo(() => {
@@ -694,6 +758,27 @@ const ClientDashboardPage: React.FC = () => {
             <option value="90">Last 90 days</option>
             <option value="365">Last year</option>
           </select>
+          {user?.role === "SUPER_ADMIN" && (
+            <button
+              type="button"
+              onClick={handleRefreshDashboard}
+              disabled={refreshingDashboard}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Refresh dashboard data from DataForSEO"
+            >
+              {refreshingDashboard ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Refreshing...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  <span>Refresh</span>
+                </>
+              )}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleExportPdf}
@@ -725,8 +810,8 @@ const ClientDashboardPage: React.FC = () => {
               </>
             ) : (
               <>
-                <Share2 className="h-4 w-4" />
-                <span>Share</span>
+            <Share2 className="h-4 w-4" />
+            <span>Share</span>
               </>
             )}
           </button>
@@ -858,6 +943,13 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
               </div>
 
+              <TargetKeywordsOverview
+                clientId={clientId}
+                clientName={client?.name}
+                title="Target Keywords"
+                subtitle="Keywords relevant to this client's website based on DataForSEO analysis."
+              />
+
               <RankedKeywordsOverview
                 clientId={clientId}
                 clientName={client?.name}
@@ -868,22 +960,10 @@ const ClientDashboardPage: React.FC = () => {
               <div className="bg-white p-6 rounded-xl border border-gray-200">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
-                  <button
-                    type="button"
-                    onClick={fetchTrafficSources}
-                    disabled={trafficSourcesLoading}
-                    className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <RefreshCw
-                      className={`h-4 w-4 ${trafficSourcesLoading ? "animate-spin text-primary-600" : ""}`}
-                    />
-                    <span>Refresh</span>
-                  </button>
                 </div>
                 {trafficSourcesError && (
                   <p className="mb-4 text-sm text-rose-600">
                     {trafficSourcesError}
-                    {trafficSources.length === 0 ? " Showing sample data instead." : ""}
                   </p>
                 )}
                 <div className="h-64">
@@ -989,13 +1069,35 @@ const ClientDashboardPage: React.FC = () => {
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200">
-                <div className="p-6 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">Top Pages</h3>
-                  {topPagesError && (
-                    <p className="mt-2 text-sm text-rose-600">
-                      {topPagesError}
-                      {topPages.length === 0 ? " Showing sample data instead." : ""}
-                    </p>
+                <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                   <div>
+                   <h3 className="text-lg font-semibold text-gray-900">Top Pages</h3>
+                   {topPagesError && (
+                     <p className="mt-2 text-sm text-rose-600">
+                       {topPagesError}
+                     </p>
+                     )}
+                   </div>
+                  {user?.role === "SUPER_ADMIN" && (
+                    <button
+                      type="button"
+                      onClick={handleRefreshTopPages}
+                      disabled={refreshingTopPages}
+                      className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                      title="Refresh top pages from DataForSEO"
+                    >
+                      {refreshingTopPages ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span>Refreshing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-3 w-3" />
+                          <span>Refresh</span>
+                        </>
+                      )}
+                    </button>
                   )}
                 </div>
                 <div className="overflow-x-auto">
@@ -1057,20 +1159,20 @@ const ClientDashboardPage: React.FC = () => {
                               {topPagesLoading ? (
                                 <span>...</span>
                               ) : (
-                                <div className="flex flex-col space-y-1">
-                                  <span className="text-green-600">
-                                    +{formatNumber(page.newKeywords)} new
-                                  </span>
-                                  <span className="text-blue-600">
-                                    ↑ {formatNumber(page.upKeywords)} up
-                                  </span>
-                                  <span className="text-orange-600">
-                                    ↓ {formatNumber(page.downKeywords)} down
-                                  </span>
-                                  <span className="text-rose-600">
-                                    -{formatNumber(page.lostKeywords)} lost
-                                  </span>
-                                </div>
+                              <div className="flex flex-col space-y-1">
+                                <span className="text-green-600">
+                                  +{formatNumber(page.newKeywords)} new
+                                </span>
+                                <span className="text-blue-600">
+                                  ↑ {formatNumber(page.upKeywords)} up
+                                </span>
+                                <span className="text-orange-600">
+                                  ↓ {formatNumber(page.downKeywords)} down
+                                </span>
+                                <span className="text-rose-600">
+                                  -{formatNumber(page.lostKeywords)} lost
+                                </span>
+                              </div>
                               )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -1090,15 +1192,27 @@ const ClientDashboardPage: React.FC = () => {
                 <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
                 <p className="text-sm text-gray-500">Daily backlinks acquired (last 30 days)</p>
               </div>
+              {user?.role === "SUPER_ADMIN" && (
               <button
                 type="button"
-                onClick={fetchBacklinkTimeseries}
-                disabled={backlinkTimeseriesLoading}
-                className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw className={`h-4 w-4 ${backlinkTimeseriesLoading ? "animate-spin text-primary-600" : ""}`} />
+                  onClick={handleRefreshBacklinks}
+                  disabled={refreshingBacklinks}
+                  className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                  title="Refresh backlinks from DataForSEO"
+                >
+                  {refreshingBacklinks ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Refreshing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3 w-3" />
                 <span>Refresh</span>
+                    </>
+                  )}
               </button>
+              )}
             </div>
             <div className="p-6 space-y-4">
               {backlinkTimeseriesLoading ? (
@@ -1192,36 +1306,36 @@ const ClientDashboardPage: React.FC = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{singleReportForClient.name}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{singleReportForClient.type}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{singleReportForClient.lastGenerated}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span
-                              className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span
+                                className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                                 singleReportForClient.status === "Sent"
-                                  ? "bg-green-100 text-green-800"
+                                    ? "bg-green-100 text-green-800"
                                   : singleReportForClient.status === "Draft"
-                                  ? "bg-yellow-100 text-yellow-800"
-                                  : "bg-blue-100 text-blue-800"
-                              }`}
-                            >
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-blue-100 text-blue-800"
+                                }`}
+                              >
                               {singleReportForClient.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {singleReportForClient.recipients.join(", ")}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                             <button 
                               onClick={() => handleViewReport(singleReportForClient)}
                               className="text-primary-600 hover:text-primary-800"
                             >
                               View
                             </button>
-                            <button className="text-gray-500 hover:text-gray-700">Edit</button>
-                            <button className="text-red-600 hover:text-red-800 inline-flex items-center space-x-1">
-                              <Trash2 className="h-4 w-4" />
-                              <span>Delete</span>
-                            </button>
-                          </td>
-                        </tr>
+                              <button className="text-gray-500 hover:text-gray-700">Edit</button>
+                              <button className="text-red-600 hover:text-red-800 inline-flex items-center space-x-1">
+                                <Trash2 className="h-4 w-4" />
+                                <span>Delete</span>
+                              </button>
+                            </td>
+                          </tr>
                       )}
                     </tbody>
                   </table>
@@ -1505,22 +1619,10 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
-                    <button
-                      type="button"
-                      onClick={fetchTrafficSources}
-                      disabled={trafficSourcesLoading}
-                      className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <RefreshCw
-                        className={`h-4 w-4 ${trafficSourcesLoading ? "animate-spin text-primary-600" : ""}`}
-                      />
-                      <span>Refresh</span>
-                    </button>
                   </div>
                   {trafficSourcesError && (
                     <p className="mb-4 text-sm text-rose-600">
                       {trafficSourcesError}
-                      {trafficSources.length === 0 ? " Showing sample data instead." : ""}
                     </p>
                   )}
                   <div className="h-64">
@@ -1631,7 +1733,6 @@ const ClientDashboardPage: React.FC = () => {
                     {topPagesError && (
                       <p className="mt-2 text-sm text-rose-600">
                         {topPagesError}
-                        {topPages.length === 0 ? " Showing sample data instead." : ""}
                       </p>
                     )}
                   </div>
@@ -1727,15 +1828,27 @@ const ClientDashboardPage: React.FC = () => {
                       <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
                       <p className="text-sm text-gray-500">Daily backlinks acquired (last 30 days)</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={fetchBacklinkTimeseries}
-                      disabled={backlinkTimeseriesLoading}
-                      className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${backlinkTimeseriesLoading ? "animate-spin text-primary-600" : ""}`} />
-                      <span>Refresh</span>
-                    </button>
+                    {user?.role === "SUPER_ADMIN" && (
+                      <button
+                        type="button"
+                        onClick={handleRefreshBacklinks}
+                        disabled={refreshingBacklinks}
+                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                        title="Refresh backlinks from DataForSEO"
+                      >
+                        {refreshingBacklinks ? (
+                          <>
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>Refreshing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3" />
+                            <span>Refresh</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                   <div className="p-6 space-y-4">
                     {backlinkTimeseriesLoading ? (

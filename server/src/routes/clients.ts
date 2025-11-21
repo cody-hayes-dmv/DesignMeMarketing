@@ -11,7 +11,8 @@ const createClientSchema = z.object({
     domain: z.string().url().or(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$/)),
     industry: z.string().optional(),
     targets: z.array(z.string()).optional(),
-    status: z.enum(['ACTIVE', 'PENDING', 'REJECTED']).optional().default('PENDING'),
+    // Status is ignored - determined by user role (SUPER_ADMIN = ACTIVE, others = PENDING)
+    status: z.enum(['ACTIVE', 'PENDING', 'REJECTED']).optional(),
 });
 
 // Get all clients
@@ -55,7 +56,44 @@ router.get('/', authenticateToken, async (req, res) => {
             });
         }
 
-        res.json(clients);
+        // Add statistics from database for each client
+        const clientsWithStats = await Promise.all(
+            clients.map(async (client) => {
+                // Get keyword count and average position
+                const keywordStats = await prisma.keyword.aggregate({
+                    where: { clientId: client.id },
+                    _count: { id: true },
+                    _avg: { currentPosition: true },
+                });
+
+                // Get top rankings (position <= 10)
+                const topRankingsCount = await prisma.keyword.count({
+                    where: {
+                        clientId: client.id,
+                        currentPosition: { lte: 10, not: null },
+                    },
+                });
+
+                // Get traffic from TrafficSource table
+                const trafficSource = await prisma.trafficSource.findFirst({
+                    where: { clientId: client.id },
+                    select: {
+                        totalEstimatedTraffic: true,
+                        organicEstimatedTraffic: true,
+                    },
+                });
+
+                return {
+                    ...client,
+                    keywords: keywordStats._count.id || 0,
+                    avgPosition: keywordStats._avg.currentPosition ? Math.round(keywordStats._avg.currentPosition * 10) / 10 : null,
+                    topRankings: topRankingsCount || 0,
+                    traffic: trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0,
+                };
+            })
+        );
+
+        res.json(clientsWithStats);
     } catch (error) {
         console.error('Fetch clients error:', error);
         res.status(500).json({ message: 'Internal server error' });
@@ -91,6 +129,12 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Client with this name already exists' });
         }
 
+        // Determine status: SUPER_ADMIN always creates ACTIVE, others always create PENDING
+        const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+        // SUPER_ADMIN always creates ACTIVE, ignore status parameter
+        // Other roles always create PENDING, ignore status parameter
+        const clientStatus = isSuperAdmin ? 'ACTIVE' : 'PENDING';
+
         // Create client
         const client = await prisma.client.create({
             data: {
@@ -98,7 +142,7 @@ router.post('/', authenticateToken, async (req, res) => {
                 domain: normalizedDomain,
                 industry,
                 targets: targets || [],
-                status: status || 'PENDING',
+                status: clientStatus,
                 userId: req.user.userId,
             },
             include: {

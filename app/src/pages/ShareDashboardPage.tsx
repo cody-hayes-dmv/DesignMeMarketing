@@ -567,17 +567,6 @@ const ShareDashboardPage: React.FC = () => {
             <div className="bg-white p-6 rounded-xl border border-gray-200">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
-                <button
-                  type="button"
-                  onClick={fetchTrafficSources}
-                  disabled={trafficSourcesLoading}
-                  className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RefreshCw
-                    className={`h-4 w-4 ${trafficSourcesLoading ? "animate-spin text-primary-600" : ""}`}
-                  />
-                  <span>Refresh</span>
-                </button>
               </div>
               {trafficSourcesError && (
                 <p className="mb-4 text-sm text-rose-600">
@@ -789,15 +778,6 @@ const ShareDashboardPage: React.FC = () => {
                   <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
                   <p className="text-sm text-gray-500">Daily backlinks acquired (last 30 days)</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={fetchBacklinkTimeseries}
-                  disabled={backlinkTimeseriesLoading}
-                  className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RefreshCw className={`h-4 w-4 ${backlinkTimeseriesLoading ? "animate-spin text-primary-600" : ""}`} />
-                  <span>Refresh</span>
-                </button>
               </div>
               <div className="p-6 space-y-4">
                 {backlinkTimeseriesLoading ? (

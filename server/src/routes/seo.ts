@@ -566,8 +566,8 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
     // Best-effort: if multiple exist, soft-clean by deleting all but latest
     if (latest) {
       await prisma.seoReport.deleteMany({
-        where: {
-          clientId,
+      where: {
+        clientId,
           id: { not: latest.id }
         }
       });
@@ -696,40 +696,36 @@ router.get("/share/:token/dashboard", async (req, res) => {
       where: { clientId, isLost: true }
     });
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    // Read traffic sources from database
+    const trafficSources = await prisma.trafficSource.findMany({
+      where: { clientId },
+    });
 
-    let trafficSourceSummary: Awaited<ReturnType<typeof fetchTrafficSourcesFromRankedKeywords>> | null = null;
-    try {
-      if (client.domain) {
-        const targetDomain = normalizeDomain(client.domain);
-        if (targetDomain) {
-          trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 100, 2840, "English");
-        }
-      }
-    } catch (apiError) {
-      console.error("Failed to fetch traffic summary from DataForSEO:", apiError);
-    }
+    const firstSource = trafficSources[0];
+    const breakdown = trafficSources.map((ts) => ({
+      name: ts.name,
+      value: ts.value,
+    })).filter((item) => item.value > 0);
 
-    const totalSessionsFromApi = trafficSourceSummary?.totalEstimatedTraffic ?? null;
-    const organicSessionsFromApi = trafficSourceSummary?.organicEstimatedTraffic ?? null;
-    const averagePositionFromApi = trafficSourceSummary?.averageRank ?? null;
+    const trafficSourceSummary = firstSource ? {
+      breakdown,
+      totalKeywords: firstSource.totalKeywords,
+      totalEstimatedTraffic: firstSource.totalEstimatedTraffic,
+      organicEstimatedTraffic: firstSource.organicEstimatedTraffic,
+      averageRank: firstSource.averageRank,
+      rankSampleSize: firstSource.rankSampleSize,
+    } : null;
 
     const totalSessions =
-      totalSessionsFromApi ??
+      trafficSourceSummary?.totalEstimatedTraffic ??
       (latestReport ? latestReport.totalSessions : keywordStats._count.id ?? 0);
 
     const organicSessions =
-      organicSessionsFromApi ??
+      trafficSourceSummary?.organicEstimatedTraffic ??
       (latestReport ? latestReport.organicSessions : null);
 
     const averagePosition =
-      averagePositionFromApi ??
+      trafficSourceSummary?.averageRank ??
       (latestReport?.averagePosition ?? keywordStats._avg.currentPosition ?? null);
 
     const conversions = latestReport?.conversions ?? null;
@@ -756,7 +752,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
       averagePosition,
       conversions,
       dataSources: {
-        traffic: trafficSourceSummary ? "dataforseo" : latestReport ? "seo_report" : "fallback",
+        traffic: trafficSourceSummary ? "database" : latestReport ? "seo_report" : "fallback",
         conversions: latestReport ? "seo_report" : "unknown",
       },
       trafficSourceSummary,
@@ -790,7 +786,7 @@ router.get("/share/:token/top-pages", async (req, res) => {
     }
 
     const clientId = tokenData.clientId;
-    const { limit = "10", locationCode = "2840", language = "English" } = req.query;
+    const { limit = "10" } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -801,24 +797,35 @@ router.get("/share/:token/top-pages", async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    // Read from database only
+    const topPages = await prisma.topPage.findMany({
+      where: { clientId },
+      orderBy: { organicEtv: "desc" },
+      take: Number(limit) || 10,
+    });
 
-    const targetDomain = normalizeDomain(client.domain);
+    // Format response to match API structure
+    const formatted = topPages.map((page) => ({
+      url: page.url,
+      organic: {
+        pos1: page.organicPos1,
+        pos2_3: page.organicPos2_3,
+        pos4_10: page.organicPos4_10,
+        count: page.organicCount,
+        etv: page.organicEtv,
+        isNew: page.organicIsNew,
+        isUp: page.organicIsUp,
+        isDown: page.organicIsDown,
+        isLost: page.organicIsLost,
+      },
+      paid: {
+        count: page.paidCount,
+        etv: page.paidEtv,
+      },
+      raw: page.rawData,
+    }));
 
-    const topPages = await fetchRelevantPagesFromDataForSEO(
-      targetDomain,
-      Number(limit) || 10,
-      Number(locationCode) || 2840,
-      String(language || "English")
-    );
-
-    res.json(topPages);
+    res.json(formatted);
   } catch (error: any) {
     console.error("Share top pages fetch error:", error);
     res.status(500).json({ message: "Failed to fetch top pages data" });
@@ -834,7 +841,7 @@ router.get("/share/:token/backlinks/timeseries", async (req, res) => {
     }
 
     const clientId = tokenData.clientId;
-    const { range = "30", group = "day" } = req.query;
+    const { range = "30" } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -845,31 +852,37 @@ router.get("/share/:token/backlinks/timeseries", async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
-
-    const targetDomain = normalizeDomain(client.domain);
-
+    // Read from database only
     const now = new Date();
     const rangeNumber = Number(range) || 30;
     const fromDate = new Date(now);
     fromDate.setDate(fromDate.getDate() - rangeNumber + 1);
+    fromDate.setHours(0, 0, 0, 0);
 
-    const dateTo = now.toISOString().split("T")[0];
-    const dateFrom = fromDate.toISOString().split("T")[0];
-    const summary = await fetchBacklinkTimeseriesSummaryFromDataForSEO(
-      targetDomain,
-      dateFrom,
-      dateTo,
-      (group as "day" | "week" | "month") || "day"
-    );
+    const timeseries = await prisma.backlinkTimeseries.findMany({
+      where: {
+        clientId,
+        date: {
+          gte: fromDate,
+          lte: now,
+        },
+      },
+      orderBy: { date: "desc" },
+    });
 
-    res.json(summary);
+    // Format response to match API structure
+    const formatted = timeseries.map((item) => ({
+      date: item.date.toISOString(),
+      newBacklinks: item.newBacklinks,
+      lostBacklinks: item.lostBacklinks,
+      newReferringDomains: item.newReferringDomains,
+      lostReferringDomains: item.lostReferringDomains,
+      newReferringMainDomains: item.newReferringMainDomains,
+      lostReferringMainDomains: item.lostReferringMainDomains,
+      raw: item.rawData,
+    }));
+
+    res.json(formatted);
   } catch (error: any) {
     console.error("Share backlink timeseries fetch error:", error);
     res.status(500).json({ message: "Failed to fetch backlink timeseries data" });
@@ -885,7 +898,6 @@ router.get("/share/:token/traffic-sources", async (req, res) => {
     }
 
     const clientId = tokenData.clientId;
-    const { limit = "100", locationCode = "2840", language = "English" } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -896,24 +908,18 @@ router.get("/share/:token/traffic-sources", async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    // Read from database only
+    const trafficSources = await prisma.trafficSource.findMany({
+      where: { clientId },
+      orderBy: { value: "desc" },
+    });
 
-    const targetDomain = normalizeDomain(client.domain);
+    const breakdown = trafficSources.map((ts) => ({
+      name: ts.name,
+      value: ts.value,
+    })).filter((item) => item.value > 0);
 
-    const result = await fetchTrafficSourcesFromRankedKeywords(
-      targetDomain,
-      Number(limit) || 100,
-      Number(locationCode) || 2840,
-      String(language || "English")
-    );
-
-    res.json(result?.breakdown || []);
+    res.json(breakdown);
   } catch (error: any) {
     console.error("Share traffic sources fetch error:", error);
     res.status(500).json({ message: "Failed to fetch traffic sources data" });
@@ -1111,9 +1117,14 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
   }
 });
 
-// Refresh keyword data from DataForSEO
+// Refresh keyword data from DataForSEO (SUPER_ADMIN only)
 router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (req, res) => {
   try {
+    // Only SUPER_ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    }
+
     const { clientId, keywordId } = req.params;
     const { locationCode = 2840, languageCode = "en" } = req.body;
 
@@ -1133,20 +1144,6 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
 
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
-
-    if (!hasAccess) {
-      return res.status(403).json({ message: "Access denied" });
     }
 
     // Get the keyword
@@ -1218,6 +1215,360 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
     if (error.message?.includes("DataForSEO credentials")) {
       return res.status(500).json({ message: error.message });
     }
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Refresh dashboard data from DataForSEO (SUPER_ADMIN only)
+router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) => {
+  try {
+    // Only SUPER_ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    }
+
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+    });
+
+    if (!client || !client.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+
+    const normalizeDomain = (domain: string) => {
+      return domain
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
+    };
+
+    const targetDomain = normalizeDomain(client.domain);
+
+    // Refresh traffic sources and save to database
+    let trafficSourceSummary = null;
+    try {
+      trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 100, 2840, "English");
+      
+      // Delete existing traffic sources for this client
+      await prisma.trafficSource.deleteMany({
+        where: { clientId },
+      });
+
+      // Save new traffic sources to database
+      await Promise.all(
+        trafficSourceSummary.breakdown.map((item) =>
+          prisma.trafficSource.create({
+            data: {
+              clientId,
+              name: item.name,
+              value: item.value,
+              totalKeywords: trafficSourceSummary.totalKeywords,
+              totalEstimatedTraffic: trafficSourceSummary.totalEstimatedTraffic,
+              organicEstimatedTraffic: trafficSourceSummary.organicEstimatedTraffic,
+              averageRank: trafficSourceSummary.averageRank,
+              rankSampleSize: trafficSourceSummary.rankSampleSize,
+            },
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Failed to refresh traffic sources:", error);
+    }
+
+    // Refresh ranked keywords count (already saved via ranked-keywords endpoint)
+    let rankedKeywordsCount = 0;
+    try {
+      const rankedData = await fetchRankedKeywordsFromDataForSEO(targetDomain, 100, 2840, "English");
+      rankedKeywordsCount = rankedData.totalKeywords || 0;
+      
+      // Update ranked keywords history (current month)
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+      
+      await prisma.rankedKeywordsHistory.upsert({
+        where: {
+          clientId_month_year: {
+            clientId,
+            month: currentMonth,
+            year: currentYear,
+          },
+        },
+        update: {
+          totalKeywords: rankedKeywordsCount,
+        },
+        create: {
+          clientId,
+          totalKeywords: rankedKeywordsCount,
+          month: currentMonth,
+          year: currentYear,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to refresh ranked keywords:", error);
+    }
+
+    res.json({
+      message: "Dashboard data refreshed successfully",
+      trafficSourceSummary,
+      rankedKeywordsCount,
+    });
+  } catch (error: any) {
+    console.error("Refresh dashboard error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Refresh top pages from DataForSEO (SUPER_ADMIN only)
+router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) => {
+  try {
+    // Only SUPER_ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    }
+
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+    });
+
+    if (!client || !client.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+
+    const normalizeDomain = (domain: string) => {
+      return domain
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
+    };
+
+    const targetDomain = normalizeDomain(client.domain);
+    const pages = await fetchRelevantPagesFromDataForSEO(targetDomain, 20, 2840, "English");
+
+    // Delete existing top pages for this client
+    await prisma.topPage.deleteMany({
+      where: { clientId },
+    });
+
+    // Save new pages to database using upsert to handle any race conditions
+    const savedPages = await Promise.all(
+      pages.map((page) =>
+        prisma.topPage.upsert({
+          where: {
+            clientId_url: {
+              clientId,
+              url: page.url,
+            },
+          },
+          update: {
+            organicPos1: page.organic.pos1,
+            organicPos2_3: page.organic.pos2_3,
+            organicPos4_10: page.organic.pos4_10,
+            organicCount: page.organic.count,
+            organicEtv: page.organic.etv,
+            organicIsNew: page.organic.isNew,
+            organicIsUp: page.organic.isUp,
+            organicIsDown: page.organic.isDown,
+            organicIsLost: page.organic.isLost,
+            paidCount: page.paid.count,
+            paidEtv: page.paid.etv,
+            rawData: page.raw || null,
+          },
+          create: {
+            clientId,
+            url: page.url,
+            organicPos1: page.organic.pos1,
+            organicPos2_3: page.organic.pos2_3,
+            organicPos4_10: page.organic.pos4_10,
+            organicCount: page.organic.count,
+            organicEtv: page.organic.etv,
+            organicIsNew: page.organic.isNew,
+            organicIsUp: page.organic.isUp,
+            organicIsDown: page.organic.isDown,
+            organicIsLost: page.organic.isLost,
+            paidCount: page.paid.count,
+            paidEtv: page.paid.etv,
+            rawData: page.raw || null,
+          },
+        })
+      )
+    );
+
+    res.json({
+      message: "Top pages refreshed successfully",
+      pages: savedPages.length,
+    });
+  } catch (error: any) {
+    console.error("Refresh top pages error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Refresh backlinks from DataForSEO (SUPER_ADMIN only)
+router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) => {
+  try {
+    // Only SUPER_ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    }
+
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+    });
+
+    if (!client || !client.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+
+    const normalizeDomain = (domain: string) => {
+      return domain
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
+    };
+
+    const targetDomain = normalizeDomain(client.domain);
+    
+    // Get date range (last 30 days)
+    const dateTo = new Date();
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - 30);
+
+    const summary = await fetchBacklinkTimeseriesSummaryFromDataForSEO(
+      targetDomain,
+      dateFrom.toISOString().split('T')[0],
+      dateTo.toISOString().split('T')[0],
+      "day"
+    );
+
+    // Delete existing timeseries data for this date range
+    await prisma.backlinkTimeseries.deleteMany({
+      where: {
+        clientId,
+        date: {
+          gte: dateFrom,
+          lte: dateTo,
+        },
+      },
+    });
+
+    // Save new timeseries data to database
+    const savedItems = await Promise.all(
+      summary.map((item) => {
+        const date = new Date(item.date);
+        return prisma.backlinkTimeseries.create({
+          data: {
+            clientId,
+            date,
+            newBacklinks: item.newBacklinks,
+            lostBacklinks: item.lostBacklinks,
+            newReferringDomains: item.newReferringDomains,
+            lostReferringDomains: item.lostReferringDomains,
+            newReferringMainDomains: item.newReferringMainDomains,
+            lostReferringMainDomains: item.lostReferringMainDomains,
+            rawData: item.raw || null,
+          },
+        });
+      })
+    );
+
+    res.json({
+      message: "Backlinks refreshed successfully",
+      items: savedItems.length,
+    });
+  } catch (error: any) {
+    console.error("Refresh backlinks error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Refresh agency dashboard data from DataForSEO (SUPER_ADMIN only)
+router.post("/agency/dashboard/refresh", authenticateToken, async (req, res) => {
+  try {
+    // Only SUPER_ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    }
+
+    // Get all clients
+    const allClients = await prisma.client.findMany({
+      where: {
+        domain: { not: null },
+      },
+      select: { id: true, domain: true },
+      take: 10, // Limit to avoid too many API calls
+    });
+
+    const normalizeDomain = (domain: string) => {
+      return domain
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
+    };
+
+    const refreshedClients: any[] = [];
+
+    // Refresh data for each client
+    for (const client of allClients) {
+      if (client.domain) {
+        try {
+          const targetDomain = normalizeDomain(client.domain);
+          
+          // Refresh traffic sources and save to DB
+          const trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 50, 2840, "English");
+          
+          // Delete existing traffic sources for this client
+          await prisma.trafficSource.deleteMany({
+            where: { clientId: client.id },
+          });
+
+          // Save new traffic sources to database
+          await Promise.all(
+            trafficSourceSummary.breakdown.map((item) =>
+              prisma.trafficSource.create({
+                data: {
+                  clientId: client.id,
+                  name: item.name,
+                  value: item.value,
+                  totalKeywords: trafficSourceSummary.totalKeywords,
+                  totalEstimatedTraffic: trafficSourceSummary.totalEstimatedTraffic,
+                  organicEstimatedTraffic: trafficSourceSummary.organicEstimatedTraffic,
+                  averageRank: trafficSourceSummary.averageRank,
+                  rankSampleSize: trafficSourceSummary.rankSampleSize,
+                },
+              })
+            )
+          );
+          
+          refreshedClients.push({
+            clientId: client.id,
+            domain: client.domain,
+            status: "success",
+          });
+        } catch (error) {
+          console.error(`Failed to refresh data for client ${client.id}:`, error);
+          refreshedClients.push({
+            clientId: client.id,
+            domain: client.domain,
+            status: "error",
+          });
+        }
+      }
+    }
+
+    res.json({
+      message: "Agency dashboard data refreshed successfully",
+      refreshedClients,
+    });
+  } catch (error: any) {
+    console.error("Refresh agency dashboard error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -1375,40 +1726,36 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       }
     });
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    // Read traffic sources from database
+    const trafficSources = await prisma.trafficSource.findMany({
+      where: { clientId },
+    });
 
-    let trafficSourceSummary: Awaited<ReturnType<typeof fetchTrafficSourcesFromRankedKeywords>> | null = null;
-    try {
-      if (client.domain) {
-        const targetDomain = normalizeDomain(client.domain);
-        if (targetDomain) {
-          trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 100, 2840, "English");
-        }
-      }
-    } catch (apiError) {
-      console.error("Failed to fetch traffic summary from DataForSEO:", apiError);
-    }
+    const firstSource = trafficSources[0];
+    const breakdown = trafficSources.map((ts) => ({
+      name: ts.name,
+      value: ts.value,
+    })).filter((item) => item.value > 0);
 
-    const totalSessionsFromApi = trafficSourceSummary?.totalEstimatedTraffic ?? null;
-    const organicSessionsFromApi = trafficSourceSummary?.organicEstimatedTraffic ?? null;
-    const averagePositionFromApi = trafficSourceSummary?.averageRank ?? null;
+    const trafficSourceSummary = firstSource ? {
+      breakdown,
+      totalKeywords: firstSource.totalKeywords,
+      totalEstimatedTraffic: firstSource.totalEstimatedTraffic,
+      organicEstimatedTraffic: firstSource.organicEstimatedTraffic,
+      averageRank: firstSource.averageRank,
+      rankSampleSize: firstSource.rankSampleSize,
+    } : null;
 
     const totalSessions =
-      totalSessionsFromApi ??
+      trafficSourceSummary?.totalEstimatedTraffic ??
       (latestReport ? latestReport.totalSessions : keywordStats._count.id ?? 0);
 
     const organicSessions =
-      organicSessionsFromApi ??
+      trafficSourceSummary?.organicEstimatedTraffic ??
       (latestReport ? latestReport.organicSessions : null);
 
     const averagePosition =
-      averagePositionFromApi ??
+      trafficSourceSummary?.averageRank ??
       (latestReport?.averagePosition ?? keywordStats._avg.currentPosition ?? null);
 
     const conversions = latestReport?.conversions ?? null;
@@ -1419,7 +1766,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       averagePosition,
       conversions,
       dataSources: {
-        traffic: trafficSourceSummary ? "dataforseo" : latestReport ? "seo_report" : "fallback",
+        traffic: trafficSourceSummary ? "database" : latestReport ? "seo_report" : "fallback",
         conversions: latestReport ? "seo_report" : "unknown",
       },
       trafficSourceSummary,
@@ -1513,8 +1860,8 @@ router.post("/reports/:clientId", authenticateToken, async (req, res) => {
       where: {
         clientId,
         id: { not: report.id }
-      }
-    });
+          }
+        });
 
     res.json(report);
   } catch (error) {
@@ -1882,11 +2229,124 @@ async function fetchRankedKeywordsFromDataForSEO(
   }
 }
 
-// Get or fetch ranked keywords for a client
+// Fetch keywords for site from DataForSEO API
+async function fetchKeywordsForSiteFromDataForSEO(
+  target: string,
+  limit: number = 100,
+  locationCode: number = 2840,
+  languageName: string = "English"
+) {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+
+  if (!base64Auth) {
+    throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
+  }
+
+  // Normalize domain (remove protocol, www, trailing slashes)
+  const normalizeDomain = (domain: string) => {
+    return domain
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/\/$/, "")
+      .toLowerCase();
+  };
+
+  const normalizedTarget = normalizeDomain(target);
+
+  const requestBody = [
+    {
+      target: normalizedTarget,
+      location_code: locationCode,
+      language_name: languageName,
+      limit,
+      include_serp_info: true, // Include SERP data for ranking and URL information
+    },
+  ];
+
+  try {
+    const response = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/keywords_for_site/live", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${base64Auth}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const items: any[] =
+      data?.tasks?.[0]?.result?.[0]?.items && Array.isArray(data.tasks[0].result[0].items)
+        ? data.tasks[0].result[0].items
+        : [];
+
+    return items.map((item) => {
+      const keywordInfo = item?.keyword_info || {};
+      const serpInfo = item?.serp_info || null;
+      
+      // Extract SERP features/types
+      const serpItemTypes = serpInfo?.serp_item_types || [];
+      
+      // Extract ranking URL from SERP info (first organic result)
+      let googleUrl = null;
+      let googlePosition = null;
+      
+      if (serpInfo) {
+        // SERP info may have items array with organic results
+        if (serpInfo.items && Array.isArray(serpInfo.items)) {
+          // Find first organic result for the target domain
+          const organicResult = serpInfo.items.find((result: any) => {
+            if (result.type === "organic" && result.url) {
+              const resultUrl = result.url.toLowerCase();
+              const targetLower = normalizedTarget.toLowerCase();
+              return resultUrl.includes(targetLower);
+            }
+            return false;
+          });
+          
+          if (organicResult) {
+            googleUrl = organicResult.url || null;
+            googlePosition = organicResult.rank_group || organicResult.rank_absolute || null;
+          }
+        }
+        
+        // Alternative: check if serpInfo has direct URL reference
+        if (!googleUrl && serpInfo.relevant_url) {
+          googleUrl = serpInfo.relevant_url;
+        }
+      }
+      
+      return {
+        keyword: item?.keyword || "",
+        searchVolume: keywordInfo?.search_volume ? Number(keywordInfo.search_volume) : null,
+        cpc: keywordInfo?.cpc ? Number(keywordInfo.cpc) : null,
+        competition: keywordInfo?.competition_level || keywordInfo?.competition || null,
+        competitionValue: keywordInfo?.competition ? Number(keywordInfo.competition) : null,
+        monthlySearches: keywordInfo?.monthly_searches || null,
+        keywordInfo: item || null,
+        locationCode: item?.location_code || locationCode,
+        languageCode: item?.language_code || null,
+        serpInfo: serpInfo,
+        serpItemTypes: serpItemTypes,
+        googleUrl: googleUrl,
+        googlePosition: googlePosition,
+        seResultsCount: serpInfo?.se_results_count ? String(serpInfo.se_results_count) : null,
+      };
+    });
+  } catch (error: any) {
+    console.error("DataForSEO Keywords for Site API error:", error);
+    throw error;
+  }
+}
+
+// Get ranked keywords for a client (read from DB only)
 router.get("/ranked-keywords/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { fetch = "false" } = req.query;
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -1926,8 +2386,8 @@ router.get("/ranked-keywords/:clientId", authenticateToken, async (req, res) => 
     const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1;
     const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
 
-    // Get current month data
-    let currentData = await prisma.rankedKeywordsHistory.findUnique({
+    // Read from database only - no API calls for agency users
+    const currentData = await prisma.rankedKeywordsHistory.findUnique({
       where: {
         clientId_month_year: {
           clientId,
@@ -1947,47 +2407,6 @@ router.get("/ranked-keywords/:clientId", authenticateToken, async (req, res) => 
         }
       }
     });
-
-    // If fetch is requested or no current data exists, fetch from DataForSEO
-    if (fetch === "true" || !currentData) {
-      try {
-        const rankedData = await fetchRankedKeywordsFromDataForSEO(
-          client.domain,
-          2840, // Default to US
-          "en" // Default to English
-        );
-
-        // Upsert current month data
-        currentData = await prisma.rankedKeywordsHistory.upsert({
-          where: {
-            clientId_month_year: {
-              clientId,
-              month: currentMonth,
-              year: currentYear
-            }
-          },
-          update: {
-            totalKeywords: rankedData.totalKeywords,
-            updatedAt: new Date()
-          },
-          create: {
-            clientId,
-            totalKeywords: rankedData.totalKeywords,
-            month: currentMonth,
-            year: currentYear
-          }
-        });
-      } catch (error: any) {
-        console.error("Failed to fetch ranked keywords from DataForSEO:", error);
-        // Continue with existing data if fetch fails
-        if (!currentData) {
-          return res.status(500).json({ 
-            message: "Failed to fetch ranked keywords and no existing data found",
-            error: error.message 
-          });
-        }
-      }
-    }
 
     // Calculate change
     const change = currentData 
@@ -2055,6 +2474,82 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
       return res.status(403).json({ message: "Access denied" });
     }
 
+    // Read from database only - no API calls for agency users
+    // Get all historical data from database
+    const allHistory = await prisma.rankedKeywordsHistory.findMany({
+      where: { clientId },
+      orderBy: [
+        { year: "asc" },
+        { month: "asc" }
+      ]
+    });
+
+    console.log(`Found ${allHistory.length} months in database`);
+
+    // Create complete 12-month dataset from database data
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    
+    const dbMonthlyData: Record<string, { month: number; year: number; totalKeywords: number; date: string }> = {};
+    allHistory.forEach((item) => {
+      const key = `${item.year}-${String(item.month).padStart(2, '0')}`;
+      dbMonthlyData[key] = {
+        month: item.month,
+        year: item.year,
+        totalKeywords: item.totalKeywords,
+        date: `${item.year}-${String(item.month).padStart(2, '0')}-01`
+      };
+    });
+
+    const completeData: Array<{ month: number; year: number; totalKeywords: number; date: string }> = [];
+    
+    // Generate all 12 months, filling with database data or 0
+    for (let i = 11; i >= 0; i--) {
+      const targetDate = new Date(currentYear, currentMonth - 1 - i, 1);
+      const targetYear = targetDate.getFullYear();
+      const targetMonth = targetDate.getMonth() + 1;
+      const key = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+      
+      const existingData = dbMonthlyData[key];
+      if (existingData) {
+        completeData.push(existingData);
+      } else {
+        // Fill missing months with 0
+        completeData.push({
+          month: targetMonth,
+          year: targetYear,
+          totalKeywords: 0,
+          date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
+        });
+      }
+    }
+
+    console.log(`Returning ${completeData.length} months (${completeData.filter(d => d.totalKeywords > 0).length} with data)`);
+    res.json(completeData);
+  } catch (error: any) {
+    console.error("Get ranked keywords history error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Refresh ranked keywords history from DataForSEO (SUPER_ADMIN only)
+router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, async (req, res) => {
+  try {
+    // Only SUPER_ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    }
+
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+    });
+
+    if (!client || !client.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+
     // Fetch historical data from DataForSEO Historical Rank Overview API
     try {
       console.log(`Fetching historical data for domain: ${client.domain}`);
@@ -2067,8 +2562,7 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
       console.log(`Received ${historicalData.length} data points from API`);
 
       if (historicalData.length === 0) {
-        console.warn("No historical data returned from API, falling back to database");
-        throw new Error("No historical data from API");
+        return res.status(404).json({ message: "No historical data returned from API" });
       }
 
       // Group by month and year, taking the latest value for each month
@@ -2132,67 +2626,41 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
         }
       }
 
-      // Log for debugging
-      console.log(`Historical data for ${client.domain}: ${completeData.length} months prepared`);
-      console.log("Monthly data:", completeData.map(d => `${d.year}-${String(d.month).padStart(2, '0')}: ${d.totalKeywords}`).join(", "));
+      // Save historical data to database
+      await Promise.all(
+        completeData.map((item) =>
+          prisma.rankedKeywordsHistory.upsert({
+            where: {
+              clientId_month_year: {
+                clientId,
+                month: item.month,
+                year: item.year,
+              },
+            },
+            update: {
+              totalKeywords: item.totalKeywords,
+            },
+            create: {
+              clientId,
+              month: item.month,
+              year: item.year,
+              totalKeywords: item.totalKeywords,
+            },
+          })
+        )
+      );
 
-      res.json(completeData);
+      console.log(`Historical data for ${client.domain}: ${completeData.length} months saved to database`);
+      res.json({
+        message: "Ranked keywords history refreshed successfully",
+        months: completeData.length,
+      });
     } catch (apiError: any) {
       console.error("Failed to fetch historical data from DataForSEO:", apiError);
-      console.error("API Error details:", apiError.message);
-      
-      // Fallback to database if API fails
-      const allHistory = await prisma.rankedKeywordsHistory.findMany({
-        where: { clientId },
-        orderBy: [
-          { year: "asc" },
-          { month: "asc" }
-        ]
+      res.status(500).json({ 
+        message: "Failed to refresh historical data",
+        error: apiError.message 
       });
-
-      console.log(`Fallback: Found ${allHistory.length} months in database`);
-
-      // Create complete 12-month dataset from database data
-      const now = new Date();
-      const currentYear = now.getFullYear();
-      const currentMonth = now.getMonth() + 1;
-      
-      const dbMonthlyData: Record<string, { month: number; year: number; totalKeywords: number; date: string }> = {};
-      allHistory.forEach((item) => {
-        const key = `${item.year}-${String(item.month).padStart(2, '0')}`;
-        dbMonthlyData[key] = {
-          month: item.month,
-          year: item.year,
-          totalKeywords: item.totalKeywords,
-          date: `${item.year}-${String(item.month).padStart(2, '0')}-01`
-        };
-      });
-
-      const completeData: Array<{ month: number; year: number; totalKeywords: number; date: string }> = [];
-      
-      // Generate all 12 months, filling with database data or 0
-      for (let i = 11; i >= 0; i--) {
-        const targetDate = new Date(currentYear, currentMonth - 1 - i, 1);
-        const targetYear = targetDate.getFullYear();
-        const targetMonth = targetDate.getMonth() + 1;
-        const key = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
-        
-        const existingData = dbMonthlyData[key];
-        if (existingData) {
-          completeData.push(existingData);
-        } else {
-          // Fill missing months with 0
-          completeData.push({
-            month: targetMonth,
-            year: targetYear,
-            totalKeywords: 0,
-            date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
-          });
-        }
-      }
-
-      console.log(`Fallback: Returning ${completeData.length} months (${completeData.filter(d => d.totalKeywords > 0).length} with data)`);
-      res.json(completeData);
     }
   } catch (error: any) {
     console.error("Get ranked keywords history error:", error);
@@ -2203,7 +2671,7 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
 router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { range = "30", group = "day" } = req.query;
+    const { range = "30" } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -2235,31 +2703,37 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
-
-    const targetDomain = normalizeDomain(client.domain);
-
+    // Read from database only
     const now = new Date();
     const rangeNumber = Number(range) || 30;
     const fromDate = new Date(now);
     fromDate.setDate(fromDate.getDate() - rangeNumber + 1);
+    fromDate.setHours(0, 0, 0, 0);
 
-    const dateTo = now.toISOString().split("T")[0];
-    const dateFrom = fromDate.toISOString().split("T")[0];
-    const summary = await fetchBacklinkTimeseriesSummaryFromDataForSEO(
-      targetDomain,
-      dateFrom,
-      dateTo,
-      (group as "day" | "week" | "month") || "day"
-    );
+    const timeseries = await prisma.backlinkTimeseries.findMany({
+      where: {
+        clientId,
+        date: {
+          gte: fromDate,
+          lte: now,
+        },
+      },
+      orderBy: { date: "desc" },
+    });
 
-    res.json(summary);
+    // Format response to match API structure
+    const formatted = timeseries.map((item) => ({
+      date: item.date.toISOString(),
+      newBacklinks: item.newBacklinks,
+      lostBacklinks: item.lostBacklinks,
+      newReferringDomains: item.newReferringDomains,
+      lostReferringDomains: item.lostReferringDomains,
+      newReferringMainDomains: item.newReferringMainDomains,
+      lostReferringMainDomains: item.lostReferringMainDomains,
+      raw: item.rawData,
+    }));
+
+    res.json(formatted);
   } catch (error: any) {
     console.error("Backlink timeseries fetch error:", error);
     res.status(500).json({ message: "Failed to fetch backlink timeseries data" });
@@ -2269,7 +2743,7 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
 router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { limit = "10", locationCode = "2840", language = "English" } = req.query;
+    const { limit = "10" } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -2301,24 +2775,35 @@ router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    // Read from database only
+    const topPages = await prisma.topPage.findMany({
+      where: { clientId },
+      orderBy: { organicEtv: "desc" },
+      take: Number(limit) || 10,
+    });
 
-    const targetDomain = normalizeDomain(client.domain);
+    // Format response to match API structure
+    const formatted = topPages.map((page) => ({
+      url: page.url,
+      organic: {
+        pos1: page.organicPos1,
+        pos2_3: page.organicPos2_3,
+        pos4_10: page.organicPos4_10,
+        count: page.organicCount,
+        etv: page.organicEtv,
+        isNew: page.organicIsNew,
+        isUp: page.organicIsUp,
+        isDown: page.organicIsDown,
+        isLost: page.organicIsLost,
+      },
+      paid: {
+        count: page.paidCount,
+        etv: page.paidEtv,
+      },
+      raw: page.rawData,
+    }));
 
-    const topPages = await fetchRelevantPagesFromDataForSEO(
-      targetDomain,
-      Number(limit) || 10,
-      Number(locationCode) || 2840,
-      String(language || "English")
-    );
-
-    res.json(topPages);
+    res.json(formatted);
   } catch (error: any) {
     console.error("Top pages fetch error:", error);
     res.status(500).json({ message: "Failed to fetch top pages data" });
@@ -2328,7 +2813,6 @@ router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
 router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { limit = "100", locationCode = "2840", language = "English" } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -2360,24 +2844,28 @@ router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => 
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    // Read from database only
+    const trafficSources = await prisma.trafficSource.findMany({
+      where: { clientId },
+      orderBy: { value: "desc" },
+    });
 
-    const targetDomain = normalizeDomain(client.domain);
+    // Get aggregated metrics from first record (they should all have the same aggregated values)
+    const firstSource = trafficSources[0];
+    const breakdown = trafficSources.map((ts) => ({
+      name: ts.name,
+      value: ts.value,
+    })).filter((item) => item.value > 0);
 
-    const result = await fetchTrafficSourcesFromRankedKeywords(
-      targetDomain,
-      Number(limit) || 100,
-      Number(locationCode) || 2840,
-      String(language || "English")
-    );
-
-    res.json(result);
+    // Return in the same format as the API
+    res.json({
+      breakdown,
+      totalKeywords: firstSource?.totalKeywords || 0,
+      totalEstimatedTraffic: firstSource?.totalEstimatedTraffic || 0,
+      organicEstimatedTraffic: firstSource?.organicEstimatedTraffic || 0,
+      averageRank: firstSource?.averageRank,
+      rankSampleSize: firstSource?.rankSampleSize || 0,
+    });
   } catch (error: any) {
     console.error("Traffic sources fetch error:", error);
     res.status(500).json({ message: "Failed to fetch traffic sources data" });
@@ -2498,57 +2986,26 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       },
     });
 
-    // Get top pages across all clients using DataForSEO
-    const topPagesData: any[] = [];
-    const allClients = await prisma.client.findMany({
+    // Get top pages from database for all accessible clients
+    const topPagesFromDb = await prisma.topPage.findMany({
       where: { 
-        id: { in: accessibleClientIds }
+        clientId: { in: accessibleClientIds }
       },
-      select: { id: true, domain: true },
-      take: 5, // Limit to avoid too many API calls
+      orderBy: { organicEtv: "desc" },
+      take: 5,
     });
-    
-    // Filter clients with valid domains
-    const clientsWithDomains = allClients.filter(client => client.domain && client.domain.trim() !== "");
 
-    // Fetch top pages for each client
-    for (const client of clientsWithDomains) {
-      if (client.domain) {
-        try {
-          const normalizeDomain = (domain: string) => {
-            return domain
-              .replace(/^https?:\/\//, "")
-              .replace(/^www\./, "")
-              .replace(/\/$/, "")
-              .toLowerCase();
-          };
-          const targetDomain = normalizeDomain(client.domain);
-          const pages = await fetchRelevantPagesFromDataForSEO(targetDomain, 5, 2840, "English");
-          topPagesData.push(...pages.map(page => ({
-            ...page,
-            clientId: client.id,
-            clientDomain: client.domain,
-          })));
-        } catch (error) {
-          console.error(`Failed to fetch top pages for client ${client.id}:`, error);
-        }
-      }
-    }
-
-    // Sort top pages by estimated traffic and take top 5
-    const topPages = topPagesData
-      .sort((a, b) => (b.organic?.etv || 0) - (a.organic?.etv || 0))
-      .slice(0, 5)
-      .map(page => ({
-        url: page.url,
-        clicks: Math.round(page.organic?.etv || 0),
-        impressions: (page.organic?.count || 0) * 100, // Estimate
-        ctr: 5.0, // Default CTR
-        position: page.organic?.pos1 > 0 ? 1 : (page.organic?.pos2_3 > 0 ? 2.5 : 5),
-      }));
+    // Format top pages
+    const topPages = topPagesFromDb.map(page => ({
+      url: page.url,
+      clicks: Math.round(page.organicEtv),
+      impressions: page.organicCount * 100, // Estimate
+      ctr: 5.0, // Default CTR
+      position: page.organicPos1 > 0 ? 1 : (page.organicPos2_3 > 0 ? 2.5 : 5),
+    }));
 
     // Calculate organic traffic from top pages
-    const organicTraffic = topPagesData.reduce((sum, page) => sum + (page.organic?.etv || 0), 0);
+    const organicTraffic = topPagesFromDb.reduce((sum, page) => sum + page.organicEtv, 0);
 
     // Format recent rankings
     const formattedRecentRankings = recentRankings.map(kw => ({
@@ -2592,6 +3049,198 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
   } catch (error: any) {
     console.error("Agency dashboard fetch error:", error);
     res.status(500).json({ message: error?.message || "Failed to fetch agency dashboard data" });
+  }
+});
+
+// Get target keywords for a client (read from DB only)
+router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Check access: user must own the client or be ADMIN/SUPER_ADMIN
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+
+    // For non-admin users, check if they're in the same agency
+    let hasAccess = isAdmin || isOwner;
+    if (!hasAccess && req.user.role !== "ADMIN" && req.user.role !== "SUPER_ADMIN") {
+      const userMemberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const userAgencyIds = userMemberships.map(m => m.agencyId);
+      const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+      hasAccess = clientAgencyIds.some(id => userAgencyIds.includes(id));
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Get target keywords from database
+    const targetKeywords = await prisma.targetKeyword.findMany({
+      where: { clientId },
+      orderBy: [
+        { searchVolume: "desc" },
+        { keyword: "asc" }
+      ],
+    });
+
+    res.json(targetKeywords);
+  } catch (error: any) {
+    console.error("Get target keywords error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Refresh target keywords from DataForSEO (SUPER_ADMIN only)
+router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req, res) => {
+  try {
+    // Only SUPER_ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    }
+
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+    });
+
+    if (!client || !client.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+
+    // Normalize domain
+    const normalizeDomain = (domain: string) => {
+      return domain
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
+    };
+
+    const targetDomain = normalizeDomain(client.domain);
+
+    // Fetch keywords from DataForSEO API
+    const keywords = await fetchKeywordsForSiteFromDataForSEO(targetDomain, 100, 2840, "English");
+
+    // Use upsert to save/update keywords
+    const savedKeywords = await Promise.all(
+      keywords.map(async (kw) => {
+        // Get existing keyword to preserve previous position for change calculation
+        const existing = await prisma.targetKeyword.findUnique({
+          where: {
+            clientId_keyword: {
+              clientId,
+              keyword: kw.keyword,
+            },
+          },
+        });
+        
+        const previousPosition = existing?.googlePosition || null;
+        const googleChange = kw.googlePosition && previousPosition 
+          ? kw.googlePosition - previousPosition 
+          : null;
+        
+        // Map location code to location name (default to US locations)
+        const locationNameMap: Record<number, string> = {
+          2840: "United States",
+          2826: "United Kingdom",
+          2036: "Australia",
+          2124: "Canada",
+        };
+        const locationName = locationNameMap[kw.locationCode || 2840] || "United States";
+        
+        // Map language code to language name
+        const languageNameMap: Record<string, string> = {
+          "en": "English",
+          "es": "Spanish",
+          "fr": "French",
+          "de": "German",
+          "it": "Italian",
+          "pt": "Portuguese",
+          "ja": "Japanese",
+          "zh": "Chinese",
+          "ko": "Korean",
+          "ru": "Russian",
+        };
+        const languageName = kw.languageCode 
+          ? (languageNameMap[kw.languageCode] || kw.languageCode) 
+          : "English";
+        
+        return prisma.targetKeyword.upsert({
+          where: {
+            clientId_keyword: {
+              clientId,
+              keyword: kw.keyword,
+            },
+          },
+          update: {
+            searchVolume: kw.searchVolume || null,
+            cpc: kw.cpc,
+            competition: kw.competition,
+            competitionValue: kw.competitionValue,
+            monthlySearches: kw.monthlySearches ? kw.monthlySearches as any : null,
+            keywordInfo: kw.keywordInfo ? kw.keywordInfo as any : null,
+            locationCode: kw.locationCode || null,
+            locationName: locationName,
+            languageCode: kw.languageCode || null,
+            languageName: languageName,
+            serpInfo: kw.serpInfo ? kw.serpInfo as any : null,
+            serpItemTypes: kw.serpItemTypes ? kw.serpItemTypes as any : null,
+            googleUrl: kw.googleUrl,
+            previousPosition: previousPosition,
+            googlePosition: kw.googlePosition,
+            seResultsCount: kw.seResultsCount ? String(kw.seResultsCount) : null,
+          },
+          create: {
+            clientId,
+            keyword: kw.keyword,
+            searchVolume: kw.searchVolume || null,
+            cpc: kw.cpc,
+            competition: kw.competition,
+            competitionValue: kw.competitionValue,
+            monthlySearches: kw.monthlySearches ? kw.monthlySearches as any : null,
+            keywordInfo: kw.keywordInfo ? kw.keywordInfo as any : null,
+            locationCode: kw.locationCode || null,
+            locationName: locationName,
+            languageCode: kw.languageCode || null,
+            languageName: languageName,
+            serpInfo: kw.serpInfo ? kw.serpInfo as any : null,
+            serpItemTypes: kw.serpItemTypes ? kw.serpItemTypes as any : null,
+            googleUrl: kw.googleUrl,
+            googlePosition: kw.googlePosition,
+            seResultsCount: kw.seResultsCount ? String(kw.seResultsCount) : null,
+          },
+        });
+      })
+    );
+
+    res.json({
+      message: "Target keywords refreshed successfully",
+      keywords: savedKeywords.length,
+    });
+  } catch (error: any) {
+    console.error("Refresh target keywords error:", error);
+    res.status(500).json({ message: error?.message || "Internal server error" });
   }
 });
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Plus, Users, Mail, UserCheck, Trash2, X } from "lucide-react";
+import ConfirmDialog from "../components/ConfirmDialog";
 import api from "../lib/api";
 import { useSelector } from "react-redux";
 import { RootState } from "../store";
@@ -110,17 +111,25 @@ const WorkersPage: React.FC = () => {
     }
   };
 
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; workerId: string | null }>({
+    isOpen: false,
+    workerId: null,
+  });
+
   const handleRemoveWorker = async (id: string) => {
-    if (!window.confirm("Remove this worker? This action cannot be undone.")) {
-      return;
-    }
+    setDeleteConfirm({ isOpen: true, workerId: id });
+  };
+
+  const confirmRemoveWorker = async () => {
+    if (!deleteConfirm.workerId) return;
     try {
-      await api.delete(`/team/${id}`);
+      await api.delete(`/team/${deleteConfirm.workerId}`);
       toast.success("Worker removed successfully!");
       fetchWorkers();
+      setDeleteConfirm({ isOpen: false, workerId: null });
     } catch (err: any) {
       console.error("Failed to remove worker", err);
-      // Toast is already shown by API interceptor
+      setDeleteConfirm({ isOpen: false, workerId: null });
     }
   };
 
@@ -359,6 +368,18 @@ const WorkersPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm({ isOpen: false, workerId: null })}
+        onConfirm={confirmRemoveWorker}
+        title="Remove Worker"
+        message="Are you sure you want to remove this worker? This action cannot be undone and they will lose access to the system."
+        confirmText="Remove"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 };

@@ -197,6 +197,10 @@ model Client {
   keywords   Keyword[]
   backlinks  Backlink[]
   rankedKeywordsHistory RankedKeywordsHistory[]
+  topPages   TopPage[]
+  trafficSources TrafficSource[]
+  backlinkTimeseries BacklinkTimeseries[]
+  targetKeywords TargetKeyword[]
 
   @@index([name, domain])
   @@map("clients")
@@ -361,4 +365,125 @@ model OnboardingTask {
 
   @@index([templateId, order])
   @@map("onboarding_tasks")
+}
+
+model TopPage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  url String
+
+  // Organic metrics
+  organicPos1    Int @default(0)
+  organicPos2_3  Int @default(0)
+  organicPos4_10 Int @default(0)
+  organicCount   Int @default(0)
+  organicEtv     Float @default(0)
+  organicIsNew   Int @default(0)
+  organicIsUp    Int @default(0)
+  organicIsDown  Int @default(0)
+  organicIsLost  Int @default(0)
+
+  // Paid metrics
+  paidCount Int @default(0)
+  paidEtv   Float @default(0)
+
+  // Raw API data for reference
+  rawData Json? @db.Json
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, url])
+  @@index([clientId, organicEtv])
+  @@map("top_pages")
+}
+
+model TrafficSource {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name  String // "Organic", "Direct", "Referral", "Paid", "Other"
+  value Float  @default(0)
+
+  // Aggregated metrics
+  totalKeywords        Int @default(0)
+  totalEstimatedTraffic Float @default(0)
+  organicEstimatedTraffic Float @default(0)
+  averageRank          Float?
+  rankSampleSize       Int @default(0)
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, name])
+  @@index([clientId])
+  @@map("traffic_sources")
+}
+
+model BacklinkTimeseries {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  date DateTime
+
+  newBacklinks            Int @default(0)
+  lostBacklinks           Int @default(0)
+  newReferringDomains     Int @default(0)
+  lostReferringDomains    Int @default(0)
+  newReferringMainDomains Int @default(0)
+  lostReferringMainDomains Int @default(0)
+
+  // Raw API data for reference
+  rawData Json? @db.Json
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, date])
+  @@index([clientId, date])
+  @@map("backlink_timeseries")
+}
+
+model TargetKeyword {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  keyword       String
+  searchVolume  Int?
+  cpc           Float?
+  competition   String?
+  competitionValue Float?
+  monthlySearches Json? @db.Json // Array of monthly search volumes for past 12 months
+  keywordInfo   Json? @db.Json // Additional keyword information from API
+  
+  // Location and language
+  locationCode  Int?
+  locationName  String?
+  languageCode  String?
+  languageName  String?
+  
+  // SERP data
+  serpInfo      Json? @db.Json // Full SERP info object from API
+  serpItemTypes Json? @db.Json // Array of SERP feature types
+  googleUrl     String? // URL that ranks for this keyword
+  googlePosition Int? // Current Google ranking position
+  previousPosition Int? // Previous ranking position for change calculation
+  seResultsCount String? // Number of search results
+  
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, keyword])
+  @@index([clientId, searchVolume])
+  @@index([clientId, googlePosition])
+  @@map("target_keywords")
 }

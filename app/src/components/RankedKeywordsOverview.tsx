@@ -14,6 +14,8 @@ import {
 import { ArrowDownRight, ArrowUpRight, Loader2, RefreshCw } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store";
 
 type ChartType = "line" | "bar";
 
@@ -76,6 +78,7 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
   showHeader = true,
   headerActions,
 }) => {
+  const { user } = useSelector((state: RootState) => state.auth);
   const [summary, setSummary] = useState<RankedKeywordsSummary | null>(null);
   const [history, setHistory] = useState<ChartDatum[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -83,18 +86,18 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [chartType, setChartType] = useState<ChartType>("line");
+  const [refreshing, setRefreshing] = useState(false);
 
   const hasData = Boolean(summary?.current);
 
   const fetchSummary = useCallback(
-    async (forceFetch = false) => {
+    async () => {
       if (!clientId) return;
       try {
         setSummaryLoading(true);
         setSummaryError(null);
-        const res = await api.get(`/seo/ranked-keywords/${clientId}`, {
-          params: forceFetch ? { fetch: "true" } : undefined,
-        });
+        // Always read from DB - no fetch parameter
+        const res = await api.get(`/seo/ranked-keywords/${clientId}`);
         const data: RankedKeywordsSummary = res.data || null;
         if (data) {
           setSummary({
@@ -145,9 +148,23 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
   }, [clientId, fetchSummary, fetchHistory]);
 
   const handleRefresh = useCallback(async () => {
-    await fetchSummary(true);
-    await fetchHistory();
-  }, [fetchSummary, fetchHistory]);
+    if (!clientId || user?.role !== "SUPER_ADMIN") return;
+    try {
+      setRefreshing(true);
+      // Refresh ranked keywords summary (current month)
+      await api.post(`/seo/dashboard/${clientId}/refresh`);
+      // Refresh ranked keywords history
+      await api.post(`/seo/ranked-keywords/${clientId}/history/refresh`);
+      toast.success("Ranked keywords data refreshed successfully!");
+      // Refetch data from DB
+      await fetchSummary();
+      await fetchHistory();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to refresh ranked keywords data");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [clientId, user?.role, fetchSummary, fetchHistory]);
 
   const changeBadge = useMemo(() => {
     if (!summary || summary.change === null || summary.change === undefined || summary.change === 0) {
@@ -206,15 +223,17 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
           </div>
           <div className="flex items-center space-x-2">
             {headerActions}
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={summaryLoading || historyLoading}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCw className={`h-4 w-4 ${summaryLoading || historyLoading ? "animate-spin text-primary-600" : ""}`} />
-              <span>Refresh</span>
-            </button>
+            {user?.role === "SUPER_ADMIN" && (
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing || summaryLoading || historyLoading}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing || summaryLoading || historyLoading ? "animate-spin text-primary-600" : ""}`} />
+                <span>Refresh</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -254,14 +273,14 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                 {lastUpdated && <p className="text-gray-500">Last updated {lastUpdated}</p>}
               </div>
             </div>
-            {!showHeader && (
+            {!showHeader && user?.role === "SUPER_ADMIN" && (
               <button
                 type="button"
                 onClick={handleRefresh}
-                disabled={summaryLoading || historyLoading}
+                disabled={refreshing || summaryLoading || historyLoading}
                 className="inline-flex items-center gap-2 self-start rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <RefreshCw className={`h-4 w-4 ${summaryLoading || historyLoading ? "animate-spin text-primary-600" : ""}`} />
+                <RefreshCw className={`h-4 w-4 ${refreshing || summaryLoading || historyLoading ? "animate-spin text-primary-600" : ""}`} />
                 <span>Refresh</span>
               </button>
             )}

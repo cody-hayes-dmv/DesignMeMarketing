@@ -13,9 +13,11 @@ import {
   Eye,
   Target,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import api from "@/lib/api";
+import toast from "react-hot-toast";
 
 interface DashboardStats {
   totalKeywords: number;
@@ -53,6 +55,7 @@ const AgencyDashboardPage = () => {
   const { clients } = useSelector((state: RootState) => state.client);
   const [selectedPeriod, setSelectedPeriod] = useState("30");
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState<DashboardStats>({
     totalKeywords: 0,
     avgPosition: null,
@@ -88,6 +91,23 @@ const AgencyDashboardPage = () => {
     fetchDashboardData();
   }, [selectedPeriod]);
 
+  const handleRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await api.post("/seo/agency/dashboard/refresh");
+      toast.success("Agency dashboard data refreshed successfully!");
+      // Refetch dashboard data
+      const res = await api.get("/seo/agency/dashboard", {
+        params: { period: selectedPeriod },
+      });
+      setStats(res.data);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const getChangeIcon = (change: number) => {
     if (change > 0) return <ArrowUpRight className="h-4 w-4 text-green-500" />;
     if (change < 0) return <ArrowDownRight className="h-4 w-4 text-red-500" />;
@@ -122,6 +142,27 @@ const AgencyDashboardPage = () => {
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
           </select>
+          {user?.role === "SUPER_ADMIN" && (
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Refresh dashboard data from DataForSEO"
+            >
+              {refreshing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Refreshing...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  <span>Refresh</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -230,7 +271,7 @@ const AgencyDashboardPage = () => {
             ) : stats.rankingTrends.length === 0 ? (
               <div className="flex items-center justify-center h-full text-gray-500">
                 No ranking data available
-              </div>
+            </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={stats.rankingTrends}>
@@ -289,7 +330,7 @@ const AgencyDashboardPage = () => {
             ) : stats.trafficTrends.length === 0 ? (
               <div className="flex items-center justify-center h-full text-gray-500">
                 No traffic data available
-              </div>
+            </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={stats.trafficTrends}>
@@ -432,7 +473,7 @@ const AgencyDashboardPage = () => {
                 No top pages data available
               </div>
             ) : (
-              <div className="space-y-4">
+            <div className="space-y-4">
                 {stats.topPages.map((page, index) => (
                 <div
                   key={index}
@@ -467,8 +508,8 @@ const AgencyDashboardPage = () => {
                     <Eye className="h-4 w-4" />
                   </button>
                 </div>
-                ))}
-              </div>
+              ))}
+            </div>
             )}
           </div>
         </div>

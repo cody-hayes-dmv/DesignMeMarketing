@@ -10,6 +10,8 @@ import {
 import api from "@/lib/api";
 import { Client, Keyword } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store";
 
 type TabId = "research" | "tracked";
 
@@ -53,6 +55,7 @@ const formatNumber = (value: number | null | undefined) => {
 };
 
 const KeywordsPage: React.FC = () => {
+  const { user } = useSelector((state: RootState) => state.auth);
   const [activeTab, setActiveTab] = useState<TabId>("research");
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -817,11 +820,13 @@ const KeywordsPage: React.FC = () => {
                           {keyword.currentPosition ?? "—"}
                         </td>
                         <td className="px-4 py-3 text-right">
+                          {user?.role === "SUPER_ADMIN" && (
                           <button
                             type="button"
                             onClick={() => handleRefreshTrackedKeyword(keyword.id)}
                             disabled={Boolean(refreshingKeywordIds[keyword.id])}
                             className="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-60"
+                              title="Refresh keyword data from DataForSEO"
                           >
                             {refreshingKeywordIds[keyword.id] ? (
                               <>
@@ -835,6 +840,7 @@ const KeywordsPage: React.FC = () => {
                               </>
                             )}
                           </button>
+                          )}
                         </td>
                       </tr>
                     ))

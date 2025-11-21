@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store";
 import { fetchClients, createClient, updateClient, deleteClient, Client } from "../store/slices/clientSlice";
@@ -12,20 +13,22 @@ import {
   Mail,
   Ban,
   Search,
-  Kanban,
   Table,
   List,
   Trash2,
   Edit,
-  Building,
   Building2,
   Eye,
   Share2,
+  X,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const ClientsPage = () => {
   const dispatch = useDispatch();
@@ -47,10 +50,33 @@ const ClientsPage = () => {
     industry: "",
     targets: [] as string[]
   });
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareLink, setShareLink] = useState("");
+  const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     dispatch(fetchClients() as any);
   }, [dispatch]);
+
+  // Close status dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      // Check if click is outside status dropdown button and dropdown menu
+      const isClickOnDropdownButton = target.closest('.status-dropdown');
+      const isClickOnDropdownMenu = target.closest('[data-status-dropdown-menu]');
+      
+      if (openStatusId && !isClickOnDropdownButton && !isClickOnDropdownMenu) {
+        setOpenStatusId("");
+      }
+    };
+    if (openStatusId) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [openStatusId]);
 
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,17 +107,26 @@ const ClientsPage = () => {
         return;
       }
       const url = `${window.location.origin}/share/${encodeURIComponent(token)}`;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(url);
-        toast.success("Shareable link copied to clipboard!");
-      } else {
-        // Fallback
-        prompt("Copy this shareable link:", url);
-      }
+      setShareLink(url);
+      setShowShareModal(true);
     } catch (error: any) {
       console.error("Share link error", error);
       // Toast is handled by interceptor; provide extra context here if desired
     }
+  };
+
+  const handleCopyLink = async () => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(shareLink);
+      toast.success("Link copied to clipboard!");
+    } else {
+      // Fallback
+      prompt("Copy this shareable link:", shareLink);
+    }
+  };
+
+  const handleOpenLink = () => {
+    window.open(shareLink, "_blank");
   };
 
   const handleViewClick = (client: Client) => {
@@ -104,27 +139,29 @@ const ClientsPage = () => {
     setOpen(true);
   };
 
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
+    isOpen: false,
+    clientId: null,
+  });
+
   const handleDeleteClient = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this client? This action cannot be undone.")) {
-      return;
-    }
+    setDeleteConfirm({ isOpen: true, clientId: id });
+  };
+
+  const confirmDeleteClient = async () => {
+    if (!deleteConfirm.clientId) return;
     try {
-      await dispatch(deleteClient(id) as any);
+      await dispatch(deleteClient(deleteConfirm.clientId) as any);
       toast.success("Client deleted successfully!");
-      // Client list will be updated automatically via Redux
+      setDeleteConfirm({ isOpen: false, clientId: null });
     } catch (error: any) {
       console.error("Failed to delete client:", error);
-      // Toast is already shown by API interceptor
+      setDeleteConfirm({ isOpen: false, clientId: null });
     }
   };
 
-  const modifiedClients = clients.map((p) => ({
-    ...p,
-    keywords: 0,
-    avgPosition: 0,
-    topRankings: 0,
-    traffic: 0,
-  }))
+  // Clients already have statistics from the database
+  const modifiedClients = clients
 
   const getStatusBadge = (status: string) => {
     const styles = {
@@ -288,9 +325,56 @@ const ClientsPage = () => {
                       ))}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
+                      {user?.role === "SUPER_ADMIN" ? (
+                        <div 
+                          className="relative inline-block status-dropdown"
+                          ref={(el) => {
+                            if (el) {
+                              statusButtonRefs.current[client.id] = el;
+                            }
+                          }}
+                        >
+                          <button
+                            className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
+                            onClick={() => setOpenStatusId(openStatusId === client.id ? "" : client.id)}
+                          >
+                            {client.status}
+                          </button>
+                          {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
+                            <div 
+                              data-status-dropdown-menu
+                              className="fixed bg-white border border-gray-200 rounded-md shadow-lg min-w-[120px]"
+                              style={{
+                                top: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().bottom + 4}px`,
+                                left: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().left}px`,
+                                zIndex: 9999
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {["ACTIVE", "PENDING", "REJECTED"].map((status) => (
+                                <div
+                                  key={status}
+                                  className="px-4 py-2 text-xs hover:bg-gray-100 cursor-pointer first:rounded-t-md last:rounded-b-md"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await dispatch(updateClient({ id: client.id, data: { status } }) as any);
+                                    setOpenStatusId("");
+                                    toast.success("Status updated successfully!");
+                                    dispatch(fetchClients() as any);
+                                  }}
+                                >
+                                  {status}
+                                </div>
+                              ))}
+                            </div>,
+                            document.body
+                          )}
+                        </div>
+                      ) : (
                       <span className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}>
                         {client.status}
                       </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
                       {client.createdAt ? format(new Date(client.createdAt), "yyyy-MM-dd") : "-"}
@@ -368,25 +452,25 @@ const ClientsPage = () => {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    {
-                      user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" ? (
-                        <div className="relative inline-block">
+                    {user?.role === "SUPER_ADMIN" ? (
+                      <div className="relative inline-block status-dropdown">
                           <button
                             className={`px-4 py-1 text-xs font-medium rounded-full ${getStatusBadge(client.status)}`}
-                            onClick={() => setOpenStatusId(client.id)}
+                          onClick={() => setOpenStatusId(openStatusId === client.id ? "" : client.id)}
                           >
                             {client.status}
                           </button>
-
                           {openStatusId === client.id && (
-                            <div className="absolute mt-1 w-30 text-xs bg-white border-none rounded-md shadow-lg z-10">
+                          <div className="absolute mt-1 left-0 bg-white border border-gray-200 rounded-md shadow-lg z-10 min-w-[120px]">
                               {["ACTIVE", "PENDING", "REJECTED"].map((status) => (
                                 <div
                                   key={status}
-                                  className="px-4 py-2 text-xs hover:bg-gray-100 cursor-pointer"
+                                className="px-4 py-2 text-xs hover:bg-gray-100 cursor-pointer first:rounded-t-md last:rounded-b-md"
                                   onClick={async () => {
                                     await dispatch(updateClient({ id: client.id, data: { status } }) as any);
                                     setOpenStatusId("");
+                                  toast.success("Status updated successfully!");
+                                  dispatch(fetchClients() as any);
                                   }}
                                 >
                                   {status}
@@ -403,15 +487,7 @@ const ClientsPage = () => {
                         >
                           {client.status}
                         </span>
-                      )
-                    }
-                    {/* <span
-                    className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusBadge(
-                      client.status
-                    )}`}
-                  >
-                    {client.status}
-                  </span> */}
+                    )}
                     <button
                       className="p-1 text-gray-400 hover:text-primary-600"
                       onClick={() => handleShareClick(client)}
@@ -543,6 +619,75 @@ const ClientsPage = () => {
           </div>
         </div>
       )}
+
+      {/* Share Link Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-gray-900">Share link generated</h2>
+              <button
+                onClick={() => {
+                  setShowShareModal(false);
+                  setShareLink("");
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mb-6">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 break-all">
+                <a
+                  href={shareLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-600 hover:text-primary-700 underline text-sm"
+                >
+                  {shareLink}
+                </a>
+              </div>
+            </div>
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                onClick={handleCopyLink}
+                className="bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+              >
+                <Copy className="h-4 w-4" />
+                <span>Copy</span>
+              </button>
+              <button
+                onClick={handleOpenLink}
+                className="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span>Open</span>
+              </button>
+              <button
+                onClick={() => {
+                  setShowShareModal(false);
+                  setShareLink("");
+                }}
+                className="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm({ isOpen: false, clientId: null })}
+        onConfirm={confirmDeleteClient}
+        title="Delete Client"
+        message="Are you sure you want to delete this client? This action cannot be undone and all associated data will be permanently removed."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 };

@@ -18,13 +18,14 @@ import SettingsPage from "./pages/SettingsPage";
 import TasksPage from "./pages/TasksPage";
 import AgencyDashboardPage from "./pages/Agency/AgencyDashboardPage";
 import AgenciesPage from "./pages/SuperAdmin/AgenciesPage";
+import SuperAdminDashboard from "./pages/SuperAdmin/SuperAdminDashboard";
 import WorkersPage from "./pages/WorkersPage";
 import ClientDashboardPage from "./pages/ClientDashboardPage";
 import ShareDashboardPage from "./pages/ShareDashboardPage";
 
 function App() {
   const dispatch = useDispatch();
-  const { user } = useSelector((state: RootState) => state.auth);
+  const { user, loading } = useSelector((state: RootState) => state.auth);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -32,6 +33,21 @@ function App() {
       dispatch(checkAuth() as any);
     }
   }, [dispatch]);
+
+  // Show loading while checking auth on initial load
+  const token = localStorage.getItem("token");
+  // Wait for auth to complete if we have a token but no user yet
+  // Only show loading if we're actually loading, not if auth failed
+  if (token && !user && loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+          <p className="text-gray-500">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Only show loading on initial app load, not during auth operations
   // const isInitialLoad = loading && !user && !localStorage.getItem("token");
@@ -50,7 +66,7 @@ function App() {
   // Role-based dashboard URLs
   // ADMIN and SUPER_ADMIN can access agency dashboard as well
   const dashboardUrls = {
-    SUPER_ADMIN: "/agency/dashboard",
+    SUPER_ADMIN: "/superadmin/dashboard",
     ADMIN: "/agency/dashboard", // Admin uses agency dashboard
     AGENCY: "/agency/dashboard",
     WORKER: "/worker/dashboard",
@@ -138,24 +154,19 @@ function App() {
 
 
       {/* Worker routes */}
-      {/* <Route
-        path="/worker/dashboard"
-        element={
-          !user || !user.verified ? (
-            <Navigate to="/login" replace />
-          ) : user.role !== "WORKER" ? (
-            <Navigate to={getRedirectUrl()} replace />
-          ) : (
-            <WorkerDashboard />
-          )
-        }
-      /> */}
       {workerRoutes.map(({ path, component: Component }) => (
         <Route
           key={path}
           path={path}
           element={
-            !user || !user.verified ? (
+            (token && !user) ? (
+              <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500">Loading...</p>
+                </div>
+              </div>
+            ) : !user || !user.verified ? (
               <Navigate to="/login" replace />
             ) : user.role !== "WORKER" ? (
               <Navigate to={getRedirectUrl()} replace />
@@ -175,7 +186,14 @@ function App() {
           key={path}
           path={path}
           element={
-            !user || !user.verified ? (
+            (token && !user) ? (
+              <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500">Loading...</p>
+                </div>
+              </div>
+            ) : !user || !user.verified ? (
               <Navigate to="/login" replace />
             ) : !["AGENCY", "ADMIN", "SUPER_ADMIN"].includes(user.role) ? (
               <Navigate to={getRedirectUrl()} replace />
@@ -188,9 +206,62 @@ function App() {
         />
       ))}
 
-      {/* Root redirect */}
-      <Route path="/" element={<Navigate to={getRedirectUrl()} replace />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* Super Admin Dashboard route */}
+      <Route
+        path="/superadmin/dashboard"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : user.role !== "SUPER_ADMIN" ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : (
+            <DashboardLayout>
+              <SuperAdminDashboard />
+            </DashboardLayout>
+          )
+        }
+      />
+
+      {/* Root redirect - only redirect if user is authenticated */}
+      <Route
+        path="/"
+        element={
+          user && user.verified ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+      {/* Catch-all route - redirect to login if not authenticated, otherwise show 404 */}
+      <Route
+        path="*"
+        element={
+          !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <h1 className="text-2xl font-bold text-gray-900 mb-2">404</h1>
+                <p className="text-gray-600 mb-4">Page not found</p>
+                <a
+                  href={getRedirectUrl()}
+                  className="text-primary-600 hover:text-primary-700 underline"
+                >
+                  Go to Dashboard
+                </a>
+              </div>
+            </div>
+          )
+        }
+      />
     </Routes>
     </>
   );
