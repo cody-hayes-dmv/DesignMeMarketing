@@ -221,6 +221,34 @@ const ClientDashboardPage: React.FC = () => {
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
   const [refreshingTopPages, setRefreshingTopPages] = useState(false);
   const [refreshingBacklinks, setRefreshingBacklinks] = useState(false);
+
+  const formatGa4ErrorMessage = useCallback((rawError: string | null): string => {
+    if (!rawError) {
+      return "GA4 connection failed. Please try again.";
+    }
+
+    let decoded = rawError;
+    try {
+      decoded = decodeURIComponent(rawError);
+    } catch {
+      // Ignore decode issues and keep the original string
+    }
+
+    const normalized = decoded.toLowerCase();
+    if (normalized.includes("missing required authentication credential")) {
+      return "Google rejected the request because it did not receive a valid OAuth token. Please try reconnecting.";
+    }
+    if (normalized.includes("access_denied")) {
+      return "Access was denied by Google. Make sure this Google account is allowed for this OAuth app (add it as a test user or publish the app).";
+    }
+    if (normalized.includes("invalid_client")) {
+      return "Google could not find this OAuth client. Double-check GA4_CLIENT_ID/SECRET and the redirect URI.";
+    }
+    if (normalized.includes("invalid_grant")) {
+      return "The authorization grant is invalid or has expired. Please restart the GA4 connection flow.";
+    }
+    return decoded;
+  }, []);
   const handleExportPdf = useCallback(async () => {
     if (!dashboardContentRef.current) {
       toast.error("Switch to the Dashboard tab to export.");
@@ -489,7 +517,9 @@ const ClientDashboardPage: React.FC = () => {
       };
       fetchSummary();
     } else if (ga4Error) {
-      toast.error(`GA4 connection failed: ${ga4Error}`);
+      const friendlyMessage = formatGa4ErrorMessage(ga4Error);
+      console.error("GA4 OAuth error:", friendlyMessage);
+      toast.error(friendlyMessage);
       window.history.replaceState({}, '', window.location.pathname);
       setGa4Connecting(false);
     }

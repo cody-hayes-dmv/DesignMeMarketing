@@ -29,6 +29,7 @@ export function getGA4AuthUrl(clientId: string): string {
   const oauth2Client = getOAuth2Client();
   const scopes = [
     'https://www.googleapis.com/auth/analytics.readonly',
+    'https://www.googleapis.com/auth/userinfo.email', // Required to get user email
   ];
 
   const redirectUri = process.env.GA4_REDIRECT_URI || `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/clients/ga4/callback`;
@@ -57,16 +58,22 @@ export async function exchangeCodeForTokens(code: string): Promise<{
     throw new Error('Failed to get access and refresh tokens from Google');
   }
 
-  // Get user email from OAuth2 client
-  oauth2Client.setCredentials(tokens);
-  const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-  const userInfo = await oauth2.userinfo.get();
-  const email = userInfo.data.email || undefined;
+  // Try to get user email (optional - don't fail if this doesn't work)
+  let email: string | undefined;
+  try {
+    oauth2Client.setCredentials(tokens);
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const userInfo = await oauth2.userinfo.get();
+    email = userInfo.data.email || undefined;
+  } catch (emailError) {
+    console.warn('Could not fetch user email (non-critical):', emailError);
+    // Continue without email - the important thing is we have the tokens
+  }
 
   return {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
-    email: email,
+    email,
   };
 }
 
@@ -76,14 +83,15 @@ export async function exchangeCodeForTokens(code: string): Promise<{
 export async function refreshAccessToken(refreshToken: string): Promise<string> {
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials({ refresh_token: refreshToken });
-  
-  const { credentials } = await oauth2Client.refreshAccessToken();
-  
-  if (!credentials.access_token) {
+
+  const accessTokenResponse = await oauth2Client.getAccessToken();
+  const newAccessToken = accessTokenResponse?.token;
+
+  if (!newAccessToken) {
     throw new Error('Failed to refresh access token');
   }
 
-  return credentials.access_token;
+  return newAccessToken;
 }
 
 /**
@@ -130,7 +138,7 @@ async function getAnalyticsClient(clientId: string) {
     refresh_token: client.ga4RefreshToken,
   });
 
-  return google.analyticsdata({ version: 'v1beta', auth: oauth2Client });
+  return google.analyticsdata({ version: 'v1', auth: oauth2Client });
 }
 
 /**
