@@ -523,7 +523,6 @@ async function fetchBacklinkTimeseriesSummaryFromDataForSEO(
 router.get("/reports/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { period = "monthly" } = req.query;
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -543,7 +542,7 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    // Permission check
+    // Permission check - ADMIN/SUPER_ADMIN and AGENCY users can access reports
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
@@ -557,23 +556,82 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    // Always return only the latest report (single report per client)
-    const latest = await prisma.seoReport.findFirst({
-      where: { clientId, period: period as string },
-      orderBy: { reportDate: "desc" }
+    // Return the single report for this client (one report per client)
+    // Include client information in the response
+    // Fetch all report fields from database (no mock data)
+    const report = await prisma.seoReport.findUnique({
+      where: { clientId },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+          }
+        },
+        schedule: {
+          select: {
+            id: true,
+            frequency: true,
+            isActive: true,
+            recipients: true,
+            emailSubject: true,
+          }
+        }
+      }
     });
 
-    // Best-effort: if multiple exist, soft-clean by deleting all but latest
-    if (latest) {
-      await prisma.seoReport.deleteMany({
-      where: {
-        clientId,
-          id: { not: latest.id }
-        }
-      });
+    // Return all report data from database
+    if (!report) {
+      return res.json(null);
     }
 
-    res.json(latest || null);
+    // Format the response with all database fields
+    res.json({
+      id: report.id,
+      reportDate: report.reportDate,
+      period: report.period,
+      status: report.status,
+      clientId: report.clientId,
+      client: report.client,
+      // Traffic metrics from database
+      totalSessions: report.totalSessions,
+      organicSessions: report.organicSessions,
+      paidSessions: report.paidSessions,
+      directSessions: report.directSessions,
+      referralSessions: report.referralSessions,
+      // SEO metrics from database
+      totalClicks: report.totalClicks,
+      totalImpressions: report.totalImpressions,
+      averageCtr: report.averageCtr,
+      averagePosition: report.averagePosition,
+      // Engagement metrics from database
+      bounceRate: report.bounceRate,
+      avgSessionDuration: report.avgSessionDuration,
+      pagesPerSession: report.pagesPerSession,
+      // Conversion metrics from database
+      conversions: report.conversions,
+      conversionRate: report.conversionRate,
+      // GA4 metrics from database
+      activeUsers: report.activeUsers,
+      eventCount: report.eventCount,
+      newUsers: report.newUsers,
+      keyEvents: report.keyEvents,
+      // Email and sharing
+      recipients: report.recipients,
+      emailSubject: report.emailSubject,
+      sentAt: report.sentAt,
+      // Timestamps
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
+      // Schedule info
+      scheduleId: report.scheduleId,
+      hasActiveSchedule: report.schedule?.isActive || false,
+      scheduleRecipients: Array.isArray(report.schedule?.recipients as any)
+        ? (report.schedule!.recipients as any)
+        : [],
+      scheduleEmailSubject: report.schedule?.emailSubject || null,
+    });
   } catch (error) {
     console.error("Fetch SEO reports error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -1310,10 +1368,43 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
       console.error("Failed to refresh ranked keywords:", error);
     }
 
+    // Refresh GA4 access token if connected (data will be fetched fresh when dashboard loads)
+    let ga4Refreshed = false;
+    const clientWithGA4 = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: {
+        ga4RefreshToken: true,
+        ga4PropertyId: true,
+        ga4ConnectedAt: true,
+        ga4AccessToken: true,
+      },
+    });
+
+    if (clientWithGA4?.ga4RefreshToken && clientWithGA4?.ga4PropertyId && clientWithGA4?.ga4ConnectedAt) {
+      try {
+        // Force refresh GA4 access token to ensure it's valid for fresh data fetch
+        const { refreshAccessToken } = await import("../lib/ga4.js");
+        const freshToken = await refreshAccessToken(clientWithGA4.ga4RefreshToken);
+        
+        // Update access token - this ensures fresh GA4 data will be fetched when dashboard loads
+        await prisma.client.update({
+          where: { id: clientId },
+          data: { ga4AccessToken: freshToken },
+        });
+
+        ga4Refreshed = true;
+        console.log(`GA4 access token refreshed for client ${clientId} - fresh data will be fetched on next dashboard load`);
+      } catch (ga4Error: any) {
+        console.error("Failed to refresh GA4 access token:", ga4Error.message);
+        // Don't fail the entire refresh if GA4 token refresh fails
+      }
+    }
+
     res.json({
       message: "Dashboard data refreshed successfully",
       trafficSourceSummary,
       rankedKeywordsCount,
+      ga4Refreshed,
     });
   } catch (error: any) {
     console.error("Refresh dashboard error:", error);
@@ -1689,9 +1780,27 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
         const { fetchGA4TrafficData } = await import("../lib/ga4.js");
         ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
         trafficDataSource = "ga4";
+        console.log(`Successfully fetched GA4 data for client ${clientId}:`, {
+          activeUsers: ga4Data?.activeUsers,
+          eventCount: ga4Data?.eventCount,
+          newUsers: ga4Data?.newUsers,
+          keyEvents: ga4Data?.keyEvents,
+        });
       } catch (ga4Error: any) {
-        console.error("Failed to fetch GA4 data:", ga4Error);
+        console.error("[Dashboard] Failed to fetch GA4 data:", {
+          clientId,
+          error: ga4Error.message,
+          stack: ga4Error.stack,
+          propertyId: client.ga4PropertyId,
+          hasAccessToken: !!client.ga4AccessToken,
+          hasRefreshToken: !!client.ga4RefreshToken,
+          hasPropertyId: !!client.ga4PropertyId,
+        });
         // Continue with fallback data sources
+        // Return error info to frontend for debugging
+        if (ga4Error.message) {
+          console.error("GA4 Error details:", ga4Error.message);
+        }
       }
     }
 
@@ -1778,11 +1887,19 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       (trafficSourceSummary?.organicEstimatedTraffic ??
       (latestReport ? latestReport.organicSessions : null));
 
-    const totalUsers = ga4Data?.totalUsers ?? null;
-    const firstTimeVisitors = ga4Data?.firstTimeVisitors ?? null;
-    const engagedVisitors = ga4Data?.engagedVisitors ?? null;
+    // New GA4 metrics
+    const activeUsers = ga4Data?.activeUsers ?? null;
+    const eventCount = ga4Data?.eventCount ?? null;
+    const newUsers = ga4Data?.newUsers ?? null;
+    const keyEvents = ga4Data?.keyEvents ?? null;
     const newUsersTrend = ga4Data?.newUsersTrend ?? [];
-    const totalUsersTrend = ga4Data?.totalUsersTrend ?? [];
+    const activeUsersTrend = ga4Data?.activeUsersTrend ?? [];
+    
+    // Keep backward compatibility (for other parts of the system)
+    const totalUsers = activeUsers; // Map activeUsers to totalUsers for compatibility
+    const firstTimeVisitors = newUsers; // Map newUsers to firstTimeVisitors for compatibility
+    const engagedVisitors = keyEvents; // Map keyEvents to engagedVisitors for compatibility
+    const totalUsersTrend = activeUsersTrend; // Map activeUsersTrend to totalUsersTrend for compatibility
 
     const averagePosition =
       trafficSourceSummary?.averageRank ??
@@ -1796,6 +1913,13 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       organicSessions,
       averagePosition,
       conversions,
+      // New GA4 metrics
+      activeUsers,
+      eventCount,
+      newUsers,
+      keyEvents,
+      activeUsersTrend,
+      // Backward compatibility (deprecated but kept for compatibility)
       totalUsers,
       firstTimeVisitors,
       engagedVisitors,
@@ -1868,14 +1992,22 @@ router.post("/reports/:clientId", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    // Permission check - only ADMIN/SUPER_ADMIN can create reports
+    // Permission check - ADMIN/SUPER_ADMIN and AGENCY users can create reports
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    if (!isAdmin) {
-      return res.status(403).json({ message: "Access denied" });
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!isAdmin && !hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied. Only admins and agency members can create reports." });
     }
 
     // Enforce single report per client: upsert by clientId only
-    const existing = await prisma.seoReport.findFirst({ where: { clientId } });
+    const existing = await prisma.seoReport.findUnique({ where: { clientId } });
 
     const report = existing
       ? await prisma.seoReport.update({
@@ -1892,20 +2024,561 @@ router.post("/reports/:clientId", authenticateToken, async (req, res) => {
           }
         });
 
-    // Cleanup: delete any other reports for this client
-    await prisma.seoReport.deleteMany({
-      where: {
-        clientId,
-        id: { not: report.id }
-          }
-        });
-
     res.json(report);
   } catch (error) {
     console.error("Create/update SEO report error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
+
+// Auto-generate report from current data (GA4 + DataForSEO)
+router.post("/reports/:clientId/generate", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { period = "monthly" } = req.body;
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Permission check - ADMIN/SUPER_ADMIN and AGENCY users can generate reports
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!isAdmin && !hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Calculate date range based on period
+    const endDate = new Date();
+    const startDate = new Date();
+    
+    if (period === "weekly") {
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (period === "biweekly") {
+      startDate.setDate(startDate.getDate() - 14);
+    } else if (period === "monthly") {
+      startDate.setMonth(startDate.getMonth() - 1);
+    } else {
+      startDate.setDate(startDate.getDate() - 30); // Default to 30 days
+    }
+
+    // Use the auto-generate function from reportScheduler
+    const { autoGenerateReport } = await import("../lib/reportScheduler.js");
+    const report = await autoGenerateReport(clientId, period as string);
+
+    res.json({ 
+      message: "Report generated successfully",
+      report 
+    });
+  } catch (error: any) {
+    console.error("Auto-generate report error:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Create or update report schedule
+router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const scheduleData = z.object({
+      frequency: z.enum(["weekly", "biweekly", "monthly"]),
+      dayOfWeek: z.number().min(0).max(6).optional(),
+      dayOfMonth: z.number().min(1).max(31).optional(),
+      timeOfDay: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).default("09:00"),
+      recipients: z.array(z.string().email()),
+      emailSubject: z.string().optional(),
+      isActive: z.boolean().default(true)
+    }).parse(req.body);
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Permission check - ADMIN/SUPER_ADMIN and AGENCY users can schedule reports
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!isAdmin && !hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Calculate next run time
+    const { calculateNextRunTime } = await import("../lib/reportScheduler.js");
+    const nextRunAt = calculateNextRunTime(
+      scheduleData.frequency,
+      scheduleData.dayOfWeek,
+      scheduleData.dayOfMonth,
+      scheduleData.timeOfDay
+    );
+
+    // Check if schedule already exists
+    const existing = await prisma.reportSchedule.findFirst({
+      where: { clientId, frequency: scheduleData.frequency }
+    });
+
+    const schedule = existing
+      ? await prisma.reportSchedule.update({
+          where: { id: existing.id },
+          data: {
+            ...scheduleData,
+            recipients: scheduleData.recipients as any,
+            nextRunAt
+          }
+        })
+      : await prisma.reportSchedule.create({
+          data: {
+            ...scheduleData,
+            recipients: scheduleData.recipients as any,
+            clientId,
+            nextRunAt
+          }
+        });
+
+    // Update report status to "scheduled" if report exists and schedule is active
+    if (schedule.isActive) {
+      const existingReport = await prisma.seoReport.findUnique({
+        where: { clientId }
+      });
+      
+      if (existingReport && existingReport.status === "draft") {
+        await prisma.seoReport.update({
+          where: { id: existingReport.id },
+          data: {
+            status: "scheduled",
+            scheduleId: schedule.id
+          }
+        });
+      }
+    }
+
+    res.json({ 
+      message: "Report schedule created/updated successfully",
+      schedule 
+    });
+  } catch (error: any) {
+    console.error("Create report schedule error:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Get report schedules for a client
+router.get("/reports/:clientId/schedules", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const schedules = await prisma.reportSchedule.findMany({
+      where: { clientId },
+      orderBy: { createdAt: "desc" }
+    });
+
+    res.json(schedules);
+  } catch (error) {
+    console.error("Get report schedules error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Manually trigger a scheduled report (for testing)
+router.post("/reports/schedules/:scheduleId/trigger", authenticateToken, async (req, res) => {
+  try {
+    const { scheduleId } = req.params;
+
+    const schedule = await prisma.reportSchedule.findUnique({
+      where: { id: scheduleId },
+      include: {
+        client: {
+          include: {
+            user: {
+              include: {
+                memberships: {
+                  select: { agencyId: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!schedule) {
+      return res.status(404).json({ message: "Schedule not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = schedule.client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    if (!schedule.isActive) {
+      return res.status(400).json({ message: "Schedule is not active" });
+    }
+
+    // Import and use the scheduler functions
+    const { autoGenerateReport, generateReportEmailHTML } = await import("../lib/reportScheduler.js");
+    const { sendEmail } = await import("../lib/email.js");
+
+    // Generate report
+    const report = await autoGenerateReport(schedule.clientId, schedule.frequency);
+    
+    // Link report to schedule
+    await prisma.seoReport.update({
+      where: { id: report.id },
+      data: { scheduleId: schedule.id }
+    });
+
+    // Send email to recipients
+    const recipients = schedule.recipients as string[];
+    if (recipients && recipients.length > 0) {
+      const emailHtml = generateReportEmailHTML(report, schedule.client);
+      const emailSubject = schedule.emailSubject || `SEO Report - ${schedule.client.name} - ${schedule.frequency.charAt(0).toUpperCase() + schedule.frequency.slice(1)}`;
+
+      const emailPromises = recipients.map((email: string) =>
+        sendEmail({
+          to: email,
+          subject: emailSubject,
+          html: emailHtml
+        })
+      );
+
+      await Promise.all(emailPromises);
+
+      // Update report status
+      await prisma.seoReport.update({
+        where: { id: report.id },
+        data: {
+          status: "sent",
+          sentAt: new Date(),
+          recipients: recipients as any,
+          emailSubject
+        }
+      });
+
+      res.json({ 
+        message: "Report generated and sent successfully",
+        report,
+        recipients
+      });
+    } else {
+      res.json({ 
+        message: "Report generated successfully, but no recipients configured",
+        report
+      });
+    }
+  } catch (error: any) {
+    console.error("Trigger schedule error:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Delete report schedule
+router.delete("/reports/schedules/:scheduleId", authenticateToken, async (req, res) => {
+  try {
+    const { scheduleId } = req.params;
+
+    const schedule = await prisma.reportSchedule.findUnique({
+      where: { id: scheduleId },
+      include: {
+        client: {
+          include: {
+            user: {
+              include: {
+                memberships: {
+                  select: { agencyId: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!schedule) {
+      return res.status(404).json({ message: "Schedule not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = schedule.client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Find any reports linked to this schedule BEFORE deleting
+    const linkedReports = await prisma.seoReport.findMany({
+      where: { scheduleId: scheduleId }
+    });
+
+    // Update linked reports BEFORE deleting the schedule
+    // If status was "scheduled", change to "draft" and clear scheduleId
+    if (linkedReports.length > 0) {
+      for (const report of linkedReports) {
+        // Only update if status is "scheduled" (don't change "sent" reports)
+        if (report.status === "scheduled") {
+          await prisma.seoReport.update({
+            where: { id: report.id },
+            data: {
+              status: "draft",
+              scheduleId: null // Clear the schedule reference
+            }
+          });
+        } else {
+          // Even if status is not "scheduled", clear the scheduleId reference
+          await prisma.seoReport.update({
+            where: { id: report.id },
+            data: {
+              scheduleId: null
+            }
+          });
+        }
+      }
+    }
+
+    // Now delete the schedule (Prisma will handle onDelete: SetNull, but we've already updated)
+    await prisma.reportSchedule.delete({
+      where: { id: scheduleId }
+    });
+
+    res.json({ 
+      message: "Schedule deleted successfully",
+      updatedReports: linkedReports.length
+    });
+  } catch (error) {
+    console.error("Delete report schedule error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Send report via email
+router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { recipients, emailSubject } = req.body;
+
+    const report = await prisma.seoReport.findUnique({
+      where: { id: reportId },
+      include: {
+        client: {
+          include: {
+            user: {
+              include: {
+                memberships: {
+                  select: { agencyId: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!report) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = report.client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const recipientsList = recipients || (report.recipients as string[] || []);
+    if (!recipientsList || recipientsList.length === 0) {
+      return res.status(400).json({ message: "No recipients specified" });
+    }
+
+    // Generate email HTML and PDF
+    const { generateReportEmailHTML, generateReportPDFBuffer } = await import("../lib/reportScheduler.js");
+    const emailHtml = generateReportEmailHTML(report, report.client);
+    const pdfBuffer = await generateReportPDFBuffer(report, report.client);
+
+    // Send emails with PDF attachment
+    const { sendEmail } = await import("../lib/email.js");
+    const emailPromises = recipientsList.map((email: string) =>
+      sendEmail({
+        to: email,
+        subject: emailSubject || `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`,
+        html: emailHtml,
+        attachments: [
+          {
+            filename: `seo-report-${report.client.name.replace(/\s+/g, '-').toLowerCase()}-${report.period}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+          }
+        ]
+      })
+    );
+
+    await Promise.all(emailPromises);
+
+    // Update report status
+    await prisma.seoReport.update({
+      where: { id: reportId },
+      data: {
+        status: "sent",
+        sentAt: new Date(),
+        recipients: recipientsList as any,
+        emailSubject: emailSubject || `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`
+      }
+    });
+
+    res.json({ 
+      message: "Report sent successfully",
+      recipients: recipientsList
+    });
+  } catch (error: any) {
+    console.error("Send report error:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Delete report
+router.delete("/reports/:reportId", authenticateToken, async (req, res) => {
+  try {
+    const { reportId } = req.params;
+
+    const report = await prisma.seoReport.findUnique({
+      where: { id: reportId },
+      include: {
+        client: {
+          include: {
+            user: {
+              include: {
+                memberships: {
+                  select: { agencyId: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!report) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = report.client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    
+    if (!hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    await prisma.seoReport.delete({
+      where: { id: reportId }
+    });
+
+    res.json({ message: "Report deleted successfully" });
+  } catch (error: any) {
+    console.error("Delete report error:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
 
 // Fetch historical rank overview from DataForSEO
 // Using the Historical Rank Overview endpoint: POST /v3/dataforseo_labs/historical_rank_overview/live
@@ -3038,13 +3711,14 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
           }
 
           const data = result.value;
-          ga4Summary.websiteVisitors += data.totalUsers || 0;
-          ga4Summary.organicSessions += data.organicSessions || 0;
-          ga4Summary.firstTimeVisitors += data.firstTimeVisitors || 0;
-          ga4Summary.engagedVisitors += data.engagedVisitors || 0;
+          // Use new metrics, fallback to old for backward compatibility
+          ga4Summary.websiteVisitors += data.activeUsers || data.totalUsers || 0;
+          ga4Summary.organicSessions += data.eventCount || data.organicSessions || 0;
+          ga4Summary.firstTimeVisitors += data.newUsers || data.firstTimeVisitors || 0;
+          ga4Summary.engagedVisitors += data.keyEvents || data.engagedVisitors || 0;
           ga4Summary.connectedClients += 1;
 
-          data.newUsersTrend?.forEach((point) => {
+          data.newUsersTrend?.forEach((point: any) => {
             if (!point?.date) return;
             newUsersTrendMap.set(
               point.date,
@@ -3052,7 +3726,9 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
             );
           });
 
-          data.totalUsersTrend?.forEach((point) => {
+          // Use activeUsersTrend, fallback to totalUsersTrend for backward compatibility
+          const trendData = data.activeUsersTrend || data.totalUsersTrend;
+          trendData?.forEach((point: any) => {
             if (!point?.date) return;
             totalUsersTrendMap.set(
               point.date,

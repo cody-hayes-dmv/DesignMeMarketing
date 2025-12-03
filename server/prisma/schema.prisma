@@ -201,6 +201,7 @@ model Client {
 
   // SEO Data
   seoReports SeoReport[]
+  reportSchedules ReportSchedule[]
   keywords   Keyword[]
   backlinks  Backlink[]
   rankedKeywordsHistory RankedKeywordsHistory[]
@@ -220,7 +221,8 @@ model SeoReport {
 
   // Report metadata
   reportDate DateTime
-  period     String // "daily", "weekly", "monthly"
+  period     String // "daily", "weekly", "biweekly", "monthly"
+  status     String @default("draft") // "draft", "sent", "scheduled"
 
   // Traffic metrics
   totalSessions    Int
@@ -244,13 +246,61 @@ model SeoReport {
   conversions    Int
   conversionRate Float
 
+  // GA4 metrics (if available)
+  activeUsers    Int?
+  eventCount     Int?
+  newUsers       Int?
+  keyEvents      Int?
+
+  // Email tracking
+  sentAt       DateTime?
+  recipients   Json? @db.Json // Array of email addresses
+  emailSubject String?
+
   // Client relationship
   clientId String
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  @@unique([clientId, reportDate, period])
+  // Schedule relationship (optional)
+  scheduleId String?
+  schedule   ReportSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+
+  @@unique([clientId]) // One report per client
   @@index([clientId, reportDate])
+  @@index([scheduleId])
   @@map("seo_reports")
+}
+
+model ReportSchedule {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Schedule configuration
+  frequency String // "weekly", "biweekly", "monthly"
+  dayOfWeek Int? // 0-6 (Sunday-Saturday) for weekly/biweekly
+  dayOfMonth Int? // 1-31 for monthly
+  timeOfDay String @default("09:00") // HH:mm format
+
+  // Email configuration
+  recipients Json @db.Json // Array of email addresses
+  emailSubject String?
+  isActive Boolean @default(true)
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Reports generated from this schedule
+  reports SeoReport[]
+
+  // Last run tracking
+  lastRunAt DateTime?
+  nextRunAt DateTime?
+
+  @@index([clientId])
+  @@index([isActive, nextRunAt])
+  @@map("report_schedules")
 }
 
 model Keyword {

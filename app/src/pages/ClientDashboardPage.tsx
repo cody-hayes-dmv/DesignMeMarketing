@@ -20,6 +20,9 @@ import {
   RefreshCw,
   Loader2,
   X,
+  Eye,
+  Edit,
+  Send,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -92,6 +95,13 @@ interface DashboardSummary {
   organicSessions: number | null;
   averagePosition: number | null;
   conversions: number | null;
+  // New GA4 metrics
+  activeUsers: number | null;
+  eventCount: number | null;
+  newUsers: number | null;
+  keyEvents: number | null;
+  activeUsersTrend?: TrendPoint[];
+  // Backward compatibility (deprecated)
   totalUsers: number | null;
   firstTimeVisitors: number | null;
   engagedVisitors: number | null;
@@ -123,38 +133,6 @@ const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
   Other: "#6366F1",
 };
 
-const sampleClientReports: ClientReport[] = [
-  {
-    id: "1",
-    clientId: "client-1",
-    name: "Monthly SEO Report",
-    type: "Monthly",
-    lastGenerated: "2024-01-15",
-    status: "Sent",
-    recipients: ["owner@example.com"],
-    metrics: { keywords: 156, avgPosition: 8.2, traffic: 12450 },
-  },
-  {
-    id: "2",
-    clientId: "client-2",
-    name: "Weekly Performance Update",
-    type: "Weekly",
-    lastGenerated: "2024-01-14",
-    status: "Draft",
-    recipients: ["marketing@example.com"],
-    metrics: { keywords: 89, avgPosition: 15.7, traffic: 5670 },
-  },
-  {
-    id: "3",
-    clientId: "client-3",
-    name: "Quarterly SEO Review",
-    type: "Quarterly",
-    lastGenerated: "2023-12-29",
-    status: "Scheduled",
-    recipients: ["team@example.com"],
-    metrics: { keywords: 234, avgPosition: 6.3, traffic: 8920 },
-  },
-];
 
 const parseNumericValue = (value: any): number | null => {
   if (value === undefined || value === null) return null;
@@ -178,11 +156,18 @@ const formatDashboardSummary = (payload: any): DashboardSummary => ({
   organicSessions: parseNumericValue(payload?.organicSessions),
   averagePosition: parseNumericValue(payload?.averagePosition),
   conversions: parseNumericValue(payload?.conversions),
-  totalUsers: parseNumericValue(payload?.totalUsers),
-  firstTimeVisitors: parseNumericValue(payload?.firstTimeVisitors),
-  engagedVisitors: parseNumericValue(payload?.engagedVisitors),
+  // New GA4 metrics
+  activeUsers: parseNumericValue(payload?.activeUsers),
+  eventCount: parseNumericValue(payload?.eventCount),
+  newUsers: parseNumericValue(payload?.newUsers),
+  keyEvents: parseNumericValue(payload?.keyEvents),
+  activeUsersTrend: normalizeTrendPoints(payload?.activeUsersTrend),
+  // Backward compatibility
+  totalUsers: parseNumericValue(payload?.totalUsers ?? payload?.activeUsers),
+  firstTimeVisitors: parseNumericValue(payload?.firstTimeVisitors ?? payload?.newUsers),
+  engagedVisitors: parseNumericValue(payload?.engagedVisitors ?? payload?.keyEvents),
   newUsersTrend: normalizeTrendPoints(payload?.newUsersTrend),
-  totalUsersTrend: normalizeTrendPoints(payload?.totalUsersTrend),
+  totalUsersTrend: normalizeTrendPoints(payload?.totalUsersTrend ?? payload?.activeUsersTrend),
 });
 
 const ClientDashboardPage: React.FC = () => {
@@ -215,12 +200,32 @@ const ClientDashboardPage: React.FC = () => {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [ga4Connected, setGa4Connected] = useState<boolean | null>(null);
+  const [ga4AccountEmail, setGa4AccountEmail] = useState<string | null>(null);
   const [ga4Connecting, setGa4Connecting] = useState(false);
   const [showGA4Modal, setShowGA4Modal] = useState(false);
   const [ga4PropertyId, setGa4PropertyId] = useState("");
+  const [ga4Properties, setGa4Properties] = useState<Array<{
+    propertyId: string;
+    propertyName: string;
+    accountId: string;
+    accountName: string;
+    displayName: string;
+  }>>([]);
+  const [loadingProperties, setLoadingProperties] = useState(false);
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
   const [refreshingTopPages, setRefreshingTopPages] = useState(false);
   const [refreshingBacklinks, setRefreshingBacklinks] = useState(false);
+  const [sendingReport, setSendingReport] = useState(false);
+
+  // Client-specific report creation modal state
+  const [showClientReportModal, setShowClientReportModal] = useState(false);
+  const [clientReportFrequency, setClientReportFrequency] = useState<"weekly" | "biweekly" | "monthly">("monthly");
+  const [clientReportDayOfWeek, setClientReportDayOfWeek] = useState(1); // Monday
+  const [clientReportDayOfMonth, setClientReportDayOfMonth] = useState(1);
+  const [clientReportTimeOfDay, setClientReportTimeOfDay] = useState("09:00");
+  const [clientReportRecipients, setClientReportRecipients] = useState("");
+  const [clientReportEmailSubject, setClientReportEmailSubject] = useState("");
+  const [clientReportSubmitting, setClientReportSubmitting] = useState(false);
 
   const formatGa4ErrorMessage = useCallback((rawError: string | null): string => {
     if (!rawError) {
@@ -312,12 +317,29 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setRefreshingDashboard(true);
-      await api.post(`/seo/dashboard/${clientId}/refresh`);
-      toast.success("Dashboard data refreshed successfully!");
-      // Refetch dashboard data
+      const refreshRes = await api.post(`/seo/dashboard/${clientId}/refresh`);
+      
+      // Show success message with details
+      const refreshData = refreshRes.data || {};
+      let successMessage = "Dashboard data refreshed successfully!";
+      if (refreshData.ga4Refreshed) {
+        successMessage += " GA4 data updated.";
+      }
+      toast.success(successMessage);
+      
+      // Refetch dashboard data (this will get fresh DataForSEO and GA4 data)
       const res = await api.get(`/seo/dashboard/${clientId}?period=${dateRange}`);
       const payload = res.data || {};
       setDashboardSummary(formatDashboardSummary(payload));
+      
+      // Also refresh GA4 status
+      try {
+        const statusRes = await api.get(`/clients/${clientId}/ga4/status`);
+        setGa4Connected(statusRes.data?.connected || false);
+      } catch (statusError) {
+        // Non-critical, just log it
+        console.warn("Failed to refresh GA4 status:", statusError);
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
     } finally {
@@ -530,7 +552,9 @@ const ClientDashboardPage: React.FC = () => {
         const res = await api.get(`/clients/${clientId}/ga4/status`);
         const isConnected = res.data?.connected || false;
         const hasTokens = res.data?.hasTokens || false;
+        const accountEmail = res.data?.accountEmail || null;
         setGa4Connected(isConnected);
+        setGa4AccountEmail(accountEmail);
         
         // If tokens exist but not connected (property ID missing), show modal
         if (hasTokens && !isConnected && !ga4TokensReceived && !ga4Connected && !ga4Error) {
@@ -539,6 +563,7 @@ const ClientDashboardPage: React.FC = () => {
       } catch (error: any) {
         console.error("Failed to check GA4 status:", error);
         setGa4Connected(false);
+        setGa4AccountEmail(null);
       }
     };
     checkGA4Status();
@@ -697,28 +722,29 @@ const ClientDashboardPage: React.FC = () => {
   }, [fetchTrafficSources]);
 
   // Load single report from server (enforced one report per client)
-  useEffect(() => {
+  const loadReport = useCallback(async () => {
     if (!clientId) return;
-    const loadReport = async () => {
-      try {
-        setReportLoading(true);
-        setReportError(null);
-        const res = await api.get(`/seo/reports/${clientId}`, { params: { period: "monthly" } });
-        setServerReport(res.data || null);
-      } catch (error: any) {
-        console.error("Failed to load report", error);
-        const msg = error?.response?.data?.message || "Unable to load report";
-        setReportError(msg);
-        setServerReport(null);
-      } finally {
-        setReportLoading(false);
-      }
-    };
-    loadReport();
+    try {
+      setReportLoading(true);
+      setReportError(null);
+      const res = await api.get(`/seo/reports/${clientId}`, { params: { period: "monthly" } });
+      setServerReport(res.data || null);
+    } catch (error: any) {
+      console.error("Failed to load report", error);
+      const msg = error?.response?.data?.message || "Unable to load report";
+      setReportError(msg);
+      setServerReport(null);
+    } finally {
+      setReportLoading(false);
+    }
   }, [clientId]);
 
+  useEffect(() => {
+    loadReport();
+  }, [loadReport]);
+
   const singleReportForClient: ClientReport | null = useMemo(() => {
-    if (serverReport && typeof serverReport === "object") {
+    if (serverReport && typeof serverReport === "object" && serverReport.id) {
       // Map backend seoReport to UI ClientReport
       const period = typeof serverReport.period === "string" ? serverReport.period : "Monthly";
       const dateStr = serverReport.reportDate ? format(new Date(serverReport.reportDate), "yyyy-MM-dd") : "";
@@ -728,8 +754,12 @@ const ClientDashboardPage: React.FC = () => {
         name: "Client SEO Report",
         type: period.charAt(0).toUpperCase() + period.slice(1),
         lastGenerated: dateStr,
-        status: "Sent",
-        recipients: [],
+        status: serverReport.status === "sent" ? "Sent" : serverReport.status === "draft" ? "Draft" : "Scheduled",
+        recipients: Array.isArray(serverReport.recipients) && serverReport.recipients.length > 0
+          ? serverReport.recipients
+          : Array.isArray(serverReport.scheduleRecipients)
+          ? serverReport.scheduleRecipients
+          : [],
         metrics: {
           keywords: Number(serverReport.totalClicks ?? 0),
           avgPosition: Number(serverReport.averagePosition ?? 0),
@@ -737,15 +767,143 @@ const ClientDashboardPage: React.FC = () => {
         },
       };
     }
-    // Fallback to single sample mapped to this client
-    const fallback = sampleClientReports[0];
-    return fallback ? { ...fallback, clientId: clientId! } : null;
+    // No report exists for this client yet
+    return null;
   }, [serverReport, clientId]);
+
+  const handleCreateReportClick = useCallback(() => {
+    if (!clientId) {
+      toast.error("Client ID is missing");
+      return;
+    }
+    // Open the client-specific report creation modal
+    setShowClientReportModal(true);
+  }, [clientId]);
+
+  const handleSubmitClientReport = useCallback(async () => {
+    if (!clientId) {
+      toast.error("Client ID is missing");
+      return;
+    }
+
+    const recipientsList = clientReportRecipients
+      .split(",")
+      .map((email) => email.trim())
+      .filter(Boolean);
+
+    if (recipientsList.length === 0) {
+      toast.error("Please enter at least one recipient email");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const invalidEmails = recipientsList.filter((email) => !emailRegex.test(email));
+    if (invalidEmails.length > 0) {
+      toast.error(`Invalid email addresses: ${invalidEmails.join(", ")}`);
+      return;
+    }
+
+    try {
+      setClientReportSubmitting(true);
+      setReportError(null);
+
+      // 1) Create or update schedule for this client
+      await api.post(`/seo/reports/${clientId}/schedule`, {
+        frequency: clientReportFrequency,
+        dayOfWeek: clientReportFrequency !== "monthly" ? clientReportDayOfWeek : undefined,
+        dayOfMonth: clientReportFrequency === "monthly" ? clientReportDayOfMonth : undefined,
+        timeOfDay: clientReportTimeOfDay,
+        recipients: recipientsList,
+        emailSubject: clientReportEmailSubject || undefined,
+        isActive: true,
+      });
+
+      // 2) Generate initial report immediately using the chosen frequency as period
+      await api.post(`/seo/reports/${clientId}/generate`, {
+        period: clientReportFrequency,
+      });
+
+      toast.success("Report created and schedule saved successfully");
+
+      // Reload report data from server so UI reflects DB state
+      await loadReport();
+
+      // Close modal
+      setShowClientReportModal(false);
+    } catch (error: any) {
+      console.error("Failed to create report and schedule", error);
+      const msg = error?.response?.data?.message || "Failed to create report and schedule";
+      toast.error(msg);
+    } finally {
+      setClientReportSubmitting(false);
+    }
+  }, [
+    clientId,
+    clientReportDayOfMonth,
+    clientReportDayOfWeek,
+    clientReportEmailSubject,
+    clientReportFrequency,
+    clientReportRecipients,
+    clientReportTimeOfDay,
+    loadReport,
+  ]);
 
   const handleViewReport = (report: ClientReport) => {
     setSelectedReport(report);
     setViewReportModalOpen(true);
   };
+
+  const handleSendReport = useCallback(async () => {
+    if (!singleReportForClient) {
+      toast.error("No report to send for this client");
+      return;
+    }
+
+    if (!singleReportForClient.recipients || singleReportForClient.recipients.length === 0) {
+      toast.error("No recipients configured for this report. Please add recipients in the schedule settings first.");
+      return;
+    }
+
+    try {
+      setSendingReport(true);
+      await api.post(`/seo/reports/${singleReportForClient.id}/send`, {
+        recipients: singleReportForClient.recipients,
+      });
+      toast.success("Report sent successfully");
+      await loadReport();
+    } catch (error: any) {
+      console.error("Failed to send report", error);
+      const msg = error?.response?.data?.message || "Failed to send report";
+      toast.error(msg);
+    } finally {
+      setSendingReport(false);
+    }
+  }, [singleReportForClient, loadReport]);
+
+  const handleDeleteReport = useCallback(async () => {
+    if (!singleReportForClient) {
+      toast.error("No report to delete for this client");
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to delete this report? This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      setReportLoading(true);
+      await api.delete(`/seo/reports/${singleReportForClient.id}`);
+      toast.success("Report deleted successfully");
+      // Reload from server so UI reflects DB (no mock data)
+      await loadReport();
+    } catch (error: any) {
+      console.error("Failed to delete report", error);
+      const msg = error?.response?.data?.message || "Failed to delete report";
+      toast.error(msg);
+    } finally {
+      setReportLoading(false);
+    }
+  }, [singleReportForClient, loadReport]);
 
   const handleCloseViewModal = () => {
     setViewReportModalOpen(false);
@@ -831,9 +989,10 @@ const ClientDashboardPage: React.FC = () => {
           if (event.data.type === 'GA4_OAUTH_SUCCESS') {
             cleanupPopup();
             closePopupSafely();
-            toast.success('OAuth successful! Please enter your GA4 Property ID.');
-            setShowGA4Modal(true);
+            toast.success('OAuth successful! Loading your GA4 properties...');
             setGa4Connecting(false);
+            // Fetch properties list
+            handleFetchGA4Properties();
           } else if (event.data.type === 'GA4_OAUTH_ERROR') {
             cleanupPopup();
             closePopupSafely();
@@ -871,19 +1030,73 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const handleSubmitPropertyId = async () => {
-    if (!clientId || !ga4PropertyId.trim()) {
-      toast.error("Please enter a valid Property ID");
+  const handleDisconnectGA4 = async () => {
+    if (!clientId) return;
+    try {
+      setGa4Connecting(true);
+      await api.post(`/clients/${clientId}/ga4/disconnect`);
+      toast.success("GA4 disconnected successfully");
+      setGa4Connected(false);
+      setGa4AccountEmail(null);
+      // Optionally clear GA4-derived metrics from the dashboard
+      setDashboardSummary((prev) =>
+        prev
+          ? {
+              ...prev,
+              activeUsers: null,
+              eventCount: null,
+              newUsers: null,
+              keyEvents: null,
+              activeUsersTrend: [],
+              newUsersTrend: [],
+            }
+          : prev
+      );
+    } catch (error: any) {
+      console.error("Failed to disconnect GA4:", error);
+      toast.error(error.response?.data?.message || "Failed to disconnect GA4");
+    } finally {
+      setGa4Connecting(false);
+    }
+  };
+
+  const handleFetchGA4Properties = async () => {
+    if (!clientId) return;
+    try {
+      setLoadingProperties(true);
+      const res = await api.get(`/clients/${clientId}/ga4/properties`);
+      const properties = res.data?.properties || [];
+      
+      if (properties.length === 0) {
+        toast.error("No GA4 properties found. Please make sure you have access to at least one GA4 property.");
+        return;
+      }
+      
+      setGa4Properties(properties);
+      setShowGA4Modal(true);
+    } catch (error: any) {
+      console.error("Failed to fetch GA4 properties:", error);
+      toast.error(error.response?.data?.message || "Failed to fetch GA4 properties");
+    } finally {
+      setLoadingProperties(false);
+    }
+  };
+
+  const handleSubmitPropertyId = async (selectedPropertyId?: string) => {
+    const propertyIdToUse = selectedPropertyId || ga4PropertyId.trim();
+    if (!clientId || !propertyIdToUse) {
+      toast.error("Please select a GA4 property");
       return;
     }
     try {
       setGa4Connecting(true);
       await api.post(`/clients/${clientId}/ga4/connect`, {
-        propertyId: ga4PropertyId.trim(),
+        propertyId: propertyIdToUse,
       });
       toast.success("GA4 connected successfully!");
       setShowGA4Modal(false);
       setGa4PropertyId("");
+      setGa4Properties([]);
       setGa4Connected(true);
       // Refresh dashboard data
       const res = await api.get(`/seo/dashboard/${clientId}?period=${dateRange}`);
@@ -897,56 +1110,56 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const websiteVisitorsDisplay = useMemo(() => {
+  const activeUsersDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     // Show "—" when GA4 is not connected (null or false)
     if (ga4Connected !== true) return "—";
-    if (dashboardSummary?.totalUsers !== null && dashboardSummary?.totalUsers !== undefined) {
-      const numeric = Number(dashboardSummary.totalUsers);
+    if (dashboardSummary?.activeUsers !== null && dashboardSummary?.activeUsers !== undefined) {
+      const numeric = Number(dashboardSummary.activeUsers);
       if (Number.isFinite(numeric)) {
         return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
-  }, [dashboardSummary?.totalUsers, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.activeUsers, fetchingSummary, ga4Connected]);
 
-  const organicTrafficDisplay = useMemo(() => {
+  const eventCountDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     // Show "—" when GA4 is not connected (null or false)
     if (ga4Connected !== true) return "—";
-    if (dashboardSummary?.organicSessions !== null && dashboardSummary?.organicSessions !== undefined) {
-      const numeric = Number(dashboardSummary.organicSessions);
+    if (dashboardSummary?.eventCount !== null && dashboardSummary?.eventCount !== undefined) {
+      const numeric = Number(dashboardSummary.eventCount);
       if (Number.isFinite(numeric)) {
         return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
-  }, [dashboardSummary?.organicSessions, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.eventCount, fetchingSummary, ga4Connected]);
 
-  const firstTimeVisitorsDisplay = useMemo(() => {
+  const newUsersDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     // Show "—" when GA4 is not connected (null or false)
     if (ga4Connected !== true) return "—";
-    if (dashboardSummary?.firstTimeVisitors !== null && dashboardSummary?.firstTimeVisitors !== undefined) {
-      const numeric = Number(dashboardSummary.firstTimeVisitors);
+    if (dashboardSummary?.newUsers !== null && dashboardSummary?.newUsers !== undefined) {
+      const numeric = Number(dashboardSummary.newUsers);
       if (Number.isFinite(numeric)) {
         return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
-  }, [dashboardSummary?.firstTimeVisitors, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.newUsers, fetchingSummary, ga4Connected]);
 
-  const engagedVisitorsDisplay = useMemo(() => {
+  const keyEventsDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (ga4Connected !== true) return "—";
-    if (dashboardSummary?.engagedVisitors !== null && dashboardSummary?.engagedVisitors !== undefined) {
-      const numeric = Number(dashboardSummary.engagedVisitors);
+    if (dashboardSummary?.keyEvents !== null && dashboardSummary?.keyEvents !== undefined) {
+      const numeric = Number(dashboardSummary.keyEvents);
       if (Number.isFinite(numeric)) {
         return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
-  }, [dashboardSummary?.engagedVisitors, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.keyEvents, fetchingSummary, ga4Connected]);
 
   const newUsersTrendData = useMemo(() => {
     if (!dashboardSummary?.newUsersTrend?.length) return [];
@@ -961,18 +1174,19 @@ const ClientDashboardPage: React.FC = () => {
     });
   }, [dashboardSummary?.newUsersTrend]);
 
-  const totalUsersTrendData = useMemo(() => {
-    if (!dashboardSummary?.totalUsersTrend?.length) return [];
-    return dashboardSummary.totalUsersTrend.map((point) => {
+  const activeUsersTrendData = useMemo(() => {
+    const trend = dashboardSummary?.activeUsersTrend ?? dashboardSummary?.totalUsersTrend;
+    if (!trend?.length) return [];
+    return trend.map((point) => {
       const dateObj = new Date(point.date);
       const label = Number.isNaN(dateObj.getTime()) ? point.date : format(dateObj, "MMM d");
       const value = Number(point.value ?? 0);
       return {
         name: label,
-        totalUsers: Number.isFinite(value) ? value : 0,
+        activeUsers: Number.isFinite(value) ? value : 0,
       };
     });
-  }, [dashboardSummary?.totalUsersTrend]);
+  }, [dashboardSummary?.activeUsersTrend, dashboardSummary?.totalUsersTrend]);
 
   if (!clientId) {
     return (
@@ -1037,7 +1251,7 @@ const ClientDashboardPage: React.FC = () => {
               onClick={handleRefreshDashboard}
               disabled={refreshingDashboard}
               className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              title="Refresh dashboard data from DataForSEO"
+              title="Refresh dashboard data from DataForSEO and GA4"
             >
               {refreshingDashboard ? (
                 <>
@@ -1161,12 +1375,44 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
               )}
+              {/* GA4 Connected Banner with Disconnect button */}
+              {ga4Connected === true && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                      <TrendingUp className="h-4 w-4 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-900">
+                        GA4 is connected
+                      </p>
+                      {ga4AccountEmail ? (
+                        <p className="text-xs text-emerald-800">
+                          Connected as{" "}
+                          <span className="font-mono">{ga4AccountEmail}</span>
+                        </p>
+                      ) : (
+                        <p className="text-xs text-emerald-800">
+                          You can disconnect and connect a different GA4 property at any time.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleDisconnectGA4}
+                    disabled={ga4Connecting}
+                    className="bg-white border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
+                  </button>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Website Visitors</p>
-                      <p className="text-2xl font-bold text-gray-900">{websiteVisitorsDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">Active Users</p>
+                      <p className="text-2xl font-bold text-gray-900">{activeUsersDisplay}</p>
                     </div>
                     <Users className="h-8 w-8 text-blue-500" />
                   </div>
@@ -1185,10 +1431,10 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Organic Traffic</p>
-                      <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">Event Count</p>
+                      <p className="text-2xl font-bold text-gray-900">{eventCountDisplay}</p>
                     </div>
-                    <Search className="h-8 w-8 text-green-500" />
+                    <Activity className="h-8 w-8 text-green-500" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 flex items-center space-x-2">
@@ -1205,8 +1451,8 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">First Time Visitors</p>
-                      <p className="text-2xl font-bold text-gray-900">{firstTimeVisitorsDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">New Users</p>
+                      <p className="text-2xl font-bold text-gray-900">{newUsersDisplay}</p>
                     </div>
                     <UserPlus className="h-8 w-8 text-purple-500" />
                   </div>
@@ -1225,10 +1471,10 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Engaged Visitors</p>
-                      <p className="text-2xl font-bold text-gray-900">{engagedVisitorsDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">Key Events</p>
+                      <p className="text-2xl font-bold text-gray-900">{keyEventsDisplay}</p>
                     </div>
-                    <Activity className="h-8 w-8 text-orange-500" />
+                    <TrendingUp className="h-8 w-8 text-orange-500" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 flex items-center space-x-2">
@@ -1276,23 +1522,23 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Users Trending</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Active Users Trending</h3>
                   <div className="h-64">
                     {ga4Connected ? (
-                      totalUsersTrendData.length > 0 ? (
+                      activeUsersTrendData.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={totalUsersTrendData}>
+                          <LineChart data={activeUsersTrendData}>
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="name" />
                             <YAxis />
                             <Tooltip />
                             <Legend />
-                            <Line type="monotone" dataKey="totalUsers" stroke="#10B981" strokeWidth={2} />
+                            <Line type="monotone" dataKey="activeUsers" stroke="#10B981" strokeWidth={2} />
                           </LineChart>
                         </ResponsiveContainer>
                       ) : (
                         <div className="h-full flex items-center justify-center text-sm text-gray-500">
-                          No GA4 total-user data for this date range.
+                          No GA4 active-user data for this date range.
                         </div>
                       )
                     ) : (
@@ -1628,9 +1874,12 @@ const ClientDashboardPage: React.FC = () => {
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <h2 className="text-xl font-semibold text-gray-900">Reports</h2>
-                <button className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700">
-                  <Plus className="h-4 w-4" />
-                  <span>Create Report</span>
+                <button
+                  onClick={handleCreateReportClick}
+                  className="flex items-center justify-center px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                  title="Create report"
+                >
+                  Create Report
                 </button>
               </div>
 
@@ -1684,22 +1933,156 @@ const ClientDashboardPage: React.FC = () => {
                             {singleReportForClient.recipients.join(", ")}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                            <button 
-                              onClick={() => handleViewReport(singleReportForClient)}
-                              className="text-primary-600 hover:text-primary-800"
-                            >
-                              View
-                            </button>
-                              <button className="text-gray-500 hover:text-gray-700">Edit</button>
-                              <button className="text-red-600 hover:text-red-800 inline-flex items-center space-x-1">
+                              <button 
+                                onClick={() => handleViewReport(singleReportForClient)}
+                                className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
+                                title="View report"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={handleShare}
+                                className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
+                                title="Share dashboard"
+                              >
+                                <Share2 className="h-4 w-4" />
+                              </button>
+                              {singleReportForClient.status !== "Sent" && (
+                                <button
+                                  onClick={handleSendReport}
+                                  disabled={sendingReport}
+                                  className="text-secondary-600 hover:text-secondary-800 inline-flex items-center justify-center mr-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                                  title="Send report via email"
+                                >
+                                  <Send className="h-4 w-4" />
+                                </button>
+                              )}
+                              <button
+                                onClick={handleDeleteReport}
+                                className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
+                                title="Delete report"
+                              >
                                 <Trash2 className="h-4 w-4" />
-                                <span>Delete</span>
                               </button>
                             </td>
                           </tr>
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Client-specific Create Report & Schedule Modal */}
+          {showClientReportModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold">Create Report & Schedule</h2>
+                  <button
+                    onClick={() => setShowClientReportModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    Configure how often this client's report should be generated and who should receive it.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+                    <select
+                      value={clientReportFrequency}
+                      onChange={(e) =>
+                        setClientReportFrequency(e.target.value as "weekly" | "biweekly" | "monthly")
+                      }
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="weekly">Weekly</option>
+                      <option value="biweekly">Biweekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </div>
+                  {clientReportFrequency !== "monthly" ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Day of Week</label>
+                      <select
+                        value={clientReportDayOfWeek}
+                        onChange={(e) => setClientReportDayOfWeek(Number(e.target.value))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      >
+                        {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map(
+                          (day, index) => (
+                            <option key={index} value={index}>
+                              {day}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Day of Month</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={clientReportDayOfMonth}
+                        onChange={(e) => setClientReportDayOfMonth(Number(e.target.value))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Time of Day</label>
+                    <input
+                      type="time"
+                      value={clientReportTimeOfDay}
+                      onChange={(e) => setClientReportTimeOfDay(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Recipients (comma-separated emails)
+                    </label>
+                    <input
+                      type="text"
+                      value={clientReportRecipients}
+                      onChange={(e) => setClientReportRecipients(e.target.value)}
+                      placeholder="email1@example.com, email2@example.com"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email Subject (optional)</label>
+                    <input
+                      type="text"
+                      value={clientReportEmailSubject}
+                      onChange={(e) => setClientReportEmailSubject(e.target.value)}
+                      placeholder="Custom email subject"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div className="flex justify-end space-x-3 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => setShowClientReportModal(false)}
+                      className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={clientReportSubmitting}
+                      onClick={handleSubmitClientReport}
+                      className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                    >
+                      {clientReportSubmitting ? "Saving..." : "Create Report"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1800,9 +2183,11 @@ const ClientDashboardPage: React.FC = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900">Work Log</h2>
-                <button className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2">
+                <button
+                  className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center"
+                  title="Add entry"
+                >
                   <Plus className="h-4 w-4" />
-                  <span>Add Entry</span>
                 </button>
               </div>
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -1837,9 +2222,24 @@ const ClientDashboardPage: React.FC = () => {
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                            <button className="text-primary-600 hover:text-primary-800">View</button>
-                            <button className="text-gray-500 hover:text-gray-700">Edit</button>
-                            <button className="text-red-600 hover:text-red-800">Delete</button>
+                            <button
+                              className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
+                              title="View entry"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
+                              title="Edit entry"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
+                              title="Delete entry"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -1879,36 +2279,48 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Website Visitors</p>
-                        <p className="text-2xl font-bold text-gray-900">{websiteVisitorsDisplay}</p>
+                        <p className="text-sm font-medium text-gray-600">Active Users</p>
+                        <p className="text-2xl font-bold text-gray-900">{activeUsersDisplay}</p>
                       </div>
                       <Users className="h-8 w-8 text-blue-500" />
                     </div>
-                    <div className="mt-4 flex items-center space-x-2">
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">+15.3% from last month</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-xl border border-gray-200">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Organic Traffic</p>
-                        <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
+                    {ga4Connected ? (
+                      <div className="mt-4 flex items-center space-x-2">
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-600">Real-time data from GA4</span>
                       </div>
-                      <Search className="h-8 w-8 text-green-500" />
-                    </div>
-                    <div className="mt-4 flex items-center space-x-2">
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">+8.3% from last month</span>
-                    </div>
+                    ) : (
+                      <div className="mt-4">
+                        <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">First Time Visitors</p>
-                        <p className="text-2xl font-bold text-gray-900">{firstTimeVisitorsDisplay}</p>
+                        <p className="text-sm font-medium text-gray-600">Event Count</p>
+                        <p className="text-2xl font-bold text-gray-900">{eventCountDisplay}</p>
+                      </div>
+                      <Activity className="h-8 w-8 text-green-500" />
+                    </div>
+                    {ga4Connected ? (
+                      <div className="mt-4 flex items-center space-x-2">
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      </div>
+                    ) : (
+                      <div className="mt-4">
+                        <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white p-6 rounded-xl border border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">New Users</p>
+                        <p className="text-2xl font-bold text-gray-900">{newUsersDisplay}</p>
                       </div>
                       <UserPlus className="h-8 w-8 text-purple-500" />
                     </div>
@@ -1927,10 +2339,10 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Engaged Visitors</p>
-                        <p className="text-2xl font-bold text-gray-900">{engagedVisitorsDisplay}</p>
+                        <p className="text-sm font-medium text-gray-600">Key Events</p>
+                        <p className="text-2xl font-bold text-gray-900">{keyEventsDisplay}</p>
                       </div>
-                      <Activity className="h-8 w-8 text-orange-500" />
+                      <TrendingUp className="h-8 w-8 text-orange-500" />
                     </div>
                     {ga4Connected ? (
                       <div className="mt-4 flex items-center space-x-2">
@@ -1978,18 +2390,18 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
 
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Users Trending</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Active Users Trending</h3>
                     <div className="h-64">
                       {ga4Connected ? (
-                        totalUsersTrendData.length > 0 ? (
+                        activeUsersTrendData.length > 0 ? (
                           <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={totalUsersTrendData}>
+                            <LineChart data={activeUsersTrendData}>
                               <CartesianGrid strokeDasharray="3 3" />
                               <XAxis dataKey="name" />
                               <YAxis />
                               <Tooltip />
                               <Legend />
-                              <Line type="monotone" dataKey="totalUsers" stroke="#10B981" strokeWidth={2} />
+                              <Line type="monotone" dataKey="activeUsers" stroke="#10B981" strokeWidth={2} />
                             </LineChart>
                           </ResponsiveContainer>
                         ) : (
@@ -2399,16 +2811,17 @@ const ClientDashboardPage: React.FC = () => {
         , document.body
       )}
 
-      {/* GA4 Property ID Modal */}
+      {/* GA4 Property Selection Modal */}
       {showGA4Modal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+          <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Enter GA4 Property ID</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Select GA4 Property</h3>
               <button
                 onClick={() => {
                   setShowGA4Modal(false);
                   setGa4PropertyId("");
+                  setGa4Properties([]);
                 }}
                 className="text-gray-400 hover:text-gray-600"
               >
@@ -2416,49 +2829,68 @@ const ClientDashboardPage: React.FC = () => {
               </button>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Please enter your Google Analytics 4 Property ID. You can find this in your GA4 property settings.
-              <br />
-              <span className="text-xs text-gray-500 mt-2 block">
-                Format: Just the numeric ID (e.g., "123456789") or "properties/123456789"
-              </span>
+              Select a Google Analytics 4 property to connect. These are all the properties accessible with your Google account.
             </p>
-            <input
-              type="text"
-              value={ga4PropertyId}
-              onChange={(e) => setGa4PropertyId(e.target.value)}
-              placeholder="123456789"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent mb-4"
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleSubmitPropertyId();
-                }
-              }}
-            />
-            <div className="flex items-center space-x-3">
-              <button
-                onClick={handleSubmitPropertyId}
-                disabled={ga4Connecting || !ga4PropertyId.trim()}
-                className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-              >
-                {ga4Connecting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Connecting...</span>
-                  </>
-                ) : (
-                  <span>Connect</span>
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  setShowGA4Modal(false);
-                  setGa4PropertyId("");
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
+            
+            {loadingProperties ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                <span className="ml-2 text-gray-600">Loading properties...</span>
+              </div>
+            ) : ga4Properties.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No GA4 properties found.</p>
+                <p className="text-sm mt-2">Please make sure you have access to at least one GA4 property.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
+                  <div className="divide-y divide-gray-200">
+                    {ga4Properties.map((property) => (
+                      <button
+                        key={property.propertyId}
+                        onClick={() => handleSubmitPropertyId(property.propertyId)}
+                        disabled={ga4Connecting}
+                        className="w-full text-left p-4 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">{property.propertyName}</div>
+                            <div className="text-sm text-gray-500 mt-1">
+                              Account: {property.accountName}
+                            </div>
+                            <div className="text-xs text-gray-400 mt-1">
+                              Property ID: {property.propertyId}
+                            </div>
+                          </div>
+                          {ga4Connecting ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                          ) : (
+                            <div className="text-primary-600">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center justify-end">
+                  <button
+                    onClick={() => {
+                      setShowGA4Modal(false);
+                      setGa4PropertyId("");
+                      setGa4Properties([]);
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

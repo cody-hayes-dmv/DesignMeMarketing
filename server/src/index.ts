@@ -49,6 +49,19 @@ app.get("/health", (req, res) => {
 // Error handling
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
+  
+  // Start report scheduler cron job (runs every hour)
+  const { processScheduledReports } = await import("./lib/reportScheduler.js");
+  
+  // Run immediately on startup (for testing)
+  processScheduledReports().catch(console.error);
+  
+  // Then run every hour
+  setInterval(() => {
+    processScheduledReports().catch(console.error);
+  }, 60 * 60 * 1000); // 1 hour in milliseconds
+  
+  console.log("Report scheduler started (runs every hour)");
 });

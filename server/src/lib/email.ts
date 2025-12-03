@@ -1,9 +1,16 @@
 import nodemailer from "nodemailer";
 
+interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 interface EmailOptions {
   to: string;
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
 }
 
 const transporter = nodemailer.createTransport({
@@ -16,13 +23,14 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export const sendEmail = async ({ to, subject, html }: EmailOptions) => {
+export const sendEmail = async ({ to, subject, html, attachments }: EmailOptions) => {
   try {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || "noreply@yourseodashboard.com",
       to,
       subject,
       html,
+      attachments,
     });
     console.log(`Email sent to ${to}`);
   } catch (error) {

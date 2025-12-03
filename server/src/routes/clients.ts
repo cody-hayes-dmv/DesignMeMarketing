@@ -298,7 +298,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 // GA4 Connection Routes
-import { getGA4AuthUrl, exchangeCodeForTokens, isGA4Connected } from '../lib/ga4.js';
+import { getGA4AuthUrl, exchangeCodeForTokens, isGA4Connected, listGA4Properties } from '../lib/ga4.js';
 
 // GA4 OAuth callback (no auth required - handled via state parameter)
 router.get('/ga4/callback', async (req, res) => {
@@ -661,6 +661,150 @@ router.get('/:id/ga4/auth-url', authenticateToken, async (req, res) => {
     }
 });
 
+// List GA4 properties (after OAuth callback, before connecting)
+router.get('/:id/ga4/properties', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+
+        // Check access
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: {
+                user: {
+                    include: {
+                        memberships: {
+                            select: { agencyId: true },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!client) {
+            return res.status(404).json({ message: 'Client not found' });
+        }
+
+        const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
+        const isOwner = client.userId === req.user.userId;
+        const userMemberships = await prisma.userAgency.findMany({
+            where: { userId: req.user.userId },
+            select: { agencyId: true },
+        });
+        const userAgencyIds = userMemberships.map(m => m.agencyId);
+        const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        // Check if tokens exist (from OAuth callback)
+        const existingClient = await prisma.client.findUnique({
+            where: { id: clientId },
+            select: { ga4AccessToken: true, ga4RefreshToken: true },
+        });
+
+        if (!existingClient?.ga4AccessToken || !existingClient?.ga4RefreshToken) {
+            return res.status(400).json({ message: 'Please complete OAuth flow first by clicking "Connect GA4"' });
+        }
+
+        // List all GA4 properties
+        const properties = await listGA4Properties(clientId);
+        res.json({ properties });
+    } catch (error: any) {
+        console.error('GA4 properties list error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Get GA4 traffic data (dedicated endpoint for fetching GA4 data)
+router.get('/:id/ga4/traffic', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const { start, end, period } = req.query;
+
+        // Check access
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: {
+                user: {
+                    include: {
+                        memberships: {
+                            select: { agencyId: true },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!client) {
+            return res.status(404).json({ message: 'Client not found' });
+        }
+
+        const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
+        const isOwner = client.userId === req.user.userId;
+        const userMemberships = await prisma.userAgency.findMany({
+            where: { userId: req.user.userId },
+            select: { agencyId: true },
+        });
+        const userAgencyIds = userMemberships.map(m => m.agencyId);
+        const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        // Check if GA4 is connected
+        if (!client.ga4RefreshToken || !client.ga4PropertyId || !client.ga4ConnectedAt) {
+            return res.status(400).json({ 
+                message: 'GA4 is not connected for this client',
+                connected: false 
+            });
+        }
+
+        // Calculate date range
+        let startDate: Date;
+        let endDate: Date = new Date();
+
+        if (start && end) {
+            // Use provided dates
+            startDate = new Date(start as string);
+            endDate = new Date(end as string);
+        } else if (period) {
+            // Use period (number of days)
+            const days = parseInt(period as string, 10);
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+        } else {
+            // Default to last 30 days
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+        }
+
+        // Fetch GA4 data
+        const { fetchGA4TrafficData } = await import('../lib/ga4.js');
+        const data = await fetchGA4TrafficData(clientId, startDate, endDate);
+
+        res.json({
+            success: true,
+            data,
+            dateRange: {
+                start: startDate.toISOString().split('T')[0],
+                end: endDate.toISOString().split('T')[0],
+            },
+            propertyId: client.ga4PropertyId,
+        });
+    } catch (error: any) {
+        console.error('GA4 traffic fetch error:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message || 'Failed to fetch GA4 traffic data',
+            error: error.message 
+        });
+    }
+});
+
 // Connect GA4 with property ID (after OAuth callback)
 router.post('/:id/ga4/connect', authenticateToken, async (req, res) => {
     try {
@@ -725,9 +869,121 @@ router.post('/:id/ga4/connect', authenticateToken, async (req, res) => {
             },
         });
 
-        res.json({ message: 'GA4 connected successfully' });
+        // Optionally: Fetch a test sample of GA4 data to verify connection works
+        try {
+            const { fetchGA4TrafficData } = await import('../lib/ga4.js');
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 7); // Last 7 days for test
+            
+            const testData = await fetchGA4TrafficData(clientId, startDate, endDate);
+            console.log(`GA4 connection verified - fetched test data:`, {
+                totalUsers: testData.totalUsers,
+                totalSessions: testData.totalSessions,
+            });
+        } catch (testError: any) {
+            console.warn('GA4 connection test failed (non-critical):', testError.message);
+            // Don't fail the connection if test fetch fails - property might not have data yet
+        }
+
+        res.json({ 
+            message: 'GA4 connected successfully',
+            propertyId: normalizedPropertyId,
+        });
     } catch (error: any) {
         console.error('GA4 connect error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Test GA4 connection and data fetch
+router.get('/:id/ga4/test', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+
+        // Check access
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: {
+                user: {
+                    include: {
+                        memberships: {
+                            select: { agencyId: true },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!client) {
+            return res.status(404).json({ message: 'Client not found' });
+        }
+
+        const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
+        const isOwner = client.userId === req.user.userId;
+        const userMemberships = await prisma.userAgency.findMany({
+            where: { userId: req.user.userId },
+            select: { agencyId: true },
+        });
+        const userAgencyIds = userMemberships.map(m => m.agencyId);
+        const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        // Check connection status
+        const isConnected = !!(
+            client.ga4RefreshToken &&
+            client.ga4PropertyId &&
+            client.ga4ConnectedAt
+        );
+
+        if (!isConnected) {
+            return res.json({
+                connected: false,
+                message: 'GA4 is not connected',
+                details: {
+                    hasRefreshToken: !!client.ga4RefreshToken,
+                    hasPropertyId: !!client.ga4PropertyId,
+                    hasConnectedAt: !!client.ga4ConnectedAt,
+                },
+            });
+        }
+
+        // Try to fetch data
+        try {
+            const { fetchGA4TrafficData } = await import('../lib/ga4.js');
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 7); // Last 7 days
+
+            const data = await fetchGA4TrafficData(clientId, startDate, endDate);
+            
+            return res.json({
+                connected: true,
+                message: 'GA4 connection is working',
+                propertyId: client.ga4PropertyId,
+                data: {
+                    totalUsers: data.totalUsers,
+                    totalSessions: data.totalSessions,
+                    organicSessions: data.organicSessions,
+                    firstTimeVisitors: data.firstTimeVisitors,
+                    engagedVisitors: data.engagedVisitors,
+                    hasTrendData: data.newUsersTrend.length > 0,
+                },
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                connected: true,
+                message: 'GA4 is connected but data fetch failed',
+                error: error.message,
+                propertyId: client.ga4PropertyId,
+            });
+        }
+    } catch (error: any) {
+        console.error('GA4 test error:', error);
         res.status(500).json({ message: error.message || 'Internal server error' });
     }
 });
