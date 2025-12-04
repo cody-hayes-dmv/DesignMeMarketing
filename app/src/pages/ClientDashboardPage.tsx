@@ -212,6 +212,7 @@ const ClientDashboardPage: React.FC = () => {
     displayName: string;
   }>>([]);
   const [loadingProperties, setLoadingProperties] = useState(false);
+  const [ga4PropertySearch, setGa4PropertySearch] = useState("");
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
   const [refreshingTopPages, setRefreshingTopPages] = useState(false);
   const [refreshingBacklinks, setRefreshingBacklinks] = useState(false);
@@ -1003,25 +1004,16 @@ const ClientDashboardPage: React.FC = () => {
 
         window.addEventListener('message', messageListener);
 
-        // Check if popup is closed manually
-        const checkClosed = window.setInterval(() => {
-          let isClosed = false;
-          try {
-            // Some browsers block direct access when COOP isolates the popup,
-            // so wrap in try/catch and assume closed on error.
-            isClosed = !popup || popup.closed;
-          } catch (err) {
-            isClosed = true;
+        // Set a maximum timeout (5 minutes) to prevent infinite waiting
+        // If no message is received, assume user closed the popup or connection failed
+        manualCloseTimeout = window.setTimeout(() => {
+          cleanupPopup();
+          closePopupSafely();
+          if (ga4Connecting) {
+            setGa4Connecting(false);
+            toast.error('GA4 connection timed out. Please try again.');
           }
-
-          if (isClosed) {
-            window.clearInterval(checkClosed);
-            window.removeEventListener('message', messageListener);
-            if (ga4Connecting) {
-              setGa4Connecting(false);
-            }
-          }
-        }, 1000);
+        }, 5 * 60 * 1000) as unknown as number;
       }
     } catch (error: any) {
       console.error("Failed to connect GA4:", error);
@@ -1386,16 +1378,9 @@ const ClientDashboardPage: React.FC = () => {
                       <p className="text-sm font-semibold text-emerald-900">
                         GA4 is connected
                       </p>
-                      {ga4AccountEmail ? (
-                        <p className="text-xs text-emerald-800">
-                          Connected as{" "}
-                          <span className="font-mono">{ga4AccountEmail}</span>
-                        </p>
-                      ) : (
-                        <p className="text-xs text-emerald-800">
-                          You can disconnect and connect a different GA4 property at any time.
-                        </p>
-                      )}
+                      <p className="text-xs text-emerald-800">
+                        You can disconnect and connect a different GA4 property at any time.
+                      </p>
                     </div>
                   </div>
                   <button
@@ -2844,9 +2829,51 @@ const ClientDashboardPage: React.FC = () => {
               </div>
             ) : (
               <>
-                <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
-                  <div className="divide-y divide-gray-200">
-                    {ga4Properties.map((property) => (
+                {/* Search Bar */}
+                <div className="mb-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by property name, account, or property ID..."
+                      value={ga4PropertySearch}
+                      onChange={(e) => setGa4PropertySearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+                
+                {(() => {
+                  // Filter and sort properties
+                  const filtered = ga4Properties.filter((property) => {
+                    if (!ga4PropertySearch.trim()) return true;
+                    const searchLower = ga4PropertySearch.toLowerCase();
+                    return (
+                      property.propertyName.toLowerCase().includes(searchLower) ||
+                      property.accountName.toLowerCase().includes(searchLower) ||
+                      property.propertyId.includes(searchLower) ||
+                      property.displayName.toLowerCase().includes(searchLower)
+                    );
+                  });
+                  
+                  // Sort alphabetically by property name
+                  const sorted = filtered.sort((a, b) => 
+                    a.propertyName.localeCompare(b.propertyName)
+                  );
+
+                  if (sorted.length === 0 && ga4PropertySearch.trim()) {
+                    return (
+                      <div className="text-center py-8 text-gray-500 border border-gray-200 rounded-lg">
+                        <p>No properties found matching "{ga4PropertySearch}"</p>
+                        <p className="text-sm mt-2">Try a different search term</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
+                      <div className="divide-y divide-gray-200">
+                        {sorted.map((property) => (
                       <button
                         key={property.propertyId}
                         onClick={() => handleSubmitPropertyId(property.propertyId)}
@@ -2874,15 +2901,19 @@ const ClientDashboardPage: React.FC = () => {
                           )}
                         </div>
                       </button>
-                    ))}
-                  </div>
-                </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+                
                 <div className="flex items-center justify-end">
                   <button
                     onClick={() => {
                       setShowGA4Modal(false);
                       setGa4PropertyId("");
                       setGa4Properties([]);
+                      setGa4PropertySearch("");
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >

@@ -189,8 +189,8 @@ model Client {
   notes    String?
 
   // GA4 Connection
-  ga4AccessToken  String?
-  ga4RefreshToken String?
+  ga4AccessToken  String? @db.Text
+  ga4RefreshToken String? @db.Text
   ga4PropertyId   String?
   ga4AccountEmail String?
   ga4ConnectedAt  DateTime?
