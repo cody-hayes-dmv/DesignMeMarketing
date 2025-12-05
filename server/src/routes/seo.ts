@@ -1908,11 +1908,19 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       (trafficSourceSummary?.organicEstimatedTraffic ??
       (latestReport ? latestReport.organicSessions : null));
 
-    // New GA4 metrics
-    const activeUsers = ga4Data?.activeUsers ?? null;
-    const eventCount = ga4Data?.eventCount ?? null;
-    const newUsers = ga4Data?.newUsers ?? null;
-    const keyEvents = ga4Data?.keyEvents ?? null;
+    // New GA4 metrics - preserve 0 values (use null only if ga4Data is null/undefined)
+    const activeUsers = ga4Data !== null && ga4Data !== undefined 
+      ? (ga4Data.activeUsers !== undefined ? ga4Data.activeUsers : null)
+      : null;
+    const eventCount = ga4Data !== null && ga4Data !== undefined
+      ? (ga4Data.eventCount !== undefined ? ga4Data.eventCount : null)
+      : null;
+    const newUsers = ga4Data !== null && ga4Data !== undefined
+      ? (ga4Data.newUsers !== undefined ? ga4Data.newUsers : null)
+      : null;
+    const keyEvents = ga4Data !== null && ga4Data !== undefined
+      ? (ga4Data.keyEvents !== undefined ? ga4Data.keyEvents : null)
+      : null;
     const newUsersTrend = ga4Data?.newUsersTrend ?? [];
     const activeUsersTrend = ga4Data?.activeUsersTrend ?? [];
     

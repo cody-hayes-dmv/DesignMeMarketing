@@ -202,6 +202,7 @@ const ClientDashboardPage: React.FC = () => {
   const [ga4Connected, setGa4Connected] = useState<boolean | null>(null);
   const [ga4AccountEmail, setGa4AccountEmail] = useState<string | null>(null);
   const [ga4Connecting, setGa4Connecting] = useState(false);
+  const [ga4StatusLoading, setGa4StatusLoading] = useState(true); // Track GA4 status check loading
   const [showGA4Modal, setShowGA4Modal] = useState(false);
   const [ga4PropertyId, setGa4PropertyId] = useState("");
   const [ga4Properties, setGa4Properties] = useState<Array<{
@@ -547,9 +548,10 @@ const ClientDashboardPage: React.FC = () => {
       setGa4Connecting(false);
     }
     
-    // Always check GA4 status on mount
+    // Always check GA4 status on mount (only when clientId changes, not dateRange)
     const checkGA4Status = async () => {
       try {
+        setGa4StatusLoading(true);
         const res = await api.get(`/clients/${clientId}/ga4/status`);
         const isConnected = res.data?.connected || false;
         const hasTokens = res.data?.hasTokens || false;
@@ -565,10 +567,12 @@ const ClientDashboardPage: React.FC = () => {
         console.error("Failed to check GA4 status:", error);
         setGa4Connected(false);
         setGa4AccountEmail(null);
+      } finally {
+        setGa4StatusLoading(false);
       }
     };
     checkGA4Status();
-  }, [clientId, dateRange]);
+  }, [clientId]); // Removed dateRange dependency - GA4 status doesn't change with date range
 
   useEffect(() => {
     if (!clientId) return;
@@ -1106,9 +1110,11 @@ const ClientDashboardPage: React.FC = () => {
     if (fetchingSummary) return "...";
     // Show "—" when GA4 is not connected (null or false)
     if (ga4Connected !== true) return "—";
+    // Check if value exists (including 0)
     if (dashboardSummary?.activeUsers !== null && dashboardSummary?.activeUsers !== undefined) {
       const numeric = Number(dashboardSummary.activeUsers);
       if (Number.isFinite(numeric)) {
+        // Show 0 as "0", not "—"
         return Math.round(numeric).toLocaleString();
       }
     }
@@ -1327,48 +1333,63 @@ const ClientDashboardPage: React.FC = () => {
         <>
           {activeTab === "dashboard" && (
             <div ref={dashboardContentRef} className="space-y-8">
-              {/* GA4 Connection Banner */}
-              {/* Show banner when GA4 is not connected (null = checking, false = confirmed not connected) */}
-              {(ga4Connected === false || ga4Connected === null) && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+              {/* GA4 Connection Status - Show loading skeleton while checking */}
+              {ga4StatusLoading ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 animate-pulse">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-yellow-900 mb-2">
-                        Connect Google Analytics 4
-                      </h3>
-                      <p className="text-sm text-yellow-800 mb-4">
-                        To view real traffic and analytics data, please connect your Google Analytics 4 account. 
-                        Without GA4 connection, traffic metrics cannot be displayed.
-                      </p>
-                      <button
-                        onClick={handleConnectGA4}
-                        disabled={ga4Connecting}
-                        className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        {ga4Connecting ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span>Connecting...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Search className="h-4 w-4" />
-                            <span>Connect GA4</span>
-                          </>
-                        )}
-                      </button>
+                      <div className="h-6 bg-gray-200 rounded w-48 mb-3"></div>
+                      <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
+                      <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
+                      <div className="h-10 bg-gray-200 rounded w-32"></div>
                     </div>
-                    <button
-                      onClick={() => setGa4Connected(null)}
-                      className="text-yellow-600 hover:text-yellow-800 ml-4"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
+                    <div className="h-5 w-5 bg-gray-200 rounded"></div>
                   </div>
                 </div>
-              )}
-              {/* GA4 Connected Banner with Disconnect button */}
-              {ga4Connected === true && (
+              ) : (
+                <>
+                  {/* GA4 Connection Banner */}
+                  {/* Show banner when GA4 is not connected (false = confirmed not connected) */}
+                  {ga4Connected === false && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-yellow-900 mb-2">
+                            Connect Google Analytics 4
+                          </h3>
+                          <p className="text-sm text-yellow-800 mb-4">
+                            To view real traffic and analytics data, please connect your Google Analytics 4 account. 
+                            Without GA4 connection, traffic metrics cannot be displayed.
+                          </p>
+                          <button
+                            onClick={handleConnectGA4}
+                            disabled={ga4Connecting}
+                            className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {ga4Connecting ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Connecting...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Search className="h-4 w-4" />
+                                <span>Connect GA4</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => setGa4Connected(null)}
+                          className="text-yellow-600 hover:text-yellow-800 ml-4"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {/* GA4 Connected Banner with Disconnect button */}
+                  {ga4Connected === true && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
@@ -1391,6 +1412,8 @@ const ClientDashboardPage: React.FC = () => {
                     {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
                   </button>
                 </div>
+                  )}
+                </>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">

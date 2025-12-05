@@ -294,7 +294,7 @@ export async function fetchGA4TrafficData(
   console.log(`[GA4] Stored property ID: ${client.ga4PropertyId}, Formatted: ${propertyId}`);
 
   // Run requests with individual error handling to avoid one failure breaking all requests
-  let sessionsResponse, usersResponse, engagementResponse, conversionsResponse, trendResponse;
+  let sessionsResponse, usersResponse, engagementResponse, conversionsResponse, trendResponse, keyEventsResponse;
   
   // Helper to safely run a report request
   const safeRunReport = async (requestConfig: any, requestName: string) => {
@@ -403,6 +403,25 @@ export async function fetchGA4TrafficData(
       ],
     }, 'Conversions');
 
+    // Try to get key events by querying events with eventName dimension
+    // The conversions metric will only return values for events marked as key events
+    // We'll sum up all conversion values to get total key events
+    keyEventsResponse = await safeRunReport({
+      property: propertyId,
+      dateRanges: [
+        {
+          startDate: startDateStr,
+          endDate: endDateStr,
+        },
+      ],
+      dimensions: [{ name: 'eventName' }],
+      metrics: [
+        { name: 'conversions' }, // This metric only counts events marked as conversions/key events
+      ],
+      // Limit to top 50 events to avoid quota issues
+      limit: 50,
+    }, 'Key Events by eventName');
+
     // Check if we got at least some data
     if (!sessionsResponse && !usersResponse && !engagementResponse && !trendResponse) {
       throw new Error('All GA4 API requests failed. Please check property ID and permissions.');
@@ -454,6 +473,30 @@ export async function fetchGA4TrafficData(
         value: mv.value,
         valueType: mv.valueType,
       })),
+      note: 'Index 0: activeUsers, Index 1: newUsers, Index 2: eventCount',
+    });
+  }
+
+  // Log key events response for debugging
+  if (keyEventsResponse?.rows && keyEventsResponse.rows.length > 0) {
+    const keyEventsWithConversions = keyEventsResponse.rows
+      .filter((row: any) => parseInt(row.metricValues?.[0]?.value || '0', 10) > 0)
+      .map((row: any) => ({
+        eventName: row.dimensionValues?.[0]?.value,
+        conversions: row.metricValues?.[0]?.value,
+      }));
+    console.log('[GA4] Key Events response:', {
+      totalEvents: keyEventsResponse.rows.length,
+      keyEventsWithConversions: keyEventsWithConversions.length,
+      sampleKeyEvents: keyEventsWithConversions.slice(0, 10),
+    });
+  }
+
+  // Log conversions response for debugging
+  if (conversionsResponse?.rows?.[0]) {
+    console.log('[GA4] Conversions response:', {
+      conversions: conversionsResponse.rows[0].metricValues?.[0]?.value,
+      conversionRate: conversionsResponse.rows[0].metricValues?.[1]?.value,
     });
   }
 
@@ -502,7 +545,6 @@ export async function fetchGA4TrafficData(
   }
 
   // Parse new metrics: Active Users, New Users, Event Count
-  // Note: conversions/keyEvents are parsed separately from conversionsResponse
   const activeUsers = parseInt(
     usersResponse?.rows?.[0]?.metricValues?.[0]?.value || '0',
     10
@@ -516,11 +558,42 @@ export async function fetchGA4TrafficData(
     10
   );
   
-  // Key Events (conversions) - get from conversions response if available
-  const keyEvents = parseInt(
-    conversionsResponse?.rows?.[0]?.metricValues?.[0]?.value || '0',
-    10
-  );
+  // Key Events - try multiple approaches to get accurate count
+  let keyEvents = 0;
+  
+  // First, try to get from keyEventsResponse (sum of conversions metric for all events)
+  if (keyEventsResponse?.rows && keyEventsResponse.rows.length > 0) {
+    // Sum up the conversions metric from all events (only key events will have conversions > 0)
+    // The conversions metric is at index 0 since we only requested that one metric
+    keyEvents = keyEventsResponse.rows.reduce((sum: number, row: any) => {
+      const conversions = parseInt(row.metricValues?.[0]?.value || '0', 10);
+      return sum + conversions;
+    }, 0);
+    console.log('[GA4] Key events calculated from eventName query:', keyEvents, `(from ${keyEventsResponse.rows.length} events)`);
+  }
+  
+  // Fallback to conversions metric if keyEventsResponse didn't work or returned 0
+  if (keyEvents === 0 && conversionsResponse?.rows?.[0]) {
+    const conversionsValue = parseInt(
+      conversionsResponse.rows[0].metricValues?.[0]?.value || '0',
+      10
+    );
+    if (conversionsValue > 0) {
+      keyEvents = conversionsValue;
+      console.log('[GA4] Key events from conversions metric:', keyEvents);
+    }
+  }
+  
+  // If still 0, log a warning
+  if (keyEvents === 0) {
+    console.warn('[GA4] ⚠️ Key events count is 0. This might indicate:', {
+      hasKeyEventsResponse: !!keyEventsResponse,
+      keyEventsResponseRows: keyEventsResponse?.rows?.length || 0,
+      hasConversionsResponse: !!conversionsResponse,
+      conversionsValue: conversionsResponse?.rows?.[0]?.metricValues?.[0]?.value || 'N/A',
+      note: 'Make sure key events are configured in GA4 and marked as conversion events',
+    });
+  }
 
   // Log parsed values for debugging
   console.log('[GA4] Parsed metrics:', {
@@ -530,7 +603,23 @@ export async function fetchGA4TrafficData(
     keyEvents,
     totalSessions,
     organicSessions,
+    note: 'newUsers comes from usersResponse metricValues[1], keyEvents is calculated from keyEventsResponse or conversionsResponse',
   });
+  
+  // Additional validation logging for newUsers
+  if (usersResponse?.rows?.[0]) {
+    const rawNewUsers = usersResponse.rows[0].metricValues?.[1]?.value;
+    console.log('[GA4] New Users validation:', {
+      rawValue: rawNewUsers,
+      parsedValue: newUsers,
+      metricIndex: 1,
+      allMetrics: usersResponse.rows[0].metricValues?.map((mv: any, idx: number) => ({
+        index: idx,
+        name: idx === 0 ? 'activeUsers' : idx === 1 ? 'newUsers' : idx === 2 ? 'eventCount' : 'unknown',
+        value: mv.value,
+      })),
+    });
+  }
 
   // Parse engagement metrics
   const bounceRate = parseFloat(
