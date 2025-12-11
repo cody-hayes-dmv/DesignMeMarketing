@@ -756,14 +756,48 @@ router.get("/share/:token/dashboard", async (req, res) => {
     let ga4Data = null;
     let trafficDataSource = "none";
 
-    // Try to fetch from GA4 if connected
+    // Try to get GA4 data from database first, then fallback to API if not found
+    let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { fetchGA4TrafficData } = await import("../lib/ga4.js");
-        ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
-        trafficDataSource = "ga4";
+        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData } = await import("../lib/ga4.js");
+        
+        // First, try to get data from database
+        const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
+        
+        if (dbMetrics) {
+          console.log(`[Share Dashboard] ✅ Using GA4 data from database for client ${clientId}`);
+          ga4Data = {
+            totalSessions: dbMetrics.totalSessions,
+            organicSessions: dbMetrics.organicSessions,
+            directSessions: dbMetrics.directSessions,
+            referralSessions: dbMetrics.referralSessions,
+            paidSessions: dbMetrics.paidSessions,
+            bounceRate: dbMetrics.bounceRate,
+            avgSessionDuration: dbMetrics.avgSessionDuration,
+            pagesPerSession: dbMetrics.pagesPerSession,
+            conversions: dbMetrics.conversions,
+            conversionRate: dbMetrics.conversionRate,
+            activeUsers: dbMetrics.activeUsers,
+            eventCount: dbMetrics.eventCount,
+            newUsers: dbMetrics.newUsers,
+            keyEvents: dbMetrics.keyEvents,
+            newUsersTrend: dbMetrics.newUsersTrend,
+            activeUsersTrend: dbMetrics.activeUsersTrend,
+          };
+          ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
+          trafficDataSource = "ga4";
+        } else {
+          // No data in database - don't fetch from API here, data should be loaded from DB
+          // Data will be fetched and saved when GA4 is connected or when refresh button is clicked
+          console.log(`[Share Dashboard] ⚠️ No GA4 data in database for client ${clientId}. Data will be available after connecting GA4 or clicking refresh.`);
+          // Set to null so frontend knows there's no data
+          ga4Data = null;
+          ga4EventsData = null;
+          trafficDataSource = "none";
+        }
       } catch (ga4Error: any) {
-        console.error("[Share Dashboard] Failed to fetch GA4 data:", ga4Error.message);
+        console.error("[Share Dashboard] Failed to get GA4 data:", ga4Error.message);
         // Continue with fallback data sources
       }
     }
@@ -887,7 +921,8 @@ router.get("/share/:token/dashboard", async (req, res) => {
         lost: lostBacklinks,
         avgDomainRating: backlinkStats._avg.domainRating
       },
-      topKeywords
+      topKeywords,
+      ga4Events: ga4EventsData?.events || null
     });
   } catch (error) {
     console.error("Shared dashboard error:", error);
@@ -948,6 +983,45 @@ router.get("/share/:token/top-pages", async (req, res) => {
   } catch (error: any) {
     console.error("Share top pages fetch error:", error);
     res.status(500).json({ message: "Failed to fetch top pages data" });
+  }
+});
+
+// Share endpoint for backlinks list
+router.get("/share/:token/backlinks", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const tokenData = verifyShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+
+    const clientId = tokenData.clientId;
+    const { lost = "false", limit = "50" } = req.query;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, domain: true }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const backlinks = await prisma.backlink.findMany({
+      where: {
+        clientId,
+        isLost: lost === "true"
+      },
+      orderBy: {
+        domainRating: "desc"
+      },
+      take: Number(limit) || 50,
+    });
+
+    res.json(backlinks);
+  } catch (error: any) {
+    console.error("Share backlinks fetch error:", error);
+    res.status(500).json({ message: "Failed to fetch backlinks data" });
   }
 });
 
@@ -1042,6 +1116,150 @@ router.get("/share/:token/traffic-sources", async (req, res) => {
   } catch (error: any) {
     console.error("Share traffic sources fetch error:", error);
     res.status(500).json({ message: "Failed to fetch traffic sources data" });
+  }
+});
+
+// Share endpoint for ranked keywords summary
+router.get("/share/:token/ranked-keywords", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const tokenData = verifyShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+
+    const clientId = tokenData.clientId;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, domain: true }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+    const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+    const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+
+    const currentData = await prisma.rankedKeywordsHistory.findUnique({
+      where: {
+        clientId_month_year: {
+          clientId,
+          month: currentMonth,
+          year: currentYear
+        }
+      }
+    });
+
+    const lastMonthData = await prisma.rankedKeywordsHistory.findUnique({
+      where: {
+        clientId_month_year: {
+          clientId,
+          month: lastMonth,
+          year: lastMonthYear
+        }
+      }
+    });
+
+    const change = currentData 
+      ? (lastMonthData ? currentData.totalKeywords - lastMonthData.totalKeywords : null)
+      : null;
+
+    res.json({
+      current: currentData ? {
+        totalKeywords: currentData.totalKeywords,
+        month: currentData.month,
+        year: currentData.year,
+        updatedAt: currentData.updatedAt
+      } : null,
+      previous: lastMonthData ? {
+        totalKeywords: lastMonthData.totalKeywords,
+        month: lastMonthData.month,
+        year: lastMonthData.year
+      } : null,
+      change: change,
+      changePercent: change !== null && lastMonthData && lastMonthData.totalKeywords > 0
+        ? ((change / lastMonthData.totalKeywords) * 100).toFixed(1)
+        : null
+    });
+  } catch (error: any) {
+    console.error("Share ranked keywords fetch error:", error);
+    res.status(500).json({ message: "Failed to fetch ranked keywords data" });
+  }
+});
+
+// Share endpoint for ranked keywords history
+router.get("/share/:token/ranked-keywords/history", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const tokenData = verifyShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+
+    const clientId = tokenData.clientId;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, domain: true }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const allHistory = await prisma.rankedKeywordsHistory.findMany({
+      where: { clientId },
+      orderBy: [
+        { year: "asc" },
+        { month: "asc" }
+      ]
+    });
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    
+    const dbMonthlyData: Record<string, { month: number; year: number; totalKeywords: number; date: string }> = {};
+    allHistory.forEach((item) => {
+      const key = `${item.year}-${String(item.month).padStart(2, '0')}`;
+      dbMonthlyData[key] = {
+        month: item.month,
+        year: item.year,
+        totalKeywords: item.totalKeywords,
+        date: `${item.year}-${String(item.month).padStart(2, '0')}-01`
+      };
+    });
+
+    const completeData: Array<{ month: number; year: number; totalKeywords: number; date: string }> = [];
+    
+    for (let i = 11; i >= 0; i--) {
+      const targetDate = new Date(currentYear, currentMonth - 1 - i, 1);
+      const targetYear = targetDate.getFullYear();
+      const targetMonth = targetDate.getMonth() + 1;
+      const key = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+      
+      const existingData = dbMonthlyData[key];
+      if (existingData) {
+        completeData.push(existingData);
+      } else {
+        completeData.push({
+          month: targetMonth,
+          year: targetYear,
+          totalKeywords: 0,
+          date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
+        });
+      }
+    }
+
+    res.json(completeData);
+  } catch (error: any) {
+    console.error("Share ranked keywords history fetch error:", error);
+    res.status(500).json({ message: "Failed to fetch ranked keywords history" });
   }
 });
 
@@ -1453,17 +1671,39 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
     if (clientWithGA4?.ga4RefreshToken && clientWithGA4?.ga4PropertyId && clientWithGA4?.ga4ConnectedAt) {
       try {
         // Force refresh GA4 access token to ensure it's valid for fresh data fetch
-        const { refreshAccessToken } = await import("../lib/ga4.js");
+        const { refreshAccessToken, fetchGA4TrafficData, fetchGA4EventsDetailed, saveGA4MetricsToDB } = await import("../lib/ga4.js");
         const freshToken = await refreshAccessToken(clientWithGA4.ga4RefreshToken);
         
-        // Update access token - this ensures fresh GA4 data will be fetched when dashboard loads
+        // Update access token
         await prisma.client.update({
           where: { id: clientId },
           data: { ga4AccessToken: freshToken },
         });
 
-        ga4Refreshed = true;
-        console.log(`GA4 access token refreshed for client ${clientId} - fresh data will be fetched on next dashboard load`);
+        // Fetch fresh GA4 data and save to database
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30); // Last 30 days
+        
+        try {
+          const [trafficData, eventsData] = await Promise.all([
+            fetchGA4TrafficData(clientId, startDate, endDate),
+            fetchGA4EventsDetailed(clientId, startDate, endDate).catch(err => {
+              console.warn(`[Refresh] Failed to fetch GA4 events for client ${clientId}:`, err.message);
+              return null;
+            })
+          ]);
+          
+          // Save to database
+          await saveGA4MetricsToDB(clientId, startDate, endDate, trafficData, eventsData || undefined);
+          
+          ga4Refreshed = true;
+          console.log(`[Refresh] GA4 data refreshed and saved to database for client ${clientId}`);
+        } catch (ga4DataError: any) {
+          console.error(`[Refresh] Failed to fetch/save GA4 data for client ${clientId}:`, ga4DataError.message);
+          // Token refresh succeeded, so mark as refreshed even if data fetch failed
+          ga4Refreshed = true;
+        }
       } catch (ga4Error: any) {
         console.error("Failed to refresh GA4 access token:", ga4Error.message);
         // Don't fail the entire refresh if GA4 token refresh fails
@@ -1875,31 +2115,39 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     let ga4Data = null;
     let trafficDataSource = "none";
 
-    // Try to fetch from GA4 if connected
+    // Always fetch fresh GA4 data for the requested date range and update the single ga4Metrics row for this client
+    // This ensures that when the date range changes (30 / 90 days / custom), the existing GA4 metrics record
+    // is updated from the GA4 account.
+    let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        console.log(`[Dashboard] Attempting to fetch GA4 data for client ${clientId}`, {
-          propertyId: client.ga4PropertyId,
-          dateRange: { start: startDate.toISOString(), end: endDate.toISOString() },
-          hasAccessToken: !!client.ga4AccessToken,
-          hasRefreshToken: !!client.ga4RefreshToken,
-        });
-        
-        const { fetchGA4TrafficData } = await import("../lib/ga4.js");
-        ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
+        const { fetchGA4TrafficData, fetchGA4EventsDetailed, saveGA4MetricsToDB, getGA4MetricsFromDB } = await import("../lib/ga4.js");
+
+        // Fetch fresh traffic + events data for this date range from GA4
+        const [trafficData, eventsData] = await Promise.all([
+          fetchGA4TrafficData(clientId, startDate, endDate),
+          // If events fetch fails, fall back to existing events from DB (if any)
+          fetchGA4EventsDetailed(clientId, startDate, endDate).catch(async (eventsError: any) => {
+            console.warn("[Dashboard] Failed to fetch detailed GA4 events (will try DB events as fallback):", eventsError?.message);
+            try {
+              const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
+              return dbMetrics?.events ? { events: dbMetrics.events } : { events: [] };
+            } catch {
+              return { events: [] };
+            }
+          }),
+        ]);
+
+        // Save/update the single GA4 metrics record for this client
+        await saveGA4MetricsToDB(clientId, startDate, endDate, trafficData, eventsData);
+
+        ga4Data = trafficData;
+        ga4EventsData = eventsData;
         trafficDataSource = "ga4";
-        
-        console.log(`[Dashboard] ✅ Successfully fetched GA4 data for client ${clientId}:`, {
-          activeUsers: ga4Data?.activeUsers,
-          eventCount: ga4Data?.eventCount,
-          newUsers: ga4Data?.newUsers,
-          keyEvents: ga4Data?.keyEvents,
-          totalSessions: ga4Data?.totalSessions,
-          organicSessions: ga4Data?.organicSessions,
-          hasTrendData: !!(ga4Data?.activeUsersTrend?.length || ga4Data?.newUsersTrend?.length),
-        });
+
+        console.log(`[Dashboard] ✅ Fetched GA4 data from API and updated metrics for client ${clientId}`);
       } catch (ga4Error: any) {
-        console.error("[Dashboard] ❌ Failed to fetch GA4 data:", {
+        console.error("[Dashboard] ❌ Failed to fetch/save GA4 data:", {
           clientId,
           error: ga4Error.message,
           errorName: ga4Error.name,
@@ -1911,11 +2159,36 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
           hasPropertyId: !!client.ga4PropertyId,
           dateRange: { start: startDate.toISOString(), end: endDate.toISOString() },
         });
-        
-        // Continue with fallback data sources
-        // Return error info to frontend for debugging
-        if (ga4Error.message) {
-          console.error("[Dashboard] GA4 Error details:", ga4Error.message);
+
+        // If API fetch fails, fall back to whatever is in the database (if anything)
+        try {
+          const { getGA4MetricsFromDB } = await import("../lib/ga4.js");
+          const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
+          if (dbMetrics) {
+            console.log(`[Dashboard] ⚠️ Using GA4 data from database fallback for client ${clientId}`);
+            ga4Data = {
+              totalSessions: dbMetrics.totalSessions,
+              organicSessions: dbMetrics.organicSessions,
+              directSessions: dbMetrics.directSessions,
+              referralSessions: dbMetrics.referralSessions,
+              paidSessions: dbMetrics.paidSessions,
+              bounceRate: dbMetrics.bounceRate,
+              avgSessionDuration: dbMetrics.avgSessionDuration,
+              pagesPerSession: dbMetrics.pagesPerSession,
+              conversions: dbMetrics.conversions,
+              conversionRate: dbMetrics.conversionRate,
+              activeUsers: dbMetrics.activeUsers,
+              eventCount: dbMetrics.eventCount,
+              newUsers: dbMetrics.newUsers,
+              keyEvents: dbMetrics.keyEvents,
+              newUsersTrend: dbMetrics.newUsersTrend,
+              activeUsersTrend: dbMetrics.activeUsersTrend,
+            };
+            ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
+            trafficDataSource = "ga4";
+          }
+        } catch (dbError) {
+          console.error("[Dashboard] ❌ Failed to load GA4 data from database fallback:", dbError);
         }
       }
     } else {
@@ -2073,10 +2346,132 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
         lost: lostBacklinks,
         avgDomainRating: backlinkStats._avg.domainRating
       },
-      topKeywords
+      topKeywords,
+      ga4Events: ga4EventsData?.events || null
     });
   } catch (error) {
     console.error("Fetch SEO dashboard error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Get GA4 events data for a client
+router.get("/events/:clientId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { period = "30", start, end, refresh = "false" } = req.query;
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const hasAccess = isAdmin || 
+      (req.user.role === "AGENCY" && userAgencyIds.includes(client.agencyId)) ||
+      (req.user.role === "CLIENT" && client.userId === req.user.userId);
+
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Check if GA4 is connected
+    const isGA4Connected = !!(
+      client.ga4RefreshToken &&
+      client.ga4PropertyId &&
+      client.ga4ConnectedAt
+    );
+
+    if (!isGA4Connected) {
+      return res.status(400).json({ message: "GA4 is not connected for this client" });
+    }
+
+    // Calculate date range
+    let startDate: Date;
+    let endDate: Date;
+    
+    if (start && end) {
+      startDate = new Date(start as string);
+      endDate = new Date(end as string);
+      if (endDate > new Date()) {
+        endDate = new Date();
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({ message: "Start date must be before end date" });
+      }
+    } else {
+      const days = parseInt(period as string);
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      endDate = new Date();
+    }
+
+    const { getGA4MetricsFromDB, fetchGA4EventsDetailed, saveGA4MetricsToDB, fetchGA4TrafficData } = await import("../lib/ga4.js");
+
+    // If refresh=true, fetch from GA4 and save to DB
+    if (refresh === "true") {
+      try {
+        // Fetch traffic data to get activeUsers for calculating eventCountPerActiveUser
+        const trafficData = await fetchGA4TrafficData(clientId, startDate, endDate);
+        const eventsData = await fetchGA4EventsDetailed(clientId, startDate, endDate);
+        
+        // Save to database
+        await saveGA4MetricsToDB(clientId, startDate, endDate, trafficData, eventsData);
+        
+        return res.json({
+          success: true,
+          events: eventsData.events,
+          source: "ga4_api"
+        });
+      } catch (error: any) {
+        console.error("[Events] Failed to fetch from GA4:", error);
+        return res.status(500).json({ 
+          message: "Failed to fetch events from GA4", 
+          error: error.message 
+        });
+      }
+    }
+
+    // Otherwise, try to get from database first
+    const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
+    
+    if (dbMetrics && dbMetrics.events && dbMetrics.events.length > 0) {
+      return res.json({
+        success: true,
+        events: dbMetrics.events,
+        source: "database"
+      });
+    }
+
+    // If no data in database, return empty array
+    // Data should be fetched and saved when GA4 is connected or when refresh button is clicked
+    console.log(`[Events] No events data in database for client ${clientId}. Data will be available after connecting GA4 or clicking refresh.`);
+    return res.json({
+      success: true,
+      events: [],
+      source: "database"
+    });
+  } catch (error: any) {
+    console.error("Fetch events error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -3581,6 +3976,92 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
   }
 });
 
+// Get keywords ranking for a specific page/URL
+router.get("/top-pages/:clientId/keywords", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { url } = req.query;
+
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ message: "URL parameter is required" });
+    }
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Find keywords that rank for this URL
+    // Match by googleUrl (normalize both URLs for comparison)
+    const normalizeUrl = (url: string) => {
+      return url
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
+    };
+
+    const normalizedTargetUrl = normalizeUrl(url);
+    
+    const keywords = await prisma.keyword.findMany({
+      where: {
+        clientId,
+        googleUrl: { not: null }
+      },
+      select: {
+        id: true,
+        keyword: true,
+        currentPosition: true,
+        previousPosition: true,
+        searchVolume: true,
+        googleUrl: true,
+      },
+      orderBy: {
+        currentPosition: "asc"
+      }
+    });
+
+    // Filter keywords where the googleUrl matches the target URL
+    const matchingKeywords = keywords.filter(kw => {
+      if (!kw.googleUrl) return false;
+      const normalizedKwUrl = normalizeUrl(kw.googleUrl);
+      return normalizedKwUrl === normalizedTargetUrl || normalizedKwUrl.includes(normalizedTargetUrl) || normalizedTargetUrl.includes(normalizedKwUrl);
+    });
+
+    res.json(matchingKeywords);
+  } catch (error: any) {
+    console.error("Get page keywords error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
@@ -4100,7 +4581,7 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
       return res.status(403).json({ message: "Access denied" });
     }
 
-    // Get target keywords from database
+    // Get target keywords from database (base ordering)
     const targetKeywords = await prisma.targetKeyword.findMany({
       where: { clientId },
       orderBy: [
@@ -4109,7 +4590,29 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
       ],
     });
 
-    res.json(targetKeywords);
+    // Also get tracked keywords for this client so we can prioritize them
+    const trackedKeywords = await prisma.keyword.findMany({
+      where: { clientId },
+      select: { keyword: true },
+    });
+
+    const trackedSet = new Set(
+      trackedKeywords
+        .map((k) => (k.keyword || "").toLowerCase())
+        .filter((k) => k.length > 0)
+    );
+
+    // Sort so that tracked keywords (from Keywords page) appear first,
+    // while preserving the existing sort order within each group.
+    const sortedTargetKeywords = [...targetKeywords].sort((a, b) => {
+      const aTracked = trackedSet.has((a.keyword || "").toLowerCase());
+      const bTracked = trackedSet.has((b.keyword || "").toLowerCase());
+      if (aTracked && !bTracked) return -1;
+      if (!aTracked && bTracked) return 1;
+      return 0;
+    });
+
+    res.json(sortedTargetKeywords);
   } catch (error: any) {
     console.error("Get target keywords error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -4200,6 +4703,79 @@ router.post("/target-keywords/:clientId", authenticateToken, async (req, res) =>
       return res.status(400).json({ message: "Invalid input data", errors: error.errors });
     }
     console.error("Create target keyword error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Update target keyword (for editing date added and ranking)
+router.patch("/target-keywords/:keywordId", authenticateToken, async (req, res) => {
+  try {
+    const { keywordId } = req.params;
+    const updateData = z.object({
+      createdAt: z.string().optional(),
+      googlePosition: z.number().int().positive().optional().nullable(),
+    }).parse(req.body);
+
+    // Get the keyword to check access
+    const keyword = await prisma.targetKeyword.findUnique({
+      where: { id: keywordId },
+      include: {
+        client: {
+          include: {
+            user: {
+              include: {
+                memberships: {
+                  select: { agencyId: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!keyword) {
+      return res.status(404).json({ message: "Target keyword not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = keyword.client.user.memberships.map(m => m.agencyId);
+    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Prepare update data
+    const dataToUpdate: any = {};
+    if (updateData.createdAt) {
+      dataToUpdate.createdAt = new Date(updateData.createdAt);
+    }
+    if (updateData.googlePosition !== undefined) {
+      // If updating position, preserve previous position for change calculation
+      if (keyword.googlePosition !== null && updateData.googlePosition !== keyword.googlePosition) {
+        dataToUpdate.previousPosition = keyword.googlePosition;
+      }
+      dataToUpdate.googlePosition = updateData.googlePosition;
+    }
+
+    const updated = await prisma.targetKeyword.update({
+      where: { id: keywordId },
+      data: dataToUpdate
+    });
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error("Update target keyword error:", error);
+    if (error.name === "ZodError") {
+      return res.status(400).json({ message: "Invalid request data", errors: error.errors });
+    }
     res.status(500).json({ message: "Internal server error" });
   }
 });

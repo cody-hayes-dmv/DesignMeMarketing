@@ -691,6 +691,497 @@ export async function fetchGA4TrafficData(
 }
 
 /**
+ * Fetch GA4 events data with detailed metrics (total users, count per active user, revenue)
+ */
+export async function fetchGA4EventsDetailed(
+  clientId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{
+  events: Array<{
+    name: string;
+    count: number;
+    totalUsers: number;
+    eventCountPerActiveUser: number;
+    totalRevenue: number;
+  }>;
+}> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { ga4PropertyId: true },
+  });
+
+  if (!client?.ga4PropertyId) {
+    return { events: [] };
+  }
+
+  const analytics = await getAnalyticsClient(clientId);
+  const propertyId = client.ga4PropertyId.startsWith('properties/') 
+    ? client.ga4PropertyId 
+    : `properties/${client.ga4PropertyId}`;
+
+  const startDateStr = startDate.toISOString().split('T')[0];
+  const endDateStr = endDate.toISOString().split('T')[0];
+
+  try {
+    // Fetch events with detailed metrics
+    const eventsResponse = await analytics.runReport({
+      property: propertyId,
+      dateRanges: [
+        {
+          startDate: startDateStr,
+          endDate: endDateStr,
+        },
+      ],
+      dimensions: [{ name: 'eventName' }],
+      metrics: [
+        { name: 'eventCount' },
+        { name: 'totalUsers' }, // Users who triggered the event
+        { name: 'eventValue' }, // Revenue value (if configured)
+      ],
+      orderBys: [
+        {
+          metric: { metricName: 'eventCount' },
+          desc: true,
+        },
+      ],
+      limit: 100,
+    });
+
+    // Get total active users for the period to calculate eventCountPerActiveUser
+    let totalActiveUsers = 0;
+    try {
+      const usersResponse = await analytics.runReport({
+        property: propertyId,
+        dateRanges: [
+          {
+            startDate: startDateStr,
+            endDate: endDateStr,
+          },
+        ],
+        metrics: [{ name: 'activeUsers' }],
+      });
+      totalActiveUsers = parseInt(
+        usersResponse?.rows?.[0]?.metricValues?.[0]?.value || '0',
+        10
+      );
+    } catch (usersError) {
+      console.warn('[GA4] Failed to fetch total active users:', usersError);
+    }
+
+    // Process events
+    const events: Array<{
+      name: string;
+      count: number;
+      totalUsers: number;
+      eventCountPerActiveUser: number;
+      totalRevenue: number;
+    }> = [];
+
+    if (eventsResponse?.rows) {
+      for (const row of eventsResponse.rows) {
+        const eventName = row.dimensionValues?.[0]?.value || '';
+        const count = parseInt(row.metricValues?.[0]?.value || '0', 10);
+        const totalUsers = parseInt(row.metricValues?.[1]?.value || '0', 10);
+        const totalRevenue = parseFloat(row.metricValues?.[2]?.value || '0');
+
+        if (eventName && count > 0) {
+          // Calculate event count per active user
+          const eventCountPerActiveUser = totalActiveUsers > 0 
+            ? parseFloat((count / totalActiveUsers).toFixed(2))
+            : 0;
+
+          events.push({
+            name: eventName,
+            count,
+            totalUsers,
+            eventCountPerActiveUser,
+            totalRevenue,
+          });
+        }
+      }
+    }
+
+    // Sort by count descending and limit to top 50
+    return {
+      events: events
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 50),
+    };
+  } catch (error: any) {
+    console.error('[GA4] Failed to fetch detailed events data:', error);
+    return { events: [] };
+  }
+}
+
+/**
+ * Fetch GA4 events data (form submissions, video plays, downloads, etc.)
+ */
+export async function fetchGA4EventsData(
+  clientId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{
+  events: Array<{
+    name: string;
+    count: number;
+    change?: string; // Percentage change
+  }>;
+}> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { ga4PropertyId: true },
+  });
+
+  if (!client?.ga4PropertyId) {
+    return { events: [] };
+  }
+
+  const analytics = await getAnalyticsClient(clientId);
+  const propertyId = client.ga4PropertyId.startsWith('properties/') 
+    ? client.ga4PropertyId 
+    : `properties/${client.ga4PropertyId}`;
+
+  const startDateStr = startDate.toISOString().split('T')[0];
+  const endDateStr = endDate.toISOString().split('T')[0];
+
+  // Calculate previous period for change calculation
+  const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+  const previousStartDate = new Date(startDate);
+  previousStartDate.setDate(previousStartDate.getDate() - daysDiff);
+  const previousEndDate = new Date(startDate);
+  const previousStartDateStr = previousStartDate.toISOString().split('T')[0];
+  const previousEndDateStr = previousEndDate.toISOString().split('T')[0];
+
+  try {
+    // Fetch current period events
+    const currentEventsResponse = await analytics.runReport({
+      property: propertyId,
+      dateRanges: [
+        {
+          startDate: startDateStr,
+          endDate: endDateStr,
+        },
+      ],
+      dimensions: [{ name: 'eventName' }],
+      metrics: [
+        { name: 'eventCount' },
+      ],
+      orderBys: [
+        {
+          metric: { metricName: 'eventCount' },
+          desc: true,
+        },
+      ],
+      limit: 100,
+    });
+
+    // Fetch previous period events for change calculation
+    let previousEventsResponse;
+    try {
+      previousEventsResponse = await analytics.runReport({
+        property: propertyId,
+        dateRanges: [
+          {
+            startDate: previousStartDateStr,
+            endDate: previousEndDateStr,
+          },
+        ],
+        dimensions: [{ name: 'eventName' }],
+        metrics: [
+          { name: 'eventCount' },
+        ],
+        orderBys: [
+          {
+            metric: { metricName: 'eventCount' },
+            desc: true,
+          },
+        ],
+        limit: 100,
+      });
+    } catch (prevError) {
+      console.warn('[GA4] Failed to fetch previous period events:', prevError);
+      previousEventsResponse = null;
+    }
+
+    // Process current events
+    const currentEventsMap = new Map<string, number>();
+    if (currentEventsResponse?.rows) {
+      currentEventsResponse.rows.forEach((row: any) => {
+        const eventName = row.dimensionValues?.[0]?.value || '';
+        const count = parseInt(row.metricValues?.[0]?.value || '0', 10);
+        if (eventName && count > 0) {
+          currentEventsMap.set(eventName, count);
+        }
+      });
+    }
+
+    // Process previous events
+    const previousEventsMap = new Map<string, number>();
+    if (previousEventsResponse?.rows) {
+      previousEventsResponse.rows.forEach((row: any) => {
+        const eventName = row.dimensionValues?.[0]?.value || '';
+        const count = parseInt(row.metricValues?.[0]?.value || '0', 10);
+        if (eventName && count > 0) {
+          previousEventsMap.set(eventName, count);
+        }
+      });
+    }
+
+    // Map common event names to display names
+    const eventNameMap: Record<string, string> = {
+      'form_submit': 'Form Submissions',
+      'form_submission': 'Form Submissions',
+      'generate_lead': 'Form Submissions',
+      'video_start': 'Video Plays',
+      'video_progress': 'Video Plays',
+      'video_complete': 'Video Plays',
+      'file_download': 'Downloads',
+      'download': 'Downloads',
+      'page_view': 'Page Views',
+    };
+
+    // Aggregate events by display name
+    const eventsMap = new Map<string, { count: number; previousCount: number }>();
+    
+    currentEventsMap.forEach((count, eventName) => {
+      const displayName = eventNameMap[eventName.toLowerCase()] || eventName;
+      const current = eventsMap.get(displayName) || { count: 0, previousCount: 0 };
+      current.count += count;
+      eventsMap.set(displayName, current);
+    });
+
+    previousEventsMap.forEach((count, eventName) => {
+      const displayName = eventNameMap[eventName.toLowerCase()] || eventName;
+      const current = eventsMap.get(displayName) || { count: 0, previousCount: 0 };
+      current.previousCount += count;
+      eventsMap.set(displayName, current);
+    });
+
+    // Convert to array and calculate changes
+    const events = Array.from(eventsMap.entries())
+      .map(([name, data]) => {
+        let change: string | undefined;
+        if (data.previousCount > 0) {
+          const changePercent = ((data.count - data.previousCount) / data.previousCount) * 100;
+          change = `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(0)}%`;
+        } else if (data.count > 0) {
+          change = '+100%';
+        }
+
+        return {
+          name,
+          count: data.count,
+          change,
+        };
+      })
+      .filter(event => event.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10); // Top 10 events
+
+    return { events };
+  } catch (error: any) {
+    console.error('[GA4] Failed to fetch events data:', error);
+    return { events: [] };
+  }
+}
+
+/**
+ * Save GA4 metrics to database
+ */
+export async function saveGA4MetricsToDB(
+  clientId: string,
+  startDate: Date,
+  endDate: Date,
+  trafficData: {
+    totalSessions: number;
+    organicSessions: number;
+    directSessions: number;
+    referralSessions: number;
+    paidSessions: number;
+    bounceRate: number;
+    avgSessionDuration: number;
+    pagesPerSession: number;
+    conversions: number;
+    conversionRate: number;
+    activeUsers: number;
+    eventCount: number;
+    newUsers: number;
+    keyEvents: number;
+    newUsersTrend: TrendPoint[];
+    activeUsersTrend: TrendPoint[];
+  },
+  eventsData?: {
+    events: Array<{
+      name: string;
+      count: number;
+      change?: string;
+      totalUsers?: number;
+      eventCountPerActiveUser?: number;
+      totalRevenue?: number;
+    }>;
+  }
+): Promise<void> {
+  try {
+    // Upsert GA4 metrics - one record per client (update if exists, otherwise create)
+    // Note: If you get "Cannot read properties of undefined", run: npx prisma generate
+    const ga4MetricsModel = (prisma as any).ga4Metrics;
+    if (!ga4MetricsModel) {
+      throw new Error('GA4Metrics model not found in Prisma client. Please run: npx prisma generate');
+    }
+    await ga4MetricsModel.upsert({
+      where: {
+        clientId: clientId, // One record per client
+      },
+      update: {
+        startDate, // Update date range to reflect current query
+        endDate,
+        activeUsers: trafficData.activeUsers,
+        eventCount: trafficData.eventCount,
+        newUsers: trafficData.newUsers,
+        keyEvents: trafficData.keyEvents,
+        totalSessions: trafficData.totalSessions,
+        organicSessions: trafficData.organicSessions,
+        directSessions: trafficData.directSessions,
+        referralSessions: trafficData.referralSessions,
+        paidSessions: trafficData.paidSessions,
+        bounceRate: trafficData.bounceRate,
+        avgSessionDuration: trafficData.avgSessionDuration,
+        pagesPerSession: trafficData.pagesPerSession,
+        conversions: trafficData.conversions,
+        conversionRate: trafficData.conversionRate,
+        newUsersTrend: trafficData.newUsersTrend.length > 0 ? trafficData.newUsersTrend : null,
+        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? trafficData.activeUsersTrend : null,
+        events: eventsData?.events && eventsData.events.length > 0 ? eventsData.events : null,
+      },
+      create: {
+        clientId,
+        startDate,
+        endDate,
+        activeUsers: trafficData.activeUsers,
+        eventCount: trafficData.eventCount,
+        newUsers: trafficData.newUsers,
+        keyEvents: trafficData.keyEvents,
+        totalSessions: trafficData.totalSessions,
+        organicSessions: trafficData.organicSessions,
+        directSessions: trafficData.directSessions,
+        referralSessions: trafficData.referralSessions,
+        paidSessions: trafficData.paidSessions,
+        bounceRate: trafficData.bounceRate,
+        avgSessionDuration: trafficData.avgSessionDuration,
+        pagesPerSession: trafficData.pagesPerSession,
+        conversions: trafficData.conversions,
+        conversionRate: trafficData.conversionRate,
+        newUsersTrend: trafficData.newUsersTrend.length > 0 ? trafficData.newUsersTrend : null,
+        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? trafficData.activeUsersTrend : null,
+        events: eventsData?.events && eventsData.events.length > 0 ? eventsData.events : null,
+      },
+    });
+
+    console.log(`[GA4] Saved metrics to database for client ${clientId} (${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]})`);
+  } catch (error: any) {
+    console.error('[GA4] Failed to save metrics to database:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get GA4 metrics from database
+ * Returns the most recent metrics snapshot that matches the date range
+ */
+export async function getGA4MetricsFromDB(
+  clientId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{
+  totalSessions: number;
+  organicSessions: number;
+  directSessions: number;
+  referralSessions: number;
+  paidSessions: number;
+  bounceRate: number;
+  avgSessionDuration: number;
+  pagesPerSession: number;
+  conversions: number;
+  conversionRate: number;
+  activeUsers: number;
+  eventCount: number;
+  newUsers: number;
+  keyEvents: number;
+  newUsersTrend: TrendPoint[];
+  activeUsersTrend: TrendPoint[];
+  events: Array<{
+    name: string;
+    count: number;
+    change?: string;
+    totalUsers?: number;
+    eventCountPerActiveUser?: number;
+    totalRevenue?: number;
+  }> | null;
+} | null> {
+  try {
+    // Find the single metrics record for this client (one record per client)
+    // Note: If you get "Cannot read properties of undefined", run: npx prisma generate
+    const ga4MetricsModel = (prisma as any).ga4Metrics;
+    if (!ga4MetricsModel) {
+      console.error('[GA4] GA4Metrics model not found in Prisma client. Please run: npx prisma generate');
+      return null;
+    }
+    // One record per client - find by clientId only (date range is stored but not used for lookup)
+    const metrics = await ga4MetricsModel.findUnique({
+      where: {
+        clientId: clientId,
+      },
+    });
+
+    if (!metrics) {
+      return null;
+    }
+
+    // Convert JSON fields back to arrays
+    const newUsersTrend: TrendPoint[] = Array.isArray(metrics.newUsersTrend)
+      ? metrics.newUsersTrend as TrendPoint[]
+      : [];
+    const activeUsersTrend: TrendPoint[] = Array.isArray(metrics.activeUsersTrend)
+      ? metrics.activeUsersTrend as TrendPoint[]
+      : [];
+    const events = Array.isArray(metrics.events)
+      ? metrics.events as Array<{ 
+          name: string; 
+          count: number; 
+          change?: string;
+          totalUsers?: number;
+          eventCountPerActiveUser?: number;
+          totalRevenue?: number;
+        }>
+      : null;
+
+    return {
+      totalSessions: metrics.totalSessions,
+      organicSessions: metrics.organicSessions,
+      directSessions: metrics.directSessions,
+      referralSessions: metrics.referralSessions,
+      paidSessions: metrics.paidSessions,
+      bounceRate: metrics.bounceRate,
+      avgSessionDuration: metrics.avgSessionDuration,
+      pagesPerSession: metrics.pagesPerSession,
+      conversions: metrics.conversions,
+      conversionRate: metrics.conversionRate,
+      activeUsers: metrics.activeUsers,
+      eventCount: metrics.eventCount,
+      newUsers: metrics.newUsers,
+      keyEvents: metrics.keyEvents,
+      newUsersTrend,
+      activeUsersTrend,
+      events,
+    };
+  } catch (error: any) {
+    console.error('[GA4] Failed to get metrics from database:', error);
+    return null;
+  }
+}
+
+/**
  * Get analytics admin client with valid access token
  */
 async function getAnalyticsAdminClient(clientId: string) {

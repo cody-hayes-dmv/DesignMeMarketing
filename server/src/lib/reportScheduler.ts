@@ -351,6 +351,74 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
 }
 
 /**
+ * Auto-refresh GA4 data for all connected clients (runs every Monday morning)
+ */
+export async function refreshAllGA4Data(): Promise<void> {
+  try {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const hour = now.getHours();
+    
+    // Only run on Monday mornings (1 = Monday, between 1 AM and 9 AM)
+    if (dayOfWeek !== 1 || hour < 1 || hour > 9) {
+      return;
+    }
+
+    console.log(`[GA4 Auto-Refresh] Starting Monday morning refresh at ${now.toISOString()}`);
+    
+    // Find all clients with GA4 connected
+    const connectedClients = await prisma.client.findMany({
+      where: {
+        ga4RefreshToken: { not: null },
+        ga4PropertyId: { not: null },
+        ga4ConnectedAt: { not: null }
+      },
+      select: {
+        id: true,
+        name: true,
+        ga4PropertyId: true
+      }
+    });
+
+    console.log(`[GA4 Auto-Refresh] Found ${connectedClients.length} clients with GA4 connected`);
+
+    // Refresh data for each client in parallel (but limit concurrency)
+    const refreshPromises = connectedClients.map(async (client) => {
+      try {
+        const { fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import('./ga4.js');
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30); // Last 30 days
+
+        const [trafficData, eventsData] = await Promise.all([
+          fetchGA4TrafficData(client.id, startDate, endDate).catch(err => {
+            console.warn(`[GA4 Auto-Refresh] Failed to refresh traffic for ${client.name}:`, err.message);
+            return null;
+          }),
+          fetchGA4EventsData(client.id, startDate, endDate).catch(err => {
+            console.warn(`[GA4 Auto-Refresh] Failed to refresh events for ${client.name}:`, err.message);
+            return null;
+          })
+        ]);
+
+        // Save to database if we got data
+        if (trafficData) {
+          await saveGA4MetricsToDB(client.id, startDate, endDate, trafficData, eventsData || undefined);
+          console.log(`[GA4 Auto-Refresh] ✅ Refreshed and saved data for ${client.name}`);
+        }
+      } catch (error: any) {
+        console.error(`[GA4 Auto-Refresh] ❌ Failed to refresh ${client.name}:`, error.message);
+      }
+    });
+
+    await Promise.allSettled(refreshPromises);
+    console.log(`[GA4 Auto-Refresh] Completed refresh for ${connectedClients.length} clients`);
+  } catch (error: any) {
+    console.error('[GA4 Auto-Refresh] Error:', error);
+  }
+}
+
+/**
  * Process scheduled reports - called by cron job
  */
 export async function processScheduledReports(): Promise<void> {

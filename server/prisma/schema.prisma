@@ -209,6 +209,7 @@ model Client {
   trafficSources TrafficSource[]
   backlinkTimeseries BacklinkTimeseries[]
   targetKeywords TargetKeyword[]
+  ga4Metrics Ga4Metrics[]
 
   @@index([name, domain])
   @@map("clients")
@@ -543,4 +544,51 @@ model TargetKeyword {
   @@index([clientId, searchVolume])
   @@index([clientId, googlePosition])
   @@map("target_keywords")
+}
+
+model Ga4Metrics {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Date range for this metrics snapshot
+  startDate DateTime
+  endDate   DateTime
+
+  // Core GA4 metrics
+  activeUsers    Int
+  eventCount     Int
+  newUsers       Int
+  keyEvents      Int
+
+  // Traffic metrics
+  totalSessions    Int
+  organicSessions  Int
+  directSessions   Int
+  referralSessions Int
+  paidSessions     Int
+
+  // Engagement metrics
+  bounceRate         Float
+  avgSessionDuration Float
+  pagesPerSession    Float
+
+  // Conversion metrics
+  conversions    Int
+  conversionRate Float
+
+  // Trend data (stored as JSON arrays)
+  newUsersTrend    Json? @db.Json // Array of { date: string, value: number }
+  activeUsersTrend Json? @db.Json // Array of { date: string, value: number }
+
+  // Events data (stored as JSON array)
+  events Json? @db.Json // Array of { name: string, count: number, change?: string }
+
+  // Client relationship
+  clientId String @unique // One record per client
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, endDate])
+  @@index([clientId, createdAt])
+  @@map("ga4_metrics")
 }

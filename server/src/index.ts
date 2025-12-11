@@ -53,7 +53,7 @@ app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   
   // Start report scheduler cron job (runs every hour)
-  const { processScheduledReports } = await import("./lib/reportScheduler.js");
+  const { processScheduledReports, refreshAllGA4Data } = await import("./lib/reportScheduler.js");
   
   // Run immediately on startup (for testing)
   processScheduledReports().catch(console.error);
@@ -63,5 +63,11 @@ app.listen(PORT, async () => {
     processScheduledReports().catch(console.error);
   }, 60 * 60 * 1000); // 1 hour in milliseconds
   
+  // GA4 auto-refresh: Check every hour, but only runs on Monday mornings
+  setInterval(() => {
+    refreshAllGA4Data().catch(console.error);
+  }, 60 * 60 * 1000); // Check every hour
+  
   console.log("Report scheduler started (runs every hour)");
+  console.log("GA4 auto-refresh scheduler started (runs Monday mornings)");
 });

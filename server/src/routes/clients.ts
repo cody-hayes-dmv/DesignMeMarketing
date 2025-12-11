@@ -869,21 +869,34 @@ router.post('/:id/ga4/connect', authenticateToken, async (req, res) => {
             },
         });
 
-        // Optionally: Fetch a test sample of GA4 data to verify connection works
+        // Auto-fetch GA4 data immediately after connection and save to DB
+        // Wait for data to be fetched and saved before responding
         try {
-            const { fetchGA4TrafficData } = await import('../lib/ga4.js');
+            const { fetchGA4TrafficData, fetchGA4EventsDetailed, saveGA4MetricsToDB } = await import('../lib/ga4.js');
             const endDate = new Date();
             const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 7); // Last 7 days for test
+            startDate.setDate(startDate.getDate() - 30); // Last 30 days for initial fetch
             
-            const testData = await fetchGA4TrafficData(clientId, startDate, endDate);
-            console.log(`GA4 connection verified - fetched test data:`, {
-                totalUsers: testData.totalUsers,
-                totalSessions: testData.totalSessions,
-            });
+            // Fetch data and save to database - await to ensure it's saved before response
+            try {
+                const [trafficData, eventsData] = await Promise.all([
+                    fetchGA4TrafficData(clientId, startDate, endDate),
+                    fetchGA4EventsDetailed(clientId, startDate, endDate).catch(err => {
+                        console.warn('GA4 events fetch failed during connection:', err.message);
+                        return { events: [] }; // Return empty events if fetch fails
+                    })
+                ]);
+                
+                // Save to database
+                await saveGA4MetricsToDB(clientId, startDate, endDate, trafficData, eventsData);
+                console.log(`[GA4 Connect] ✅ Successfully fetched and saved GA4 data for client ${clientId} (${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]})`);
+            } catch (fetchError: any) {
+                console.error('[GA4 Connect] Failed to fetch/save GA4 data:', fetchError.message);
+                // Don't fail the connection if data fetch fails, but log the error
+            }
         } catch (testError: any) {
-            console.warn('GA4 connection test failed (non-critical):', testError.message);
-            // Don't fail the connection if test fetch fails - property might not have data yet
+            console.warn('[GA4 Connect] Auto-fetch setup failed (non-critical):', testError.message);
+            // Don't fail the connection if auto-fetch setup fails
         }
 
         res.json({ 
