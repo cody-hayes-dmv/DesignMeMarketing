@@ -295,6 +295,7 @@ export async function fetchGA4TrafficData(
 
   // Run requests with individual error handling to avoid one failure breaking all requests
   let sessionsResponse, usersResponse, engagementResponse, conversionsResponse, trendResponse, keyEventsResponse;
+  let hadAuthError = false;
   
   // Helper to safely run a report request
   const safeRunReport = async (requestConfig: any, requestName: string) => {
@@ -302,6 +303,14 @@ export async function fetchGA4TrafficData(
       const [response] = await analytics.runReport(requestConfig);
       return response;
     } catch (error: any) {
+      if (
+        error?.code === 16 ||
+        error?.status === 'UNAUTHENTICATED' ||
+        typeof error?.message === 'string' &&
+          error.message.includes('UNAUTHENTICATED')
+      ) {
+        hadAuthError = true;
+      }
       console.warn(`[GA4] ${requestName} request failed:`, {
         error: error.message,
         code: error.code,
@@ -428,6 +437,36 @@ export async function fetchGA4TrafficData(
     }
 
   } catch (apiError: any) {
+    // If all requests failed specifically due to authentication, don't crash the app.
+    // Instead, log a clear warning and return safe default metrics so the rest of the
+    // reporting pipeline (e.g. scheduled reports) can continue using fallback data.
+    if (hadAuthError) {
+      console.warn('[GA4] All GA4 API requests failed due to authentication (UNAUTHENTICATED). ' +
+        'Returning zero metrics and falling back to non-GA4 data.', {
+        propertyId,
+        message: apiError?.message,
+      });
+
+      return {
+        totalSessions: 0,
+        organicSessions: 0,
+        directSessions: 0,
+        referralSessions: 0,
+        paidSessions: 0,
+        bounceRate: 0,
+        avgSessionDuration: 0,
+        pagesPerSession: 0,
+        conversions: 0,
+        conversionRate: 0,
+        activeUsers: 0,
+        eventCount: 0,
+        newUsers: 0,
+        keyEvents: 0,
+        newUsersTrend: [],
+        activeUsersTrend: [],
+      };
+    }
+
     console.error('[GA4] Critical API error:', {
       error: apiError.message,
       code: apiError.code,

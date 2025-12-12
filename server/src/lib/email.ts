@@ -13,6 +13,8 @@ interface EmailOptions {
   attachments?: EmailAttachment[];
 }
 
+const EMAIL_DISABLED = process.env.EMAIL_DISABLED === "true";
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "localhost",
   port: parseInt(process.env.SMTP_PORT || "587"),
@@ -25,6 +27,13 @@ const transporter = nodemailer.createTransport({
 
 export const sendEmail = async ({ to, subject, html, attachments }: EmailOptions) => {
   try {
+    if (EMAIL_DISABLED) {
+      console.log(
+        `[Email] EMAIL_DISABLED=true, skipping send to ${to}. Subject: "${subject}"`
+      );
+      return;
+    }
+
     await transporter.sendMail({
       from: process.env.SMTP_FROM || "noreply@yourseodashboard.com",
       to,

@@ -314,7 +314,8 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
   };
 
   // Upsert report (one report per client)
-  const existing = await prisma.seoReport.findUnique({
+  // Use findFirst instead of findUnique(clientId) to be compatible with older Prisma clients
+  const existing = await prisma.seoReport.findFirst({
     where: { clientId }
   });
 

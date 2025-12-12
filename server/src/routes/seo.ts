@@ -559,7 +559,8 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
     // Return the single report for this client (one report per client)
     // Include client information in the response
     // Fetch all report fields from database (no mock data)
-    const report = await prisma.seoReport.findUnique({
+    // Use findFirst instead of findUnique(clientId) for compatibility with older Prisma clients
+    const report = await prisma.seoReport.findFirst({
       where: { clientId },
       include: {
         client: {
@@ -2532,7 +2533,8 @@ router.post("/reports/:clientId", authenticateToken, async (req, res) => {
     }
 
     // Enforce single report per client: upsert by clientId only
-    const existing = await prisma.seoReport.findUnique({ where: { clientId } });
+    // Use findFirst instead of findUnique(clientId) for compatibility with older Prisma clients
+    const existing = await prisma.seoReport.findFirst({ where: { clientId } });
 
     const report = existing
       ? await prisma.seoReport.update({
