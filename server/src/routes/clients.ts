@@ -315,7 +315,9 @@ router.get('/ga4/callback', async (req, res) => {
         }
         // Fallback checks for popup detection
         if (!isPopup) {
-            isPopup = req.query.popup === 'true' || req.headers.referer?.includes('popup=true');
+            const fromQuery = req.query.popup === 'true';
+            const fromReferer = !!req.headers.referer?.includes('popup=true');
+            isPopup = fromQuery || fromReferer;
         }
 
         if (error) {

@@ -1603,18 +1603,19 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
 
       // Save new traffic sources to database
       if (trafficSourceSummary) {
+        const summary: NonNullable<typeof trafficSourceSummary> = trafficSourceSummary;
         await Promise.all(
-          trafficSourceSummary.breakdown.map((item) =>
+          summary.breakdown.map((item) =>
             prisma.trafficSource.create({
               data: {
                 clientId,
                 name: item.name,
                 value: item.value,
-                totalKeywords: trafficSourceSummary.totalKeywords,
-                totalEstimatedTraffic: trafficSourceSummary.totalEstimatedTraffic,
-                organicEstimatedTraffic: trafficSourceSummary.organicEstimatedTraffic,
-                averageRank: trafficSourceSummary.averageRank,
-                rankSampleSize: trafficSourceSummary.rankSampleSize,
+                totalKeywords: summary.totalKeywords,
+                totalEstimatedTraffic: summary.totalEstimatedTraffic,
+                organicEstimatedTraffic: summary.organicEstimatedTraffic,
+                averageRank: summary.averageRank,
+                rankSampleSize: summary.rankSampleSize,
               },
             })
           )
@@ -2387,8 +2388,10 @@ router.get("/events/:clientId", authenticateToken, async (req, res) => {
       select: { agencyId: true }
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || 
-      (req.user.role === "AGENCY" && userAgencyIds.includes(client.agencyId)) ||
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAccess =
+      isAdmin ||
+      clientAgencyIds.some(id => userAgencyIds.includes(id)) ||
       (req.user.role === "CLIENT" && client.userId === req.user.userId);
 
     if (!hasAccess) {
