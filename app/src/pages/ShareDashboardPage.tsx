@@ -764,7 +764,7 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Ranked Keywords Overview (same as client report view, without refresh button) */}
+            {/* Ranked Keywords Overview */}
             {dashboardSummary?.client?.id && token && (
               <RankedKeywordsOverview
                 clientId={dashboardSummary.client.id}
@@ -772,7 +772,6 @@ const ShareDashboardPage: React.FC = () => {
                 title="Total Keywords Ranked"
                 subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
                 shareToken={token}
-                enableRefresh={false}
               />
             )}
 
@@ -823,7 +822,87 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Visitor Source, Events, and extra Conversions sections omitted to match the client report view */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">Visitor Source</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session Source</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Visitors</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sessions</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Events</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Count</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {visitorSourceData.map((source, index) => (
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source.source}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source.visitors.toLocaleString()}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source.sessions}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source.keyEvents}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source.eventCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Events</h3>
+                <div className="space-y-4">
+                  {dashboardSummary?.ga4Events && dashboardSummary.ga4Events.length > 0 ? (
+                    dashboardSummary.ga4Events.map((event, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <p className="font-medium text-gray-900">{event.name}</p>
+                          <p className="text-sm text-gray-500">{event.count.toLocaleString()} events</p>
+                        </div>
+                        <div className="text-right">
+                          {event.change && (
+                            <p className="text-sm font-medium text-green-600">{event.change}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-gray-500 text-center py-4">
+                      {dashboardSummary?.isGA4Connected 
+                        ? "No events data available. Make sure events are configured in GA4."
+                        : "Connect GA4 to view events data."}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Conversions</h3>
+                <div className="space-y-4">
+                  {dashboardSummary?.keyEvents !== null && dashboardSummary?.keyEvents !== undefined ? (
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div>
+                        <p className="font-medium text-gray-900">Key Events</p>
+                        <p className="text-sm text-gray-500">{dashboardSummary.keyEvents.toLocaleString()} conversions</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium text-green-600">From GA4</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-500 text-center py-4">
+                      {dashboardSummary?.isGA4Connected 
+                        ? "No conversions data available."
+                        : "Connect GA4 to view conversions data."}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <div className="bg-white rounded-xl border border-gray-200">
               <div className="p-6 border-b border-gray-200">
@@ -921,7 +1000,6 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* New Links section – mirror the view-report modal: show only the trend list */}
             <div className="bg-white rounded-xl border border-gray-200">
               <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                 <div>
@@ -930,6 +1008,58 @@ const ShareDashboardPage: React.FC = () => {
                 </div>
               </div>
               <div className="p-6 space-y-4">
+                {backlinksListLoading ? (
+                  <p className="text-sm text-gray-500">Loading backlinks...</p>
+                ) : backlinksListError ? (
+                  <p className="text-sm text-red-600">{backlinksListError}</p>
+                ) : backlinksList.length > 0 ? (
+                  <div className="mb-6 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Source URL</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Anchor Text</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Domain Rating</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Type</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {backlinksList.slice(0, 20).map((link) => (
+                          <tr key={link.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2">
+                              <a
+                                href={link.sourceUrl.startsWith("http") ? link.sourceUrl : `https://${link.sourceUrl}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary-600 hover:underline text-xs break-all"
+                              >
+                                {link.sourceUrl}
+                              </a>
+                            </td>
+                            <td className="px-4 py-2 text-gray-700">{link.anchorText || "—"}</td>
+                            <td className="px-4 py-2 text-gray-700">
+                              {link.domainRating !== null ? link.domainRating.toFixed(1) : "—"}
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                link.isFollow ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"
+                              }`}>
+                                {link.isFollow ? "Follow" : "Nofollow"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {backlinksList.length > 20 && (
+                      <p className="mt-2 text-xs text-gray-500 text-center">
+                        Showing 20 of {backlinksList.length} backlinks
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 mb-4">No backlinks data available yet.</p>
+                )}
                 {backlinkTimeseriesLoading ? (
                   <p className="text-sm text-gray-500">Loading backlink trends...</p>
                 ) : backlinkTimeseriesError ? (

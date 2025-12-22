@@ -789,13 +789,18 @@ router.get("/share/:token/dashboard", async (req, res) => {
           ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
           trafficDataSource = "ga4";
         } else {
-          // No data in database - don't fetch from API here, data should be loaded from DB
-          // Data will be fetched and saved when GA4 is connected or when refresh button is clicked
-          console.log(`[Share Dashboard] ⚠️ No GA4 data in database for client ${clientId}. Data will be available after connecting GA4 or clicking refresh.`);
-          // Set to null so frontend knows there's no data
-          ga4Data = null;
-          ga4EventsData = null;
-          trafficDataSource = "none";
+          // No data in database, fetch from API (but don't save to DB here - that's done by refresh/connect)
+          console.log(`[Share Dashboard] No GA4 data in database, fetching from API for client ${clientId}`);
+          ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
+          // Fetch events data in parallel
+          try {
+            ga4EventsData = await fetchGA4EventsData(clientId, startDate, endDate);
+          } catch (eventsError) {
+            console.warn("[Share Dashboard] Failed to fetch GA4 events:", eventsError);
+          }
+          trafficDataSource = "ga4";
+          
+          console.log(`[Share Dashboard] ✅ Successfully fetched GA4 data from API for client ${clientId}`);
         }
       } catch (ga4Error: any) {
         console.error("[Share Dashboard] Failed to get GA4 data:", ga4Error.message);
@@ -1117,6 +1122,70 @@ router.get("/share/:token/traffic-sources", async (req, res) => {
   } catch (error: any) {
     console.error("Share traffic sources fetch error:", error);
     res.status(500).json({ message: "Failed to fetch traffic sources data" });
+  }
+});
+
+// Share endpoint for top events
+router.get("/share/:token/events/top", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const tokenData = verifyShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+
+    const clientId = tokenData.clientId;
+    const { period = "30", start, end, limit = "10" } = req.query;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, ga4RefreshToken: true, ga4PropertyId: true, ga4ConnectedAt: true }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Check if GA4 is connected
+    const isGA4Connected = !!(
+      client.ga4RefreshToken &&
+      client.ga4PropertyId &&
+      client.ga4ConnectedAt
+    );
+
+    if (!isGA4Connected) {
+      return res.json([]);
+    }
+
+    // Calculate date range
+    let startDate: Date;
+    let endDate: Date;
+    
+    if (start && end) {
+      startDate = new Date(start as string);
+      endDate = new Date(end as string);
+      if (endDate > new Date()) {
+        endDate = new Date();
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({ message: "Start date must be before end date" });
+      }
+    } else {
+      const days = parseInt(period as string);
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      endDate = new Date();
+    }
+
+    // Fetch top events
+    const { fetchGA4TopEvents } = await import("../lib/ga4TopEvents.js");
+    const eventsLimit = parseInt(limit as string) || 10;
+    const events = await fetchGA4TopEvents(clientId, startDate, endDate, eventsLimit);
+
+    res.json(events);
+  } catch (error: any) {
+    console.error("Share top events fetch error:", error);
+    res.status(500).json({ message: "Failed to fetch top events data" });
   }
 });
 
@@ -1603,19 +1672,18 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
 
       // Save new traffic sources to database
       if (trafficSourceSummary) {
-        const summary: NonNullable<typeof trafficSourceSummary> = trafficSourceSummary;
         await Promise.all(
-          summary.breakdown.map((item) =>
+          trafficSourceSummary.breakdown.map((item) =>
             prisma.trafficSource.create({
               data: {
                 clientId,
                 name: item.name,
                 value: item.value,
-                totalKeywords: summary.totalKeywords,
-                totalEstimatedTraffic: summary.totalEstimatedTraffic,
-                organicEstimatedTraffic: summary.organicEstimatedTraffic,
-                averageRank: summary.averageRank,
-                rankSampleSize: summary.rankSampleSize,
+                totalKeywords: trafficSourceSummary.totalKeywords,
+                totalEstimatedTraffic: trafficSourceSummary.totalEstimatedTraffic,
+                organicEstimatedTraffic: trafficSourceSummary.organicEstimatedTraffic,
+                averageRank: trafficSourceSummary.averageRank,
+                rankSampleSize: trafficSourceSummary.rankSampleSize,
               },
             })
           )
@@ -1673,7 +1741,7 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
     if (clientWithGA4?.ga4RefreshToken && clientWithGA4?.ga4PropertyId && clientWithGA4?.ga4ConnectedAt) {
       try {
         // Force refresh GA4 access token to ensure it's valid for fresh data fetch
-        const { refreshAccessToken, fetchGA4TrafficData, fetchGA4EventsDetailed, saveGA4MetricsToDB } = await import("../lib/ga4.js");
+        const { refreshAccessToken, fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import("../lib/ga4.js");
         const freshToken = await refreshAccessToken(clientWithGA4.ga4RefreshToken);
         
         // Update access token
@@ -1688,16 +1756,28 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
         startDate.setDate(startDate.getDate() - 30); // Last 30 days
         
         try {
-          const [trafficData, eventsData] = await Promise.all([
+          const { fetchGA4VisitorSources } = await import("../lib/ga4VisitorSources.js");
+          const [trafficData, eventsData, visitorSourcesData] = await Promise.all([
             fetchGA4TrafficData(clientId, startDate, endDate),
-            fetchGA4EventsDetailed(clientId, startDate, endDate).catch(err => {
+            fetchGA4EventsData(clientId, startDate, endDate).catch(err => {
               console.warn(`[Refresh] Failed to fetch GA4 events for client ${clientId}:`, err.message);
+              return null;
+            }),
+            fetchGA4VisitorSources(clientId, startDate, endDate, 10).catch(err => {
+              console.warn(`[Refresh] Failed to fetch GA4 visitor sources for client ${clientId}:`, err.message);
               return null;
             })
           ]);
           
           // Save to database
-          await saveGA4MetricsToDB(clientId, startDate, endDate, trafficData, eventsData || undefined);
+          await saveGA4MetricsToDB(
+            clientId, 
+            startDate, 
+            endDate, 
+            trafficData, 
+            eventsData || undefined,
+            visitorSourcesData ? { sources: visitorSourcesData } : undefined
+          );
           
           ga4Refreshed = true;
           console.log(`[Refresh] GA4 data refreshed and saved to database for client ${clientId}`);
@@ -2117,39 +2197,53 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     let ga4Data = null;
     let trafficDataSource = "none";
 
-    // Always fetch fresh GA4 data for the requested date range and update the single ga4Metrics row for this client
-    // This ensures that when the date range changes (30 / 90 days / custom), the existing GA4 metrics record
-    // is updated from the GA4 account.
+    // Try to get GA4 data from database first, then fallback to API if not found
     let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { fetchGA4TrafficData, fetchGA4EventsDetailed, saveGA4MetricsToDB, getGA4MetricsFromDB } = await import("../lib/ga4.js");
-
-        // Fetch fresh traffic + events data for this date range from GA4
-        const [trafficData, eventsData] = await Promise.all([
-          fetchGA4TrafficData(clientId, startDate, endDate),
-          // If events fetch fails, fall back to existing events from DB (if any)
-          fetchGA4EventsDetailed(clientId, startDate, endDate).catch(async (eventsError: any) => {
-            console.warn("[Dashboard] Failed to fetch detailed GA4 events (will try DB events as fallback):", eventsError?.message);
-            try {
-              const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
-              return dbMetrics?.events ? { events: dbMetrics.events } : { events: [] };
-            } catch {
-              return { events: [] };
-            }
-          }),
-        ]);
-
-        // Save/update the single GA4 metrics record for this client
-        await saveGA4MetricsToDB(clientId, startDate, endDate, trafficData, eventsData);
-
-        ga4Data = trafficData;
-        ga4EventsData = eventsData;
-        trafficDataSource = "ga4";
-
-        console.log(`[Dashboard] ✅ Fetched GA4 data from API and updated metrics for client ${clientId}`);
+        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData } = await import("../lib/ga4.js");
+        
+        // First, try to get data from database
+        const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
+        
+        if (dbMetrics) {
+          console.log(`[Dashboard] ✅ Using GA4 data from database for client ${clientId}`);
+          ga4Data = {
+            totalSessions: dbMetrics.totalSessions,
+            organicSessions: dbMetrics.organicSessions,
+            directSessions: dbMetrics.directSessions,
+            referralSessions: dbMetrics.referralSessions,
+            paidSessions: dbMetrics.paidSessions,
+            bounceRate: dbMetrics.bounceRate,
+            avgSessionDuration: dbMetrics.avgSessionDuration,
+            pagesPerSession: dbMetrics.pagesPerSession,
+            conversions: dbMetrics.conversions,
+            conversionRate: dbMetrics.conversionRate,
+            activeUsers: dbMetrics.activeUsers,
+            eventCount: dbMetrics.eventCount,
+            newUsers: dbMetrics.newUsers,
+            keyEvents: dbMetrics.keyEvents,
+            newUsersTrend: dbMetrics.newUsersTrend,
+            activeUsersTrend: dbMetrics.activeUsersTrend,
+          };
+          ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
+          trafficDataSource = "ga4";
+        } else {
+          // No data in database, fetch from API (but don't save to DB here - that's done by refresh/connect)
+          console.log(`[Dashboard] No GA4 data in database, fetching from API for client ${clientId}`);
+          ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
+          // Fetch events data in parallel
+          try {
+            ga4EventsData = await fetchGA4EventsData(clientId, startDate, endDate);
+          } catch (eventsError) {
+            console.warn("[Dashboard] Failed to fetch GA4 events:", eventsError);
+          }
+          trafficDataSource = "ga4";
+          
+          console.log(`[Dashboard] ✅ Successfully fetched GA4 data from API for client ${clientId}`);
+        }
       } catch (ga4Error: any) {
-        console.error("[Dashboard] ❌ Failed to fetch/save GA4 data:", {
+        console.error("[Dashboard] ❌ Failed to get GA4 data:", {
           clientId,
           error: ga4Error.message,
           errorName: ga4Error.name,
@@ -2161,36 +2255,11 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
           hasPropertyId: !!client.ga4PropertyId,
           dateRange: { start: startDate.toISOString(), end: endDate.toISOString() },
         });
-
-        // If API fetch fails, fall back to whatever is in the database (if anything)
-        try {
-          const { getGA4MetricsFromDB } = await import("../lib/ga4.js");
-          const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
-          if (dbMetrics) {
-            console.log(`[Dashboard] ⚠️ Using GA4 data from database fallback for client ${clientId}`);
-            ga4Data = {
-              totalSessions: dbMetrics.totalSessions,
-              organicSessions: dbMetrics.organicSessions,
-              directSessions: dbMetrics.directSessions,
-              referralSessions: dbMetrics.referralSessions,
-              paidSessions: dbMetrics.paidSessions,
-              bounceRate: dbMetrics.bounceRate,
-              avgSessionDuration: dbMetrics.avgSessionDuration,
-              pagesPerSession: dbMetrics.pagesPerSession,
-              conversions: dbMetrics.conversions,
-              conversionRate: dbMetrics.conversionRate,
-              activeUsers: dbMetrics.activeUsers,
-              eventCount: dbMetrics.eventCount,
-              newUsers: dbMetrics.newUsers,
-              keyEvents: dbMetrics.keyEvents,
-              newUsersTrend: dbMetrics.newUsersTrend,
-              activeUsersTrend: dbMetrics.activeUsersTrend,
-            };
-            ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
-            trafficDataSource = "ga4";
-          }
-        } catch (dbError) {
-          console.error("[Dashboard] ❌ Failed to load GA4 data from database fallback:", dbError);
+        
+        // Continue with fallback data sources
+        // Return error info to frontend for debugging
+        if (ga4Error.message) {
+          console.error("[Dashboard] GA4 Error details:", ga4Error.message);
         }
       }
     } else {
@@ -2303,7 +2372,8 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     // Keep backward compatibility (for other parts of the system)
     const totalUsers = activeUsers; // Map activeUsers to totalUsers for compatibility
     const firstTimeVisitors = newUsers; // Map newUsers to firstTimeVisitors for compatibility
-    const engagedVisitors = keyEvents; // Map keyEvents to engagedVisitors for compatibility
+    // Use engagedUsers from GA4 for Engaged Visitors (from engagedUsers metric)
+    const engagedVisitors = ga4Data?.engagedUsers; // Use engagedUsers if available, fallback to keyEvents
     const totalUsersTrend = activeUsersTrend; // Map activeUsersTrend to totalUsersTrend for compatibility
 
     const averagePosition =
@@ -2357,11 +2427,11 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
   }
 });
 
-// Get GA4 events data for a client
-router.get("/events/:clientId", authenticateToken, async (req, res) => {
+// Get top events for a client
+router.get("/events/:clientId/top", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { period = "30", start, end, refresh = "false" } = req.query;
+    const { period = "30", start, end, limit = "10" } = req.query;
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -2389,10 +2459,7 @@ router.get("/events/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess =
-      isAdmin ||
-      clientAgencyIds.some(id => userAgencyIds.includes(id)) ||
-      (req.user.role === "CLIENT" && client.userId === req.user.userId);
+    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -2406,7 +2473,7 @@ router.get("/events/:clientId", authenticateToken, async (req, res) => {
     );
 
     if (!isGA4Connected) {
-      return res.status(400).json({ message: "GA4 is not connected for this client" });
+      return res.json([]);
     }
 
     // Calculate date range
@@ -2429,54 +2496,128 @@ router.get("/events/:clientId", authenticateToken, async (req, res) => {
       endDate = new Date();
     }
 
-    const { getGA4MetricsFromDB, fetchGA4EventsDetailed, saveGA4MetricsToDB, fetchGA4TrafficData } = await import("../lib/ga4.js");
-
-    // If refresh=true, fetch from GA4 and save to DB
-    if (refresh === "true") {
-      try {
-        // Fetch traffic data to get activeUsers for calculating eventCountPerActiveUser
-        const trafficData = await fetchGA4TrafficData(clientId, startDate, endDate);
-        const eventsData = await fetchGA4EventsDetailed(clientId, startDate, endDate);
-        
-        // Save to database
-        await saveGA4MetricsToDB(clientId, startDate, endDate, trafficData, eventsData);
-        
-        return res.json({
-          success: true,
-          events: eventsData.events,
-          source: "ga4_api"
-        });
-      } catch (error: any) {
-        console.error("[Events] Failed to fetch from GA4:", error);
-        return res.status(500).json({ 
-          message: "Failed to fetch events from GA4", 
-          error: error.message 
-        });
+    // Fetch top events
+    try {
+      const { fetchGA4TopEvents } = await import("../lib/ga4TopEvents.js");
+      const eventsLimit = parseInt(limit as string) || 10;
+      const events = await fetchGA4TopEvents(clientId, startDate, endDate, eventsLimit);
+      res.json(events);
+    } catch (fetchError: any) {
+      console.error("Error fetching top events:", fetchError);
+      // If it's a GA4 connection issue, return empty array instead of error
+      if (fetchError.message?.includes("Client not found") || fetchError.message?.includes("GA4")) {
+        return res.json([]);
       }
+      throw fetchError; // Re-throw to be caught by outer catch
     }
-
-    // Otherwise, try to get from database first
-    const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
-    
-    if (dbMetrics && dbMetrics.events && dbMetrics.events.length > 0) {
-      return res.json({
-        success: true,
-        events: dbMetrics.events,
-        source: "database"
-      });
-    }
-
-    // If no data in database, return empty array
-    // Data should be fetched and saved when GA4 is connected or when refresh button is clicked
-    console.log(`[Events] No events data in database for client ${clientId}. Data will be available after connecting GA4 or clicking refresh.`);
-    return res.json({
-      success: true,
-      events: [],
-      source: "database"
-    });
   } catch (error: any) {
-    console.error("Fetch events error:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Get top events error:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Get visitor sources for a client
+router.get("/visitor-sources/:clientId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { period = "30", start, end, limit = "10" } = req.query;
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Check if GA4 is connected
+    const isGA4Connected = !!(
+      client.ga4RefreshToken &&
+      client.ga4PropertyId &&
+      client.ga4ConnectedAt
+    );
+
+    if (!isGA4Connected) {
+      return res.json([]);
+    }
+
+    // Calculate date range
+    let startDate: Date;
+    let endDate: Date;
+    
+    if (start && end) {
+      startDate = new Date(start as string);
+      endDate = new Date(end as string);
+      if (endDate > new Date()) {
+        endDate = new Date();
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({ message: "Start date must be before end date" });
+      }
+    } else {
+      const days = parseInt(period as string);
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      endDate = new Date();
+    }
+
+    // Try to get visitor sources from database first
+    try {
+      const { getGA4MetricsFromDB } = await import("../lib/ga4.js");
+      const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
+      
+      if (dbMetrics?.visitorSources && Array.isArray(dbMetrics.visitorSources) && dbMetrics.visitorSources.length > 0) {
+        console.log(`[Visitor Sources] ✅ Using visitor sources data from database for client ${clientId}`);
+        // Apply limit if specified
+        const sourcesLimit = parseInt(limit as string) || 10;
+        const limitedSources = dbMetrics.visitorSources.slice(0, sourcesLimit);
+        return res.json(limitedSources);
+      }
+    } catch (dbError: any) {
+      console.warn("[Visitor Sources] Failed to get visitor sources from database, will try API:", dbError.message);
+    }
+
+    // If not in database, fetch from API
+    try {
+      const { fetchGA4VisitorSources } = await import("../lib/ga4VisitorSources.js");
+      const sourcesLimit = parseInt(limit as string) || 10;
+      const sources = await fetchGA4VisitorSources(clientId, startDate, endDate, sourcesLimit);
+      res.json(sources);
+    } catch (fetchError: any) {
+      console.error("Error fetching visitor sources:", fetchError);
+      // If it's a GA4 connection issue, return empty array instead of error
+      if (fetchError.message?.includes("Client not found") || fetchError.message?.includes("GA4")) {
+        return res.json([]);
+      }
+      throw fetchError; // Re-throw to be caught by outer catch
+    }
+  } catch (error: any) {
+    console.error("Get visitor sources error:", error);
+    res.status(500).json({ message: error.message || "Internal server error" });
   }
 });
 
@@ -2536,8 +2677,7 @@ router.post("/reports/:clientId", authenticateToken, async (req, res) => {
     }
 
     // Enforce single report per client: upsert by clientId only
-    // Use findFirst instead of findUnique(clientId) for compatibility with older Prisma clients
-    const existing = await prisma.seoReport.findFirst({ where: { clientId } });
+    const existing = await prisma.seoReport.findUnique({ where: { clientId } });
 
     const report = existing
       ? await prisma.seoReport.update({
@@ -4159,6 +4299,10 @@ router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => 
       return res.status(404).json({ message: "Client not found" });
     }
 
+    if (!client.domain) {
+      return res.status(400).json({ message: "Client has no domain configured" });
+    }
+
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
@@ -4586,8 +4730,17 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
       return res.status(403).json({ message: "Access denied" });
     }
 
-    // Get target keywords from database (base ordering)
-    const targetKeywords = await prisma.targetKeyword.findMany({
+    // Get tracked keywords (from keywords table) for this client
+    const trackedKeywords = await prisma.keyword.findMany({
+      where: { clientId },
+      select: { keyword: true },
+    });
+    
+    // Create a set of tracked keyword strings for fast lookup
+    const trackedKeywordSet = new Set(trackedKeywords.map(k => k.keyword.toLowerCase()));
+
+    // Get target keywords from database
+    const allTargetKeywords = await prisma.targetKeyword.findMany({
       where: { clientId },
       orderBy: [
         { searchVolume: "desc" },
@@ -4595,29 +4748,12 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
       ],
     });
 
-    // Also get tracked keywords for this client so we can prioritize them
-    const trackedKeywords = await prisma.keyword.findMany({
-      where: { clientId },
-      select: { keyword: true },
-    });
-
-    const trackedSet = new Set(
-      trackedKeywords
-        .map((k) => (k.keyword || "").toLowerCase())
-        .filter((k) => k.length > 0)
+    // Filter to only include target keywords that are also tracked
+    const targetKeywords = allTargetKeywords.filter(tk => 
+      trackedKeywordSet.has(tk.keyword.toLowerCase())
     );
 
-    // Sort so that tracked keywords (from Keywords page) appear first,
-    // while preserving the existing sort order within each group.
-    const sortedTargetKeywords = [...targetKeywords].sort((a, b) => {
-      const aTracked = trackedSet.has((a.keyword || "").toLowerCase());
-      const bTracked = trackedSet.has((b.keyword || "").toLowerCase());
-      if (aTracked && !bTracked) return -1;
-      if (!aTracked && bTracked) return 1;
-      return 0;
-    });
-
-    res.json(sortedTargetKeywords);
+    res.json(targetKeywords);
   } catch (error: any) {
     console.error("Get target keywords error:", error);
     res.status(500).json({ message: "Internal server error" });

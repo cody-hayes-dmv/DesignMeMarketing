@@ -556,14 +556,16 @@ model Ga4Metrics {
   endDate   DateTime
 
   // Core GA4 metrics
-  activeUsers    Int
-  eventCount     Int
-  newUsers       Int
-  keyEvents      Int
+  totalUsers      Int // Website Visitors
+  activeUsers     Int
+  newUsers        Int // First Time Visitors
+  engagedSessions Int // Engaged Visitors
+  eventCount      Int
+  keyEvents       Int
 
   // Traffic metrics
   totalSessions    Int
-  organicSessions  Int
+  organicSessions  Int // Organic Traffic
   directSessions   Int
   referralSessions Int
   paidSessions     Int
@@ -580,9 +582,13 @@ model Ga4Metrics {
   // Trend data (stored as JSON arrays)
   newUsersTrend    Json? @db.Json // Array of { date: string, value: number }
   activeUsersTrend Json? @db.Json // Array of { date: string, value: number }
+  totalUsersTrend  Json? @db.Json // Array of { date: string, value: number } - Website Visitors trend
 
   // Events data (stored as JSON array)
   events Json? @db.Json // Array of { name: string, count: number, change?: string }
+
+  // Visitor sources data (stored as JSON array)
+  visitorSources Json? @db.Json // Array of { source: string, users: number }
 
   // Client relationship
   clientId String @unique // One record per client

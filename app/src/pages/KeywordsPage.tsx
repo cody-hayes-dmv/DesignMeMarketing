@@ -670,41 +670,45 @@ const KeywordsPage: React.FC = () => {
 
             <form
               onSubmit={handleAddTrackedKeyword}
-              className="flex items-end gap-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4"
+              className="rounded-lg border border-gray-200 bg-gray-50/60 p-4"
             >
-              <div className="flex-1">
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  Keyword
-                </label>
-                <input
-                  type="text"
-                  value={newKeywordValue}
-                  onChange={(e) => setNewKeywordValue(e.target.value)}
-                  placeholder="e.g. best running shoes"
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                  required
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Data will be automatically fetched from DataForSEO when you track this keyword.
-                </p>
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                    Keyword
+                  </label>
+                  <div className="mt-1 flex items-center gap-3">
+                    <input
+                      type="text"
+                      value={newKeywordValue}
+                      onChange={(e) => setNewKeywordValue(e.target.value)}
+                      placeholder="e.g. best running shoes"
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                      required
+                    />
+                    <button
+                      type="submit"
+                      disabled={addingKeyword || !selectedClientId}
+                      className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60 whitespace-nowrap"
+                    >
+                      {addingKeyword ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Tracking…
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Track
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Data will be automatically fetched from DataForSEO when you track this keyword.
+                  </p>
+                </div>
               </div>
-              <button
-                type="submit"
-                disabled={addingKeyword || !selectedClientId}
-                className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60 h-fit"
-              >
-                {addingKeyword ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Tracking…
-                  </>
-                ) : (
-                  <>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Track
-                  </>
-                )}
-              </button>
               {addKeywordMessage && (
                 <div className="absolute mt-16 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-700">
                   {addKeywordMessage}

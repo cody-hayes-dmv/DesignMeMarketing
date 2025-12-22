@@ -104,6 +104,7 @@ interface DashboardSummary {
   totalUsers: number | null;
   firstTimeVisitors: number | null;
   engagedVisitors: number | null;
+  engagedSessions: number | null;
   dataSources?: {
     traffic?: string;
     conversions?: string;
@@ -224,9 +225,14 @@ const ClientDashboardPage: React.FC = () => {
   const [loadingProperties, setLoadingProperties] = useState(false);
   const [ga4PropertySearch, setGa4PropertySearch] = useState("");
   const [refreshingDashboard, setRefreshingDashboard] = useState(false);
+  const [topEvents, setTopEvents] = useState<Array<{ name: string; count: number }>>([]);
+  const [topEventsLoading, setTopEventsLoading] = useState(false);
+  const [topEventsError, setTopEventsError] = useState<string | null>(null);
+  const [visitorSources, setVisitorSources] = useState<Array<{ source: string; users: number }>>([]);
+  const [visitorSourcesLoading, setVisitorSourcesLoading] = useState(false);
+  const [visitorSourcesError, setVisitorSourcesError] = useState<string | null>(null);
   const [refreshingTopPages, setRefreshingTopPages] = useState(false);
   const [refreshingBacklinks, setRefreshingBacklinks] = useState(false);
-  const [refreshingTrafficSources, setRefreshingTrafficSources] = useState(false);
   const [sendingReport, setSendingReport] = useState(false);
   const [expandedPageUrls, setExpandedPageUrls] = useState<Set<string>>(new Set());
   const [pageKeywords, setPageKeywords] = useState<Record<string, Array<{
@@ -378,6 +384,9 @@ const ClientDashboardPage: React.FC = () => {
       const payload = res.data || {};
       setDashboardSummary(formatDashboardSummary(payload));
       
+      // Refetch top events and visitor sources from database
+      await Promise.all([fetchTopEvents(), fetchVisitorSources()]);
+      
       // Also refresh GA4 status
       try {
         const statusRes = await api.get(`/clients/${clientId}/ga4/status`);
@@ -407,6 +416,41 @@ const ClientDashboardPage: React.FC = () => {
       toast.error(error.response?.data?.message || "Failed to refresh top pages");
     } finally {
       setRefreshingTopPages(false);
+    }
+  }, [clientId]);
+
+  const handleRefreshBacklinks = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setRefreshingBacklinks(true);
+      await api.post(`/seo/backlinks/${clientId}/refresh`);
+      toast.success("Backlinks refreshed successfully!");
+      // Refetch backlink timeseries
+      const dateTo = new Date();
+      const dateFrom = new Date();
+      dateFrom.setDate(dateFrom.getDate() - 30);
+      const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
+        params: {
+          dateFrom: dateFrom.toISOString().split('T')[0],
+          dateTo: dateTo.toISOString().split('T')[0],
+          groupRange: "day",
+        },
+      });
+      const normalized = (res.data || []).map((item: any) => ({
+        date: item.date,
+        newBacklinks: item.newBacklinks || 0,
+        lostBacklinks: item.lostBacklinks || 0,
+        newReferringDomains: item.newReferringDomains || 0,
+        lostReferringDomains: item.lostReferringDomains || 0,
+      })).sort((a: any, b: any) => {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+      setBacklinkTimeseries(normalized.slice(0, 15));
+      setBacklinkTimeseriesError(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to refresh backlinks");
+    } finally {
+      setRefreshingBacklinks(false);
     }
   }, [clientId]);
 
@@ -666,21 +710,6 @@ const ClientDashboardPage: React.FC = () => {
     fetchBacklinkTimeseries();
   }, [fetchBacklinkTimeseries]);
 
-  const handleRefreshBacklinks = useCallback(async () => {
-    if (!clientId) return;
-    try {
-      setRefreshingBacklinks(true);
-      await api.post(`/seo/backlinks/${clientId}/refresh`);
-      toast.success("Backlinks refreshed successfully!");
-      // Refetch backlink timeseries using the same function that's used for initial load
-      await fetchBacklinkTimeseries();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to refresh backlinks");
-    } finally {
-      setRefreshingBacklinks(false);
-    }
-  }, [clientId, fetchBacklinkTimeseries]);
-
   useEffect(() => {
     if (!clientId) return;
 
@@ -720,6 +749,70 @@ const ClientDashboardPage: React.FC = () => {
 
     fetchTopPages();
   }, [clientId]);
+
+  const fetchTopEvents = useCallback(async () => {
+    if (!clientId) return;
+
+    try {
+      setTopEventsLoading(true);
+      setTopEventsError(null);
+      
+      const params: any = { limit: 10 };
+      if (dateRange === "custom" && customStartDate && customEndDate) {
+        params.start = customStartDate;
+        params.end = customEndDate;
+      } else {
+        params.period = dateRange;
+      }
+
+      const res = await api.get(`/seo/events/${clientId}/top`, { params });
+      const data = Array.isArray(res.data) ? res.data : [];
+      setTopEvents(data);
+    } catch (error: any) {
+      console.error("Failed to fetch top events", error);
+      setTopEvents([]);
+      const errorMsg = error?.response?.data?.message || "Unable to load top events data";
+      setTopEventsError(errorMsg);
+    } finally {
+      setTopEventsLoading(false);
+    }
+  }, [clientId, dateRange, customStartDate, customEndDate]);
+
+  useEffect(() => {
+    fetchTopEvents();
+  }, [fetchTopEvents]);
+
+  const fetchVisitorSources = useCallback(async () => {
+    if (!clientId) return;
+
+    try {
+      setVisitorSourcesLoading(true);
+      setVisitorSourcesError(null);
+      
+      const params: any = { limit: 10 };
+      if (dateRange === "custom" && customStartDate && customEndDate) {
+        params.start = customStartDate;
+        params.end = customEndDate;
+      } else {
+        params.period = dateRange;
+      }
+
+      const res = await api.get(`/seo/visitor-sources/${clientId}`, { params });
+      const data = Array.isArray(res.data) ? res.data : [];
+      setVisitorSources(data);
+    } catch (error: any) {
+      console.error("Failed to fetch visitor sources", error);
+      setVisitorSources([]);
+      const errorMsg = error?.response?.data?.message || "Unable to load visitor sources data";
+      setVisitorSourcesError(errorMsg);
+    } finally {
+      setVisitorSourcesLoading(false);
+    }
+  }, [clientId, dateRange, customStartDate, customEndDate]);
+
+  useEffect(() => {
+    fetchVisitorSources();
+  }, [fetchVisitorSources]);
 
   const fetchTrafficSources = useCallback(async () => {
     if (!clientId) return;
@@ -769,23 +862,6 @@ const ClientDashboardPage: React.FC = () => {
   useEffect(() => {
     fetchTrafficSources();
   }, [fetchTrafficSources]);
-
-  // GA4 Events are stored in the database but no longer displayed in the client dashboard/report UI
-
-  const handleRefreshTrafficSources = useCallback(async () => {
-    if (!clientId) return;
-    try {
-      setRefreshingTrafficSources(true);
-      await api.post(`/seo/dashboard/${clientId}/refresh`);
-      toast.success("Traffic sources refreshed successfully!");
-      // Refetch traffic sources
-      await fetchTrafficSources();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to refresh traffic sources");
-    } finally {
-      setRefreshingTrafficSources(false);
-    }
-  }, [clientId, fetchTrafficSources]);
 
   // Load single report from server (enforced one report per client)
   const loadReport = useCallback(async () => {
@@ -1150,24 +1226,15 @@ const ClientDashboardPage: React.FC = () => {
       await api.post(`/clients/${clientId}/ga4/connect`, {
         propertyId: propertyIdToUse,
       });
-      toast.success("GA4 connected successfully! Fetching data...");
+      toast.success("GA4 connected successfully!");
       setShowGA4Modal(false);
       setGa4PropertyId("");
       setGa4Properties([]);
-      
-      // Wait a moment for backend to save data, then refresh dashboard data
-      // The backend now awaits data fetch/save, but add a small delay to be safe
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Set GA4 connected state after data is saved
       setGa4Connected(true);
-      
       // Refresh dashboard data
       const res = await api.get(buildDashboardUrl(clientId));
       const payload = res.data || {};
       setDashboardSummary(formatDashboardSummary(payload));
-      
-      toast.success("GA4 data loaded successfully!");
     } catch (error: any) {
       console.error("Failed to connect GA4 property:", error);
       toast.error(error.response?.data?.message || "Failed to connect GA4 property");
@@ -1176,37 +1243,36 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const activeUsersDisplay = useMemo(() => {
+  // Web Visitors (same as Active Users / Total Users)
+  const websiteVisitorsDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
-    // Show "—" when GA4 is not connected (null or false)
     if (ga4Connected !== true) return "—";
-    // Check if value exists (including 0)
-    if (dashboardSummary?.activeUsers !== null && dashboardSummary?.activeUsers !== undefined) {
-      const numeric = Number(dashboardSummary.activeUsers);
-      if (Number.isFinite(numeric)) {
-        // Show 0 as "0", not "—"
-        return Math.round(numeric).toLocaleString();
-      }
-    }
-    return "—";
-  }, [dashboardSummary?.activeUsers, fetchingSummary, ga4Connected]);
-
-  const eventCountDisplay = useMemo(() => {
-    if (fetchingSummary) return "...";
-    // Show "—" when GA4 is not connected (null or false)
-    if (ga4Connected !== true) return "—";
-    if (dashboardSummary?.eventCount !== null && dashboardSummary?.eventCount !== undefined) {
-      const numeric = Number(dashboardSummary.eventCount);
+    const value = dashboardSummary?.totalUsers ?? dashboardSummary?.activeUsers;
+    if (value !== null && value !== undefined) {
+      const numeric = Number(value);
       if (Number.isFinite(numeric)) {
         return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
-  }, [dashboardSummary?.eventCount, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.totalUsers, dashboardSummary?.activeUsers, fetchingSummary, ga4Connected]);
 
-  const newUsersDisplay = useMemo(() => {
+  // Organic Traffic (from organicSessions)
+  const organicTrafficDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
-    // Show "—" when GA4 is not connected (null or false)
+    if (ga4Connected !== true) return "—";
+    if (dashboardSummary?.organicSessions !== null && dashboardSummary?.organicSessions !== undefined) {
+      const numeric = Number(dashboardSummary.organicSessions);
+      if (Number.isFinite(numeric)) {
+        return Math.round(numeric).toLocaleString();
+      }
+    }
+    return "—";
+  }, [dashboardSummary?.organicSessions, fetchingSummary, ga4Connected]);
+
+  // First Time Visitors (same as New Users)
+  const firstTimeVisitorsDisplay = useMemo(() => {
+    if (fetchingSummary) return "...";
     if (ga4Connected !== true) return "—";
     if (dashboardSummary?.newUsers !== null && dashboardSummary?.newUsers !== undefined) {
       const numeric = Number(dashboardSummary.newUsers);
@@ -1217,17 +1283,19 @@ const ClientDashboardPage: React.FC = () => {
     return "—";
   }, [dashboardSummary?.newUsers, fetchingSummary, ga4Connected]);
 
-  const keyEventsDisplay = useMemo(() => {
+  // Engaged Visitors (from engagedSessions/engagedVisitors)
+  const engagedVisitorsDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (ga4Connected !== true) return "—";
-    if (dashboardSummary?.keyEvents !== null && dashboardSummary?.keyEvents !== undefined) {
-      const numeric = Number(dashboardSummary.keyEvents);
+    const value = dashboardSummary?.engagedVisitors ?? dashboardSummary?.engagedSessions;
+    if (value !== null && value !== undefined) {
+      const numeric = Number(value);
       if (Number.isFinite(numeric)) {
         return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
-  }, [dashboardSummary?.keyEvents, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.engagedVisitors, dashboardSummary?.engagedSessions, fetchingSummary, ga4Connected]);
 
   const newUsersTrendData = useMemo(() => {
     if (!dashboardSummary?.newUsersTrend?.length) return [];
@@ -1549,8 +1617,8 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Active Users</p>
-                      <p className="text-2xl font-bold text-gray-900">{activeUsersDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">Web Visitors</p>
+                      <p className="text-2xl font-bold text-gray-900">{websiteVisitorsDisplay}</p>
                     </div>
                     <Users className="h-8 w-8 text-blue-500" />
                   </div>
@@ -1569,10 +1637,10 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Event Count</p>
-                      <p className="text-2xl font-bold text-gray-900">{eventCountDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">Organic Traffic</p>
+                      <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
                     </div>
-                    <Activity className="h-8 w-8 text-green-500" />
+                    <Search className="h-8 w-8 text-green-500" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 flex items-center space-x-2">
@@ -1589,8 +1657,8 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">New Users</p>
-                      <p className="text-2xl font-bold text-gray-900">{newUsersDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">First Time Visitors</p>
+                      <p className="text-2xl font-bold text-gray-900">{firstTimeVisitorsDisplay}</p>
                     </div>
                     <UserPlus className="h-8 w-8 text-purple-500" />
                   </div>
@@ -1609,10 +1677,10 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Key Events (Conversions)</p>
-                      <p className="text-2xl font-bold text-gray-900">{keyEventsDisplay}</p>
+                      <p className="text-sm font-medium text-gray-600">Engaged Visitors</p>
+                      <p className="text-2xl font-bold text-gray-900">{engagedVisitorsDisplay}</p>
                     </div>
-                    <TrendingUp className="h-8 w-8 text-orange-500" />
+                    <Activity className="h-8 w-8 text-orange-500" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 flex items-center space-x-2">
@@ -1747,7 +1815,73 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* GA4 Events table removed from dashboard view as requested */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Visitor Sources</h3>
+                  </div>
+                  {visitorSourcesError && (
+                    <p className="mb-4 text-sm text-rose-600">
+                      {visitorSourcesError}
+                    </p>
+                  )}
+                  <div className="space-y-4">
+                    {visitorSourcesLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <p className="text-sm text-gray-500">Loading visitor sources...</p>
+                      </div>
+                    ) : visitorSources.length === 0 ? (
+                      <div className="text-sm text-gray-500 text-center py-4">
+                        {ga4Connected 
+                          ? "No visitor sources data available."
+                          : "Connect GA4 to view visitor sources data."}
+                      </div>
+                    ) : (
+                      visitorSources.map((source, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <p className="font-medium text-gray-900">{source.source}</p>
+                            <p className="text-sm text-gray-500">{source.users.toLocaleString()} users</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Events</h3>
+                  </div>
+                {topEventsError && (
+                  <p className="mb-4 text-sm text-rose-600">
+                    {topEventsError}
+                  </p>
+                )}
+                <div className="space-y-4">
+                  {topEventsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <p className="text-sm text-gray-500">Loading events...</p>
+                    </div>
+                  ) : topEvents.length === 0 ? (
+                    <div className="text-sm text-gray-500 text-center py-4">
+                      {ga4Connected 
+                        ? "No events data available. Make sure events are configured in GA4."
+                        : "Connect GA4 to view events data."}
+                    </div>
+                  ) : (
+                    topEvents.map((event, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <p className="font-medium text-gray-900">{event.name}</p>
+                          <p className="text-sm text-gray-500">{event.count.toLocaleString()} events</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              </div>
 
               <div className="bg-white rounded-xl border border-gray-200">
                 <div className="p-6 border-b border-gray-200 flex items-center justify-between">
@@ -2471,8 +2605,8 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Active Users</p>
-                        <p className="text-2xl font-bold text-gray-900">{activeUsersDisplay}</p>
+                        <p className="text-sm font-medium text-gray-600">Web Visitors</p>
+                        <p className="text-2xl font-bold text-gray-900">{websiteVisitorsDisplay}</p>
                       </div>
                       <Users className="h-8 w-8 text-blue-500" />
                     </div>
@@ -2491,10 +2625,10 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Event Count</p>
-                        <p className="text-2xl font-bold text-gray-900">{eventCountDisplay}</p>
+                        <p className="text-sm font-medium text-gray-600">Organic Traffic</p>
+                        <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
                       </div>
-                      <Activity className="h-8 w-8 text-green-500" />
+                      <Search className="h-8 w-8 text-green-500" />
                     </div>
                     {ga4Connected ? (
                       <div className="mt-4 flex items-center space-x-2">
@@ -2511,8 +2645,8 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">New Users</p>
-                        <p className="text-2xl font-bold text-gray-900">{newUsersDisplay}</p>
+                        <p className="text-sm font-medium text-gray-600">First Time Visitors</p>
+                        <p className="text-2xl font-bold text-gray-900">{firstTimeVisitorsDisplay}</p>
                       </div>
                       <UserPlus className="h-8 w-8 text-purple-500" />
                     </div>
@@ -2531,10 +2665,10 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-600">Key Events (Conversions)</p>
-                        <p className="text-2xl font-bold text-gray-900">{keyEventsDisplay}</p>
+                        <p className="text-sm font-medium text-gray-600">Engaged Visitors</p>
+                        <p className="text-2xl font-bold text-gray-900">{engagedVisitorsDisplay}</p>
                       </div>
-                      <TrendingUp className="h-8 w-8 text-orange-500" />
+                      <Activity className="h-8 w-8 text-orange-500" />
                     </div>
                     {ga4Connected ? (
                       <div className="mt-4 flex items-center space-x-2">
@@ -2615,7 +2749,6 @@ const ClientDashboardPage: React.FC = () => {
                   clientName={client?.name}
                   title="Total Keywords Ranked"
                   subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
-                  enableRefresh={false}
                 />
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
@@ -2662,8 +2795,6 @@ const ClientDashboardPage: React.FC = () => {
                     )}
                   </div>
                 </div>
-
-                {/* GA4 Events Section in Report Modal removed as requested */}
 
                 <div className="bg-white rounded-xl border border-gray-200">
                   <div className="p-6 border-b border-gray-200">
@@ -2766,6 +2897,27 @@ const ClientDashboardPage: React.FC = () => {
                       <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
                       <p className="text-sm text-gray-500">Daily backlinks acquired (last 30 days)</p>
                     </div>
+                    {user?.role === "SUPER_ADMIN" && (
+                      <button
+                        type="button"
+                        onClick={handleRefreshBacklinks}
+                        disabled={refreshingBacklinks}
+                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                        title="Refresh backlinks from DataForSEO"
+                      >
+                        {refreshingBacklinks ? (
+                          <>
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>Refreshing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3" />
+                            <span>Refresh</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                   <div className="p-6 space-y-4">
                     {backlinkTimeseriesLoading ? (
