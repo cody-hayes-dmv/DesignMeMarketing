@@ -269,6 +269,7 @@ export async function fetchGA4TrafficData(
   newUsers: number; // Replaces firstTimeVisitors/First Time Visitors
   keyEvents: number; // Replaces engagedVisitors/Engaged Visitors (conversions)
   engagedUsers: number; // Engaged Visitors from GA4 engagedUsers metric
+  engagementRate: number; // Engagement rate as decimal (0.63 for 63%)
   newUsersTrend: TrendPoint[];
   activeUsersTrend: TrendPoint[]; // Replaces totalUsersTrend
 }> {
@@ -359,6 +360,7 @@ export async function fetchGA4TrafficData(
           { name: 'averageSessionDuration' },
           { name: 'screenPageViewsPerSession' },
           { name: 'engagedUsers' }, // Changed from engagedSessions to engagedUsers for Engaged Visitors
+          { name: 'engagementRate' }, // Engagement rate as decimal
         ],
       }, 'Engagement'),
       
@@ -637,6 +639,10 @@ export async function fetchGA4TrafficData(
     engagementResponse?.rows?.[0]?.metricValues?.[3]?.value || '0',
     10
   );
+  // Engagement rate as decimal (e.g., 0.63 for 63%)
+  const engagementRate = parseFloat(
+    engagementResponse?.rows?.[0]?.metricValues?.[4]?.value || '0'
+  );
 
   // Parse conversions
   const conversions = parseInt(
@@ -688,6 +694,7 @@ export async function fetchGA4TrafficData(
     newUsers, // Replaces firstTimeVisitors
     keyEvents, // Replaces engagedVisitors (conversions)
     engagedUsers, // Engaged Visitors from GA4 engagedUsers metric
+    engagementRate, // Engagement rate as decimal
     newUsersTrend,
     activeUsersTrend, // Replaces totalUsersTrend
   };
@@ -888,6 +895,7 @@ export async function saveGA4MetricsToDB(
     newUsers: number;
     keyEvents: number;
     engagedUsers: number;
+    engagementRate: number;
     newUsersTrend: TrendPoint[];
     activeUsersTrend: TrendPoint[];
   },
@@ -956,6 +964,7 @@ export async function saveGA4MetricsToDB(
         events: eventsData?.events && eventsData.events.length > 0 ? eventsData.events : null,
         visitorSources: visitorSourcesData?.sources && visitorSourcesData.sources.length > 0 ? visitorSourcesData.sources : null,
         engagedSessions: trafficData.engagedUsers ?? trafficData.keyEvents,
+        engagementRate: trafficData.engagementRate ?? null,
       },
     });
 
@@ -991,6 +1000,9 @@ export async function getGA4MetricsFromDB(
   keyEvents: number;
   newUsersTrend: TrendPoint[];
   activeUsersTrend: TrendPoint[];
+  totalUsers: number;
+  engagedSessions: number;
+  engagementRate: number | null;
   events: Array<{
     name: string;
     count: number;
@@ -1016,6 +1028,7 @@ export async function getGA4MetricsFromDB(
           newUsersTrend, activeUsersTrend, events,
           COALESCE(totalUsers, activeUsers) as totalUsers,
           COALESCE(engagedSessions, keyEvents) as engagedSessions,
+          engagementRate,
           visitorSources
         FROM ga4_metrics
         WHERE clientId = ${clientId}
@@ -1036,6 +1049,7 @@ export async function getGA4MetricsFromDB(
             newUsersTrend, activeUsersTrend, events,
             COALESCE(totalUsers, activeUsers) as totalUsers,
             COALESCE(engagedSessions, keyEvents) as engagedSessions,
+            engagementRate,
             NULL as visitorSources
           FROM ga4_metrics
           WHERE clientId = ${clientId}
@@ -1091,6 +1105,7 @@ export async function getGA4MetricsFromDB(
       // Handle optional fields that might not exist in database yet
       totalUsers: metric.totalUsers ? Number(metric.totalUsers) : Number(metric.activeUsers),
       engagedSessions: metric.engagedSessions ? Number(metric.engagedSessions) : Number(metric.keyEvents),
+      engagementRate: metric.engagementRate ? Number(metric.engagementRate) : null,
     };
   } catch (error: any) {
     console.error('[GA4] Failed to get metrics from database:', error);

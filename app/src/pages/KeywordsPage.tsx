@@ -6,7 +6,9 @@ import {
   Plus,
   CheckCircle2,
   AlertTriangle,
+  Trash2,
 } from "lucide-react";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import api from "@/lib/api";
 import { Client, Keyword } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
@@ -68,6 +70,12 @@ const KeywordsPage: React.FC = () => {
   const [trackedError, setTrackedError] = useState<string | null>(null);
   const [trackSearchTerm, setTrackSearchTerm] = useState("");
   const [refreshingKeywordIds, setRefreshingKeywordIds] = useState<Record<string, boolean>>({});
+  const [deletingKeywordIds, setDeletingKeywordIds] = useState<Record<string, boolean>>({});
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; keywordId: string | null; keywordText: string | null }>({
+    isOpen: false,
+    keywordId: null,
+    keywordText: null,
+  });
 
   const [newKeywordValue, setNewKeywordValue] = useState("");
   const [addingKeyword, setAddingKeyword] = useState(false);
@@ -332,6 +340,32 @@ const KeywordsPage: React.FC = () => {
       // Toast is already shown by API interceptor
     } finally {
       setRefreshingKeywordIds((prev) => ({ ...prev, [keywordId]: false }));
+    }
+  };
+
+  const handleDeleteTrackedKeyword = (keywordId: string, keywordText: string) => {
+    setDeleteConfirm({ isOpen: true, keywordId, keywordText });
+  };
+
+  const confirmDeleteTrackedKeyword = async () => {
+    if (!deleteConfirm.keywordId || !selectedClientId) return;
+    
+    try {
+      setDeletingKeywordIds((prev) => ({ ...prev, [deleteConfirm.keywordId!]: true }));
+      await api.delete(`/seo/keywords/${selectedClientId}/${deleteConfirm.keywordId}`);
+      toast.success("Keyword deleted successfully!");
+      
+      // Refresh the keyword list
+      const res = await api.get(`/seo/keywords/${selectedClientId}`);
+      const keywordList: Keyword[] = Array.isArray(res.data) ? res.data : [];
+      setTrackedKeywords(keywordList);
+      setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null });
+    } catch (error: any) {
+      console.error("Failed to delete keyword", error);
+      toast.error(error?.response?.data?.message || "Failed to delete keyword");
+      setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null });
+    } finally {
+      setDeletingKeywordIds((prev) => ({ ...prev, [deleteConfirm.keywordId!]: false }));
     }
   };
 
@@ -803,27 +837,36 @@ const KeywordsPage: React.FC = () => {
                           {keyword.currentPosition ?? "—"}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {user?.role === "SUPER_ADMIN" && (
-                          <button
-                            type="button"
-                            onClick={() => handleRefreshTrackedKeyword(keyword.id)}
-                            disabled={Boolean(refreshingKeywordIds[keyword.id])}
-                            className="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-60"
-                              title="Refresh keyword data from DataForSEO"
-                          >
-                            {refreshingKeywordIds[keyword.id] ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
-                                Updating…
-                              </>
-                            ) : (
-                              <>
-                                <RefreshCw className="h-3.5 w-3.5 mr-2" />
-                                Refresh
-                              </>
+                          <div className="flex items-center justify-end gap-2">
+                            {user?.role === "SUPER_ADMIN" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRefreshTrackedKeyword(keyword.id)}
+                                disabled={Boolean(refreshingKeywordIds[keyword.id])}
+                                className="inline-flex items-center justify-center rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-60 transition-colors"
+                                title="Refresh keyword data from DataForSEO"
+                              >
+                                {refreshingKeywordIds[keyword.id] ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="h-4 w-4" />
+                                )}
+                              </button>
                             )}
-                          </button>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTrackedKeyword(keyword.id, keyword.keyword)}
+                              disabled={Boolean(deletingKeywordIds[keyword.id])}
+                              className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
+                              title="Delete this keyword"
+                            >
+                              {deletingKeywordIds[keyword.id] ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -834,6 +877,18 @@ const KeywordsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null })}
+        onConfirm={confirmDeleteTrackedKeyword}
+        title="Delete Keyword"
+        message={`Are you sure you want to delete the keyword "${deleteConfirm.keywordText}"? This action cannot be undone and all tracking data for this keyword will be permanently removed.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 };

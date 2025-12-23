@@ -281,11 +281,10 @@ const WorkersPage: React.FC = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button
                         onClick={() => handleRemoveWorker(member.id)}
-                        className="text-red-600 hover:text-red-900 inline-flex items-center space-x-1"
+                        className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50 transition-colors"
                         title="Remove worker"
                       >
                         <Trash2 className="h-4 w-4" />
-                        <span>Remove</span>
                       </button>
                     </td>
                   </tr>

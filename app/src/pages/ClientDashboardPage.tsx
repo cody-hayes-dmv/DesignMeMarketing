@@ -1283,19 +1283,20 @@ const ClientDashboardPage: React.FC = () => {
     return "—";
   }, [dashboardSummary?.newUsers, fetchingSummary, ga4Connected]);
 
-  // Engaged Visitors (from engagedSessions/engagedVisitors)
+  // Engaged Visitors (from engagementRate as percentage)
   const engagedVisitorsDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (ga4Connected !== true) return "—";
-    const value = dashboardSummary?.engagedVisitors ?? dashboardSummary?.engagedSessions;
+    const value = dashboardSummary?.engagedVisitors;
     if (value !== null && value !== undefined) {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
-        return Math.round(numeric).toLocaleString();
+        // Value is already a percentage (engagementRate * 100), format with 1 decimal place
+        return `${numeric.toFixed(1)}%`;
       }
     }
     return "—";
-  }, [dashboardSummary?.engagedVisitors, dashboardSummary?.engagedSessions, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.engagedVisitors, fetchingSummary, ga4Connected]);
 
   const newUsersTrendData = useMemo(() => {
     if (!dashboardSummary?.newUsersTrend?.length) return [];
@@ -1839,10 +1840,8 @@ const ClientDashboardPage: React.FC = () => {
                     ) : (
                       visitorSources.map((source, index) => (
                         <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                          <div>
-                            <p className="font-medium text-gray-900">{source.source}</p>
-                            <p className="text-sm text-gray-500">{source.users.toLocaleString()} users</p>
-                          </div>
+                          <p className="font-medium text-gray-900">{source.source}</p>
+                          <p className="text-sm text-gray-500">{source.users.toLocaleString()} users</p>
                         </div>
                       ))
                     )}
@@ -1872,10 +1871,8 @@ const ClientDashboardPage: React.FC = () => {
                   ) : (
                     topEvents.map((event, index) => (
                       <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div>
-                          <p className="font-medium text-gray-900">{event.name}</p>
-                          <p className="text-sm text-gray-500">{event.count.toLocaleString()} events</p>
-                        </div>
+                        <p className="font-medium text-gray-900">{event.name}</p>
+                        <p className="text-sm text-gray-500">{event.count.toLocaleString()} events</p>
                       </div>
                     ))
                   )}
@@ -1925,7 +1922,7 @@ const ClientDashboardPage: React.FC = () => {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 1</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 2-3</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 4-10</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Movement</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Movement</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid Traffic</th>
                       </tr>
                     </thead>
@@ -2023,23 +2020,38 @@ const ClientDashboardPage: React.FC = () => {
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                               {topPagesLoading ? "..." : formatNumber(page.top10)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-700">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
                               {topPagesLoading ? (
                                 <span>...</span>
                               ) : (
-                              <div className="flex flex-col space-y-1">
-                                <span className="text-green-600">
-                                  +{formatNumber(page.newKeywords)} new
-                                </span>
-                                <span className="text-blue-600">
-                                  ↑ {formatNumber(page.upKeywords)} up
-                                </span>
-                                <span className="text-orange-600">
-                                  ↓ {formatNumber(page.downKeywords)} down
-                                </span>
-                                <span className="text-rose-600">
-                                  -{formatNumber(page.lostKeywords)} lost
-                                </span>
+                              <div className="flex flex-row items-end space-x-1">
+                                {page.newKeywords > 0 && (
+                                  <div className="flex items-center gap-1 text-green-600">
+                                    <Plus className="h-3.5 w-3.5" />
+                                    <span>{formatNumber(page.newKeywords)}</span>
+                                  </div>
+                                )}
+                                {page.upKeywords > 0 && (
+                                  <div className="flex items-center gap-1 text-blue-600">
+                                    <TrendingUp className="h-3.5 w-3.5" />
+                                    <span>{formatNumber(page.upKeywords)}</span>
+                                  </div>
+                                )}
+                                {page.downKeywords > 0 && (
+                                  <div className="flex items-center gap-1 text-orange-600">
+                                    <TrendingDown className="h-3.5 w-3.5" />
+                                    <span>{formatNumber(page.downKeywords)}</span>
+                                  </div>
+                                )}
+                                {page.lostKeywords > 0 && (
+                                  <div className="flex items-center gap-1 text-rose-600">
+                                    <TrendingDown className="h-3.5 w-3.5" />
+                                    <span>{formatNumber(page.lostKeywords)}</span>
+                                  </div>
+                                )}
+                                {page.newKeywords === 0 && page.upKeywords === 0 && page.downKeywords === 0 && page.lostKeywords === 0 && (
+                                  <span className="text-gray-400">—</span>
+                                )}
                               </div>
                               )}
                             </td>
@@ -2815,7 +2827,7 @@ const ClientDashboardPage: React.FC = () => {
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 1</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 2-3</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 4-10</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Movement</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Movement</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid Traffic</th>
                         </tr>
                       </thead>
@@ -2860,23 +2872,38 @@ const ClientDashboardPage: React.FC = () => {
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 {topPagesLoading ? "..." : formatNumber(page.top10)}
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-700">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
                                 {topPagesLoading ? (
                                   <span>...</span>
                                 ) : (
-                                  <div className="flex flex-col space-y-1">
-                                    <span className="text-green-600">
-                                      +{formatNumber(page.newKeywords)} new
-                                    </span>
-                                    <span className="text-blue-600">
-                                      ↑ {formatNumber(page.upKeywords)} up
-                                    </span>
-                                    <span className="text-orange-600">
-                                      ↓ {formatNumber(page.downKeywords)} down
-                                    </span>
-                                    <span className="text-rose-600">
-                                      -{formatNumber(page.lostKeywords)} lost
-                                    </span>
+                                  <div className="flex flex-col items-end space-y-1">
+                                    {page.newKeywords > 0 && (
+                                      <div className="flex items-center gap-1 text-green-600">
+                                        <Plus className="h-3.5 w-3.5" />
+                                        <span>{formatNumber(page.newKeywords)}</span>
+                                      </div>
+                                    )}
+                                    {page.upKeywords > 0 && (
+                                      <div className="flex items-center gap-1 text-blue-600">
+                                        <TrendingUp className="h-3.5 w-3.5" />
+                                        <span>{formatNumber(page.upKeywords)}</span>
+                                      </div>
+                                    )}
+                                    {page.downKeywords > 0 && (
+                                      <div className="flex items-center gap-1 text-orange-600">
+                                        <TrendingDown className="h-3.5 w-3.5" />
+                                        <span>{formatNumber(page.downKeywords)}</span>
+                                      </div>
+                                    )}
+                                    {page.lostKeywords > 0 && (
+                                      <div className="flex items-center gap-1 text-rose-600">
+                                        <X className="h-3.5 w-3.5" />
+                                        <span>{formatNumber(page.lostKeywords)}</span>
+                                      </div>
+                                    )}
+                                    {page.newKeywords === 0 && page.upKeywords === 0 && page.downKeywords === 0 && page.lostKeywords === 0 && (
+                                      <span className="text-gray-400">—</span>
+                                    )}
                                   </div>
                                 )}
                               </td>

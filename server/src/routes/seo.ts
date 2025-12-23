@@ -1626,6 +1626,67 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
   }
 });
 
+// Delete a keyword
+router.delete("/keywords/:clientId/:keywordId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId, keywordId } = req.params;
+
+    // Check if user has access to this client
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true }
+            }
+          }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Permission check
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Check if keyword exists and belongs to this client
+    const keyword = await prisma.keyword.findFirst({
+      where: {
+        id: keywordId,
+        clientId
+      }
+    });
+
+    if (!keyword) {
+      return res.status(404).json({ message: "Keyword not found" });
+    }
+
+    // Delete the keyword
+    await prisma.keyword.delete({
+      where: { id: keywordId }
+    });
+
+    res.json({ message: "Keyword deleted successfully" });
+  } catch (error: any) {
+    console.error("Delete keyword error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Refresh dashboard data from DataForSEO (SUPER_ADMIN only)
 router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
@@ -2372,8 +2433,11 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     // Keep backward compatibility (for other parts of the system)
     const totalUsers = activeUsers; // Map activeUsers to totalUsers for compatibility
     const firstTimeVisitors = newUsers; // Map newUsers to firstTimeVisitors for compatibility
-    // Use engagedUsers from GA4 for Engaged Visitors (from engagedUsers metric)
-    const engagedVisitors = ga4Data?.engagedUsers; // Use engagedUsers if available, fallback to keyEvents
+    // Use engagementRate from GA4 for Engaged Visitors (convert to percentage)
+    // engagementRate is returned as decimal (0.63 for 63%), multiply by 100 for percentage
+    const engagedVisitors = ga4Data?.engagementRate !== null && ga4Data?.engagementRate !== undefined
+      ? ga4Data.engagementRate * 100
+      : (ga4Data?.engagedUsers ?? null); // Fallback to engagedUsers if engagementRate not available
     const totalUsersTrend = activeUsersTrend; // Map activeUsersTrend to totalUsersTrend for compatibility
 
     const averagePosition =
