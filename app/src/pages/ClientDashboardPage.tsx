@@ -538,7 +538,12 @@ const ClientDashboardPage: React.FC = () => {
       try {
         setLoading(true);
         const res = await api.get("/clients");
-        const found = (res.data as Client[]).find((c) => c.id === clientId);
+        // const found = (res.data as Client[]).find((c) => c.id === clientId);
+        const clients: Client[] = Array.isArray(res.data?.clients)
+        ? res.data.clients
+        : [];    
+        const found = clients.find((c) => c.id === clientId);
+
         if (found) {
           setClient(found);
         } else {
