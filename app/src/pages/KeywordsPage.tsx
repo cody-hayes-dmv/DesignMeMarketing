@@ -100,7 +100,7 @@ const KeywordsPage: React.FC = () => {
         setClientsLoading(true);
         setClientsError(null);
         const res = await api.get("/clients");
-        const clientList: Client[] = Array.isArray(res.data?.clients) ? res.data.clients : [];
+        const clientList: Client[] = Array.isArray(res.data) ? res.data : [];
         setClients(clientList);
         if (clientList.length > 0) {
           setSelectedClientId(clientList[0].id);
@@ -127,7 +127,7 @@ const KeywordsPage: React.FC = () => {
         setTrackedLoading(true);
         setTrackedError(null);
         const res = await api.get(`/seo/keywords/${selectedClientId}`);
-        const keywordList: Keyword[] = Array.isArray(res.data?.keywords) ? res.data.keywords : [];
+        const keywordList: Keyword[] = Array.isArray(res.data) ? res.data : [];
         setTrackedKeywords(keywordList);
       } catch (error: any) {
         console.error("Failed to fetch tracked keywords", error);
@@ -170,7 +170,7 @@ const KeywordsPage: React.FC = () => {
         },
         timeout: 60000, // 60 seconds timeout for keyword research (can take longer)
       });
-      const suggestions: ResearchKeyword[] = Array.isArray(res.data?.results) ? res.data.results : [];
+      const suggestions: ResearchKeyword[] = Array.isArray(res.data) ? res.data : [];
       setResearchResults(suggestions);
       if (suggestions.length === 0) {
         setResearchError("No suggestions were found for this keyword. Try a different phrase.");

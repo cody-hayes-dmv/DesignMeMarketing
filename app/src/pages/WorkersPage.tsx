@@ -43,17 +43,9 @@ const WorkersPage: React.FC = () => {
     try {
       setLoading(true);
       const response = await api.get("/team");
-      // const workerOnly = (response.data as WorkerMember[]).filter(
-      //   (member) => member.role === "WORKER"
-      // );
-      const members: WorkerMember[] = Array.isArray(response.data?.members)
-      ? response.data.members
-      : [];
-  
-      const workerOnly = members.filter(
+      const workerOnly = (response.data as WorkerMember[]).filter(
         (member) => member.role === "WORKER"
       );
-    
       setWorkers(workerOnly);
       setError(null);
     } catch (err: any) {
