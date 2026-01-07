@@ -268,7 +268,7 @@ export async function fetchGA4TrafficData(
   eventCount: number; // Replaces organicSessions/Organic Traffic
   newUsers: number; // Replaces firstTimeVisitors/First Time Visitors
   keyEvents: number; // Replaces engagedVisitors/Engaged Visitors (conversions)
-  engagedUsers: number; // Engaged Visitors from GA4 engagedUsers metric
+  engagedSessions: number; // Engaged Sessions from GA4 engagedSessions metric
   engagementRate: number; // Engagement rate as decimal (0.63 for 63%)
   newUsersTrend: TrendPoint[];
   activeUsersTrend: TrendPoint[]; // Replaces totalUsersTrend
@@ -359,7 +359,7 @@ export async function fetchGA4TrafficData(
           { name: 'bounceRate' },
           { name: 'averageSessionDuration' },
           { name: 'screenPageViewsPerSession' },
-          { name: 'engagedUsers' }, // Changed from engagedSessions to engagedUsers for Engaged Visitors
+          { name: 'engagedSessions' }, // Engaged Sessions from GA4
           { name: 'engagementRate' }, // Engagement rate as decimal
         ],
       }, 'Engagement'),
@@ -634,8 +634,8 @@ export async function fetchGA4TrafficData(
   const pagesPerSession = parseFloat(
     engagementResponse?.rows?.[0]?.metricValues?.[2]?.value || '0'
   );
-  // Engaged Visitors from engagedUsers metric
-  const engagedUsers = parseInt(
+  // Engaged Sessions from GA4 engagedSessions metric
+  const engagedSessions = parseInt(
     engagementResponse?.rows?.[0]?.metricValues?.[3]?.value || '0',
     10
   );
@@ -693,7 +693,7 @@ export async function fetchGA4TrafficData(
     eventCount, // Replaces organicSessions for display
     newUsers, // Replaces firstTimeVisitors
     keyEvents, // Replaces engagedVisitors (conversions)
-    engagedUsers, // Engaged Visitors from GA4 engagedUsers metric
+    engagedSessions, // Engaged Sessions from GA4
     engagementRate, // Engagement rate as decimal
     newUsersTrend,
     activeUsersTrend, // Replaces totalUsersTrend
@@ -894,7 +894,7 @@ export async function saveGA4MetricsToDB(
     eventCount: number;
     newUsers: number;
     keyEvents: number;
-    engagedUsers: number;
+    engagedSessions: number;
     engagementRate: number;
     newUsersTrend: TrendPoint[];
     activeUsersTrend: TrendPoint[];
@@ -939,6 +939,8 @@ export async function saveGA4MetricsToDB(
         activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? trafficData.activeUsersTrend : null,
         events: eventsData?.events && eventsData.events.length > 0 ? eventsData.events : null,
         visitorSources: visitorSourcesData?.sources && visitorSourcesData.sources.length > 0 ? visitorSourcesData.sources : null,
+        engagedSessions: trafficData.engagedSessions ?? trafficData.keyEvents,
+        engagementRate: trafficData.engagementRate ?? null,
       },
       create: {
         clientId,
@@ -963,7 +965,7 @@ export async function saveGA4MetricsToDB(
         totalUsersTrend: trafficData.totalUsersTrend?.length > 0 ? trafficData.totalUsersTrend : null,
         events: eventsData?.events && eventsData.events.length > 0 ? eventsData.events : null,
         visitorSources: visitorSourcesData?.sources && visitorSourcesData.sources.length > 0 ? visitorSourcesData.sources : null,
-        engagedSessions: trafficData.engagedUsers ?? trafficData.keyEvents,
+        engagedSessions: trafficData.engagedSessions ?? trafficData.keyEvents,
         engagementRate: trafficData.engagementRate ?? null,
       },
     });

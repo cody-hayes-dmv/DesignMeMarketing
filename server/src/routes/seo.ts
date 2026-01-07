@@ -2433,11 +2433,8 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     // Keep backward compatibility (for other parts of the system)
     const totalUsers = activeUsers; // Map activeUsers to totalUsers for compatibility
     const firstTimeVisitors = newUsers; // Map newUsers to firstTimeVisitors for compatibility
-    // Use engagementRate from GA4 for Engaged Visitors (convert to percentage)
-    // engagementRate is returned as decimal (0.63 for 63%), multiply by 100 for percentage
-    const engagedVisitors = ga4Data?.engagementRate !== null && ga4Data?.engagementRate !== undefined
-      ? ga4Data.engagementRate * 100
-      : (ga4Data?.engagedUsers ?? null); // Fallback to engagedUsers if engagementRate not available
+    // Engaged Visitors is the same as Engaged Sessions from GA4
+    const engagedVisitors = ga4Data?.engagedSessions ?? null;
     const totalUsersTrend = activeUsersTrend; // Map activeUsersTrend to totalUsersTrend for compatibility
 
     const averagePosition =

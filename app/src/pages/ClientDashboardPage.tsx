@@ -1283,7 +1283,7 @@ const ClientDashboardPage: React.FC = () => {
     return "—";
   }, [dashboardSummary?.newUsers, fetchingSummary, ga4Connected]);
 
-  // Engaged Visitors (from engagementRate as percentage)
+  // Engaged Visitors (same as Engaged Sessions from GA4)
   const engagedVisitorsDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (ga4Connected !== true) return "—";
@@ -1291,8 +1291,8 @@ const ClientDashboardPage: React.FC = () => {
     if (value !== null && value !== undefined) {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
-        // Value is already a percentage (engagementRate * 100), format with 1 decimal place
-        return `${numeric.toFixed(1)}%`;
+        // Value is a count (engagedSessions), format as number
+        return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
