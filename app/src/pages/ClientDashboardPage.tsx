@@ -25,6 +25,7 @@ import {
   Send,
   ChevronDown,
   ChevronRight,
+  AlertTriangle,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -213,6 +214,7 @@ const ClientDashboardPage: React.FC = () => {
   const [ga4AccountEmail, setGa4AccountEmail] = useState<string | null>(null);
   const [ga4Connecting, setGa4Connecting] = useState(false);
   const [ga4StatusLoading, setGa4StatusLoading] = useState(true); // Track GA4 status check loading
+  const [ga4ConnectionError, setGa4ConnectionError] = useState<string | null>(null);
   const [showGA4Modal, setShowGA4Modal] = useState(false);
   const [ga4PropertyId, setGa4PropertyId] = useState("");
   const [ga4Properties, setGa4Properties] = useState<Array<{
@@ -236,12 +238,21 @@ const ClientDashboardPage: React.FC = () => {
   const [sendingReport, setSendingReport] = useState(false);
   const [expandedPageUrls, setExpandedPageUrls] = useState<Set<string>>(new Set());
   const [pageKeywords, setPageKeywords] = useState<Record<string, Array<{
-    id: string;
     keyword: string;
     currentPosition: number | null;
     previousPosition: number | null;
-    searchVolume: number;
-    googleUrl: string | null;
+    searchVolume: number | null;
+    isNew?: boolean;
+    isUp?: boolean;
+    isDown?: boolean;
+    isLost?: boolean;
+    etv?: number | null;
+    keywordDifficulty?: number | null;
+    cpc?: number | null;
+    competition?: string | null;
+    url?: string | null;
+    title?: string | null;
+    description?: string | null;
   }>>>({});
   const [loadingPageKeywords, setLoadingPageKeywords] = useState<Record<string, boolean>>({});
 
@@ -369,6 +380,7 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setRefreshingDashboard(true);
+      setGa4ConnectionError(null); // Clear any previous errors
       const refreshRes = await api.post(`/seo/dashboard/${clientId}/refresh`);
       
       // Show success message with details
@@ -382,25 +394,88 @@ const ClientDashboardPage: React.FC = () => {
       // Refetch dashboard data (this will get fresh DataForSEO and GA4 data)
       const res = await api.get(buildDashboardUrl(clientId));
       const payload = res.data || {};
-      setDashboardSummary(formatDashboardSummary(payload));
+      const isGA4Connected = payload?.isGA4Connected || false;
+      const dataSource = payload?.dataSources?.traffic || "none";
+      
+      // Validate GA4 connection after refresh
+      if (isGA4Connected && dataSource !== "ga4") {
+        // Check actual GA4 status
+        try {
+          const statusRes = await api.get(`/clients/${clientId}/ga4/status`);
+          const actualStatus = statusRes.data?.connected || false;
+          setGa4Connected(actualStatus);
+          
+          if (!actualStatus) {
+            setGa4ConnectionError("GA4 connection appears to be invalid. Please reconnect GA4 to get fresh data.");
+            // Clear GA4 data
+            const summary = formatDashboardSummary(payload);
+            summary.activeUsers = null;
+            summary.eventCount = null;
+            summary.newUsers = null;
+            summary.keyEvents = null;
+            summary.activeUsersTrend = [];
+            summary.newUsersTrend = [];
+            summary.totalUsers = null;
+            summary.firstTimeVisitors = null;
+            summary.engagedVisitors = null;
+            summary.totalUsersTrend = [];
+            summary.ga4Events = null;
+            setDashboardSummary(summary);
+          } else {
+            setDashboardSummary(formatDashboardSummary(payload));
+          }
+        } catch (statusError) {
+          console.warn("Failed to refresh GA4 status:", statusError);
+          setGa4Connected(false);
+          setGa4ConnectionError("Unable to verify GA4 connection. Please reconnect GA4.");
+        }
+      } else {
+        setGa4Connected(isGA4Connected);
+        setDashboardSummary(formatDashboardSummary(payload));
+      }
       
       // Refetch top events and visitor sources from database
-      await Promise.all([fetchTopEvents(), fetchVisitorSources()]);
-      
-      // Also refresh GA4 status
+      // Note: These functions are called directly, not via dependency to avoid circular dependencies
       try {
-        const statusRes = await api.get(`/clients/${clientId}/ga4/status`);
-        setGa4Connected(statusRes.data?.connected || false);
-      } catch (statusError) {
-        // Non-critical, just log it
-        console.warn("Failed to refresh GA4 status:", statusError);
+        const topEventsParams: any = { limit: 10 };
+        if (dateRange === "custom" && customStartDate && customEndDate) {
+          topEventsParams.start = customStartDate;
+          topEventsParams.end = customEndDate;
+        } else {
+          topEventsParams.period = dateRange;
+        }
+        const topEventsRes = await api.get(`/seo/events/${clientId}/top`, { params: topEventsParams });
+        setTopEvents(Array.isArray(topEventsRes.data) ? topEventsRes.data : []);
+      } catch (err) {
+        console.warn("Failed to refresh top events:", err);
+      }
+      
+      try {
+        const visitorSourcesParams: any = { limit: 10 };
+        if (dateRange === "custom" && customStartDate && customEndDate) {
+          visitorSourcesParams.start = customStartDate;
+          visitorSourcesParams.end = customEndDate;
+        } else {
+          visitorSourcesParams.period = dateRange;
+        }
+        const visitorSourcesRes = await api.get(`/seo/visitor-sources/${clientId}`, { params: visitorSourcesParams });
+        setVisitorSources(Array.isArray(visitorSourcesRes.data) ? visitorSourcesRes.data : []);
+      } catch (err) {
+        console.warn("Failed to refresh visitor sources:", err);
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
+      
+      // If error is GA4-related, mark connection as invalid
+      if (error?.response?.data?.message?.toLowerCase().includes("ga4") || 
+          error?.response?.data?.message?.toLowerCase().includes("token")) {
+        setGa4Connected(false);
+        setGa4ConnectionError("GA4 connection error during refresh. Please reconnect GA4.");
+      }
     } finally {
       setRefreshingDashboard(false);
     }
-  }, [clientId, buildDashboardUrl]);
+  }, [clientId, buildDashboardUrl, dateRange, customStartDate, customEndDate]);
 
   const handleRefreshTopPages = useCallback(async () => {
     if (!clientId) return;
@@ -652,13 +727,84 @@ const ClientDashboardPage: React.FC = () => {
     const fetchSummary = async () => {
       try {
         setFetchingSummary(true);
+        setGa4ConnectionError(null);
         const res = await api.get(buildDashboardUrl(clientId));
         const payload = res.data || {};
-        setGa4Connected(payload?.isGA4Connected || false);
-        setDashboardSummary(formatDashboardSummary(payload));
+        const isGA4Connected = payload?.isGA4Connected || false;
+        const dataSource = payload?.dataSources?.traffic || "none";
+        
+        // Validate GA4 connection: if marked as connected but data is not from GA4, connection might be invalid
+        if (isGA4Connected && dataSource !== "ga4") {
+          // GA4 is marked as connected but we're getting fallback data - connection might be invalid
+          // Check actual GA4 status to confirm
+          try {
+            const statusRes = await api.get(`/clients/${clientId}/ga4/status`);
+            const actualStatus = statusRes.data?.connected || false;
+            
+            if (!actualStatus) {
+              // GA4 connection is actually invalid - clear GA4 data and show warning
+              setGa4Connected(false);
+              setGa4ConnectionError("GA4 connection appears to be invalid. Please reconnect GA4 to get fresh data.");
+              
+              // Clear GA4-specific metrics from dashboard summary
+              const summary = formatDashboardSummary(payload);
+              summary.activeUsers = null;
+              summary.eventCount = null;
+              summary.newUsers = null;
+              summary.keyEvents = null;
+              summary.activeUsersTrend = [];
+              summary.newUsersTrend = [];
+              summary.totalUsers = null;
+              summary.firstTimeVisitors = null;
+              summary.engagedVisitors = null;
+              summary.totalUsersTrend = [];
+              summary.ga4Events = null;
+              setDashboardSummary(summary);
+              
+              toast.error("GA4 connection is invalid. Please reconnect to get fresh data.", { duration: 5000 });
+            } else {
+              // Status is OK but data source is not GA4 - might be using cached data
+              setGa4Connected(true);
+              setDashboardSummary(formatDashboardSummary(payload));
+            }
+          } catch (statusError: any) {
+            // Status check failed - connection is likely invalid
+            console.error("GA4 status check failed:", statusError);
+            setGa4Connected(false);
+            setGa4ConnectionError("Unable to verify GA4 connection. Please reconnect GA4.");
+            
+            // Clear GA4-specific metrics
+            const summary = formatDashboardSummary(payload);
+            summary.activeUsers = null;
+            summary.eventCount = null;
+            summary.newUsers = null;
+            summary.keyEvents = null;
+            summary.activeUsersTrend = [];
+            summary.newUsersTrend = [];
+            summary.totalUsers = null;
+            summary.firstTimeVisitors = null;
+            summary.engagedVisitors = null;
+            summary.totalUsersTrend = [];
+            summary.ga4Events = null;
+            setDashboardSummary(summary);
+            
+            toast.error("GA4 connection verification failed. Please reconnect GA4.", { duration: 5000 });
+          }
+        } else {
+          // Normal case: either GA4 is connected and data is from GA4, or GA4 is not connected
+          setGa4Connected(isGA4Connected);
+          setDashboardSummary(formatDashboardSummary(payload));
+        }
       } catch (error: any) {
         console.warn("Failed to fetch dashboard summary", error);
         setDashboardSummary(null);
+        
+        // If error is related to GA4, mark connection as invalid
+        if (error?.response?.data?.message?.toLowerCase().includes("ga4") || 
+            error?.response?.data?.message?.toLowerCase().includes("token")) {
+          setGa4Connected(false);
+          setGa4ConnectionError("GA4 connection error. Please reconnect GA4.");
+        }
       } finally {
         setFetchingSummary(false);
       }
@@ -1133,6 +1279,7 @@ const ClientDashboardPage: React.FC = () => {
             closePopupSafely();
             toast.success('OAuth successful! Loading your GA4 properties...');
             setGa4Connecting(false);
+            setGa4ConnectionError(null); // Clear any previous connection errors
             // Fetch properties list
             handleFetchGA4Properties();
           } else if (event.data.type === 'GA4_OAUTH_ERROR') {
@@ -1171,6 +1318,7 @@ const ClientDashboardPage: React.FC = () => {
       toast.success("GA4 disconnected successfully");
       setGa4Connected(false);
       setGa4AccountEmail(null);
+      setGa4ConnectionError(null); // Clear connection error when disconnecting
       // Optionally clear GA4-derived metrics from the dashboard
       setDashboardSummary((prev) =>
         prev
@@ -1547,9 +1695,50 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
               ) : (
                 <>
+                  {/* GA4 Connection Error Banner - Show when connection is invalid */}
+                  {ga4ConnectionError && (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-red-900 mb-2 flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5" />
+                            GA4 Connection Invalid
+                          </h3>
+                          <p className="text-sm text-red-800 mb-4">
+                            {ga4ConnectionError} GA4 data has been cleared to prevent displaying stale information.
+                          </p>
+                          <button
+                            onClick={handleConnectGA4}
+                            disabled={ga4Connecting}
+                            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {ga4Connecting ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Connecting...</span>
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="h-4 w-4" />
+                                <span>Reconnect GA4</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => setGa4ConnectionError(null)}
+                          className="text-red-600 hover:text-red-800"
+                          title="Dismiss warning"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
                   {/* GA4 Connection Banner */}
                   {/* Show banner when GA4 is not connected (false = confirmed not connected) */}
-                  {ga4Connected === false && (
+                  {ga4Connected === false && !ga4ConnectionError && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -1850,7 +2039,7 @@ const ClientDashboardPage: React.FC = () => {
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Events</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">Conversions</h3>
                   </div>
                 {topEventsError && (
                   <p className="mb-4 text-sm text-rose-600">
@@ -1860,19 +2049,19 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="space-y-4">
                   {topEventsLoading ? (
                     <div className="flex items-center justify-center py-8">
-                      <p className="text-sm text-gray-500">Loading events...</p>
+                      <p className="text-sm text-gray-500">Loading conversions...</p>
                     </div>
                   ) : topEvents.length === 0 ? (
                     <div className="text-sm text-gray-500 text-center py-4">
                       {ga4Connected 
-                        ? "No events data available. Make sure events are configured in GA4."
-                        : "Connect GA4 to view events data."}
+                        ? "No conversions data available. Make sure events are configured in GA4."
+                        : "Connect GA4 to view conversions data."}
                     </div>
                   ) : (
                     topEvents.map((event, index) => (
                       <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <p className="font-medium text-gray-900">{event.name}</p>
-                        <p className="text-sm text-gray-500">{event.count.toLocaleString()} events</p>
+                        <p className="text-sm text-gray-500">{event.count.toLocaleString()} conversions</p>
                       </div>
                     ))
                   )}
@@ -2087,13 +2276,38 @@ const ClientDashboardPage: React.FC = () => {
                                           </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                          {keywords.map((kw) => {
+                                          {keywords.map((kw, idx) => {
+                                            // Use is_new, is_lost, is_up, is_down flags from API response
+                                            const isNew = kw.isNew || false;
+                                            const isLost = kw.isLost || false;
+                                            const isUp = kw.isUp || false;
+                                            const isDown = kw.isDown || false;
+                                            
+                                            // Calculate position change if available
                                             const positionChange = kw.previousPosition !== null && kw.currentPosition !== null
                                               ? kw.currentPosition - kw.previousPosition
                                               : null;
+                                            
+                                            // Determine status badge
+                                            let statusBadge = null;
+                                            if (isNew) {
+                                              statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">New</span>;
+                                            } else if (isLost) {
+                                              statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-800">Lost</span>;
+                                            } else if (isUp) {
+                                              statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">↑ Up</span>;
+                                            } else if (isDown) {
+                                              statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">↓ Down</span>;
+                                            }
+                                            
                                             return (
-                                              <tr key={kw.id} className="hover:bg-gray-50">
-                                                <td className="px-3 py-2 text-gray-900">{kw.keyword}</td>
+                                              <tr key={kw.keyword || idx} className="hover:bg-gray-50">
+                                                <td className="px-3 py-2">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className="text-gray-900">{kw.keyword}</span>
+                                                    {statusBadge}
+                                                  </div>
+                                                </td>
                                                 <td className="px-3 py-2 text-gray-900">
                                                   {kw.currentPosition !== null ? `#${kw.currentPosition}` : "—"}
                                                 </td>
@@ -2109,7 +2323,7 @@ const ClientDashboardPage: React.FC = () => {
                                                   )}
                                                 </td>
                                                 <td className="px-3 py-2 text-gray-700">
-                                                  {kw.searchVolume > 0 ? kw.searchVolume.toLocaleString() : "—"}
+                                                  {kw.searchVolume && kw.searchVolume > 0 ? kw.searchVolume.toLocaleString() : "—"}
                                                 </td>
                                               </tr>
                                             );

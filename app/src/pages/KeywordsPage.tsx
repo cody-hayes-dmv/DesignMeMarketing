@@ -92,7 +92,6 @@ const KeywordsPage: React.FC = () => {
   const [assignClientId, setAssignClientId] = useState<string | null>(null);
   const [assigningKeywords, setAssigningKeywords] = useState(false);
   const [assignMessage, setAssignMessage] = useState<string | null>(null);
-  const [addAsTargetKeyword, setAddAsTargetKeyword] = useState(false);
 
   useEffect(() => {
     const loadClients = async () => {
@@ -230,35 +229,31 @@ const KeywordsPage: React.FC = () => {
         )
       );
 
-      // Also add as target keywords if checkbox is checked
-      if (addAsTargetKeyword) {
-        try {
-          await Promise.all(
-            keywords.map((item) =>
-              api.post(`/seo/target-keywords/${assignClientId}`, {
-                keyword: item.keyword,
-                searchVolume: Number(item.searchVolume) || 0,
-                cpc: item.cpc ?? undefined,
-                competition: item.competitionLevel || undefined,
-                competitionValue: item.competition !== null ? item.competition : undefined,
-                locationCode: researchLocation,
-                languageCode: researchLanguage,
-              }).catch((err) => {
-                // Ignore errors for keywords that already exist as target keywords
-                if (err?.response?.status !== 400 || !err?.response?.data?.message?.includes("already exists")) {
-                  console.warn(`Failed to add ${item.keyword} as target keyword:`, err);
-                }
-              })
-            )
-          );
-        } catch (targetError) {
-          console.error("Some keywords failed to be added as target keywords:", targetError);
-        }
+      // Always add as target keywords when tracking
+      try {
+        await Promise.all(
+          keywords.map((item) =>
+            api.post(`/seo/target-keywords/${assignClientId}`, {
+              keyword: item.keyword,
+              searchVolume: Number(item.searchVolume) || 0,
+              cpc: item.cpc ?? undefined,
+              competition: item.competitionLevel || undefined,
+              competitionValue: item.competition !== null ? item.competition : undefined,
+              locationCode: researchLocation,
+              languageCode: researchLanguage,
+            }).catch((err) => {
+              // Ignore errors for keywords that already exist as target keywords
+              if (err?.response?.status !== 400 || !err?.response?.data?.message?.includes("already exists")) {
+                console.warn(`Failed to add ${item.keyword} as target keyword:`, err);
+              }
+            })
+          )
+        );
+      } catch (targetError) {
+        console.error("Some keywords failed to be added as target keywords:", targetError);
       }
 
-      const successMessage = addAsTargetKeyword
-        ? `Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking and target keywords.`
-        : `Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking.`;
+      const successMessage = `Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking and target keywords.`;
       toast.success(successMessage);
       setAssignMessage(successMessage);
       if (assignClientId === selectedClientId) {
@@ -267,7 +262,6 @@ const KeywordsPage: React.FC = () => {
         setTrackedKeywords(keywordList);
       }
       setSelectedSuggestions({});
-      setAddAsTargetKeyword(false);
     } catch (error: any) {
       console.error("Failed to assign keywords", error);
       const errorMsg = error?.response?.data?.message || "Failed to assign keywords. Please try again.";
@@ -530,15 +524,6 @@ const KeywordsPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={addAsTargetKeyword}
-                    onChange={(e) => setAddAsTargetKeyword(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  />
-                  <span>Also add as target keyword</span>
-                </label>
                 <button
                   type="button"
                   onClick={handleAssignSelected}

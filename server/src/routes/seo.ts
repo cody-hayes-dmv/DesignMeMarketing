@@ -3785,6 +3785,116 @@ async function fetchKeywordsForSiteFromDataForSEO(
   }
 }
 
+// Fetch ranked keywords for a specific page URL from DataForSEO
+async function fetchRankedKeywordsForPageFromDataForSEO(
+  target: string,
+  pageUrl: string,
+  locationCode: number = 2840,
+  languageName: string = "English",
+  limit: number = 100
+) {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+
+  if (!base64Auth) {
+    throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
+  }
+
+  // Normalize domain (remove protocol, www, trailing slashes)
+  const normalizeDomain = (domain: string) => {
+    return domain
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/\/$/, "")
+      .toLowerCase();
+  };
+
+  const normalizedTarget = normalizeDomain(target);
+
+  // Extract relative URL path from the full URL
+  // Example: "https://www.abchamber.ca/wp-content/uploads/2022/04/Extension-of-Hours-at-the-Port-of-Wildhorse.pdf"
+  // Should become: "/wp-content/uploads/2022/04/Extension-of-Hours-at-the-Port-of-Wildhorse.pdf"
+  let relativeUrl = pageUrl;
+  try {
+    const urlObj = new URL(pageUrl);
+    relativeUrl = urlObj.pathname;
+  } catch (e) {
+    // If pageUrl is not a full URL, assume it's already a relative path
+    if (!pageUrl.startsWith("/")) {
+      relativeUrl = "/" + pageUrl;
+    }
+  }
+
+  const requestBody = [
+    {
+      target: normalizedTarget,
+      location_code: locationCode,
+      language_name: languageName,
+      limit: limit,
+      filters: [
+        "ranked_serp_element.serp_item.relative_url",
+        "=",
+        relativeUrl
+      ]
+    },
+  ];
+
+  try {
+    const response = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${base64Auth}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    // Parse the response structure
+    if (data?.tasks && data.tasks.length > 0 && data.tasks[0].result && data.tasks[0].result.length > 0) {
+      const result = data.tasks[0].result[0];
+      const items: any[] = result?.items || [];
+
+      // Map items to our format
+      return items.map((item) => {
+        const keywordData = item?.keyword_data || {};
+        const keywordInfo = keywordData?.keyword_info || {};
+        const rankedSerpElement = item?.ranked_serp_element || {};
+        const serpItem = rankedSerpElement?.serp_item || {};
+        const rankChanges = serpItem?.rank_changes || {};
+
+        return {
+          keyword: keywordData?.keyword || "",
+          currentPosition: serpItem?.rank_absolute || serpItem?.rank_group || null,
+          previousPosition: rankChanges?.previous_rank_absolute || null,
+          searchVolume: keywordInfo?.search_volume ? Number(keywordInfo.search_volume) : null,
+          isNew: rankChanges?.is_new || false,
+          isUp: rankChanges?.is_up || false,
+          isDown: rankChanges?.is_down || false,
+          isLost: rankedSerpElement?.is_lost || false,
+          etv: serpItem?.etv ? Number(serpItem.etv) : null,
+          keywordDifficulty: keywordData?.keyword_properties?.keyword_difficulty || null,
+          cpc: keywordInfo?.cpc ? Number(keywordInfo.cpc) : null,
+          competition: keywordInfo?.competition_level || null,
+          url: serpItem?.url || null,
+          title: serpItem?.title || null,
+          description: serpItem?.description || null,
+        };
+      });
+    }
+
+    return [];
+  } catch (error: any) {
+    console.error("DataForSEO Ranked Keywords for Page API error:", error);
+    throw error;
+  }
+}
+
 // Get ranked keywords for a client (read from DB only)
 router.get("/ranked-keywords/:clientId", authenticateToken, async (req, res) => {
   try {
@@ -4182,7 +4292,7 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
   }
 });
 
-// Get keywords ranking for a specific page/URL
+// Get keywords ranking for a specific page/URL from DataForSEO
 router.get("/top-pages/:clientId/keywords", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
@@ -4206,8 +4316,8 @@ router.get("/top-pages/:clientId/keywords", authenticateToken, async (req, res) 
       }
     });
 
-    if (!client) {
-      return res.status(404).json({ message: "Client not found" });
+    if (!client || !client.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
     }
 
     // Permission check
@@ -4224,47 +4334,33 @@ router.get("/top-pages/:clientId/keywords", authenticateToken, async (req, res) 
       return res.status(403).json({ message: "Access denied" });
     }
 
-    // Find keywords that rank for this URL
-    // Match by googleUrl (normalize both URLs for comparison)
-    const normalizeUrl = (url: string) => {
-      return url
+    // Normalize domain (remove protocol, www, trailing slashes)
+    const normalizeDomain = (domain: string) => {
+      return domain
         .replace(/^https?:\/\//, "")
         .replace(/^www\./, "")
         .replace(/\/$/, "")
         .toLowerCase();
     };
 
-    const normalizedTargetUrl = normalizeUrl(url);
-    
-    const keywords = await prisma.keyword.findMany({
-      where: {
-        clientId,
-        googleUrl: { not: null }
-      },
-      select: {
-        id: true,
-        keyword: true,
-        currentPosition: true,
-        previousPosition: true,
-        searchVolume: true,
-        googleUrl: true,
-      },
-      orderBy: {
-        currentPosition: "asc"
-      }
-    });
+    const targetDomain = normalizeDomain(client.domain);
 
-    // Filter keywords where the googleUrl matches the target URL
-    const matchingKeywords = keywords.filter(kw => {
-      if (!kw.googleUrl) return false;
-      const normalizedKwUrl = normalizeUrl(kw.googleUrl);
-      return normalizedKwUrl === normalizedTargetUrl || normalizedKwUrl.includes(normalizedTargetUrl) || normalizedTargetUrl.includes(normalizedKwUrl);
-    });
+    // Fetch keywords from DataForSEO API
+    const keywords = await fetchRankedKeywordsForPageFromDataForSEO(
+      targetDomain,
+      url,
+      2840, // location_code for United States
+      "English",
+      100 // limit
+    );
 
-    res.json(matchingKeywords);
+    res.json(keywords);
   } catch (error: any) {
     console.error("Get page keywords error:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ 
+      message: error.message || "Internal server error",
+      error: error.message 
+    });
   }
 });
 
