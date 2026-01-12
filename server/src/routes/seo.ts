@@ -6,6 +6,104 @@ import jwt from "jsonwebtoken";
 
 const router = express.Router();
 
+type DataForSEOGoogleAdsLocation = {
+  location_code: number;
+  location_name: string;
+  location_code_parent: number | null;
+  country_iso_code: string | null;
+  location_type: string | null;
+};
+
+let googleAdsLocationsCache: {
+  loadedAt: number;
+  locations: DataForSEOGoogleAdsLocation[];
+} | null = null;
+let googleAdsLocationsLoadPromise: Promise<DataForSEOGoogleAdsLocation[]> | null = null;
+
+const GOOGLE_ADS_LOCATIONS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+async function fetchGoogleAdsLocationsFromDataForSEO(): Promise<DataForSEOGoogleAdsLocation[]> {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) {
+    throw new Error(
+      "DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable."
+    );
+  }
+
+  const response = await fetch(
+    "https://api.dataforseo.com/v3/keywords_data/google_ads/locations",
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Basic ${base64Auth}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+  }
+
+  const data: any = await response.json();
+  const locations: DataForSEOGoogleAdsLocation[] =
+    data?.tasks?.[0]?.result && Array.isArray(data.tasks[0].result) ? data.tasks[0].result : [];
+  return locations;
+}
+
+async function getGoogleAdsLocationsCached(): Promise<DataForSEOGoogleAdsLocation[]> {
+  const now = Date.now();
+  if (googleAdsLocationsCache && now - googleAdsLocationsCache.loadedAt < GOOGLE_ADS_LOCATIONS_CACHE_TTL_MS) {
+    return googleAdsLocationsCache.locations;
+  }
+
+  if (!googleAdsLocationsLoadPromise) {
+    googleAdsLocationsLoadPromise = fetchGoogleAdsLocationsFromDataForSEO()
+      .then((locations) => {
+        googleAdsLocationsCache = { loadedAt: Date.now(), locations };
+        return locations;
+      })
+      .finally(() => {
+        googleAdsLocationsLoadPromise = null;
+      });
+  }
+
+  return googleAdsLocationsLoadPromise;
+}
+
+// Search Google Ads locations (DataForSEO) for UI combobox
+router.get("/locations", authenticateToken, async (req, res) => {
+  try {
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 20;
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 20;
+
+    // Require a short query to avoid returning massive datasets
+    if (q.length < 2) {
+      return res.json([]);
+    }
+
+    const all = await getGoogleAdsLocationsCached();
+    const qLower = q.toLowerCase();
+    const matches = all
+      .filter((loc) => (loc.location_name || "").toLowerCase().includes(qLower))
+      .slice(0, limit)
+      .map((loc) => ({
+        location_name: loc.location_name,
+        country_iso_code: loc.country_iso_code,
+        location_type: loc.location_type,
+      }));
+
+    res.json(matches);
+  } catch (error: any) {
+    console.error("Locations search error:", error);
+    if (error.message?.includes("DataForSEO credentials")) {
+      return res.status(500).json({ message: error.message });
+    }
+    res.status(500).json({ message: "Failed to fetch locations" });
+  }
+});
+
 // DataForSEO API helper function
 async function fetchKeywordDataFromDataForSEO(
   keyword: string, 
@@ -154,6 +252,55 @@ async function fetchKeywordDataFromDataForSEO(
     console.error("DataForSEO API error:", error);
     throw error;
   }
+}
+
+async function fetchKeywordOverviewFromDataForSEO(params: {
+  keywords: string[];
+  languageCode: string;
+  locationName: string;
+  includeClickstreamData?: boolean;
+  includeSerpInfo?: boolean;
+}) {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+
+  if (!base64Auth) {
+    throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
+  }
+
+  const requestBody = [
+    {
+      language_code: params.languageCode,
+      location_name: params.locationName,
+      include_clickstream_data: params.includeClickstreamData ?? true,
+      include_serp_info: params.includeSerpInfo ?? true,
+      keywords: params.keywords,
+    },
+  ];
+
+  const response = await fetch(
+    "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${base64Auth}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+  }
+
+  const raw: any = await response.json();
+  const item =
+    raw?.tasks?.[0]?.result?.[0]?.items?.[0] && typeof raw.tasks[0].result[0].items[0] === "object"
+      ? raw.tasks[0].result[0].items[0]
+      : null;
+
+  return { raw, item };
 }
 
 async function fetchRelevantPagesFromDataForSEO(
@@ -1379,12 +1526,47 @@ router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
       };
     }
 
-    const keywords = await prisma.keyword.findMany({
-      where: whereClause,
-      orderBy: {
-        [sortBy as string]: order as "asc" | "desc"
+    let keywords: any;
+    try {
+      keywords = await prisma.keyword.findMany({
+        where: whereClause,
+        orderBy: {
+          [sortBy as string]: order as "asc" | "desc",
+        },
+      });
+    } catch (error: any) {
+      // Backwards-compatible fallback for DBs that haven't added keywords.locationName yet
+      if (error?.code === "P2022" && String(error?.meta?.column || "").includes("locationName")) {
+        keywords = await prisma.keyword.findMany({
+          where: whereClause,
+          orderBy: {
+            [sortBy as string]: order as "asc" | "desc",
+          },
+          select: {
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+            keyword: true,
+            searchVolume: true,
+            difficulty: true,
+            cpc: true,
+            competition: true,
+            currentPosition: true,
+            previousPosition: true,
+            bestPosition: true,
+            googleUrl: true,
+            serpFeatures: true,
+            totalResults: true,
+            clicks: true,
+            impressions: true,
+            ctr: true,
+            clientId: true,
+          },
+        });
+      } else {
+        throw error;
       }
-    });
+    }
 
     res.json(keywords);
   } catch (error) {
@@ -1412,7 +1594,14 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       fetchFromDataForSEO: z.boolean().optional().default(false),
       locationCode: z.number().int().optional().default(2840),
       languageCode: z.string().optional().default("en"),
+      // UI-selected location name (do not require a code from client)
+      locationName: z.string().min(1).optional(),
+      location_name: z.string().min(1).optional(),
+      include_clickstream_data: z.boolean().optional(),
+      include_serp_info: z.boolean().optional(),
     }).parse(req.body);
+
+    const resolvedLocationName = keywordData.locationName || (keywordData as any).location_name;
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -1464,52 +1653,131 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     let serpData: any = null;
     if (keywordData.fetchFromDataForSEO) {
       try {
-        const dataForSEOData = await fetchKeywordDataFromDataForSEO(
-          keywordData.keyword,
-          client.domain,
-          keywordData.locationCode,
-          keywordData.languageCode
-        );
-        
-        // Update keyword data with DataForSEO results
-        if (dataForSEOData.currentPosition !== null) {
-          keywordData.currentPosition = dataForSEOData.currentPosition;
+        // Use DataForSEO Labs Keyword Overview (location_name-based)
+        const locationNameForApi = resolvedLocationName || "United States";
+        const overview = await fetchKeywordOverviewFromDataForSEO({
+          keywords: [keywordData.keyword],
+          languageCode: keywordData.languageCode,
+          locationName: locationNameForApi,
+          includeClickstreamData: (keywordData as any).include_clickstream_data,
+          includeSerpInfo: (keywordData as any).include_serp_info,
+        });
+
+        serpData = overview.raw;
+        const item = overview.item;
+
+        const searchVolume = Number(item?.keyword_info?.search_volume);
+        if (Number.isFinite(searchVolume) && searchVolume >= 0) {
+          keywordData.searchVolume = Math.round(searchVolume);
         }
-        if (dataForSEOData.bestPosition !== null) {
-          keywordData.bestPosition = dataForSEOData.bestPosition;
+
+        const difficulty = Number(item?.keyword_properties?.keyword_difficulty);
+        if (Number.isFinite(difficulty)) {
+          keywordData.difficulty = difficulty;
         }
-        if (dataForSEOData.googleUrl) {
-          keywordData.googleUrl = dataForSEOData.googleUrl;
+
+        const cpc = Number(item?.keyword_info?.cpc);
+        if (Number.isFinite(cpc) && cpc >= 0) {
+          keywordData.cpc = cpc;
         }
-        if (dataForSEOData.serpFeatures && dataForSEOData.serpFeatures.length > 0) {
-          keywordData.serpFeatures = dataForSEOData.serpFeatures;
+
+        const competitionLevel = item?.keyword_info?.competition_level;
+        if (typeof competitionLevel === "string" && competitionLevel.length > 0) {
+          keywordData.competition = competitionLevel;
         }
-        if (dataForSEOData.totalResults !== null && dataForSEOData.totalResults > 0) {
-          keywordData.totalResults = dataForSEOData.totalResults;
+
+        const checkUrl = item?.serp_info?.check_url;
+        if (typeof checkUrl === "string" && checkUrl.startsWith("http")) {
+          keywordData.googleUrl = checkUrl;
         }
-        serpData = dataForSEOData.serpData;
+
+        const serpItemTypes = item?.serp_info?.serp_item_types;
+        if (Array.isArray(serpItemTypes) && serpItemTypes.length > 0) {
+          keywordData.serpFeatures = serpItemTypes;
+        }
+
+        const seResultsCount = Number(item?.serp_info?.se_results_count);
+        if (Number.isFinite(seResultsCount) && seResultsCount >= 0) {
+          keywordData.totalResults = Math.round(seResultsCount);
+        }
       } catch (error: any) {
         console.error("Failed to fetch from DataForSEO:", error);
         // Continue with manual data if DataForSEO fails
       }
     }
 
-    const keyword = await prisma.keyword.create({
-      data: {
-        keyword: keywordData.keyword,
-        searchVolume: keywordData.searchVolume,
-        difficulty: keywordData.difficulty,
-        cpc: keywordData.cpc,
-        competition: keywordData.competition,
-        currentPosition: keywordData.currentPosition,
-        previousPosition: keywordData.previousPosition,
-        bestPosition: keywordData.bestPosition,
-        googleUrl: keywordData.googleUrl,
-        serpFeatures: keywordData.serpFeatures || undefined,
-        totalResults: keywordData.totalResults,
-        clientId
+    const createData: any = {
+      keyword: keywordData.keyword,
+      searchVolume: keywordData.searchVolume,
+      difficulty: keywordData.difficulty,
+      cpc: keywordData.cpc,
+      competition: keywordData.competition,
+      currentPosition: keywordData.currentPosition,
+      previousPosition: keywordData.previousPosition,
+      bestPosition: keywordData.bestPosition,
+      googleUrl: keywordData.googleUrl,
+      serpFeatures: keywordData.serpFeatures || undefined,
+      totalResults: keywordData.totalResults,
+      ...(resolvedLocationName ? { locationName: resolvedLocationName } : {}),
+      clientId,
+    };
+
+    let keyword: any;
+    try {
+      keyword = await prisma.keyword.create({ data: createData });
+    } catch (error: any) {
+      // Backwards-compatible fallback for DBs that haven't added keywords.locationName yet
+      if (error?.code === "P2022" && String(error?.meta?.column || "").includes("locationName")) {
+        delete createData.locationName;
+        keyword = await prisma.keyword.create({ data: createData });
+      } else {
+        throw error;
       }
-    });
+    }
+
+    // Ensure tracked keyword is also available in Target Keywords panel (upsert)
+    try {
+      const item = serpData?.tasks?.[0]?.result?.[0]?.items?.[0];
+      const competitionValue = Number(item?.keyword_info?.competition);
+      const monthlySearches = item?.keyword_info?.monthly_searches;
+
+      const targetUpsertData: any = {
+        keyword: keywordData.keyword,
+        searchVolume: keywordData.searchVolume ?? undefined,
+        cpc: keywordData.cpc ?? undefined,
+        competition: keywordData.competition ?? undefined,
+        competitionValue: Number.isFinite(competitionValue) ? competitionValue : undefined,
+        monthlySearches: Array.isArray(monthlySearches) ? monthlySearches : undefined,
+        keywordInfo: item?.keyword_info ? item.keyword_info : undefined,
+        serpInfo: item?.serp_info ? item.serp_info : undefined,
+        serpItemTypes: Array.isArray(item?.serp_info?.serp_item_types)
+          ? item.serp_info.serp_item_types
+          : undefined,
+        googleUrl: typeof item?.serp_info?.check_url === "string" ? item.serp_info.check_url : undefined,
+        seResultsCount:
+          item?.serp_info?.se_results_count !== undefined && item?.serp_info?.se_results_count !== null
+            ? String(item.serp_info.se_results_count)
+            : undefined,
+        languageCode: keywordData.languageCode,
+        locationName: resolvedLocationName || "United States",
+      };
+
+      await prisma.targetKeyword.upsert({
+        where: {
+          clientId_keyword: {
+            clientId,
+            keyword: keywordData.keyword,
+          },
+        },
+        update: targetUpsertData,
+        create: {
+          ...targetUpsertData,
+          clientId,
+        },
+      });
+    } catch (targetErr) {
+      console.warn("Failed to upsert target keyword for tracked keyword:", targetErr);
+    }
 
     res.json({ keyword, serpData });
   } catch (error: any) {
@@ -1732,19 +2000,20 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
       });
 
       // Save new traffic sources to database
-      if (trafficSourceSummary) {
+      const tss = trafficSourceSummary;
+      if (tss) {
         await Promise.all(
-          trafficSourceSummary.breakdown.map((item) =>
+          tss.breakdown.map((item) =>
             prisma.trafficSource.create({
               data: {
                 clientId,
                 name: item.name,
                 value: item.value,
-                totalKeywords: trafficSourceSummary.totalKeywords,
-                totalEstimatedTraffic: trafficSourceSummary.totalEstimatedTraffic,
-                organicEstimatedTraffic: trafficSourceSummary.organicEstimatedTraffic,
-                averageRank: trafficSourceSummary.averageRank,
-                rankSampleSize: trafficSourceSummary.rankSampleSize,
+                totalKeywords: tss.totalKeywords,
+                totalEstimatedTraffic: tss.totalEstimatedTraffic,
+                organicEstimatedTraffic: tss.organicEstimatedTraffic,
+                averageRank: tss.averageRank,
+                rankSampleSize: tss.rankSampleSize,
               },
             })
           )
@@ -2492,7 +2761,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
 router.get("/events/:clientId/top", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { period = "30", start, end, limit = "10" } = req.query;
+    const { period = "30", start, end, limit = "10", type = "events" } = req.query;
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -2559,9 +2828,13 @@ router.get("/events/:clientId/top", authenticateToken, async (req, res) => {
 
     // Fetch top events
     try {
-      const { fetchGA4TopEvents } = await import("../lib/ga4TopEvents.js");
+      const { fetchGA4TopEvents, fetchGA4TopKeyEvents } = await import("../lib/ga4TopEvents.js");
       const eventsLimit = parseInt(limit as string) || 10;
-      const events = await fetchGA4TopEvents(clientId, startDate, endDate, eventsLimit);
+      const mode = String(type || "events").toLowerCase();
+      const events =
+        mode === "keyevents" || mode === "key_events" || mode === "key-events"
+          ? await fetchGA4TopKeyEvents(clientId, startDate, endDate, eventsLimit)
+          : await fetchGA4TopEvents(clientId, startDate, endDate, eventsLimit);
       res.json(events);
     } catch (fetchError: any) {
       console.error("Error fetching top events:", fetchError);

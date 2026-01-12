@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X } from "lucide-react";
 import { format } from "date-fns";
 import api from "@/lib/api";
@@ -57,6 +57,32 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   const [editingField, setEditingField] = useState<"date" | "position" | null>(null);
   const [editDateValue, setEditDateValue] = useState<string>("");
   const [editPositionValue, setEditPositionValue] = useState<string>("");
+  const [starredKeywordIds, setStarredKeywordIds] = useState<Set<string>>(new Set());
+
+  const starredStorageKey = useMemo(() => {
+    // Persist per-user, per-client
+    const userKey = user?.id || user?.userId || "anon";
+    return clientId ? `targetKeywords:starred:${userKey}:${clientId}` : "";
+  }, [user, clientId]);
+
+  useEffect(() => {
+    if (!starredStorageKey) return;
+    try {
+      const raw = window.localStorage.getItem(starredStorageKey);
+      if (!raw) {
+        setStarredKeywordIds(new Set());
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setStarredKeywordIds(new Set(parsed.filter((v) => typeof v === "string")));
+      } else {
+        setStarredKeywordIds(new Set());
+      }
+    } catch {
+      setStarredKeywordIds(new Set());
+    }
+  }, [starredStorageKey]);
 
   const fetchKeywords = useCallback(async () => {
     if (!clientId) return;
@@ -73,6 +99,47 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
       setLoading(false);
     }
   }, [clientId]);
+
+  const persistStarredIds = useCallback(
+    (next: Set<string>) => {
+      if (!starredStorageKey) return;
+      try {
+        window.localStorage.setItem(starredStorageKey, JSON.stringify(Array.from(next)));
+      } catch {
+        // ignore storage write errors
+      }
+    },
+    [starredStorageKey]
+  );
+
+  const handleToggleStar = useCallback(
+    (keywordId: string) => {
+      setStarredKeywordIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(keywordId)) {
+          next.delete(keywordId);
+        } else {
+          next.add(keywordId);
+        }
+        persistStarredIds(next);
+        return next;
+      });
+    },
+    [persistStarredIds]
+  );
+
+  const sortedKeywords = useMemo(() => {
+    // Keep existing server order as the secondary ordering (stable).
+    const indexMap = new Map<string, number>();
+    keywords.forEach((k, idx) => indexMap.set(k.id, idx));
+
+    return [...keywords].sort((a, b) => {
+      const aStar = starredKeywordIds.has(a.id);
+      const bStar = starredKeywordIds.has(b.id);
+      if (aStar !== bStar) return aStar ? -1 : 1;
+      return (indexMap.get(a.id) ?? 0) - (indexMap.get(b.id) ?? 0);
+    });
+  }, [keywords, starredKeywordIds]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -276,11 +343,25 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {keywords.slice(0, 50).map((keyword) => (
+                  {sortedKeywords.slice(0, 50).map((keyword) => {
+                    const isStarred = starredKeywordIds.has(keyword.id);
+                    return (
                     <tr key={keyword.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <Star className="h-4 w-4 text-gray-400 hover:text-yellow-400 cursor-pointer transition-colors" />
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStar(keyword.id)}
+                            className="inline-flex items-center"
+                            title={isStarred ? "Unstar keyword" : "Star keyword (pin to top)"}
+                          >
+                            <Star
+                              className={`h-4 w-4 cursor-pointer transition-colors ${
+                                isStarred ? "text-yellow-500" : "text-gray-400 hover:text-yellow-400"
+                              }`}
+                              fill={isStarred ? "currentColor" : "none"}
+                            />
+                          </button>
                           <span className="text-sm font-medium text-gray-900 underline cursor-pointer hover:text-primary-600">
                             {keyword.keyword}
                           </span>
@@ -405,7 +486,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                         )}
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>

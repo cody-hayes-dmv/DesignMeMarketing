@@ -444,7 +444,7 @@ const ClientDashboardPage: React.FC = () => {
         } else {
           topEventsParams.period = dateRange;
         }
-        const topEventsRes = await api.get(`/seo/events/${clientId}/top`, { params: topEventsParams });
+        const topEventsRes = await api.get(`/seo/events/${clientId}/top`, { params: { ...topEventsParams, type: "keyEvents" } });
         setTopEvents(Array.isArray(topEventsRes.data) ? topEventsRes.data : []);
       } catch (err) {
         console.warn("Failed to refresh top events:", err);
@@ -911,7 +911,7 @@ const ClientDashboardPage: React.FC = () => {
         params.period = dateRange;
       }
 
-      const res = await api.get(`/seo/events/${clientId}/top`, { params });
+      const res = await api.get(`/seo/events/${clientId}/top`, { params: { ...params, type: "keyEvents" } });
       const data = Array.isArray(res.data) ? res.data : [];
       setTopEvents(data);
     } catch (error: any) {
@@ -2039,7 +2039,7 @@ const ClientDashboardPage: React.FC = () => {
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Conversions</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">Key Events</h3>
                   </div>
                 {topEventsError && (
                   <p className="mb-4 text-sm text-rose-600">
@@ -2049,19 +2049,19 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="space-y-4">
                   {topEventsLoading ? (
                     <div className="flex items-center justify-center py-8">
-                      <p className="text-sm text-gray-500">Loading conversions...</p>
+                      <p className="text-sm text-gray-500">Loading key events...</p>
                     </div>
                   ) : topEvents.length === 0 ? (
                     <div className="text-sm text-gray-500 text-center py-4">
                       {ga4Connected 
-                        ? "No conversions data available. Make sure events are configured in GA4."
-                        : "Connect GA4 to view conversions data."}
+                        ? "No key events data available. Make sure key events are configured in GA4."
+                        : "Connect GA4 to view key events data."}
                     </div>
                   ) : (
                     topEvents.map((event, index) => (
                       <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <p className="font-medium text-gray-900">{event.name}</p>
-                        <p className="text-sm text-gray-500">{event.count.toLocaleString()} conversions</p>
+                        <p className="text-sm text-gray-500">{event.count.toLocaleString()}</p>
                       </div>
                     ))
                   )}

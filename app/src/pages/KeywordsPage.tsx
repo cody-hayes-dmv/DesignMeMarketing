@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2,
   Search,
@@ -80,6 +80,25 @@ const KeywordsPage: React.FC = () => {
   const [newKeywordValue, setNewKeywordValue] = useState("");
   const [addingKeyword, setAddingKeyword] = useState(false);
   const [addKeywordMessage, setAddKeywordMessage] = useState<string | null>(null);
+
+  type LocationOption = {
+    location_name: string;
+    country_iso_code?: string | null;
+    location_type?: string | null;
+  };
+
+  const DEFAULT_TRACK_LOCATION: LocationOption = {
+    location_name: "United States",
+    country_iso_code: "US",
+    location_type: "Country",
+  };
+
+  const [trackLocationQuery, setTrackLocationQuery] = useState<string>(DEFAULT_TRACK_LOCATION.location_name);
+  const [trackLocationSelected, setTrackLocationSelected] = useState<LocationOption>(DEFAULT_TRACK_LOCATION);
+  const [trackLocationOptions, setTrackLocationOptions] = useState<LocationOption[]>([]);
+  const [trackLocationLoading, setTrackLocationLoading] = useState(false);
+  const [trackLocationOpen, setTrackLocationOpen] = useState(false);
+  const locationBoxRef = useRef<HTMLDivElement | null>(null);
 
   const [researchSeed, setResearchSeed] = useState("");
   const [researchLocation, setResearchLocation] = useState<number>(DEFAULT_LOCATION);
@@ -296,8 +315,10 @@ const KeywordsPage: React.FC = () => {
       await api.post(`/seo/keywords/${selectedClientId}`, {
         keyword: newKeywordValue.trim(),
         fetchFromDataForSEO: true, // Auto-fetch ranking data
-        locationCode: DEFAULT_LOCATION,
         languageCode: DEFAULT_LANGUAGE,
+        location_name: trackLocationSelected?.location_name || DEFAULT_TRACK_LOCATION.location_name,
+        include_clickstream_data: true,
+        include_serp_info: true,
       });
 
       toast.success("Keyword added and data fetched successfully!");
@@ -316,6 +337,50 @@ const KeywordsPage: React.FC = () => {
       setAddingKeyword(false);
     }
   };
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (!locationBoxRef.current) return;
+      if (!locationBoxRef.current.contains(e.target as Node)) {
+        setTrackLocationOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
+  useEffect(() => {
+    if (!trackLocationOpen) return;
+
+    const q = trackLocationQuery.trim();
+    if (q.length < 2) {
+      setTrackLocationOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setTrackLocationLoading(true);
+        const res = await api.get("/seo/locations", {
+          params: { q, limit: 10 },
+        });
+        const items: LocationOption[] = Array.isArray(res.data) ? res.data : [];
+        if (!cancelled) {
+          setTrackLocationOptions(items);
+        }
+      } catch (err) {
+        if (!cancelled) setTrackLocationOptions([]);
+      } finally {
+        if (!cancelled) setTrackLocationLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [trackLocationOpen, trackLocationQuery]);
 
   const handleRefreshTrackedKeyword = async (keywordId: string) => {
     if (!selectedClientId) return;
@@ -705,6 +770,52 @@ const KeywordsPage: React.FC = () => {
                       className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
                       required
                     />
+                    <div ref={locationBoxRef} className="relative w-72">
+                      <label className="sr-only">Location</label>
+                      <input
+                        type="text"
+                        value={trackLocationQuery}
+                        onChange={(e) => {
+                          setTrackLocationQuery(e.target.value);
+                          setTrackLocationOpen(true);
+                        }}
+                        onFocus={() => setTrackLocationOpen(true)}
+                        placeholder="Search location"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                      />
+                      {trackLocationOpen && (
+                        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+                          <div className="max-h-64 overflow-y-auto">
+                            {trackLocationLoading ? (
+                              <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>
+                            ) : trackLocationQuery.trim().length < 2 ? (
+                              <div className="px-3 py-2 text-sm text-gray-500">Type 2+ characters to search.</div>
+                            ) : trackLocationOptions.length === 0 ? (
+                              <div className="px-3 py-2 text-sm text-gray-500">No locations found.</div>
+                            ) : (
+                              trackLocationOptions.map((opt) => (
+                                <button
+                                  key={`${opt.location_name}-${opt.country_iso_code ?? ""}-${opt.location_type ?? ""}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setTrackLocationSelected(opt);
+                                    setTrackLocationQuery(opt.location_name);
+                                    setTrackLocationOpen(false);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+                                >
+                                  <div className="font-medium text-gray-900">{opt.location_name}</div>
+                                  <div className="text-xs text-gray-500">
+                                    {(opt.location_type || "Location")}
+                                    {opt.country_iso_code ? ` • ${opt.country_iso_code}` : ""}
+                                  </div>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <button
                       type="submit"
                       disabled={addingKeyword || !selectedClientId}
