@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE `target_keywords` ADD COLUMN `googlePosition` INTEGER NULL,
+ALTER TABLE `target_keywords`
     ADD COLUMN `googleUrl` VARCHAR(191) NULL,
     ADD COLUMN `languageCode` VARCHAR(191) NULL,
     ADD COLUMN `languageName` VARCHAR(191) NULL,
