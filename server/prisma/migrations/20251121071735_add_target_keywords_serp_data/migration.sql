@@ -12,4 +12,4 @@ ALTER TABLE `target_keywords`
     ADD COLUMN IF NOT EXISTS `serpItemTypes` JSON NULL;
 
 -- CreateIndex (make it safe too)
--- CREATE INDEX `target_keywords_clientId_googlePosition_idx` ON `target_keywords`(`clientId`, `googlePosition`);
+CREATE INDEX `target_keywords_clientId_googlePosition_idx` ON `target_keywords`(`clientId`, `googlePosition`);
