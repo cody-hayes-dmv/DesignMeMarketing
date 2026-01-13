@@ -315,6 +315,9 @@ model Keyword {
   cpc          Float?
   competition  String?
 
+  // Tracking metadata (UI-selected)
+  locationName String?
+
   // Ranking data
   currentPosition  Int?
   previousPosition Int?
