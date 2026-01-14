@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Plus, Users, Mail, UserCheck, Trash2, X } from "lucide-react";
-import ConfirmDialog from "../components/ConfirmDialog";
 import api from "../lib/api";
 import { useSelector } from "react-redux";
 import { RootState } from "../store";
@@ -111,25 +110,17 @@ const WorkersPage: React.FC = () => {
     }
   };
 
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; workerId: string | null }>({
-    isOpen: false,
-    workerId: null,
-  });
-
   const handleRemoveWorker = async (id: string) => {
-    setDeleteConfirm({ isOpen: true, workerId: id });
-  };
-
-  const confirmRemoveWorker = async () => {
-    if (!deleteConfirm.workerId) return;
+    if (!window.confirm("Remove this worker? This action cannot be undone.")) {
+      return;
+    }
     try {
-      await api.delete(`/team/${deleteConfirm.workerId}`);
+      await api.delete(`/team/${id}`);
       toast.success("Worker removed successfully!");
       fetchWorkers();
-      setDeleteConfirm({ isOpen: false, workerId: null });
     } catch (err: any) {
       console.error("Failed to remove worker", err);
-      setDeleteConfirm({ isOpen: false, workerId: null });
+      // Toast is already shown by API interceptor
     }
   };
 
@@ -281,10 +272,11 @@ const WorkersPage: React.FC = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button
                         onClick={() => handleRemoveWorker(member.id)}
-                        className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50 transition-colors"
+                        className="text-red-600 hover:text-red-900 inline-flex items-center space-x-1"
                         title="Remove worker"
                       >
                         <Trash2 className="h-4 w-4" />
+                        <span>Remove</span>
                       </button>
                     </td>
                   </tr>
@@ -367,18 +359,6 @@ const WorkersPage: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Delete Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={deleteConfirm.isOpen}
-        onClose={() => setDeleteConfirm({ isOpen: false, workerId: null })}
-        onConfirm={confirmRemoveWorker}
-        title="Remove Worker"
-        message="Are you sure you want to remove this worker? This action cannot be undone and they will lose access to the system."
-        confirmText="Remove"
-        cancelText="Cancel"
-        variant="danger"
-      />
     </div>
   );
 };

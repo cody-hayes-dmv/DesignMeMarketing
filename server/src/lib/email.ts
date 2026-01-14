@@ -1,19 +1,10 @@
 import nodemailer from "nodemailer";
 
-interface EmailAttachment {
-  filename: string;
-  content: Buffer;
-  contentType?: string;
-}
-
 interface EmailOptions {
   to: string;
   subject: string;
   html: string;
-  attachments?: EmailAttachment[];
 }
-
-const EMAIL_DISABLED = process.env.EMAIL_DISABLED === "true";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "localhost",
@@ -25,21 +16,13 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export const sendEmail = async ({ to, subject, html, attachments }: EmailOptions) => {
+export const sendEmail = async ({ to, subject, html }: EmailOptions) => {
   try {
-    if (EMAIL_DISABLED) {
-      console.log(
-        `[Email] EMAIL_DISABLED=true, skipping send to ${to}. Subject: "${subject}"`
-      );
-      return;
-    }
-
     await transporter.sendMail({
       from: process.env.SMTP_FROM || "noreply@yourseodashboard.com",
       to,
       subject,
       html,
-      attachments,
     });
     console.log(`Email sent to ${to}`);
   } catch (error) {

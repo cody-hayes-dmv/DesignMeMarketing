@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Loader2,
   Search,
@@ -6,14 +6,10 @@ import {
   Plus,
   CheckCircle2,
   AlertTriangle,
-  Trash2,
 } from "lucide-react";
-import ConfirmDialog from "@/components/ConfirmDialog";
 import api from "@/lib/api";
 import { Client, Keyword } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
-import { useSelector } from "react-redux";
-import { RootState } from "@/store";
 
 type TabId = "research" | "tracked";
 
@@ -57,7 +53,6 @@ const formatNumber = (value: number | null | undefined) => {
 };
 
 const KeywordsPage: React.FC = () => {
-  const { user } = useSelector((state: RootState) => state.auth);
   const [activeTab, setActiveTab] = useState<TabId>("research");
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -70,35 +65,14 @@ const KeywordsPage: React.FC = () => {
   const [trackedError, setTrackedError] = useState<string | null>(null);
   const [trackSearchTerm, setTrackSearchTerm] = useState("");
   const [refreshingKeywordIds, setRefreshingKeywordIds] = useState<Record<string, boolean>>({});
-  const [deletingKeywordIds, setDeletingKeywordIds] = useState<Record<string, boolean>>({});
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; keywordId: string | null; keywordText: string | null }>({
-    isOpen: false,
-    keywordId: null,
-    keywordText: null,
-  });
 
   const [newKeywordValue, setNewKeywordValue] = useState("");
+  const [newKeywordVolume, setNewKeywordVolume] = useState("");
+  const [newKeywordDifficulty, setNewKeywordDifficulty] = useState("");
+  const [newKeywordCpc, setNewKeywordCpc] = useState("");
+  const [newKeywordCompetition, setNewKeywordCompetition] = useState("");
   const [addingKeyword, setAddingKeyword] = useState(false);
   const [addKeywordMessage, setAddKeywordMessage] = useState<string | null>(null);
-
-  type LocationOption = {
-    location_name: string;
-    country_iso_code?: string | null;
-    location_type?: string | null;
-  };
-
-  const DEFAULT_TRACK_LOCATION: LocationOption = {
-    location_name: "United States",
-    country_iso_code: "US",
-    location_type: "Country",
-  };
-
-  const [trackLocationQuery, setTrackLocationQuery] = useState<string>(DEFAULT_TRACK_LOCATION.location_name);
-  const [trackLocationSelected, setTrackLocationSelected] = useState<LocationOption>(DEFAULT_TRACK_LOCATION);
-  const [trackLocationOptions, setTrackLocationOptions] = useState<LocationOption[]>([]);
-  const [trackLocationLoading, setTrackLocationLoading] = useState(false);
-  const [trackLocationOpen, setTrackLocationOpen] = useState(false);
-  const locationBoxRef = useRef<HTMLDivElement | null>(null);
 
   const [researchSeed, setResearchSeed] = useState("");
   const [researchLocation, setResearchLocation] = useState<number>(DEFAULT_LOCATION);
@@ -186,7 +160,6 @@ const KeywordsPage: React.FC = () => {
           locationCode: researchLocation,
           languageCode: researchLanguage,
         },
-        timeout: 60000, // 60 seconds timeout for keyword research (can take longer)
       });
       const suggestions: ResearchKeyword[] = Array.isArray(res.data) ? res.data : [];
       setResearchResults(suggestions);
@@ -196,12 +169,7 @@ const KeywordsPage: React.FC = () => {
     } catch (error: any) {
       console.error("Keyword research error", error);
       setResearchResults([]);
-      let errorMsg = "Unable to fetch keyword suggestions. Please try again.";
-      if (error?.code === "ECONNABORTED" || error?.message?.includes("timeout")) {
-        errorMsg = "Request timed out. The keyword research is taking longer than expected. Please try again.";
-      } else if (error?.response?.data?.message) {
-        errorMsg = error.response.data.message;
-      }
+      const errorMsg = error?.response?.data?.message || "Unable to fetch keyword suggestions. Please try again.";
       setResearchError(errorMsg);
       // Toast is already shown by API interceptor
     } finally {
@@ -230,7 +198,6 @@ const KeywordsPage: React.FC = () => {
       setAssigningKeywords(true);
       setAssignMessage(null);
 
-      // Add as tracked keywords - auto-fetch data from DataForSEO
       await Promise.all(
         keywords.map((item) =>
           api.post(`/seo/keywords/${assignClientId}`, {
@@ -241,40 +208,13 @@ const KeywordsPage: React.FC = () => {
             competition:
               item.competitionLevel ||
               (item.competition !== null ? item.competition.toFixed(2) : undefined),
-            fetchFromDataForSEO: true, // Auto-fetch ranking data
-            locationCode: researchLocation,
-            languageCode: researchLanguage,
+            fetchFromDataForSEO: false,
           })
         )
       );
 
-      // Always add as target keywords when tracking
-      try {
-        await Promise.all(
-          keywords.map((item) =>
-            api.post(`/seo/target-keywords/${assignClientId}`, {
-              keyword: item.keyword,
-              searchVolume: Number(item.searchVolume) || 0,
-              cpc: item.cpc ?? undefined,
-              competition: item.competitionLevel || undefined,
-              competitionValue: item.competition !== null ? item.competition : undefined,
-              locationCode: researchLocation,
-              languageCode: researchLanguage,
-            }).catch((err) => {
-              // Ignore errors for keywords that already exist as target keywords
-              if (err?.response?.status !== 400 || !err?.response?.data?.message?.includes("already exists")) {
-                console.warn(`Failed to add ${item.keyword} as target keyword:`, err);
-              }
-            })
-          )
-        );
-      } catch (targetError) {
-        console.error("Some keywords failed to be added as target keywords:", targetError);
-      }
-
-      const successMessage = `Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking and target keywords.`;
-      toast.success(successMessage);
-      setAssignMessage(successMessage);
+      toast.success(`Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking.`);
+      setAssignMessage(`Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking.`);
       if (assignClientId === selectedClientId) {
         const res = await api.get(`/seo/keywords/${assignClientId}`);
         const keywordList: Keyword[] = Array.isArray(res.data) ? res.data : [];
@@ -311,19 +251,22 @@ const KeywordsPage: React.FC = () => {
     try {
       setAddingKeyword(true);
       setAddKeywordMessage(null);
-      // Auto-fetch data from DataForSEO when adding keyword
       await api.post(`/seo/keywords/${selectedClientId}`, {
         keyword: newKeywordValue.trim(),
-        fetchFromDataForSEO: true, // Auto-fetch ranking data
-        languageCode: DEFAULT_LANGUAGE,
-        location_name: trackLocationSelected?.location_name || DEFAULT_TRACK_LOCATION.location_name,
-        include_clickstream_data: true,
-        include_serp_info: true,
+        searchVolume: Number(newKeywordVolume) || 0,
+        difficulty: newKeywordDifficulty ? Number(newKeywordDifficulty) : undefined,
+        cpc: newKeywordCpc ? Number(newKeywordCpc) : undefined,
+        competition: newKeywordCompetition || undefined,
+        fetchFromDataForSEO: false,
       });
 
-      toast.success("Keyword added and data fetched successfully!");
-      setAddKeywordMessage("Keyword added successfully. Ranking data will be fetched automatically.");
-      setNewKeywordValue("");
+      toast.success("Keyword added successfully!");
+      setAddKeywordMessage("Keyword added successfully.");
+      setNewKeywordValue("{}");
+      setNewKeywordVolume("{}");
+      setNewKeywordDifficulty("{}");
+      setNewKeywordCpc("{}");
+      setNewKeywordCompetition("{}");
 
       const res = await api.get(`/seo/keywords/${selectedClientId}`);
       const keywordList: Keyword[] = Array.isArray(res.data) ? res.data : [];
@@ -337,50 +280,6 @@ const KeywordsPage: React.FC = () => {
       setAddingKeyword(false);
     }
   };
-
-  useEffect(() => {
-    const onMouseDown = (e: MouseEvent) => {
-      if (!locationBoxRef.current) return;
-      if (!locationBoxRef.current.contains(e.target as Node)) {
-        setTrackLocationOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onMouseDown);
-    return () => document.removeEventListener("mousedown", onMouseDown);
-  }, []);
-
-  useEffect(() => {
-    if (!trackLocationOpen) return;
-
-    const q = trackLocationQuery.trim();
-    if (q.length < 2) {
-      setTrackLocationOptions([]);
-      return;
-    }
-
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      try {
-        setTrackLocationLoading(true);
-        const res = await api.get("/seo/locations", {
-          params: { q, limit: 10 },
-        });
-        const items: LocationOption[] = Array.isArray(res.data) ? res.data : [];
-        if (!cancelled) {
-          setTrackLocationOptions(items);
-        }
-      } catch (err) {
-        if (!cancelled) setTrackLocationOptions([]);
-      } finally {
-        if (!cancelled) setTrackLocationLoading(false);
-      }
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [trackLocationOpen, trackLocationQuery]);
 
   const handleRefreshTrackedKeyword = async (keywordId: string) => {
     if (!selectedClientId) return;
@@ -399,32 +298,6 @@ const KeywordsPage: React.FC = () => {
       // Toast is already shown by API interceptor
     } finally {
       setRefreshingKeywordIds((prev) => ({ ...prev, [keywordId]: false }));
-    }
-  };
-
-  const handleDeleteTrackedKeyword = (keywordId: string, keywordText: string) => {
-    setDeleteConfirm({ isOpen: true, keywordId, keywordText });
-  };
-
-  const confirmDeleteTrackedKeyword = async () => {
-    if (!deleteConfirm.keywordId || !selectedClientId) return;
-    
-    try {
-      setDeletingKeywordIds((prev) => ({ ...prev, [deleteConfirm.keywordId!]: true }));
-      await api.delete(`/seo/keywords/${selectedClientId}/${deleteConfirm.keywordId}`);
-      toast.success("Keyword deleted successfully!");
-      
-      // Refresh the keyword list
-      const res = await api.get(`/seo/keywords/${selectedClientId}`);
-      const keywordList: Keyword[] = Array.isArray(res.data) ? res.data : [];
-      setTrackedKeywords(keywordList);
-      setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null });
-    } catch (error: any) {
-      console.error("Failed to delete keyword", error);
-      toast.error(error?.response?.data?.message || "Failed to delete keyword");
-      setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null });
-    } finally {
-      setDeletingKeywordIds((prev) => ({ ...prev, [deleteConfirm.keywordId!]: false }));
     }
   };
 
@@ -754,93 +627,98 @@ const KeywordsPage: React.FC = () => {
 
             <form
               onSubmit={handleAddTrackedKeyword}
-              className="rounded-lg border border-gray-200 bg-gray-50/60 p-4"
+              className="grid grid-cols-1 md:grid-cols-5 gap-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4"
             >
-              <div className="flex items-start gap-3">
-                <div className="flex-1">
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Keyword
-                  </label>
-                  <div className="mt-1 flex items-center gap-3">
-                    <input
-                      type="text"
-                      value={newKeywordValue}
-                      onChange={(e) => setNewKeywordValue(e.target.value)}
-                      placeholder="e.g. best running shoes"
-                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                      required
-                    />
-                    <div ref={locationBoxRef} className="relative w-72">
-                      <label className="sr-only">Location</label>
-                      <input
-                        type="text"
-                        value={trackLocationQuery}
-                        onChange={(e) => {
-                          setTrackLocationQuery(e.target.value);
-                          setTrackLocationOpen(true);
-                        }}
-                        onFocus={() => setTrackLocationOpen(true)}
-                        placeholder="Search location"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                      />
-                      {trackLocationOpen && (
-                        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
-                          <div className="max-h-64 overflow-y-auto">
-                            {trackLocationLoading ? (
-                              <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>
-                            ) : trackLocationQuery.trim().length < 2 ? (
-                              <div className="px-3 py-2 text-sm text-gray-500">Type 2+ characters to search.</div>
-                            ) : trackLocationOptions.length === 0 ? (
-                              <div className="px-3 py-2 text-sm text-gray-500">No locations found.</div>
-                            ) : (
-                              trackLocationOptions.map((opt) => (
-                                <button
-                                  key={`${opt.location_name}-${opt.country_iso_code ?? ""}-${opt.location_type ?? ""}`}
-                                  type="button"
-                                  onClick={() => {
-                                    setTrackLocationSelected(opt);
-                                    setTrackLocationQuery(opt.location_name);
-                                    setTrackLocationOpen(false);
-                                  }}
-                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
-                                >
-                                  <div className="font-medium text-gray-900">{opt.location_name}</div>
-                                  <div className="text-xs text-gray-500">
-                                    {(opt.location_type || "Location")}
-                                    {opt.country_iso_code ? ` • ${opt.country_iso_code}` : ""}
-                                  </div>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={addingKeyword || !selectedClientId}
-                      className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60 whitespace-nowrap"
-                    >
-                      {addingKeyword ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          Tracking…
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Track
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Data will be automatically fetched from DataForSEO when you track this keyword.
-                  </p>
-                </div>
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Keyword
+                </label>
+                <input
+                  type="text"
+                  value={newKeywordValue}
+                  onChange={(e) => setNewKeywordValue(e.target.value)}
+                  placeholder="e.g. best running shoes"
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Search volume
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={newKeywordVolume}
+                  onChange={(e) => setNewKeywordVolume(e.target.value)}
+                  placeholder="0"
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Difficulty (0-100)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={newKeywordDifficulty}
+                  onChange={(e) => setNewKeywordDifficulty(e.target.value)}
+                  placeholder="—"
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  CPC (USD)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={newKeywordCpc}
+                  onChange={(e) => setNewKeywordCpc(e.target.value)}
+                  placeholder="0.00"
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Competition
+                </label>
+                <input
+                  type="text"
+                  value={newKeywordCompetition}
+                  onChange={(e) => setNewKeywordCompetition(e.target.value)}
+                  placeholder="e.g. 0.45 or Medium"
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                />
+              </div>
+              <div className="md:col-span-5 flex items-center justify-between">
+                <p className="text-xs text-gray-500">
+                  Add a keyword manually or use the research tab to discover new opportunities.
+                </p>
+                <button
+                  type="submit"
+                  disabled={addingKeyword || !selectedClientId}
+                  className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60"
+                >
+                  {addingKeyword ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Saving…
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add keyword
+                    </>
+                  )}
+                </button>
               </div>
               {addKeywordMessage && (
-                <div className="absolute mt-16 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-700">
+                <div className="md:col-span-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-700">
                   {addKeywordMessage}
                 </div>
               )}
@@ -933,36 +811,24 @@ const KeywordsPage: React.FC = () => {
                           {keyword.currentPosition ?? "—"}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            {user?.role === "SUPER_ADMIN" && (
-                              <button
-                                type="button"
-                                onClick={() => handleRefreshTrackedKeyword(keyword.id)}
-                                disabled={Boolean(refreshingKeywordIds[keyword.id])}
-                                className="inline-flex items-center justify-center rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-60 transition-colors"
-                                title="Refresh keyword data from DataForSEO"
-                              >
-                                {refreshingKeywordIds[keyword.id] ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="h-4 w-4" />
-                                )}
-                              </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRefreshTrackedKeyword(keyword.id)}
+                            disabled={Boolean(refreshingKeywordIds[keyword.id])}
+                            className="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-60"
+                          >
+                            {refreshingKeywordIds[keyword.id] ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
+                                Updating…
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                                Refresh
+                              </>
                             )}
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTrackedKeyword(keyword.id, keyword.keyword)}
-                              disabled={Boolean(deletingKeywordIds[keyword.id])}
-                              className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
-                              title="Delete this keyword"
-                            >
-                              {deletingKeywordIds[keyword.id] ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </button>
-                          </div>
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -973,18 +839,6 @@ const KeywordsPage: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Delete Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={deleteConfirm.isOpen}
-        onClose={() => setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null })}
-        onConfirm={confirmDeleteTrackedKeyword}
-        title="Delete Keyword"
-        message={`Are you sure you want to delete the keyword "${deleteConfirm.keywordText}"? This action cannot be undone and all tracking data for this keyword will be permanently removed.`}
-        confirmText="Delete"
-        cancelText="Cancel"
-        variant="danger"
-      />
     </div>
   );
 };

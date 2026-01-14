@@ -9,13 +9,11 @@ import {
   UserX,
   Edit,
   Trash2,
-  X,
 } from "lucide-react";
 import api from "../lib/api";
 import { useSelector } from "react-redux";
 import { RootState } from "../store";
 import toast from "react-hot-toast";
-import ConfirmDialog from "../components/ConfirmDialog";
 
 interface TeamMember {
   id: string;
@@ -43,12 +41,6 @@ const TeamPage = () => {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
-  const [editForm, setEditForm] = useState({
-    name: "",
-    role: "WORKER" as "WORKER" | "AGENCY" | "ADMIN",
-  });
 
   useEffect(() => {
     fetchTeamMembers();
@@ -83,51 +75,18 @@ const TeamPage = () => {
     }
   };
 
-  const handleEditTeamMember = (member: TeamMember) => {
-    setSelectedMember(member);
-    setEditForm({
-      name: member.name,
-      role: member.role as "WORKER" | "AGENCY" | "ADMIN",
-    });
-    setShowEditModal(true);
-  };
-
-  const handleUpdateTeamMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedMember) return;
-
+  const handleDeleteTeamMember = async (id: string) => {
+    if (!window.confirm("Are you sure you want to remove this team member? This action cannot be undone.")) {
+      return;
+    }
     try {
-      await api.put(`/team/${selectedMember.id}`, editForm);
-      toast.success("Team member updated successfully!");
-      setShowEditModal(false);
-      setSelectedMember(null);
+      await api.delete(`/team/${id}`);
+      toast.success("Team member removed successfully!");
       // Refresh team members
       fetchTeamMembers();
     } catch (error: any) {
-      console.error("Failed to update team member:", error);
-      // Toast is already shown by API interceptor
-    }
-  };
-
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; memberId: string | null }>({
-    isOpen: false,
-    memberId: null,
-  });
-
-  const handleDeleteTeamMember = async (id: string) => {
-    setDeleteConfirm({ isOpen: true, memberId: id });
-  };
-
-  const confirmDeleteTeamMember = async () => {
-    if (!deleteConfirm.memberId) return;
-    try {
-      await api.delete(`/team/${deleteConfirm.memberId}`);
-      toast.success("Team member removed successfully!");
-      fetchTeamMembers();
-      setDeleteConfirm({ isOpen: false, memberId: null });
-    } catch (error: any) {
       console.error("Failed to delete team member:", error);
-      setDeleteConfirm({ isOpen: false, memberId: null });
+      // Toast is already shown by API interceptor
     }
   };
 
@@ -341,18 +300,13 @@ const TeamPage = () => {
                       <div className="flex items-center space-x-2">
                         {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || user?.role === "AGENCY") && (
                           <>
-                            <button
-                              onClick={() => handleEditTeamMember(member)}
-                              className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
-                              title="Edit member"
-                            >
+                            <button className="p-1 text-gray-400 hover:text-primary-600 transition-colors">
                               <Edit className="h-4 w-4" />
                             </button>
                             {member.role !== "SUPER_ADMIN" && (
                               <button
                                 onClick={() => handleDeleteTeamMember(member.id)}
                                 className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                title="Delete member"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </button>
@@ -439,92 +393,6 @@ const TeamPage = () => {
           </div>
         </div>
       )}
-
-      {/* Edit Team Member Modal */}
-      {showEditModal && selectedMember && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-gray-900">
-                Edit Team Member
-              </h2>
-              <button
-                onClick={() => {
-                  setShowEditModal(false);
-                  setSelectedMember(null);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <form onSubmit={handleUpdateTeamMember} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  value={editForm.name}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, name: e.target.value })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Role
-                </label>
-                <select
-                  value={editForm.role}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, role: e.target.value as "WORKER" | "AGENCY" | "ADMIN" })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                >
-                  <option value="WORKER">Worker</option>
-                  <option value="AGENCY">Agency Admin</option>
-                  {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") && (
-                    <option value="ADMIN">Admin</option>
-                  )}
-                </select>
-              </div>
-              <div className="flex space-x-4 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setSelectedMember(null);
-                  }}
-                  className="flex-1 bg-gray-200 text-gray-800 py-3 px-6 rounded-lg hover:bg-gray-300 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors"
-                >
-                  Update Member
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={deleteConfirm.isOpen}
-        onClose={() => setDeleteConfirm({ isOpen: false, memberId: null })}
-        onConfirm={confirmDeleteTeamMember}
-        title="Remove Team Member"
-        message="Are you sure you want to remove this team member? This action cannot be undone and they will lose access to the system."
-        confirmText="Remove"
-        cancelText="Cancel"
-        variant="danger"
-      />
     </div>
   );
 };

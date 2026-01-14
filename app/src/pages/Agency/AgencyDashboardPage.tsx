@@ -1,172 +1,120 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
 import {
   TrendingUp,
+  TrendingDown,
   Search,
-  BarChart3,
+  FolderOpen,
   Users,
-  UserPlus,
-  Activity,
+  BarChart3,
   ArrowUpRight,
   ArrowDownRight,
   Minus,
   Globe,
   Eye,
+  Calendar,
   Target,
-  Loader2,
-  RefreshCw,
 } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import api from "@/lib/api";
-import toast from "react-hot-toast";
-
-interface TrendPoint {
-  date: string;
-  value: number;
-}
-
-interface AgencyGa4Summary {
-  websiteVisitors: number;
-  organicSessions: number;
-  firstTimeVisitors: number;
-  engagedVisitors: number;
-  connectedClients: number;
-  totalClients: number;
-  newUsersTrend: TrendPoint[];
-  totalUsersTrend: TrendPoint[];
-}
-
-interface DashboardStats {
-  totalKeywords: number;
-  avgPosition: number | null;
-  topRankings: number;
-  totalProjects: number;
-  organicTraffic: number;
-  recentRankings: Array<{
-    keyword: string;
-    position: number;
-    change: number;
-    url: string;
-    volume: number;
-  }>;
-  topPages: Array<{
-    url: string;
-    clicks: number;
-    impressions: number;
-    ctr: number;
-    position: number;
-  }>;
-  rankingTrends: Array<{
-    date: string;
-    avgPosition: number;
-  }>;
-  trafficTrends: Array<{
-    date: string;
-    traffic: number;
-  }>;
-  ga4Summary: AgencyGa4Summary;
-}
-
-const defaultGa4Summary: AgencyGa4Summary = {
-  websiteVisitors: 0,
-  organicSessions: 0,
-  firstTimeVisitors: 0,
-  engagedVisitors: 0,
-  connectedClients: 0,
-  totalClients: 0,
-  newUsersTrend: [],
-  totalUsersTrend: [],
-};
-
-const mapDashboardResponse = (payload: any): DashboardStats => ({
-  totalKeywords: payload?.totalKeywords ?? 0,
-  avgPosition:
-    payload?.avgPosition !== undefined && payload?.avgPosition !== null
-      ? Number(payload.avgPosition)
-      : null,
-  topRankings: payload?.topRankings ?? 0,
-  totalProjects: payload?.totalProjects ?? 0,
-  organicTraffic: payload?.organicTraffic ?? 0,
-  recentRankings: payload?.recentRankings ?? [],
-  topPages: payload?.topPages ?? [],
-  rankingTrends: payload?.rankingTrends ?? [],
-  trafficTrends: payload?.trafficTrends ?? [],
-  ga4Summary: {
-    ...defaultGa4Summary,
-    ...(payload?.ga4Summary || {}),
-    websiteVisitors: payload?.ga4Summary?.websiteVisitors ?? 0,
-    organicSessions: payload?.ga4Summary?.organicSessions ?? 0,
-    firstTimeVisitors: payload?.ga4Summary?.firstTimeVisitors ?? 0,
-    engagedVisitors: payload?.ga4Summary?.engagedVisitors ?? 0,
-    connectedClients: payload?.ga4Summary?.connectedClients ?? 0,
-    totalClients: payload?.ga4Summary?.totalClients ?? payload?.totalProjects ?? 0,
-    newUsersTrend: (payload?.ga4Summary?.newUsersTrend ?? [])
-      .map((point: any) => ({
-        date: point?.date || "",
-        value: Number(point?.value ?? 0),
-      }))
-      .filter((point: TrendPoint) => Boolean(point.date)),
-    totalUsersTrend: (payload?.ga4Summary?.totalUsersTrend ?? [])
-      .map((point: any) => ({
-        date: point?.date || "",
-        value: Number(point?.value ?? 0),
-      }))
-      .filter((point: TrendPoint) => Boolean(point.date)),
-  },
-});
-
-const defaultDashboardStats: DashboardStats = mapDashboardResponse({});
 
 const AgencyDashboardPage = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const { clients } = useSelector((state: RootState) => state.client);
   const [selectedPeriod, setSelectedPeriod] = useState("30");
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState<DashboardStats>(defaultDashboardStats);
 
   useEffect(() => {
     dispatch(fetchClients() as any);
   }, [dispatch]);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        const res = await api.get("/seo/agency/dashboard", {
-          params: { period: selectedPeriod },
-        });
-        setStats(mapDashboardResponse(res.data));
-      } catch (error: any) {
-        console.error("Failed to fetch dashboard data", error);
-        // Toast is already shown by API interceptor
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboardData();
-  }, [selectedPeriod]);
-
-  const handleRefresh = async () => {
-    try {
-      setRefreshing(true);
-      await api.post("/seo/agency/dashboard/refresh");
-      toast.success("Agency dashboard data refreshed successfully!");
-      // Refetch dashboard data
-      const res = await api.get("/seo/agency/dashboard", {
-        params: { period: selectedPeriod },
-      });
-      setStats(mapDashboardResponse(res.data));
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
-    } finally {
-      setRefreshing(false);
-    }
+  // Mock data for demo
+  const stats = {
+    totalKeywords: 1247,
+    avgPosition: 12.4,
+    topRankings: 89,
+    totalProjects: clients.length || 5,
+    totalClicks: 15420,
+    totalImpressions: 234567,
+    organicTraffic: 45230,
+    conversionRate: 3.2,
   };
+
+  const recentRankings = [
+    {
+      keyword: "seo services",
+      position: 3,
+      change: 2,
+      url: "/seo-services",
+      volume: 8100,
+    },
+    {
+      keyword: "digital marketing",
+      position: 7,
+      change: -1,
+      url: "/digital-marketing",
+      volume: 12100,
+    },
+    {
+      keyword: "content marketing",
+      position: 12,
+      change: 0,
+      url: "/content-marketing",
+      volume: 5400,
+    },
+    {
+      keyword: "link building",
+      position: 5,
+      change: 3,
+      url: "/link-building",
+      volume: 2900,
+    },
+    {
+      keyword: "local seo",
+      position: 2,
+      change: 1,
+      url: "/local-seo",
+      volume: 3600,
+    },
+  ];
+
+  const topPages = [
+    {
+      url: "/seo-services",
+      clicks: 2340,
+      impressions: 45600,
+      ctr: 5.1,
+      position: 3.2,
+    },
+    {
+      url: "/digital-marketing",
+      clicks: 1890,
+      impressions: 38200,
+      ctr: 4.9,
+      position: 7.1,
+    },
+    {
+      url: "/content-strategy",
+      clicks: 1560,
+      impressions: 29800,
+      ctr: 5.2,
+      position: 5.8,
+    },
+    {
+      url: "/local-seo",
+      clicks: 1340,
+      impressions: 22100,
+      ctr: 6.1,
+      position: 2.1,
+    },
+    {
+      url: "/technical-seo",
+      clicks: 980,
+      impressions: 18900,
+      ctr: 5.2,
+      position: 8.4,
+    },
+  ];
 
   const getChangeIcon = (change: number) => {
     if (change > 0) return <ArrowUpRight className="h-4 w-4 text-green-500" />;
@@ -179,63 +127,6 @@ const AgencyDashboardPage = () => {
     if (change < 0) return "text-red-600";
     return "text-gray-500";
   };
-
-  const hasGa4Data = stats.ga4Summary.connectedClients > 0;
-  const ga4TotalClients = stats.ga4Summary.totalClients || stats.totalProjects || 0;
-
-  const formatGa4Value = (value: number) => {
-    if (!hasGa4Data) return "—";
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return "—";
-    return Math.round(numeric).toLocaleString();
-  };
-
-  const ga4Cards = [
-    {
-      key: "websiteVisitors",
-      title: "Website Visitors",
-      value: stats.ga4Summary.websiteVisitors,
-      icon: Users,
-      accent: "text-blue-500",
-    },
-    {
-      key: "organicTraffic",
-      title: "Organic Traffic",
-      value: stats.ga4Summary.organicSessions,
-      icon: Search,
-      accent: "text-green-500",
-    },
-    {
-      key: "firstTimeVisitors",
-      title: "First Time Visitors",
-      value: stats.ga4Summary.firstTimeVisitors,
-      icon: UserPlus,
-      accent: "text-purple-500",
-    },
-    {
-      key: "engagedVisitors",
-      title: "Engaged Visitors",
-      value: stats.ga4Summary.engagedVisitors,
-      icon: Activity,
-      accent: "text-orange-500",
-    },
-  ];
-
-  const ga4ConnectionSummary = hasGa4Data
-    ? `GA4 connected for ${stats.ga4Summary.connectedClients}/${ga4TotalClients} client${
-        ga4TotalClients === 1 ? "" : "s"
-      }`
-    : "No GA4-connected clients yet";
-
-  const newUsersTrendData = useMemo(
-    () => stats.ga4Summary.newUsersTrend.map((point) => ({ ...point })),
-    [stats.ga4Summary.newUsersTrend]
-  );
-
-  const totalUsersTrendData = useMemo(
-    () => stats.ga4Summary.totalUsersTrend.map((point) => ({ ...point })),
-    [stats.ga4Summary.totalUsersTrend]
-  );
 
   return (
     <div className="p-8">
@@ -259,183 +150,140 @@ const AgencyDashboardPage = () => {
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
           </select>
-          {user?.role === "SUPER_ADMIN" && (
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              title="Refresh dashboard data from DataForSEO"
-            >
-              {refreshing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Refreshing...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4" />
-                  <span>Refresh</span>
-                </>
-              )}
-            </button>
-          )}
         </div>
       </div>
 
-      {/* GA4 Overview */}
-      <section className="mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">GA4 Performance Overview</h2>
-          <span className="text-sm text-gray-500">{ga4ConnectionSummary}</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {ga4Cards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <div
-                key={card.key}
-                className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg transition-shadow"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">{card.title}</p>
-                    <p className="text-2xl font-bold text-gray-900">{formatGa4Value(card.value)}</p>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <Icon className={`h-6 w-6 ${card.accent}`} />
-                  </div>
-                </div>
-                {hasGa4Data ? (
-                  <div className="mt-4 flex items-center space-x-2">
-                    <TrendingUp className="h-4 w-4 text-green-500" />
-                    <span className="text-sm text-green-600">Real-time aggregate from GA4</span>
-                  </div>
-                ) : (
-                  <div className="mt-4">
-                    <span className="text-xs text-gray-500">Connect GA4 for your clients to view data</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        {!hasGa4Data && (
-          <div className="mt-4 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3">
-            Connect at least one client's GA4 property to populate this section.
-          </div>
-        )}
-      </section>
-
-      {/* GA4 Trends */}
-      <section className="mb-10">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-white p-6 rounded-xl border border-gray-200">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">New Users Trending</h2>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">
+                Organic Traffic
+              </p>
+              <p className="text-2xl font-bold text-gray-900">
+                {stats.organicTraffic.toLocaleString()}
+              </p>
             </div>
-            <div className="h-64">
-              {hasGa4Data ? (
-                newUsersTrendData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={newUsersTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime())
-                            ? value
-                            : `${date.getMonth() + 1}/${date.getDate()}`;
-                        }}
-                      />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip
-                        labelFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-                        }}
-                        formatter={(value: number) => Math.round(value).toLocaleString()}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#3B82F6"
-                        strokeWidth={2}
-                        name="New Users"
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                    Not enough GA4 data for this date range
-                  </div>
-                )
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                  Connect GA4 to view this chart
-                </div>
-              )}
+            <div className="bg-primary-100 p-3 rounded-lg">
+              <TrendingUp className="h-6 w-6 text-primary-600" />
             </div>
           </div>
+          <div className="mt-4 flex items-center space-x-2">
+            <TrendingUp className="h-4 w-4 text-green-500" />
+            <span className="text-sm text-green-600">
+              +15.3% from last month
+            </span>
+          </div>
+        </div>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-200">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Total Users Trending</h2>
+        <div className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">
+                Total Keywords
+              </p>
+              <p className="text-2xl font-bold text-gray-900">
+                {stats.totalKeywords.toLocaleString()}
+              </p>
             </div>
-            <div className="h-64">
-              {hasGa4Data ? (
-                totalUsersTrendData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={totalUsersTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime())
-                            ? value
-                            : `${date.getMonth() + 1}/${date.getDate()}`;
-                        }}
-                      />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip
-                        labelFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-                        }}
-                        formatter={(value: number) => Math.round(value).toLocaleString()}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#10B981"
-                        strokeWidth={2}
-                        name="Total Users"
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                    Not enough GA4 data for this date range
-                  </div>
-                )
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                  Connect GA4 to view this chart
-                </div>
-              )}
+            <div className="bg-primary-100 p-3 rounded-lg">
+              <Search className="h-6 w-6 text-primary-600" />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center space-x-2">
+            <TrendingUp className="h-4 w-4 text-green-500" />
+            <span className="text-sm text-green-600">+12% from last month</span>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Avg Position</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {stats.avgPosition}
+              </p>
+            </div>
+            <div className="bg-secondary-100 p-3 rounded-lg">
+              <Target className="h-6 w-6 text-secondary-600" />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center space-x-2">
+            <TrendingUp className="h-4 w-4 text-green-500" />
+            <span className="text-sm text-green-600">+2.1 positions</span>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">
+                Top 10 Rankings
+              </p>
+              <p className="text-2xl font-bold text-gray-900">
+                {stats.topRankings}
+              </p>
+            </div>
+            <div className="bg-accent-100 p-3 rounded-lg">
+              <BarChart3 className="h-6 w-6 text-accent-600" />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center space-x-2">
+            <TrendingUp className="h-4 w-4 text-green-500" />
+            <span className="text-sm text-green-600">+7 this week</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        {/* Rankings Chart */}
+        <div className="bg-white p-6 rounded-xl border border-gray-200">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Ranking Trends
+            </h2>
+            <select className="text-sm border border-gray-300 rounded-lg px-3 py-2">
+              <option>Last 30 days</option>
+              <option>Last 7 days</option>
+              <option>Last 90 days</option>
+            </select>
+          </div>
+          <div className="h-64 bg-gray-50 rounded-lg flex items-center justify-center">
+            <div className="text-center">
+              <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">Ranking trends chart</p>
+              <p className="text-sm text-gray-400 mt-2">
+                Chart integration needed
+              </p>
             </div>
           </div>
         </div>
-      </section>
 
+        {/* Traffic Chart */}
+        <div className="bg-white p-6 rounded-xl border border-gray-200">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Organic Traffic
+            </h2>
+            <select className="text-sm border border-gray-300 rounded-lg px-3 py-2">
+              <option>Last 30 days</option>
+              <option>Last 7 days</option>
+              <option>Last 90 days</option>
+            </select>
+          </div>
+          <div className="h-64 bg-gray-50 rounded-lg flex items-center justify-center">
+            <div className="text-center">
+              <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">Traffic analytics chart</p>
+              <p className="text-sm text-gray-400 mt-2">
+                Chart integration needed
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -470,20 +318,7 @@ const AgencyDashboardPage = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {loading ? (
-                  <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center">
-                      <Loader2 className="h-5 w-5 animate-spin text-primary-600 mx-auto" />
-                    </td>
-                  </tr>
-                ) : stats.recentRankings.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500">
-                      No recent ranking changes
-                    </td>
-                  </tr>
-                ) : (
-                  stats.recentRankings.map((ranking, index) => (
+                {recentRankings.map((ranking, index) => (
                   <tr key={index} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">
@@ -514,8 +349,7 @@ const AgencyDashboardPage = () => {
                       </div>
                     </td>
                   </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
           </div>
@@ -534,17 +368,8 @@ const AgencyDashboardPage = () => {
             </div>
           </div>
           <div className="p-6">
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
-              </div>
-            ) : stats.topPages.length === 0 ? (
-              <div className="text-center py-8 text-sm text-gray-500">
-                No top pages data available
-              </div>
-            ) : (
             <div className="space-y-4">
-                {stats.topPages.map((page, index) => (
+              {topPages.map((page, index) => (
                 <div
                   key={index}
                   className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
@@ -580,7 +405,6 @@ const AgencyDashboardPage = () => {
                 </div>
               ))}
             </div>
-            )}
           </div>
         </div>
       </div>

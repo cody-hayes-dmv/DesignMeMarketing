@@ -36,7 +36,6 @@ import OnboardingTemplateModal from "@/components/OnboardingTemplateModal";
 import { fetchTasks, patchTaskStatus, deleteTask } from "@/store/slices/taskSlice";
 import { ROLE, Task } from "@/utils/types";
 import toast from "react-hot-toast";
-import ConfirmDialog from "../components/ConfirmDialog";
 
 const TasksPage = () => {
     const dispatch = useDispatch();
@@ -66,24 +65,17 @@ const TasksPage = () => {
         setOpen(true);
     };
 
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null }>({
-    isOpen: false,
-    taskId: null,
-  });
-
   const handleDeleteTask = async (id: string) => {
-    setDeleteConfirm({ isOpen: true, taskId: id });
-  };
-
-  const confirmDeleteTask = async () => {
-    if (!deleteConfirm.taskId) return;
+    if (!window.confirm("Are you sure you want to delete this task? This action cannot be undone.")) {
+      return;
+    }
     try {
-      await dispatch(deleteTask(deleteConfirm.taskId) as any);
+      await dispatch(deleteTask(id) as any);
       toast.success("Task deleted successfully!");
-      setDeleteConfirm({ isOpen: false, taskId: null });
+      // Task list will be updated automatically via Redux
     } catch (error: any) {
       console.error("Failed to delete task:", error);
-      setDeleteConfirm({ isOpen: false, taskId: null });
+      // Toast is already shown by API interceptor
     }
   };
 
@@ -460,18 +452,6 @@ const TasksPage = () => {
                     dispatch(fetchTasks() as any);
                     setShowOnboardingModal(false);
                 }}
-            />
-
-            {/* Delete Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={deleteConfirm.isOpen}
-                onClose={() => setDeleteConfirm({ isOpen: false, taskId: null })}
-                onConfirm={confirmDeleteTask}
-                title="Delete Task"
-                message="Are you sure you want to delete this task? This action cannot be undone and all task data will be permanently removed."
-                confirmText="Delete"
-                cancelText="Cancel"
-                variant="danger"
             />
         </div>
     );

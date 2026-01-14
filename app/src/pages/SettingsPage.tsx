@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { useSelector, useDispatch } from "react-redux";
+import React, { useState } from "react";
+import { useSelector } from "react-redux";
 import { RootState } from "../store";
 import {
   User,
@@ -12,20 +12,12 @@ import {
   Save,
   Eye,
   EyeOff,
-  Loader2,
 } from "lucide-react";
-import api from "@/lib/api";
-import toast from "react-hot-toast";
-import { checkAuth } from "@/store/slices/authSlice";
 
 const SettingsPage = () => {
   const { user } = useSelector((state: RootState) => state.auth);
-  const dispatch = useDispatch();
   const [activeTab, setActiveTab] = useState("profile");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [agencyLoading, setAgencyLoading] = useState(false);
-  const [passwordLoading, setPasswordLoading] = useState(false);
 
   const [profileForm, setProfileForm] = useState({
     name: user?.name || "",
@@ -36,9 +28,10 @@ const SettingsPage = () => {
   });
 
   const [agencyForm, setAgencyForm] = useState({
-    name: "",
-    subdomain: "",
-    website: "",
+    name: "My SEO Agency",
+    subdomain: "my-agency",
+    website: "https://myagency.com",
+    logo: "",
   });
 
   const [notificationSettings, setNotificationSettings] = useState({
@@ -48,136 +41,22 @@ const SettingsPage = () => {
     teamUpdates: true,
   });
 
-  // Remove billing tab for SUPER_ADMIN
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
     { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
-    { id: "billing", label: "Billing", icon: CreditCard, roles: ["ADMIN", "AGENCY", "WORKER"] }, // Removed SUPER_ADMIN
+    { id: "billing", label: "Billing", icon: CreditCard, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
   ];
 
-  // Fetch agency data on mount if user has agency access
-  useEffect(() => {
-    if (user && (user.role === "AGENCY" || user.role === "ADMIN" || user.role === "SUPER_ADMIN")) {
-      fetchAgencyData();
-    }
-  }, [user]);
-
-  // Update profile form when user changes
-  useEffect(() => {
-    if (user) {
-      setProfileForm((prev) => ({
-        ...prev,
-        name: user.name || "",
-        email: user.email || "",
-      }));
-    }
-  }, [user]);
-
-  const fetchAgencyData = async () => {
-    try {
-      setAgencyLoading(true);
-      const response = await api.get("/agencies/me");
-      setAgencyForm({
-        name: response.data.name || "",
-        subdomain: response.data.subdomain || "",
-        website: "", // Not stored in backend currently
-      });
-    } catch (error: any) {
-      if (error.response?.status !== 404) {
-        console.error("Error fetching agency data:", error);
-      }
-    } finally {
-      setAgencyLoading(false);
-    }
+  const handleProfileSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log("Updating profile:", profileForm);
   };
 
-  const handleProfileSubmit = async (e: React.FormEvent) => {
+  const handleAgencySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      setLoading(true);
-      const updateData: { name?: string; email?: string } = {};
-      if (profileForm.name !== user?.name) {
-        updateData.name = profileForm.name;
-      }
-      if (profileForm.email !== user?.email) {
-        updateData.email = profileForm.email;
-      }
-
-      if (Object.keys(updateData).length === 0) {
-        toast.error("No changes to save");
-        return;
-      }
-
-      await api.put("/auth/profile", updateData);
-      toast.success("Profile updated successfully!");
-      // Refresh user data
-      dispatch(checkAuth() as any);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to update profile");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (profileForm.newPassword !== profileForm.confirmPassword) {
-      toast.error("New passwords do not match");
-      return;
-    }
-
-    if (profileForm.newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters");
-      return;
-    }
-
-    try {
-      setPasswordLoading(true);
-      await api.put("/auth/password", {
-        currentPassword: profileForm.currentPassword,
-        newPassword: profileForm.newPassword,
-      });
-      toast.success("Password updated successfully!");
-      setProfileForm({
-        ...profileForm,
-        currentPassword: "",
-        newPassword: "",
-        confirmPassword: "",
-      });
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to update password");
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
-
-  const handleAgencySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setLoading(true);
-      const updateData: { name?: string; subdomain?: string } = {};
-      if (agencyForm.name) {
-        updateData.name = agencyForm.name;
-      }
-      if (agencyForm.subdomain) {
-        updateData.subdomain = agencyForm.subdomain;
-      }
-
-      if (Object.keys(updateData).length === 0) {
-        toast.error("No changes to save");
-        return;
-      }
-
-      await api.put("/agencies/me", updateData);
-      toast.success("Agency settings updated successfully!");
-      fetchAgencyData();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to update agency settings");
-    } finally {
-      setLoading(false);
-    }
+    console.log("Updating agency:", agencyForm);
   };
 
   const filteredTabs = tabs.filter((tab) =>
@@ -227,14 +106,9 @@ const SettingsPage = () => {
                 </div>
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
                 >
-                  {loading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
+                  <Save className="h-4 w-4" />
                   <span>Save Changes</span>
                 </button>
               </form>
@@ -244,7 +118,7 @@ const SettingsPage = () => {
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Change Password
               </h3>
-              <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              <form className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Current Password
@@ -310,17 +184,9 @@ const SettingsPage = () => {
                 </div>
                 <button
                   type="submit"
-                  disabled={passwordLoading}
-                  className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors"
                 >
-                  {passwordLoading ? (
-                    <span className="flex items-center space-x-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Updating...</span>
-                    </span>
-                  ) : (
-                    "Update Password"
-                  )}
+                  Update Password
                 </button>
               </form>
             </div>
@@ -334,77 +200,62 @@ const SettingsPage = () => {
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Agency Settings
               </h3>
-              {agencyLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+              <form onSubmit={handleAgencySubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Agency Name
+                  </label>
+                  <input
+                    type="text"
+                    value={agencyForm.name}
+                    onChange={(e) =>
+                      setAgencyForm({ ...agencyForm, name: e.target.value })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
                 </div>
-              ) : (
-                <form onSubmit={handleAgencySubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Agency Name
-                    </label>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Subdomain
+                  </label>
+                  <div className="flex">
                     <input
                       type="text"
-                      value={agencyForm.name}
+                      value={agencyForm.subdomain}
                       onChange={(e) =>
-                        setAgencyForm({ ...agencyForm, name: e.target.value })
+                        setAgencyForm({
+                          ...agencyForm,
+                          subdomain: e.target.value,
+                        })
                       }
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-l-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     />
+                    <span className="bg-gray-50 border border-l-0 border-gray-300 rounded-r-lg px-4 py-3 text-gray-500">
+                      .yourseodashboard.com
+                    </span>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Subdomain
-                    </label>
-                    <div className="flex">
-                      <input
-                        type="text"
-                        value={agencyForm.subdomain}
-                        onChange={(e) =>
-                          setAgencyForm({
-                            ...agencyForm,
-                            subdomain: e.target.value,
-                          })
-                        }
-                        className="flex-1 px-4 py-3 border border-gray-300 rounded-l-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <span className="bg-gray-50 border border-l-0 border-gray-300 rounded-r-lg px-4 py-3 text-gray-500">
-                        .yourseodashboard.com
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Website
-                    </label>
-                    <input
-                      type="url"
-                      value={agencyForm.website}
-                      onChange={(e) =>
-                        setAgencyForm({ ...agencyForm, website: e.target.value })
-                      }
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      placeholder="https://example.com"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">
-                      Note: Website URL is not currently saved to the backend
-                    </p>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4" />
-                    )}
-                    <span>Save Changes</span>
-                  </button>
-                </form>
-              )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Website
+                  </label>
+                  <input
+                    type="url"
+                    value={agencyForm.website}
+                    onChange={(e) =>
+                      setAgencyForm({ ...agencyForm, website: e.target.value })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+                >
+                  <Save className="h-4 w-4" />
+                  <span>Save Changes</span>
+                </button>
+              </form>
             </div>
           </div>
         );
@@ -440,14 +291,12 @@ const SettingsPage = () => {
                       </p>
                     </div>
                     <button
-                      onClick={() => {
+                      onClick={() =>
                         setNotificationSettings({
                           ...notificationSettings,
                           [key]: !value,
-                        });
-                        // TODO: Save to backend when endpoint is available
-                        toast.success("Notification preference updated");
-                      }}
+                        })
+                      }
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${value ? "bg-primary-600" : "bg-gray-200"
                         }`}
                     >
@@ -481,10 +330,7 @@ const SettingsPage = () => {
                         Add an extra layer of security to your account
                       </p>
                     </div>
-                    <button
-                      onClick={() => toast("2FA feature coming soon", { icon: "ℹ️" })}
-                      className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
-                    >
+                    <button className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors">
                       Enable
                     </button>
                   </div>
@@ -499,10 +345,7 @@ const SettingsPage = () => {
                         Manage API access for integrations
                       </p>
                     </div>
-                    <button
-                      onClick={() => toast("API Keys feature coming soon", { icon: "ℹ️" })}
-                      className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
-                    >
+                    <button className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors">
                       Manage
                     </button>
                   </div>
@@ -529,10 +372,7 @@ const SettingsPage = () => {
                       $299/month • Next billing: Feb 15, 2024
                     </p>
                   </div>
-                  <button
-                    onClick={() => toast("Billing feature coming soon", { icon: "ℹ️" })}
-                    className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
-                  >
+                  <button className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors">
                     Upgrade
                   </button>
                 </div>
@@ -549,10 +389,7 @@ const SettingsPage = () => {
                         •••• •••• •••• 4242
                       </p>
                     </div>
-                    <button
-                      onClick={() => toast("Payment method update coming soon", { icon: "ℹ️" })}
-                      className="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
+                    <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">
                       Update
                     </button>
                   </div>
@@ -567,10 +404,7 @@ const SettingsPage = () => {
                         View past invoices and payments
                       </p>
                     </div>
-                    <button
-                      onClick={() => toast("Billing history coming soon", { icon: "ℹ️" })}
-                      className="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
+                    <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">
                       View History
                     </button>
                   </div>

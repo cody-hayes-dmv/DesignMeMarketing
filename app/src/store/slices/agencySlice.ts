@@ -49,20 +49,6 @@ export const inviteAgency = createAsyncThunk(
   }
 );
 
-export const createAgency = createAsyncThunk(
-  "agency/createAgency",
-  async ({ name, subdomain }: { name: string; subdomain?: string }) => {
-    try {
-      const response = await api.post("/agencies", { name, subdomain });
-      return response.data;
-    } catch (error: any) {
-      throw new Error(
-        error.response?.data?.message || "Failed to create agency"
-      );
-    }
-  }
-);
-
 const agencySlice = createSlice({
   name: "agency",
   initialState,
@@ -94,17 +80,6 @@ const agencySlice = createSlice({
       .addCase(inviteAgency.rejected, (state, action) => {
         state.loading = false;
         state.error = action.error.message || "Failed to invite agency";
-      })
-      .addCase(createAgency.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(createAgency.fulfilled, (state) => {
-        state.loading = false;
-      })
-      .addCase(createAgency.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.error.message || "Failed to create agency";
       });
   },
 });
