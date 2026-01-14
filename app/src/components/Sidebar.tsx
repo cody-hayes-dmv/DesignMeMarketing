@@ -58,7 +58,14 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       label: "Dashboard",
       path: "/agency/dashboard",
       hasSubMenu: false,
-      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+      roles: ["AGENCY", "ADMIN"],
+    },
+    {
+      icon: Home,
+      label: "Dashboard",
+      path: "/superadmin/dashboard",
+      hasSubMenu: false,
+      roles: ["SUPER_ADMIN"],
     },
     {
       icon: Building2,

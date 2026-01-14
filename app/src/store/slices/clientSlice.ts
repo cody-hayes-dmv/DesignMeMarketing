@@ -25,6 +25,7 @@ export interface Keyword {
   difficulty?: number | null;
   cpc?: number | null;
   competition?: string | null;
+  locationName?: string | null;
   currentPosition?: number | null;
   previousPosition?: number | null;
   bestPosition?: number | null;
@@ -86,7 +87,7 @@ export const fetchClients = createAsyncThunk(
 
 export const createClient = createAsyncThunk(
   "client/createClient",
-  async ({ id, data }: { id?: string; data: any }) => {
+  async ({ id: _id, data }: { id?: string; data: any }) => {
     try {
       const response = await api.post(`/clients`, data);
       return response.data;

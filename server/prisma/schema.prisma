@@ -188,15 +188,28 @@ model Client {
   password String?
   notes    String?
 
+  // GA4 Connection
+  ga4AccessToken  String? @db.Text
+  ga4RefreshToken String? @db.Text
+  ga4PropertyId   String?
+  ga4AccountEmail String?
+  ga4ConnectedAt  DateTime?
+
   userId String
   user   User   @relation(fields: [userId], references: [id])
   Task   Task[]
 
   // SEO Data
   seoReports SeoReport[]
+  reportSchedules ReportSchedule[]
   keywords   Keyword[]
   backlinks  Backlink[]
   rankedKeywordsHistory RankedKeywordsHistory[]
+  topPages   TopPage[]
+  trafficSources TrafficSource[]
+  backlinkTimeseries BacklinkTimeseries[]
+  targetKeywords TargetKeyword[]
+  ga4Metrics Ga4Metrics[]
 
   @@index([name, domain])
   @@map("clients")
@@ -209,7 +222,8 @@ model SeoReport {
 
   // Report metadata
   reportDate DateTime
-  period     String // "daily", "weekly", "monthly"
+  period     String // "daily", "weekly", "biweekly", "monthly"
+  status     String @default("draft") // "draft", "sent", "scheduled"
 
   // Traffic metrics
   totalSessions    Int
@@ -233,13 +247,61 @@ model SeoReport {
   conversions    Int
   conversionRate Float
 
+  // GA4 metrics (if available)
+  activeUsers    Int?
+  eventCount     Int?
+  newUsers       Int?
+  keyEvents      Int?
+
+  // Email tracking
+  sentAt       DateTime?
+  recipients   Json? @db.Json // Array of email addresses
+  emailSubject String?
+
   // Client relationship
   clientId String
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  @@unique([clientId, reportDate, period])
+  // Schedule relationship (optional)
+  scheduleId String?
+  schedule   ReportSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+
+  @@unique([clientId]) // One report per client
   @@index([clientId, reportDate])
+  @@index([scheduleId])
   @@map("seo_reports")
+}
+
+model ReportSchedule {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Schedule configuration
+  frequency String // "weekly", "biweekly", "monthly"
+  dayOfWeek Int? // 0-6 (Sunday-Saturday) for weekly/biweekly
+  dayOfMonth Int? // 1-31 for monthly
+  timeOfDay String @default("09:00") // HH:mm format
+
+  // Email configuration
+  recipients Json @db.Json // Array of email addresses
+  emailSubject String?
+  isActive Boolean @default(true)
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Reports generated from this schedule
+  reports SeoReport[]
+
+  // Last run tracking
+  lastRunAt DateTime?
+  nextRunAt DateTime?
+
+  @@index([clientId])
+  @@index([isActive, nextRunAt])
+  @@map("report_schedules")
 }
 
 model Keyword {
@@ -252,6 +314,9 @@ model Keyword {
   difficulty   Float?
   cpc          Float?
   competition  String?
+
+  // Tracking metadata (UI-selected)
+  locationName String?
 
   // Ranking data
   currentPosition  Int?
@@ -361,4 +426,178 @@ model OnboardingTask {
 
   @@index([templateId, order])
   @@map("onboarding_tasks")
+}
+
+model TopPage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  url String
+
+  // Organic metrics
+  organicPos1    Int @default(0)
+  organicPos2_3  Int @default(0)
+  organicPos4_10 Int @default(0)
+  organicCount   Int @default(0)
+  organicEtv     Float @default(0)
+  organicIsNew   Int @default(0)
+  organicIsUp    Int @default(0)
+  organicIsDown  Int @default(0)
+  organicIsLost  Int @default(0)
+
+  // Paid metrics
+  paidCount Int @default(0)
+  paidEtv   Float @default(0)
+
+  // Raw API data for reference
+  rawData Json? @db.Json
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, url])
+  @@index([clientId, organicEtv])
+  @@map("top_pages")
+}
+
+model TrafficSource {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name  String // "Organic", "Direct", "Referral", "Paid", "Other"
+  value Float  @default(0)
+
+  // Aggregated metrics
+  totalKeywords        Int @default(0)
+  totalEstimatedTraffic Float @default(0)
+  organicEstimatedTraffic Float @default(0)
+  averageRank          Float?
+  rankSampleSize       Int @default(0)
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, name])
+  @@index([clientId])
+  @@map("traffic_sources")
+}
+
+model BacklinkTimeseries {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  date DateTime
+
+  newBacklinks            Int @default(0)
+  lostBacklinks           Int @default(0)
+  newReferringDomains     Int @default(0)
+  lostReferringDomains    Int @default(0)
+  newReferringMainDomains Int @default(0)
+  lostReferringMainDomains Int @default(0)
+
+  // Raw API data for reference
+  rawData Json? @db.Json
+
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, date])
+  @@index([clientId, date])
+  @@map("backlink_timeseries")
+}
+
+model TargetKeyword {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  keyword       String
+  searchVolume  Int?
+  cpc           Float?
+  competition   String?
+  competitionValue Float?
+  monthlySearches Json? @db.Json // Array of monthly search volumes for past 12 months
+  keywordInfo   Json? @db.Json // Additional keyword information from API
+  
+  // Location and language
+  locationCode  Int?
+  locationName  String?
+  languageCode  String?
+  languageName  String?
+  
+  // SERP data
+  serpInfo      Json? @db.Json // Full SERP info object from API
+  serpItemTypes Json? @db.Json // Array of SERP feature types
+  googleUrl     String? // URL that ranks for this keyword
+  googlePosition Int? // Current Google ranking position
+  previousPosition Int? // Previous ranking position for change calculation
+  seResultsCount String? // Number of search results
+  
+  // Client relationship
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, keyword])
+  @@index([clientId, searchVolume])
+  @@index([clientId, googlePosition])
+  @@map("target_keywords")
+}
+
+model Ga4Metrics {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Date range for this metrics snapshot
+  startDate DateTime
+  endDate   DateTime
+
+  // Core GA4 metrics
+  totalUsers      Int // Website Visitors
+  activeUsers     Int
+  newUsers        Int // First Time Visitors
+  engagedSessions Int // Engaged Visitors
+  eventCount      Int
+  keyEvents       Int
+
+  // Traffic metrics
+  totalSessions    Int
+  organicSessions  Int // Organic Traffic
+  directSessions   Int
+  referralSessions Int
+  paidSessions     Int
+
+  // Engagement metrics
+  bounceRate         Float
+  avgSessionDuration Float
+  pagesPerSession    Float
+
+  // Conversion metrics
+  conversions    Int
+  conversionRate Float
+
+  // Trend data (stored as JSON arrays)
+  newUsersTrend    Json? @db.Json // Array of { date: string, value: number }
+  activeUsersTrend Json? @db.Json // Array of { date: string, value: number }
+  totalUsersTrend  Json? @db.Json // Array of { date: string, value: number } - Website Visitors trend
+
+  // Events data (stored as JSON array)
+  events Json? @db.Json // Array of { name: string, count: number, change?: string }
+
+  // Visitor sources data (stored as JSON array)
+  visitorSources Json? @db.Json // Array of { source: string, users: number }
+
+  // Client relationship
+  clientId String @unique // One record per client
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, endDate])
+  @@index([clientId, createdAt])
+  @@map("ga4_metrics")
 }
