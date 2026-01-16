@@ -141,44 +141,23 @@ export async function getAnalyticsClient(clientId: string) {
     throw new Error('GA4 not connected for this client');
   }
 
-  let accessToken = client.ga4AccessToken;
-
-  const oauth2Client = getOAuth2Client();
-  oauth2Client.setCredentials({
-    access_token: accessToken,
-    refresh_token: client.ga4RefreshToken,
-  });
-
-  // Always try to refresh token to ensure it's valid
+  // IMPORTANT:
+  // We don't store token expiry in DB, so relying on getAccessToken() can leave
+  // us with a stale access token after some time. Force-refresh every time to
+  // keep GA4 requests working reliably.
+  let accessToken: string;
   try {
-    // Get a fresh access token (this will refresh if expired)
-    const tokenResponse = await oauth2Client.getAccessToken();
-    const freshToken = tokenResponse?.token;
-    
-    if (freshToken && freshToken !== accessToken) {
-      // Update stored access token if it changed
-      await prisma.client.update({
-        where: { id: clientId },
-        data: { ga4AccessToken: freshToken },
-      });
-      accessToken = freshToken;
-    }
+    accessToken = await refreshAccessToken(client.ga4RefreshToken);
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { ga4AccessToken: accessToken },
+    });
   } catch (error) {
     console.error('Failed to refresh GA4 token:', error);
-    throw new Error('GA4 token expired. Please reconnect GA4.');
+    throw new Error('GA4 token expired or revoked. Please reconnect GA4.');
   }
 
-  // Set credentials on OAuth2Client (already done above, but ensure it's set)
-  oauth2Client.setCredentials({
-    access_token: accessToken,
-    refresh_token: client.ga4RefreshToken,
-  });
-
-  // BetaAnalyticsDataClient uses gRPC and needs OAuth tokens passed correctly
-  // The issue: gRPC clients need the token in metadata format
-  // We'll create a custom auth adapter that works with gRPC
-  
-  // Ensure OAuth2Client has the latest token
+  const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials({
     access_token: accessToken,
     refresh_token: client.ga4RefreshToken,
@@ -195,40 +174,9 @@ export async function getAnalyticsClient(clientId: string) {
   (auth as any).cachedCredential = oauth2Client;
   (auth as any).cachedCredentialPromise = Promise.resolve(oauth2Client);
 
-  // CRITICAL: For gRPC, we must ensure the auth can provide tokens
-  // Test authentication before creating the client
-  try {
-    // Get a fresh token (this will refresh if needed)
-    const tokenInfo = await auth.getAccessToken();
-    if (!tokenInfo) {
-      throw new Error('Failed to get access token from GoogleAuth');
-    }
-    
-    // Update stored token if it changed
-    if (tokenInfo !== accessToken) {
-      await prisma.client.update({
-        where: { id: clientId },
-        data: { ga4AccessToken: tokenInfo },
-      });
-      accessToken = tokenInfo;
-      console.log(`[GA4] Token refreshed and updated in database`);
-    }
-    
-    console.log(`[GA4] Verified access token (length: ${tokenInfo.length})`);
-    
-    // Note: BetaAnalyticsDataClient will handle getting request metadata internally
-    // We don't need to manually verify getRequestMetadata - the client library does this
-    // The auth object is properly configured and will work with gRPC
-  } catch (tokenError: any) {
-    console.error('[GA4] Authentication verification failed:', {
-      error: tokenError.message,
-      stack: tokenError.stack?.substring(0, 300),
-      hasAccessToken: !!accessToken,
-      hasRefreshToken: !!client.ga4RefreshToken,
-      clientId: process.env.GA4_CLIENT_ID ? 'set' : 'missing',
-      clientSecret: process.env.GA4_CLIENT_SECRET ? 'set' : 'missing',
-    });
-    throw new Error(`GA4 authentication failed: ${tokenError.message}. Please reconnect your GA4 account.`);
+  // Quick sanity check (keeps errors actionable in logs)
+  if (!process.env.GA4_CLIENT_ID || !process.env.GA4_CLIENT_SECRET) {
+    throw new Error("GA4 OAuth environment variables missing (GA4_CLIENT_ID / GA4_CLIENT_SECRET).");
   }
 
   // Create BetaAnalyticsDataClient with authenticated GoogleAuth
@@ -741,7 +689,7 @@ export async function fetchGA4EventsData(
 
   try {
     // Fetch current period events
-    const currentEventsResponse = await analytics.runReport({
+    const [currentEventsResponse] = await analytics.runReport({
       property: propertyId,
       dateRanges: [
         {
@@ -765,7 +713,7 @@ export async function fetchGA4EventsData(
     // Fetch previous period events for change calculation
     let previousEventsResponse;
     try {
-      previousEventsResponse = await analytics.runReport({
+      [previousEventsResponse] = await analytics.runReport({
         property: propertyId,
         dateRanges: [
           {
@@ -935,12 +883,10 @@ export async function saveGA4MetricsToDB(
         pagesPerSession: trafficData.pagesPerSession,
         conversions: trafficData.conversions,
         conversionRate: trafficData.conversionRate,
-        newUsersTrend: trafficData.newUsersTrend.length > 0 ? trafficData.newUsersTrend : null,
-        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? trafficData.activeUsersTrend : null,
-        events: eventsData?.events && eventsData.events.length > 0 ? eventsData.events : null,
-        visitorSources: visitorSourcesData?.sources && visitorSourcesData.sources.length > 0 ? visitorSourcesData.sources : null,
-        engagedSessions: trafficData.engagedSessions ?? trafficData.keyEvents,
-        engagementRate: trafficData.engagementRate ?? null,
+        newUsersTrend: trafficData.newUsersTrend.length > 0 ? JSON.stringify(trafficData.newUsersTrend) : undefined,
+        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? JSON.stringify(trafficData.activeUsersTrend) : undefined,
+        events: eventsData?.events && eventsData.events.length > 0 ? JSON.stringify(eventsData.events) : undefined,
+        // engagementRate: trafficData.engagementRate ?? undefined,
       },
       create: {
         clientId,
@@ -960,13 +906,11 @@ export async function saveGA4MetricsToDB(
         pagesPerSession: trafficData.pagesPerSession,
         conversions: trafficData.conversions,
         conversionRate: trafficData.conversionRate,
-        newUsersTrend: trafficData.newUsersTrend.length > 0 ? trafficData.newUsersTrend : null,
-        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? trafficData.activeUsersTrend : null,
-        totalUsersTrend: trafficData.totalUsersTrend?.length > 0 ? trafficData.totalUsersTrend : null,
-        events: eventsData?.events && eventsData.events.length > 0 ? eventsData.events : null,
-        visitorSources: visitorSourcesData?.sources && visitorSourcesData.sources.length > 0 ? visitorSourcesData.sources : null,
-        engagedSessions: trafficData.engagedSessions ?? trafficData.keyEvents,
-        engagementRate: trafficData.engagementRate ?? null,
+        newUsersTrend: trafficData.newUsersTrend.length > 0 ? JSON.stringify(trafficData.newUsersTrend) : undefined,
+        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? JSON.stringify(trafficData.activeUsersTrend) : undefined,
+        // totalUsersTrend: trafficData.totalUsersTrend?.length > 0 ? trafficData.totalUsersTrend : undefined,
+        events: eventsData?.events && eventsData.events.length > 0 ? JSON.stringify(eventsData.events) : undefined,
+        // engagementRate: trafficData.engagementRate ?? undefined,
       },
     });
 

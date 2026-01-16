@@ -1,5 +1,5 @@
 export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
-export type ROLE = "SUPER_ADMIN" | "ADMIN" | "AGENCY" | "WORKER";
+export type ROLE = "SUPER_ADMIN" | "ADMIN" | "AGENCY" | "WORKER" | "CLIENT";
 
 export interface ProofItem {
   type: "image" | "video" | "url";

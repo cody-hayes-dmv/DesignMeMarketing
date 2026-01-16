@@ -22,6 +22,92 @@ let googleAdsLocationsLoadPromise: Promise<DataForSEOGoogleAdsLocation[]> | null
 
 const GOOGLE_ADS_LOCATIONS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
+function normalizeLocationName(value: string): string {
+  // Keep commas exactly as provided; just normalize whitespace for storage/display.
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeLocationNameForMatch(value: string): string {
+  return normalizeLocationName(value).toLowerCase();
+}
+
+async function resolveLocationCodeFromName(locationName: string): Promise<number | null> {
+  const normalized = normalizeLocationNameForMatch(locationName);
+  if (!normalized) return null;
+  const all = await getGoogleAdsLocationsCached();
+
+  // Prefer exact match
+  const exact = all.find((loc) => normalizeLocationNameForMatch(loc.location_name) === normalized);
+  if (exact?.location_code) return exact.location_code;
+
+  // Fallback: closest contains match (can happen with minor formatting differences)
+  const contains = all.find((loc) => normalizeLocationNameForMatch(loc.location_name).includes(normalized));
+  if (contains?.location_code) return contains.location_code;
+
+  return null;
+}
+
+// DataForSEO-billable refresh throttling + in-flight dedupe
+// Requirement: avoid repeated pulls (and billing) when users visit/refresh the same report/dashboard many times.
+const DATAFORSEO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+const inflightByKey = new Map<string, Promise<any>>();
+
+function coerceBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "1" || value.toLowerCase() === "true";
+  return false;
+}
+
+async function dedupeInFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = inflightByKey.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = fn().finally(() => inflightByKey.delete(key));
+  inflightByKey.set(key, p as any);
+  return p;
+}
+
+function isFresh(lastUpdatedAt: Date | null | undefined, ttlMs: number): boolean {
+  if (!lastUpdatedAt) return false;
+  return Date.now() - lastUpdatedAt.getTime() < ttlMs;
+}
+
+async function getLatestTrafficSourceUpdatedAt(clientId: string): Promise<Date | null> {
+  const latest = await prisma.trafficSource.findFirst({
+    where: { clientId },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return latest?.createdAt ?? null;
+}
+
+async function getLatestRankedKeywordsHistoryUpdatedAt(clientId: string): Promise<Date | null> {
+  const latest = await prisma.rankedKeywordsHistory.findFirst({
+    where: { clientId },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+  return latest?.updatedAt ?? null;
+}
+
+async function getLatestTopPagesUpdatedAt(clientId: string): Promise<Date | null> {
+  const latest = await prisma.topPage.findFirst({
+    where: { clientId },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+  return latest?.updatedAt ?? null;
+}
+
+async function getLatestBacklinksUpdatedAt(clientId: string): Promise<Date | null> {
+  // Backlink refresh writes backlinkTimeseries records (not necessarily backlink list records)
+  const latestTimeseries = await prisma.backlinkTimeseries.findFirst({
+    where: { clientId },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+  return latestTimeseries?.updatedAt ?? null;
+}
+
 async function fetchGoogleAdsLocationsFromDataForSEO(): Promise<DataForSEOGoogleAdsLocation[]> {
   const base64Auth = process.env.DATAFORSEO_BASE64;
   if (!base64Auth) {
@@ -89,6 +175,7 @@ router.get("/locations", authenticateToken, async (req, res) => {
       .filter((loc) => (loc.location_name || "").toLowerCase().includes(qLower))
       .slice(0, limit)
       .map((loc) => ({
+        location_code: loc.location_code,
         location_name: loc.location_name,
         country_iso_code: loc.country_iso_code,
         location_type: loc.location_type,
@@ -111,6 +198,14 @@ async function fetchKeywordDataFromDataForSEO(
   locationCode: number = 2840, 
   languageCode: string = "en"
 ) {
+  // Prisma `Int` maps to 32-bit signed; DataForSEO can exceed it.
+  const clampDbInt = (value: unknown) => {
+    const MAX_INT = 2147483647;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.min(MAX_INT, Math.max(0, Math.round(numeric)));
+  };
+
   const base64Auth = process.env.DATAFORSEO_BASE64;
 
   if (!base64Auth) {
@@ -157,25 +252,36 @@ async function fetchKeywordDataFromDataForSEO(
       let googleUrl: string | null = null;
       
       if (clientDomain) {
-        // Normalize domain for comparison (remove protocol, www, trailing slashes)
-        const normalizeDomain = (domain: string) => {
-          return domain
-            .replace(/^https?:\/\//, "")
-            .replace(/^www\./, "")
-            .replace(/\/$/, "")
-            .toLowerCase();
+        const normalizeHost = (value: string) => {
+          const raw = String(value || "").trim();
+          if (!raw) return "";
+          try {
+            const url = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
+            return url.hostname.replace(/^www\./, "").toLowerCase();
+          } catch {
+            return raw
+              .replace(/^https?:\/\//, "")
+              .replace(/^www\./, "")
+              .split("/")[0]
+              .toLowerCase();
+          }
         };
-        
-        const normalizedClientDomain = normalizeDomain(clientDomain);
+
+        const clientHost = normalizeHost(clientDomain);
         
         // Search for client's domain in organic results
         for (let i = 0; i < organicResults.length; i++) {
           const item = organicResults[i];
           const itemUrl = item.url || "";
-          const normalizedItemDomain = normalizeDomain(itemUrl);
+          const itemHost = normalizeHost(itemUrl);
           
-          if (normalizedItemDomain.includes(normalizedClientDomain) || 
-              normalizedClientDomain.includes(normalizedItemDomain)) {
+          if (
+            clientHost &&
+            itemHost &&
+            (itemHost === clientHost ||
+              itemHost.endsWith(`.${clientHost}`) ||
+              clientHost.endsWith(`.${itemHost}`))
+          ) {
             currentPosition = i + 1; // Position is 1-indexed
             googleUrl = itemUrl; // Store the URL that ranks
             break;
@@ -189,7 +295,7 @@ async function fetchKeywordDataFromDataForSEO(
       }
       
       // Extract additional metrics if available
-      const totalResults = result?.total_count || 0;
+      const totalResults = clampDbInt(result?.total_count);
       
       // Extract SERP features from items
       const serpFeaturesList: string[] = [];
@@ -257,7 +363,8 @@ async function fetchKeywordDataFromDataForSEO(
 async function fetchKeywordOverviewFromDataForSEO(params: {
   keywords: string[];
   languageCode: string;
-  locationName: string;
+  locationName?: string;
+  locationCode?: number;
   includeClickstreamData?: boolean;
   includeSerpInfo?: boolean;
 }) {
@@ -267,15 +374,21 @@ async function fetchKeywordOverviewFromDataForSEO(params: {
     throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
   }
 
-  const requestBody = [
-    {
-      language_code: params.languageCode,
-      location_name: params.locationName,
-      include_clickstream_data: params.includeClickstreamData ?? true,
-      include_serp_info: params.includeSerpInfo ?? true,
-      keywords: params.keywords,
-    },
-  ];
+  const task: any = {
+    language_code: params.languageCode,
+    include_clickstream_data: params.includeClickstreamData ?? true,
+    include_serp_info: params.includeSerpInfo ?? true,
+    keywords: params.keywords,
+  };
+  if (typeof params.locationCode === "number" && Number.isFinite(params.locationCode)) {
+    task.location_code = params.locationCode;
+  } else if (typeof params.locationName === "string" && params.locationName.trim()) {
+    task.location_name = params.locationName.trim();
+  } else {
+    task.location_code = 2840; // United States fallback
+  }
+
+  const requestBody = [task];
 
   const response = await fetch(
     "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live",
@@ -670,6 +783,9 @@ async function fetchBacklinkTimeseriesSummaryFromDataForSEO(
 router.get("/reports/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
+    const ensureFresh = coerceBoolean(req.query.ensureFresh);
+    const periodQuery = typeof req.query.period === "string" ? req.query.period : undefined;
+    const requestedPeriod = periodQuery && ["weekly", "biweekly", "monthly"].includes(periodQuery) ? periodQuery : "monthly";
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -701,6 +817,22 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Optionally ensure we have a recent report without requiring the user to hit a manual refresh.
+    // This does NOT call DataForSEO directly; it regenerates from existing DB + GA4 (if connected).
+    if (ensureFresh) {
+      const existing = await prisma.seoReport.findFirst({
+        where: { clientId },
+        select: { updatedAt: true },
+      });
+
+      if (!isFresh(existing?.updatedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+        await dedupeInFlight(`report-autogen:${clientId}:${requestedPeriod}`, async () => {
+          const { autoGenerateReport } = await import("../lib/reportScheduler.js");
+          await autoGenerateReport(clientId, requestedPeriod);
+        });
+      }
     }
 
     // Return the single report for this client (one report per client)
@@ -908,7 +1040,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
     let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData } = await import("../lib/ga4.js");
+        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import("../lib/ga4.js");
         
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
@@ -1592,7 +1724,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       serpFeatures: z.array(z.string()).optional().nullable(),
       totalResults: z.number().int().min(0).optional().nullable(),
       fetchFromDataForSEO: z.boolean().optional().default(false),
-      locationCode: z.number().int().optional().default(2840),
+      locationCode: z.number().int().optional(),
       languageCode: z.string().optional().default("en"),
       // UI-selected location name (do not require a code from client)
       locationName: z.string().min(1).optional(),
@@ -1601,7 +1733,10 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       include_serp_info: z.boolean().optional(),
     }).parse(req.body);
 
-    const resolvedLocationName = keywordData.locationName || (keywordData as any).location_name;
+    const resolvedLocationNameRaw = keywordData.locationName || (keywordData as any).location_name;
+    const resolvedLocationName = normalizeLocationName(resolvedLocationNameRaw || "United States");
+    const resolvedLocationCode =
+      keywordData.locationCode ?? (await resolveLocationCodeFromName(resolvedLocationName)) ?? 2840;
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -1651,14 +1786,15 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
 
     // Fetch data from DataForSEO if requested
     let serpData: any = null;
+    let serpRankData: any = null;
     if (keywordData.fetchFromDataForSEO) {
+      // 1) Keyword overview (volume/cpc/difficulty). Do not block ranking if this fails.
       try {
-        // Use DataForSEO Labs Keyword Overview (location_name-based)
-        const locationNameForApi = resolvedLocationName || "United States";
         const overview = await fetchKeywordOverviewFromDataForSEO({
           keywords: [keywordData.keyword],
           languageCode: keywordData.languageCode,
-          locationName: locationNameForApi,
+          locationCode: resolvedLocationCode,
+          locationName: resolvedLocationName || "United States",
           includeClickstreamData: (keywordData as any).include_clickstream_data,
           includeSerpInfo: (keywordData as any).include_serp_info,
         });
@@ -1696,13 +1832,48 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
           keywordData.serpFeatures = serpItemTypes;
         }
 
-        const seResultsCount = Number(item?.serp_info?.se_results_count);
-        if (Number.isFinite(seResultsCount) && seResultsCount >= 0) {
-          keywordData.totalResults = Math.round(seResultsCount);
+        // Prisma `Int` maps to 32-bit signed; DataForSEO can exceed it.
+        const clampDbInt = (value: unknown) => {
+          const MAX_INT = 2147483647;
+          const numeric = Number(value);
+          if (!Number.isFinite(numeric)) return null;
+          return Math.min(MAX_INT, Math.max(0, Math.round(numeric)));
+        };
+
+        const seResultsCount = clampDbInt(item?.serp_info?.se_results_count);
+        if (seResultsCount !== null) {
+          keywordData.totalResults = seResultsCount;
         }
       } catch (error: any) {
-        console.error("Failed to fetch from DataForSEO:", error);
-        // Continue with manual data if DataForSEO fails
+        console.warn("Keyword Overview fetch failed (will still fetch ranking):", error?.message || error);
+      }
+
+      // 2) SERP ranking for this client domain (position/url). This should run even if overview fails.
+      if (client.domain) {
+        try {
+          serpRankData = await fetchKeywordDataFromDataForSEO(
+            keywordData.keyword,
+            client.domain,
+            resolvedLocationCode,
+            keywordData.languageCode || "en"
+          );
+
+          if (serpRankData?.googleUrl) {
+            keywordData.googleUrl = serpRankData.googleUrl;
+          }
+          if (Array.isArray(serpRankData?.serpFeatures) && serpRankData.serpFeatures.length > 0) {
+            keywordData.serpFeatures = serpRankData.serpFeatures;
+          }
+          if (typeof serpRankData?.currentPosition === "number" && serpRankData.currentPosition > 0) {
+            keywordData.currentPosition = serpRankData.currentPosition;
+            keywordData.bestPosition = serpRankData.currentPosition;
+          }
+          if (typeof serpRankData?.totalResults === "number") {
+            keywordData.totalResults = serpRankData.totalResults;
+          }
+        } catch (rankErr) {
+          console.warn("Failed to fetch SERP ranking for tracked keyword:", rankErr);
+        }
       }
     }
 
@@ -1716,7 +1887,8 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       previousPosition: keywordData.previousPosition,
       bestPosition: keywordData.bestPosition,
       googleUrl: keywordData.googleUrl,
-      serpFeatures: keywordData.serpFeatures || undefined,
+      // Prisma stores this as a LongText string; serialize arrays to JSON.
+      serpFeatures: Array.isArray(keywordData.serpFeatures) ? JSON.stringify(keywordData.serpFeatures) : undefined,
       totalResults: keywordData.totalResults,
       ...(resolvedLocationName ? { locationName: resolvedLocationName } : {}),
       clientId,
@@ -1741,19 +1913,42 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       const competitionValue = Number(item?.keyword_info?.competition);
       const monthlySearches = item?.keyword_info?.monthly_searches;
 
+      // Preserve previous position when updating.
+      const existingTarget = await prisma.targetKeyword.findUnique({
+        where: {
+          clientId_keyword: {
+            clientId,
+            keyword: keywordData.keyword,
+          },
+        },
+      });
+
+      const nextGooglePosition =
+        typeof keywordData.currentPosition === "number" && keywordData.currentPosition > 0
+          ? keywordData.currentPosition
+          : null;
+      const prevGooglePosition = existingTarget?.googlePosition ?? null;
+      const previousPositionForUpdate =
+        prevGooglePosition !== null && nextGooglePosition !== null && prevGooglePosition !== nextGooglePosition
+          ? prevGooglePosition
+          : existingTarget?.previousPosition ?? null;
+
       const targetUpsertData: any = {
         keyword: keywordData.keyword,
         searchVolume: keywordData.searchVolume ?? undefined,
         cpc: keywordData.cpc ?? undefined,
         competition: keywordData.competition ?? undefined,
         competitionValue: Number.isFinite(competitionValue) ? competitionValue : undefined,
-        monthlySearches: Array.isArray(monthlySearches) ? monthlySearches : undefined,
-        keywordInfo: item?.keyword_info ? item.keyword_info : undefined,
-        serpInfo: item?.serp_info ? item.serp_info : undefined,
+        // TargetKeyword stores JSON blobs as strings in LongText columns.
+        monthlySearches: Array.isArray(monthlySearches) ? JSON.stringify(monthlySearches) : undefined,
+        keywordInfo: item?.keyword_info ? JSON.stringify(item.keyword_info) : undefined,
+        serpInfo: item?.serp_info ? JSON.stringify(item.serp_info) : undefined,
         serpItemTypes: Array.isArray(item?.serp_info?.serp_item_types)
-          ? item.serp_info.serp_item_types
+          ? JSON.stringify(item.serp_info.serp_item_types)
           : undefined,
-        googleUrl: typeof item?.serp_info?.check_url === "string" ? item.serp_info.check_url : undefined,
+        googleUrl: keywordData.googleUrl || (typeof item?.serp_info?.check_url === "string" ? item.serp_info.check_url : undefined),
+        googlePosition: nextGooglePosition,
+        previousPosition: previousPositionForUpdate,
         seResultsCount:
           item?.serp_info?.se_results_count !== undefined && item?.serp_info?.se_results_count !== null
             ? String(item.serp_info.se_results_count)
@@ -1761,6 +1956,13 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
         languageCode: keywordData.languageCode,
         locationName: resolvedLocationName || "United States",
       };
+
+      if (serpRankData?.serpData) {
+        targetUpsertData.serpInfo = JSON.stringify(serpRankData.serpData);
+      }
+      if (Array.isArray(serpRankData?.serpFeatures)) {
+        targetUpsertData.serpItemTypes = JSON.stringify(serpRankData.serpFeatures);
+      }
 
       await prisma.targetKeyword.upsert({
         where: {
@@ -1866,7 +2068,8 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
 
     // Update SERP features
     if (dataForSEOData.serpFeatures && dataForSEOData.serpFeatures.length > 0) {
-      updateData.serpFeatures = dataForSEOData.serpFeatures;
+      // DB column is LongText (String); store as JSON string.
+      updateData.serpFeatures = JSON.stringify(dataForSEOData.serpFeatures);
     }
 
     // Update total results
@@ -1964,169 +2167,203 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
     }
 
     const { clientId } = req.params;
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-    });
+    const force = coerceBoolean(req.query.force);
 
-    if (!client || !client.domain) {
-      return res.status(404).json({ message: "Client not found or has no domain" });
+    // 48h throttle to prevent repeated billable DataForSEO pulls.
+    const [trafficUpdatedAt, rankedUpdatedAt] = await Promise.all([
+      getLatestTrafficSourceUpdatedAt(clientId),
+      getLatestRankedKeywordsHistoryUpdatedAt(clientId),
+    ]);
+    const lastRefreshedAt =
+      trafficUpdatedAt && rankedUpdatedAt
+        ? new Date(Math.max(trafficUpdatedAt.getTime(), rankedUpdatedAt.getTime()))
+        : (trafficUpdatedAt ?? rankedUpdatedAt);
+    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+
+    if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+      return res.json({
+        message: "Using cached dashboard data (refresh limited to every 48 hours).",
+        skipped: true,
+        lastRefreshedAt,
+        nextAllowedAt,
+        ga4Refreshed: false,
+      });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
-
-    const targetDomain = normalizeDomain(client.domain);
-
-    // Refresh traffic sources and save to database
-    let trafficSourceSummary: {
-      breakdown: Array<{ name: string; value: number }>;
-      totalKeywords: number;
-      totalEstimatedTraffic: number;
-      organicEstimatedTraffic: number;
-      averageRank: number | null;
-      rankSampleSize: number;
-    } | null = null;
-    try {
-      trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 100, 2840, "English");
-      
-      // Delete existing traffic sources for this client
-      await prisma.trafficSource.deleteMany({
-        where: { clientId },
+    const result = await dedupeInFlight(`dashboard-refresh:${clientId}`, async () => {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId },
       });
 
-      // Save new traffic sources to database
-      const tss = trafficSourceSummary;
-      if (tss) {
-        await Promise.all(
-          tss.breakdown.map((item) =>
-            prisma.trafficSource.create({
-              data: {
-                clientId,
-                name: item.name,
-                value: item.value,
-                totalKeywords: tss.totalKeywords,
-                totalEstimatedTraffic: tss.totalEstimatedTraffic,
-                organicEstimatedTraffic: tss.organicEstimatedTraffic,
-                averageRank: tss.averageRank,
-                rankSampleSize: tss.rankSampleSize,
-              },
-            })
-          )
-        );
+      if (!client || !client.domain) {
+        return { notFound: true as const };
       }
-    } catch (error) {
-      console.error("Failed to refresh traffic sources:", error);
-    }
 
-    // Refresh ranked keywords count (already saved via ranked-keywords endpoint)
-    let rankedKeywordsCount = 0;
-    try {
-      const rankedData = await fetchRankedKeywordsFromDataForSEO(targetDomain, 2840, "en");
-      rankedKeywordsCount = rankedData.totalKeywords || 0;
-      
-      // Update ranked keywords history (current month)
-      const now = new Date();
-      const currentMonth = now.getMonth() + 1;
-      const currentYear = now.getFullYear();
-      
-      await prisma.rankedKeywordsHistory.upsert({
-        where: {
-          clientId_month_year: {
+      const normalizeDomain = (domain: string) => {
+        return domain
+          .replace(/^https?:\/\//, "")
+          .replace(/^www\./, "")
+          .replace(/\/$/, "")
+          .toLowerCase();
+      };
+
+      const targetDomain = normalizeDomain(client.domain);
+
+      // Refresh traffic sources and save to database
+      let trafficSourceSummary: {
+        breakdown: Array<{ name: string; value: number }>;
+        totalKeywords: number;
+        totalEstimatedTraffic: number;
+        organicEstimatedTraffic: number;
+        averageRank: number | null;
+        rankSampleSize: number;
+      } | null = null;
+      try {
+        trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 100, 2840, "English");
+
+        // Delete existing traffic sources for this client
+        await prisma.trafficSource.deleteMany({
+          where: { clientId },
+        });
+
+        // Save new traffic sources to database
+        const tss = trafficSourceSummary;
+        if (tss) {
+          await Promise.all(
+            tss.breakdown.map((item) =>
+              prisma.trafficSource.create({
+                data: {
+                  clientId,
+                  name: item.name,
+                  value: item.value,
+                  totalKeywords: tss.totalKeywords,
+                  totalEstimatedTraffic: tss.totalEstimatedTraffic,
+                  organicEstimatedTraffic: tss.organicEstimatedTraffic,
+                  averageRank: tss.averageRank,
+                  rankSampleSize: tss.rankSampleSize,
+                },
+              })
+            )
+          );
+        }
+      } catch (error) {
+        console.error("Failed to refresh traffic sources:", error);
+      }
+
+      // Refresh ranked keywords count (already saved via ranked-keywords endpoint)
+      let rankedKeywordsCount = 0;
+      try {
+        const rankedData = await fetchRankedKeywordsFromDataForSEO(targetDomain, 2840, "en");
+        rankedKeywordsCount = rankedData.totalKeywords || 0;
+
+        // Update ranked keywords history (current month)
+        const now = new Date();
+        const currentMonth = now.getMonth() + 1;
+        const currentYear = now.getFullYear();
+
+        await prisma.rankedKeywordsHistory.upsert({
+          where: {
+            clientId_month_year: {
+              clientId,
+              month: currentMonth,
+              year: currentYear,
+            },
+          },
+          update: {
+            totalKeywords: rankedKeywordsCount,
+          },
+          create: {
             clientId,
+            totalKeywords: rankedKeywordsCount,
             month: currentMonth,
             year: currentYear,
           },
-        },
-        update: {
-          totalKeywords: rankedKeywordsCount,
-        },
-        create: {
-          clientId,
-          totalKeywords: rankedKeywordsCount,
-          month: currentMonth,
-          year: currentYear,
+        });
+      } catch (error) {
+        console.error("Failed to refresh ranked keywords:", error);
+      }
+
+      // Refresh GA4 access token if connected (data will be fetched fresh when dashboard loads)
+      let ga4Refreshed = false;
+      const clientWithGA4 = await prisma.client.findUnique({
+        where: { id: clientId },
+        select: {
+          ga4RefreshToken: true,
+          ga4PropertyId: true,
+          ga4ConnectedAt: true,
+          ga4AccessToken: true,
         },
       });
-    } catch (error) {
-      console.error("Failed to refresh ranked keywords:", error);
-    }
 
-    // Refresh GA4 access token if connected (data will be fetched fresh when dashboard loads)
-    let ga4Refreshed = false;
-    const clientWithGA4 = await prisma.client.findUnique({
-      where: { id: clientId },
-      select: {
-        ga4RefreshToken: true,
-        ga4PropertyId: true,
-        ga4ConnectedAt: true,
-        ga4AccessToken: true,
-      },
+      if (clientWithGA4?.ga4RefreshToken && clientWithGA4?.ga4PropertyId && clientWithGA4?.ga4ConnectedAt) {
+        try {
+          // Force refresh GA4 access token to ensure it's valid for fresh data fetch
+          const { refreshAccessToken, fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import("../lib/ga4.js");
+          const freshToken = await refreshAccessToken(clientWithGA4.ga4RefreshToken);
+
+          // Update access token
+          await prisma.client.update({
+            where: { id: clientId },
+            data: { ga4AccessToken: freshToken },
+          });
+
+          // Fetch fresh GA4 data and save to database
+          const endDate = new Date();
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - 30); // Last 30 days
+
+          try {
+            const { fetchGA4VisitorSources } = await import("../lib/ga4VisitorSources.js");
+            const [trafficData, eventsData, visitorSourcesData] = await Promise.all([
+              fetchGA4TrafficData(clientId, startDate, endDate),
+              fetchGA4EventsData(clientId, startDate, endDate).catch(err => {
+                console.warn(`[Refresh] Failed to fetch GA4 events for client ${clientId}:`, err.message);
+                return null;
+              }),
+              fetchGA4VisitorSources(clientId, startDate, endDate, 10).catch(err => {
+                console.warn(`[Refresh] Failed to fetch GA4 visitor sources for client ${clientId}:`, err.message);
+                return null;
+              })
+            ]);
+
+            // Save to database
+            await saveGA4MetricsToDB(
+              clientId,
+              startDate,
+              endDate,
+              trafficData,
+              eventsData || undefined,
+              visitorSourcesData ? { sources: visitorSourcesData } : undefined
+            );
+
+            ga4Refreshed = true;
+            console.log(`[Refresh] GA4 data refreshed and saved to database for client ${clientId}`);
+          } catch (ga4DataError: any) {
+            console.error(`[Refresh] Failed to fetch/save GA4 data for client ${clientId}:`, ga4DataError.message);
+            // Token refresh succeeded, so mark as refreshed even if data fetch failed
+            ga4Refreshed = true;
+          }
+        } catch (ga4Error: any) {
+          console.error("Failed to refresh GA4 access token:", ga4Error.message);
+          // Don't fail the entire refresh if GA4 token refresh fails
+        }
+      }
+
+      return { trafficSourceSummary, rankedKeywordsCount, ga4Refreshed, notFound: false as const };
     });
 
-    if (clientWithGA4?.ga4RefreshToken && clientWithGA4?.ga4PropertyId && clientWithGA4?.ga4ConnectedAt) {
-      try {
-        // Force refresh GA4 access token to ensure it's valid for fresh data fetch
-        const { refreshAccessToken, fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import("../lib/ga4.js");
-        const freshToken = await refreshAccessToken(clientWithGA4.ga4RefreshToken);
-        
-        // Update access token
-        await prisma.client.update({
-          where: { id: clientId },
-          data: { ga4AccessToken: freshToken },
-        });
-
-        // Fetch fresh GA4 data and save to database
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30); // Last 30 days
-        
-        try {
-          const { fetchGA4VisitorSources } = await import("../lib/ga4VisitorSources.js");
-          const [trafficData, eventsData, visitorSourcesData] = await Promise.all([
-            fetchGA4TrafficData(clientId, startDate, endDate),
-            fetchGA4EventsData(clientId, startDate, endDate).catch(err => {
-              console.warn(`[Refresh] Failed to fetch GA4 events for client ${clientId}:`, err.message);
-              return null;
-            }),
-            fetchGA4VisitorSources(clientId, startDate, endDate, 10).catch(err => {
-              console.warn(`[Refresh] Failed to fetch GA4 visitor sources for client ${clientId}:`, err.message);
-              return null;
-            })
-          ]);
-          
-          // Save to database
-          await saveGA4MetricsToDB(
-            clientId, 
-            startDate, 
-            endDate, 
-            trafficData, 
-            eventsData || undefined,
-            visitorSourcesData ? { sources: visitorSourcesData } : undefined
-          );
-          
-          ga4Refreshed = true;
-          console.log(`[Refresh] GA4 data refreshed and saved to database for client ${clientId}`);
-        } catch (ga4DataError: any) {
-          console.error(`[Refresh] Failed to fetch/save GA4 data for client ${clientId}:`, ga4DataError.message);
-          // Token refresh succeeded, so mark as refreshed even if data fetch failed
-          ga4Refreshed = true;
-        }
-      } catch (ga4Error: any) {
-        console.error("Failed to refresh GA4 access token:", ga4Error.message);
-        // Don't fail the entire refresh if GA4 token refresh fails
-      }
+    if (result.notFound) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
     }
 
-    res.json({
+    return res.json({
       message: "Dashboard data refreshed successfully",
-      trafficSourceSummary,
-      rankedKeywordsCount,
-      ga4Refreshed,
+      skipped: false,
+      trafficSourceSummary: result.trafficSourceSummary,
+      rankedKeywordsCount: result.rankedKeywordsCount,
+      ga4Refreshed: result.ga4Refreshed,
+      lastRefreshedAt: new Date(),
+      nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
     });
   } catch (error: any) {
     console.error("Refresh dashboard error:", error);
@@ -2143,77 +2380,100 @@ router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) 
     }
 
     const { clientId } = req.params;
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
+    const force = coerceBoolean(req.query.force);
+    const lastRefreshedAt = await getLatestTopPagesUpdatedAt(clientId);
+    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+    if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+      return res.json({
+        message: "Using cached top pages data (refresh limited to every 48 hours).",
+        skipped: true,
+        lastRefreshedAt,
+        nextAllowedAt,
+      });
+    }
+
+    const result = await dedupeInFlight(`top-pages-refresh:${clientId}`, async () => {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId },
+      });
+
+      if (!client || !client.domain) {
+        return { notFound: true as const };
+      }
+
+      const normalizeDomain = (domain: string) => {
+        return domain
+          .replace(/^https?:\/\//, "")
+          .replace(/^www\./, "")
+          .replace(/\/$/, "")
+          .toLowerCase();
+      };
+
+      const targetDomain = normalizeDomain(client.domain);
+      const pages = await fetchRelevantPagesFromDataForSEO(targetDomain, 20, 2840, "English");
+
+      // Delete existing top pages for this client
+      await prisma.topPage.deleteMany({
+        where: { clientId },
+      });
+
+      // Save new pages to database using upsert to handle any race conditions
+      const savedPages = await Promise.all(
+        pages.map((page) =>
+          prisma.topPage.upsert({
+            where: {
+              clientId_url: {
+                clientId,
+                url: page.url,
+              },
+            },
+            update: {
+              organicPos1: page.organic.pos1,
+              organicPos2_3: page.organic.pos2_3,
+              organicPos4_10: page.organic.pos4_10,
+              organicCount: page.organic.count,
+              organicEtv: page.organic.etv,
+              organicIsNew: page.organic.isNew,
+              organicIsUp: page.organic.isUp,
+              organicIsDown: page.organic.isDown,
+              organicIsLost: page.organic.isLost,
+              paidCount: page.paid.count,
+              paidEtv: page.paid.etv,
+              rawData: page.raw || null,
+            },
+            create: {
+              clientId,
+              url: page.url,
+              organicPos1: page.organic.pos1,
+              organicPos2_3: page.organic.pos2_3,
+              organicPos4_10: page.organic.pos4_10,
+              organicCount: page.organic.count,
+              organicEtv: page.organic.etv,
+              organicIsNew: page.organic.isNew,
+              organicIsUp: page.organic.isUp,
+              organicIsDown: page.organic.isDown,
+              organicIsLost: page.organic.isLost,
+              paidCount: page.paid.count,
+              paidEtv: page.paid.etv,
+              rawData: page.raw || null,
+            },
+          })
+        )
+      );
+
+      return { pages: savedPages.length, notFound: false as const };
     });
 
-    if (!client || !client.domain) {
+    if (result.notFound) {
       return res.status(404).json({ message: "Client not found or has no domain" });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
-
-    const targetDomain = normalizeDomain(client.domain);
-    const pages = await fetchRelevantPagesFromDataForSEO(targetDomain, 20, 2840, "English");
-
-    // Delete existing top pages for this client
-    await prisma.topPage.deleteMany({
-      where: { clientId },
-    });
-
-    // Save new pages to database using upsert to handle any race conditions
-    const savedPages = await Promise.all(
-      pages.map((page) =>
-        prisma.topPage.upsert({
-          where: {
-            clientId_url: {
-              clientId,
-              url: page.url,
-            },
-          },
-          update: {
-            organicPos1: page.organic.pos1,
-            organicPos2_3: page.organic.pos2_3,
-            organicPos4_10: page.organic.pos4_10,
-            organicCount: page.organic.count,
-            organicEtv: page.organic.etv,
-            organicIsNew: page.organic.isNew,
-            organicIsUp: page.organic.isUp,
-            organicIsDown: page.organic.isDown,
-            organicIsLost: page.organic.isLost,
-            paidCount: page.paid.count,
-            paidEtv: page.paid.etv,
-            rawData: page.raw || null,
-          },
-          create: {
-            clientId,
-            url: page.url,
-            organicPos1: page.organic.pos1,
-            organicPos2_3: page.organic.pos2_3,
-            organicPos4_10: page.organic.pos4_10,
-            organicCount: page.organic.count,
-            organicEtv: page.organic.etv,
-            organicIsNew: page.organic.isNew,
-            organicIsUp: page.organic.isUp,
-            organicIsDown: page.organic.isDown,
-            organicIsLost: page.organic.isLost,
-            paidCount: page.paid.count,
-            paidEtv: page.paid.etv,
-            rawData: page.raw || null,
-          },
-        })
-      )
-    );
-
-    res.json({
+    return res.json({
       message: "Top pages refreshed successfully",
-      pages: savedPages.length,
+      skipped: false,
+      pages: result.pages,
+      lastRefreshedAt: new Date(),
+      nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
     });
   } catch (error: any) {
     console.error("Refresh top pages error:", error);
@@ -2230,23 +2490,36 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
     }
 
     const { clientId } = req.params;
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-    });
-
-    if (!client || !client.domain) {
-      return res.status(404).json({ message: "Client not found or has no domain" });
+    const force = coerceBoolean(req.query.force);
+    const lastRefreshedAt = await getLatestBacklinksUpdatedAt(clientId);
+    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+    if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+      return res.json({
+        message: "Using cached backlinks data (refresh limited to every 48 hours).",
+        skipped: true,
+        lastRefreshedAt,
+        nextAllowedAt,
+      });
     }
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    const result = await dedupeInFlight(`backlinks-refresh:${clientId}`, async () => {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId },
+      });
 
-    const targetDomain = normalizeDomain(client.domain);
+      if (!client || !client.domain) {
+        return { notFound: true as const };
+      }
+
+      const normalizeDomain = (domain: string) => {
+        return domain
+          .replace(/^https?:\/\//, "")
+          .replace(/^www\./, "")
+          .replace(/\/$/, "")
+          .toLowerCase();
+      };
+
+      const targetDomain = normalizeDomain(client.domain);
     
     // Get date range (last 30 days)
     const dateTo = new Date();
@@ -2294,9 +2567,19 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
       })
     );
 
-    res.json({
+      return { items: savedItems.length, notFound: false as const };
+    });
+
+    if (result.notFound) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+
+    return res.json({
       message: "Backlinks refreshed successfully",
-      items: savedItems.length,
+      skipped: false,
+      items: result.items,
+      lastRefreshedAt: new Date(),
+      nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
     });
   } catch (error: any) {
     console.error("Refresh backlinks error:", error);
@@ -2531,7 +2814,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData } = await import("../lib/ga4.js");
+        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import("../lib/ga4.js");
         
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
@@ -2570,6 +2853,19 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
           }
           trafficDataSource = "ga4";
           
+          // Save fresh GA4 data so the dashboard keeps working even if the API is flaky later.
+          try {
+            await saveGA4MetricsToDB(
+              clientId,
+              startDate,
+              endDate,
+              ga4Data,
+              ga4EventsData || undefined
+            );
+          } catch (saveError: any) {
+            console.warn("[Dashboard] Failed to save GA4 metrics snapshot:", saveError?.message || saveError);
+          }
+
           console.log(`[Dashboard] ✅ Successfully fetched GA4 data from API for client ${clientId}`);
         }
       } catch (ga4Error: any) {
@@ -3312,8 +3608,16 @@ router.post("/reports/schedules/:scheduleId/trigger", authenticateToken, async (
       data: { scheduleId: schedule.id }
     });
 
-    // Send email to recipients
-    const recipients = schedule.recipients as string[];
+    // Send email to recipients (stored as JSON string)
+    const recipients: string[] = (() => {
+      if (!schedule.recipients) return [];
+      try {
+        const parsed = JSON.parse(String(schedule.recipients));
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
     if (recipients && recipients.length > 0) {
       const emailHtml = generateReportEmailHTML(report, schedule.client);
       const emailSubject = schedule.emailSubject || `SEO Report - ${schedule.client.name} - ${schedule.frequency.charAt(0).toUpperCase() + schedule.frequency.slice(1)}`;
@@ -3334,7 +3638,7 @@ router.post("/reports/schedules/:scheduleId/trigger", authenticateToken, async (
         data: {
           status: "sent",
           sentAt: new Date(),
-          recipients: recipients as any,
+          recipients: JSON.stringify(recipients),
           emailSubject
         }
       });
@@ -3482,7 +3786,17 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const recipientsList = recipients || (report.recipients as string[] || []);
+    const recipientsList: string[] = Array.isArray(recipients)
+      ? recipients
+      : (() => {
+          if (!report.recipients) return [];
+          try {
+            const parsed = JSON.parse(String(report.recipients));
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })();
     if (!recipientsList || recipientsList.length === 0) {
       return res.status(400).json({ message: "No recipients specified" });
     }
@@ -3517,7 +3831,7 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
       data: {
         status: "sent",
         sentAt: new Date(),
-        recipients: recipientsList as any,
+        recipients: JSON.stringify(recipientsList),
         emailSubject: emailSubject || `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`
       }
     });
@@ -3993,7 +4307,6 @@ async function fetchKeywordsForSiteFromDataForSEO(
     }
 
     const data = await response.json();
-    console.log("AAAAAAAAAAAAAAAAAAAA", data.tasks[0])
     const items: any[] =
       data?.tasks?.[0]?.result?.[0]?.items && Array.isArray(data.tasks[0].result[0].items)
         ? data.tasks[0].result[0].items
@@ -4011,6 +4324,17 @@ async function fetchKeywordsForSiteFromDataForSEO(
       let googlePosition = null;
       
       if (serpInfo) {
+        // Most reliable: rank_* is often provided directly in serp_info
+        const directRank =
+          (serpInfo as any).rank_group ??
+          (serpInfo as any).rank_absolute ??
+          (serpInfo as any)?.rank_info?.rank_group ??
+          (serpInfo as any)?.rank_info?.rank_absolute ??
+          null;
+        if (typeof directRank === "number" && Number.isFinite(directRank) && directRank > 0) {
+          googlePosition = directRank;
+        }
+
         // SERP info may have items array with organic results
         if (serpInfo.items && Array.isArray(serpInfo.items)) {
           // Find first organic result for the target domain
@@ -4025,7 +4349,9 @@ async function fetchKeywordsForSiteFromDataForSEO(
           
           if (organicResult) {
             googleUrl = organicResult.url || null;
-            googlePosition = organicResult.rank_group || organicResult.rank_absolute || null;
+            if (googlePosition == null) {
+              googlePosition = organicResult.rank_group || organicResult.rank_absolute || null;
+            }
           }
         }
         
@@ -5354,11 +5680,6 @@ router.patch("/target-keywords/:keywordId", authenticateToken, async (req, res) 
 // Refresh target keywords from DataForSEO (SUPER_ADMIN only)
 router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN") {
-      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
-    }
-
     const { clientId } = req.params;
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -5379,8 +5700,115 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
 
     const targetDomain = normalizeDomain(client.domain);
 
+    // Non-super-admin refresh: update rankings for existing tracked target keywords via SERP (limited).
+    // This avoids relying on the expensive Keywords-for-site endpoint and fixes "no ranking data" issues.
+    if (req.user.role !== "SUPER_ADMIN") {
+      // Only allow users who can already view the client's dashboard (agency/admin ownership model)
+      const userMemberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const userAgencyIds = userMemberships.map((m) => m.agencyId);
+
+      const clientWithUser = await prisma.client.findUnique({
+        where: { id: clientId },
+        include: {
+          user: {
+            include: {
+              memberships: {
+                select: { agencyId: true },
+              },
+            },
+          },
+        },
+      });
+      if (!clientWithUser) return res.status(404).json({ message: "Client not found" });
+      const isAdmin = req.user.role === "ADMIN";
+      const hasAccess = isAdmin || clientWithUser.user.memberships.some((m) => userAgencyIds.includes(m.agencyId));
+      if (!hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      // Only refresh tracked target keywords (intersection of target_keywords + keywords)
+      const trackedKeywords = await prisma.keyword.findMany({
+        where: { clientId },
+        select: { keyword: true },
+      });
+      const trackedSet = new Set(trackedKeywords.map((k) => k.keyword.toLowerCase()));
+      const targetKeywords = await prisma.targetKeyword.findMany({
+        where: { clientId },
+        orderBy: [{ updatedAt: "asc" }],
+      });
+
+      const toRefresh = targetKeywords
+        .filter((tk) => trackedSet.has(tk.keyword.toLowerCase()))
+        .slice(0, 10); // safety limit per click
+
+      const updates = await Promise.all(
+        toRefresh.map(async (tk) => {
+          try {
+            const serp = await fetchKeywordDataFromDataForSEO(
+              tk.keyword,
+              client.domain,
+              tk.locationCode || 2840,
+              tk.languageCode || "en"
+            );
+
+            const nextPos = serp.currentPosition ?? null;
+            const prevPos = tk.googlePosition ?? null;
+            const previousPosition =
+              prevPos !== null && nextPos !== null && prevPos !== nextPos ? prevPos : tk.previousPosition ?? null;
+
+            return prisma.targetKeyword.update({
+              where: { id: tk.id },
+              data: {
+                googlePosition: nextPos,
+                previousPosition,
+                googleUrl: serp.googleUrl ?? tk.googleUrl,
+                serpInfo: serp.serpData ? JSON.stringify(serp.serpData) : tk.serpInfo,
+                serpItemTypes: Array.isArray(serp.serpFeatures) ? JSON.stringify(serp.serpFeatures) : tk.serpItemTypes,
+                seResultsCount: typeof serp.totalResults === "number" ? String(serp.totalResults) : tk.seResultsCount,
+              },
+            });
+          } catch (err) {
+            console.warn(`[Target Keywords Refresh] Failed for "${tk.keyword}":`, err);
+            return null;
+          }
+        })
+      );
+
+      return res.json({
+        message: "Target keywords refreshed successfully",
+        keywords: updates.filter(Boolean).length,
+        mode: "serp",
+      });
+    }
+
     // Fetch keywords from DataForSEO API
     const keywords = await fetchKeywordsForSiteFromDataForSEO(targetDomain, 100, 2840, "English");
+
+    // Backfill accurate ranking for tracked keywords (SERP-based) when keywords_for_site doesn't include position.
+    const trackedKeywords = await prisma.keyword.findMany({
+      where: { clientId },
+      select: { keyword: true },
+    });
+    const trackedSet = new Set(trackedKeywords.map((k) => k.keyword.toLowerCase()));
+
+    const keywordsNeedingRank = keywords
+      .filter((k) => trackedSet.has((k.keyword || "").toLowerCase()))
+      .filter((k) => k.googlePosition == null)
+      .slice(0, 10); // safety limit per click (DataForSEO billing)
+
+    for (const kw of keywordsNeedingRank) {
+      try {
+        const serp = await fetchKeywordDataFromDataForSEO(kw.keyword, client.domain, 2840, "en");
+        if (serp?.googleUrl) kw.googleUrl = serp.googleUrl;
+        if (typeof serp?.currentPosition === "number" && serp.currentPosition > 0) kw.googlePosition = serp.currentPosition;
+        if (serp?.serpData) kw.serpInfo = serp.serpData;
+        if (Array.isArray(serp?.serpFeatures)) kw.serpItemTypes = serp.serpFeatures;
+        if (typeof serp?.totalResults === "number") kw.seResultsCount = String(serp.totalResults);
+      } catch (err) {
+        console.warn(`[Target Keywords Refresh] SERP backfill failed for "${kw.keyword}":`, err);
+      }
+    }
 
     // Use upsert to save/update keywords
     const savedKeywords = await Promise.all(
@@ -5438,14 +5866,14 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
             cpc: kw.cpc,
             competition: kw.competition,
             competitionValue: kw.competitionValue,
-            monthlySearches: kw.monthlySearches ? kw.monthlySearches as any : null,
-            keywordInfo: kw.keywordInfo ? kw.keywordInfo as any : null,
+            monthlySearches: kw.monthlySearches ? JSON.stringify(kw.monthlySearches) : null,
+            keywordInfo: kw.keywordInfo ? JSON.stringify(kw.keywordInfo) : null,
             locationCode: kw.locationCode || null,
             locationName: locationName,
             languageCode: kw.languageCode || null,
             languageName: languageName,
-            serpInfo: kw.serpInfo ? kw.serpInfo as any : null,
-            serpItemTypes: kw.serpItemTypes ? kw.serpItemTypes as any : null,
+            serpInfo: kw.serpInfo ? JSON.stringify(kw.serpInfo) : null,
+            serpItemTypes: kw.serpItemTypes ? JSON.stringify(kw.serpItemTypes) : null,
             googleUrl: kw.googleUrl,
             previousPosition: previousPosition,
             googlePosition: kw.googlePosition,
@@ -5458,14 +5886,14 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
             cpc: kw.cpc,
             competition: kw.competition,
             competitionValue: kw.competitionValue,
-            monthlySearches: kw.monthlySearches ? kw.monthlySearches as any : null,
-            keywordInfo: kw.keywordInfo ? kw.keywordInfo as any : null,
+            monthlySearches: kw.monthlySearches ? JSON.stringify(kw.monthlySearches) : null,
+            keywordInfo: kw.keywordInfo ? JSON.stringify(kw.keywordInfo) : null,
             locationCode: kw.locationCode || null,
             locationName: locationName,
             languageCode: kw.languageCode || null,
             languageName: languageName,
-            serpInfo: kw.serpInfo ? kw.serpInfo as any : null,
-            serpItemTypes: kw.serpItemTypes ? kw.serpItemTypes as any : null,
+            serpInfo: kw.serpInfo ? JSON.stringify(kw.serpInfo) : null,
+            serpItemTypes: kw.serpItemTypes ? JSON.stringify(kw.serpItemTypes) : null,
             googleUrl: kw.googleUrl,
             googlePosition: kw.googlePosition,
             seResultsCount: kw.seResultsCount ? String(kw.seResultsCount) : null,

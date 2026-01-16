@@ -7,11 +7,426 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id             String       @id @default(cuid())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  email          String       @unique
+  name           String?
+  passwordHash   String?
+  role           Role         @default(AGENCY)
+  verified       Boolean      @default(false)
+  invited        Boolean      @default(false)
+  clients        Client[]
+  assignedTaksks Task[]       @relation("TaskAssignee")
+  createdTass    Task[]       @relation("TaskCreator")
+  tokens         Token[]
+  memberships    UserAgency[]
+
+  @@map("users")
+}
+
+model Agency {
+  id                  String               @id @default(cuid())
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  name                String
+  subdomain           String?              @unique
+  onboardingTemplates OnboardingTemplate[]
+  tasks               Task[]
+  tokens              Token[]
+  members             UserAgency[]
+
+  @@map("agencies")
+}
+
+model UserAgency {
+  id         String     @id @default(cuid())
+  userId     String
+  agencyId   String
+  agencyRole AgencyRole @default(WORKER)
+  agency     Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, agencyId])
+  @@index([agencyId])
+  @@index([userId])
+  @@map("user_agencies")
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  title          String
+  description    String?
+  category       String?
+  dueDate        DateTime?
+  status         TaskStatus @default(TODO)
+  priority       String?
+  estimatedHours Int?
+  proof          String?    @db.LongText
+  agencyId       String
+  createdById    String?
+  assigneeId     String?
+  clientId       String?
+  agency         Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  client         Client?    @relation(fields: [clientId], references: [id])
+  createdBy      User?      @relation("TaskCreator", fields: [createdById], references: [id])
+
+  @@index([agencyId, status])
+  @@index([assigneeId])
+  @@index([clientId], map: "tasks_clientId_fkey")
+  @@index([createdById], map: "tasks_createdById_fkey")
+  @@map("tasks")
+}
+
+model Token {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  usedAt    DateTime?
+  type      TokenType
+  email     String
+  token     String    @unique @db.VarChar(500)
+  expiresAt DateTime
+  userId    String?
+  agencyId  String?
+  role      Role?
+  metadata  String?   @db.LongText
+  agency    Agency?   @relation(fields: [agencyId], references: [id])
+  user      User?     @relation(fields: [userId], references: [id])
+
+  @@index([type, email])
+  @@index([agencyId], map: "tokens_agencyId_fkey")
+  @@index([userId], map: "tokens_userId_fkey")
+  @@map("tokens")
+}
+
+model Client {
+  id                    String                  @id @default(cuid())
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  name                  String                  @unique
+  domain                String                  @unique
+  industry              String?
+  targets               String?                 @db.LongText
+  status                Status                  @default(PENDING)
+  loginUrl              String?
+  username              String?
+  password              String?
+  notes                 String?
+  ga4AccessToken        String?                 @db.Text
+  ga4RefreshToken       String?                 @db.Text
+  ga4PropertyId         String?
+  ga4AccountEmail       String?
+  ga4ConnectedAt        DateTime?
+  userId                String
+  backlinkTimeseries    BacklinkTimeseries[]
+  backlinks             Backlink[]
+  user                  User                    @relation(fields: [userId], references: [id])
+  ga4Metrics            Ga4Metrics?
+  keywords              Keyword[]
+  rankedKeywordsHistory RankedKeywordsHistory[]
+  reportSchedules       ReportSchedule[]
+  seoReports            SeoReport?
+  targetKeywords        TargetKeyword[]
+  Task                  Task[]
+  topPages              TopPage[]
+  trafficSources        TrafficSource[]
+
+  @@index([name, domain])
+  @@index([userId], map: "clients_userId_fkey")
+  @@map("clients")
+}
+
+model SeoReport {
+  id                 String          @id @default(cuid())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  reportDate         DateTime
+  period             String
+  totalSessions      Int
+  organicSessions    Int
+  paidSessions       Int
+  directSessions     Int
+  referralSessions   Int
+  totalClicks        Int
+  totalImpressions   Int
+  averageCtr         Float
+  averagePosition    Float
+  bounceRate         Float
+  avgSessionDuration Float
+  pagesPerSession    Float
+  conversions        Int
+  conversionRate     Float
+  clientId           String          @unique
+  activeUsers        Int?
+  emailSubject       String?
+  eventCount         Int?
+  keyEvents          Int?
+  newUsers           Int?
+  recipients         String?         @db.LongText
+  scheduleId         String?
+  sentAt             DateTime?
+  status             String          @default("draft")
+  client             Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  schedule           ReportSchedule? @relation(fields: [scheduleId], references: [id])
+
+  @@index([clientId, reportDate])
+  @@index([scheduleId])
+  @@map("seo_reports")
+}
+
+model ReportSchedule {
+  id           String      @id @default(cuid())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  frequency    String
+  dayOfWeek    Int?
+  dayOfMonth   Int?
+  timeOfDay    String      @default("09:00")
+  recipients   String      @db.LongText
+  emailSubject String?
+  isActive     Boolean     @default(true)
+  clientId     String
+  lastRunAt    DateTime?
+  nextRunAt    DateTime?
+  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  reports      SeoReport[]
+
+  @@index([clientId])
+  @@index([isActive, nextRunAt])
+  @@map("report_schedules")
+}
+
+model Keyword {
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  keyword          String
+  searchVolume     Int
+  difficulty       Float?
+  cpc              Float?
+  competition      String?
+  currentPosition  Int?
+  previousPosition Int?
+  bestPosition     Int?
+  googleUrl        String?
+  serpFeatures     String?  @db.LongText
+  totalResults     Int?
+  clicks           Int      @default(0)
+  impressions      Int      @default(0)
+  ctr              Float    @default(0)
+  clientId         String
+  locationName     String?  @db.VarChar(255)
+  client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, keyword])
+  @@index([clientId, currentPosition])
+  @@map("keywords")
+}
+
+model RankedKeywordsHistory {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  totalKeywords Int
+  clientId      String
+  month         Int
+  year          Int
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, month, year])
+  @@index([clientId, year, month])
+  @@map("ranked_keywords_history")
+}
+
+model Backlink {
+  id           String    @id @default(cuid())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sourceUrl    String
+  targetUrl    String
+  anchorText   String?
+  domainRating Float?
+  urlRating    Float?
+  traffic      Int?
+  isFollow     Boolean   @default(true)
+  isLost       Boolean   @default(false)
+  firstSeen    DateTime?
+  lastSeen     DateTime?
+  clientId     String
+  client       Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, isLost])
+  @@index([clientId, domainRating])
+  @@map("backlinks")
+}
+
+model OnboardingTemplate {
+  id          String           @id @default(cuid())
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  name        String
+  description String?
+  isDefault   Boolean          @default(false)
+  agencyId    String
+  tasks       OnboardingTask[]
+  agency      Agency           @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId])
+  @@map("onboarding_templates")
+}
+
+model OnboardingTask {
+  id             String             @id @default(cuid())
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  title          String
+  description    String?
+  category       String?
+  priority       String?
+  estimatedHours Int?
+  order          Int                @default(0)
+  templateId     String
+  template       OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, order])
+  @@map("onboarding_tasks")
+}
+
+model TopPage {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  url            String
+  organicPos1    Int      @default(0)
+  organicPos2_3  Int      @default(0)
+  organicPos4_10 Int      @default(0)
+  organicCount   Int      @default(0)
+  organicEtv     Float    @default(0)
+  organicIsNew   Int      @default(0)
+  organicIsUp    Int      @default(0)
+  organicIsDown  Int      @default(0)
+  organicIsLost  Int      @default(0)
+  paidCount      Int      @default(0)
+  paidEtv        Float    @default(0)
+  rawData        String?  @db.LongText
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, url])
+  @@index([clientId, organicEtv])
+  @@map("top_pages")
+}
+
+model TrafficSource {
+  id                      String   @id @default(cuid())
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  name                    String
+  value                   Float    @default(0)
+  totalKeywords           Int      @default(0)
+  totalEstimatedTraffic   Float    @default(0)
+  organicEstimatedTraffic Float    @default(0)
+  averageRank             Float?
+  rankSampleSize          Int      @default(0)
+  clientId                String
+  client                  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, name])
+  @@index([clientId])
+  @@map("traffic_sources")
+}
+
+model BacklinkTimeseries {
+  id                       String   @id @default(cuid())
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  date                     DateTime
+  newBacklinks             Int      @default(0)
+  lostBacklinks            Int      @default(0)
+  newReferringDomains      Int      @default(0)
+  lostReferringDomains     Int      @default(0)
+  newReferringMainDomains  Int      @default(0)
+  lostReferringMainDomains Int      @default(0)
+  rawData                  String?  @db.LongText
+  clientId                 String
+  client                   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, date])
+  @@index([clientId, date])
+  @@map("backlink_timeseries")
+}
+
+model TargetKeyword {
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  keyword          String
+  searchVolume     Int?
+  cpc              Float?
+  competition      String?
+  competitionValue Float?
+  monthlySearches  String?  @db.LongText
+  keywordInfo      String?  @db.LongText
+  locationCode     Int?
+  locationName     String?
+  languageCode     String?
+  languageName     String?
+  serpInfo         String?  @db.LongText
+  serpItemTypes    String?  @db.LongText
+  googleUrl        String?
+  googlePosition   Int?
+  previousPosition Int?
+  seResultsCount   String?
+  clientId         String
+  client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, keyword])
+  @@index([clientId, searchVolume])
+  @@index([clientId, googlePosition])
+  @@map("target_keywords")
+}
+
+model Ga4Metrics {
+  id                 String   @id @default(cuid())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  startDate          DateTime
+  endDate            DateTime
+  activeUsers        Int
+  eventCount         Int
+  newUsers           Int
+  keyEvents          Int
+  totalSessions      Int
+  organicSessions    Int
+  directSessions     Int
+  referralSessions   Int
+  paidSessions       Int
+  bounceRate         Float
+  avgSessionDuration Float
+  pagesPerSession    Float
+  conversions        Int
+  conversionRate     Float
+  newUsersTrend      String?  @db.LongText
+  activeUsersTrend   String?  @db.LongText
+  events             String?  @db.LongText
+  clientId           String   @unique
+  client             Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, endDate])
+  @@index([clientId, createdAt])
+  @@map("ga4_metrics")
+}
+
 enum Role {
   SUPER_ADMIN
   ADMIN
   AGENCY
   WORKER
+  CLIENT
 }
 
 enum AgencyRole {
@@ -34,570 +449,7 @@ enum Status {
 }
 
 enum TokenType {
-  EMAIL_VERIFY // email confirmation after agency self-registers
-  INVITE // invite link (agency or worker)
-  MAGIC_LOGIN // passwordless one-time login for workers
-}
-
-model User {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  email        String  @unique
-  name         String?
-  passwordHash String? // agency users set this at registration; workers optionally later
-  role         Role    @default(AGENCY)
-  verified     Boolean @default(false) // must confirm email before login (self-registered agencies)
-  invited      Boolean @default(false) // true if created from an invite
-
-  // Memberships to agencies (owner/worker)
-  memberships UserAgency[]
-
-  // Clients
-  clients Client[]
-
-  // Emails & login tokens
-  tokens Token[]
-
-  // Tasks assigned (optional)
-  assignedTaksks Task[] @relation("TaskAssignee")
-  createdTass    Task[] @relation("TaskCreator")
-
-  @@map("users")
-}
-
-model Agency {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  name      String
-  subdomain String? @unique // e.g., acme → acme.yourseodashboard.com
-
-  // Memberships (owner(s) and workers)
-  members UserAgency[]
-
-  // Works
-  tasks Task[]
-
-  // Tokens for invitations
-  tokens Token[]
-
-  // Onboarding templates
-  onboardingTemplates OnboardingTemplate[]
-
-  @@map("agencies")
-}
-
-model UserAgency {
-  id String @id @default(cuid())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  agencyId String
-  agency   Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-
-  // Per-agency role (owner/manager/worker). Use Role.AGENCY here for owners/managers in MVP.
-  agencyRole AgencyRole @default(WORKER)
-
-  @@unique([userId, agencyId])
-  @@index([agencyId])
-  @@index([userId])
-  @@map("user_agencies")
-}
-
-model Task {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  title          String
-  description    String?
-  category       String?
-  dueDate        DateTime?
-  status         TaskStatus @default(TODO)
-  priority       String? // "high", "medium", "low"
-  estimatedHours Int?
-  
-  // Proof/Attachments: Array of objects with type (image/video/url) and value (file URL or URL string)
-  // Example: [{ type: "image", value: "https://...", name: "screenshot.png" }, { type: "url", value: "https://example.com" }]
-  proof Json? @db.Json
-
-  // Tenant scope
-  agencyId String
-  agency   Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-
-  // Who created it (agency owner/worker/admin)
-  createdById String?
-  createdBy   User?   @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
-
-  // Who it's assigned to
-  assigneeId String?
-  assignee   User?   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-
-  // who it is for
-  clientId String?
-  client   Client? @relation(fields: [clientId], references: [id])
-
-  @@index([agencyId, status])
-  @@index([assigneeId])
-  @@map("tasks")
-}
-
-model Token {
-  id        String    @id @default(cuid())
-  createdAt DateTime  @default(now())
-  usedAt    DateTime?
-
-  type      TokenType
-  email     String // the email this token is for
-  token     String    @unique @db.VarChar(500) // in prod: store a hash instead of raw token
-  expiresAt DateTime
-
-  // Optional scoping
-  userId String?
-  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  agencyId String?
-  agency   Agency? @relation(fields: [agencyId], references: [id], onDelete: SetNull)
-
-  role Role? // target role for INVITE (AGENCY/WORKER)
-
-  metadata Json? @db.Json
-
-  @@index([type, email])
-  @@map("tokens")
-}
-
-model Client {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  name     String  @unique
-  domain   String  @unique
-  industry String?
-  targets  Json?   @db.Json
-  status   Status  @default(PENDING)
-
-  // Login credentials for workers
-  loginUrl String?
-  username String?
-  password String?
-  notes    String?
-
-  // GA4 Connection
-  ga4AccessToken  String? @db.Text
-  ga4RefreshToken String? @db.Text
-  ga4PropertyId   String?
-  ga4AccountEmail String?
-  ga4ConnectedAt  DateTime?
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
-  Task   Task[]
-
-  // SEO Data
-  seoReports SeoReport[]
-  reportSchedules ReportSchedule[]
-  keywords   Keyword[]
-  backlinks  Backlink[]
-  rankedKeywordsHistory RankedKeywordsHistory[]
-  topPages   TopPage[]
-  trafficSources TrafficSource[]
-  backlinkTimeseries BacklinkTimeseries[]
-  targetKeywords TargetKeyword[]
-  ga4Metrics Ga4Metrics[]
-
-  @@index([name, domain])
-  @@map("clients")
-}
-
-model SeoReport {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Report metadata
-  reportDate DateTime
-  period     String // "daily", "weekly", "biweekly", "monthly"
-  status     String @default("draft") // "draft", "sent", "scheduled"
-
-  // Traffic metrics
-  totalSessions    Int
-  organicSessions  Int
-  paidSessions     Int
-  directSessions   Int
-  referralSessions Int
-
-  // SEO metrics
-  totalClicks      Int
-  totalImpressions Int
-  averageCtr       Float
-  averagePosition  Float
-
-  // Engagement metrics
-  bounceRate         Float
-  avgSessionDuration Float
-  pagesPerSession    Float
-
-  // Conversion metrics
-  conversions    Int
-  conversionRate Float
-
-  // GA4 metrics (if available)
-  activeUsers    Int?
-  eventCount     Int?
-  newUsers       Int?
-  keyEvents      Int?
-
-  // Email tracking
-  sentAt       DateTime?
-  recipients   Json? @db.Json // Array of email addresses
-  emailSubject String?
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  // Schedule relationship (optional)
-  scheduleId String?
-  schedule   ReportSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
-
-  @@unique([clientId]) // One report per client
-  @@index([clientId, reportDate])
-  @@index([scheduleId])
-  @@map("seo_reports")
-}
-
-model ReportSchedule {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Schedule configuration
-  frequency String // "weekly", "biweekly", "monthly"
-  dayOfWeek Int? // 0-6 (Sunday-Saturday) for weekly/biweekly
-  dayOfMonth Int? // 1-31 for monthly
-  timeOfDay String @default("09:00") // HH:mm format
-
-  // Email configuration
-  recipients Json @db.Json // Array of email addresses
-  emailSubject String?
-  isActive Boolean @default(true)
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  // Reports generated from this schedule
-  reports SeoReport[]
-
-  // Last run tracking
-  lastRunAt DateTime?
-  nextRunAt DateTime?
-
-  @@index([clientId])
-  @@index([isActive, nextRunAt])
-  @@map("report_schedules")
-}
-
-model Keyword {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  keyword      String
-  searchVolume Int
-  difficulty   Float?
-  cpc          Float?
-  competition  String?
-
-  // Tracking metadata (UI-selected)
-  locationName String?
-
-  // Ranking data
-  currentPosition  Int?
-  previousPosition Int?
-  bestPosition     Int?
-
-  // Google SERP data
-  googleUrl     String? // The URL that ranks for this keyword
-  serpFeatures  Json?   // Array of SERP features (e.g., ["video", "images", "local_pack"])
-  totalResults  Int?    // Total number of search results
-
-  // Performance data
-  clicks      Int   @default(0)
-  impressions Int   @default(0)
-  ctr         Float @default(0)
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@unique([clientId, keyword])
-  @@index([clientId, currentPosition])
-  @@map("keywords")
-}
-
-model RankedKeywordsHistory {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Total keywords ranked for the domain
-  totalKeywords Int
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  // Month and year for tracking
-  month Int // 1-12
-  year  Int
-
-  @@unique([clientId, month, year])
-  @@index([clientId, year, month])
-  @@map("ranked_keywords_history")
-}
-
-model Backlink {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  sourceUrl    String
-  targetUrl    String
-  anchorText   String?
-  domainRating Float?
-  urlRating    Float?
-  traffic      Int?
-  isFollow     Boolean   @default(true)
-  isLost       Boolean   @default(false)
-  firstSeen    DateTime?
-  lastSeen     DateTime?
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@index([clientId, isLost])
-  @@index([clientId, domainRating])
-  @@map("backlinks")
-}
-
-model OnboardingTemplate {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  name        String
-  description String?
-  isDefault   Boolean @default(false)
-
-  // Agency relationship
-  agencyId String
-  agency   Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-
-  // Template tasks
-  tasks OnboardingTask[]
-
-  @@index([agencyId])
-  @@map("onboarding_templates")
-}
-
-model OnboardingTask {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  title          String
-  description    String?
-  category       String?
-  priority       String? // "high", "medium", "low"
-  estimatedHours Int?
-  order          Int     @default(0)
-
-  // Template relationship
-  templateId String
-  template   OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-
-  @@index([templateId, order])
-  @@map("onboarding_tasks")
-}
-
-model TopPage {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  url String
-
-  // Organic metrics
-  organicPos1    Int @default(0)
-  organicPos2_3  Int @default(0)
-  organicPos4_10 Int @default(0)
-  organicCount   Int @default(0)
-  organicEtv     Float @default(0)
-  organicIsNew   Int @default(0)
-  organicIsUp    Int @default(0)
-  organicIsDown  Int @default(0)
-  organicIsLost  Int @default(0)
-
-  // Paid metrics
-  paidCount Int @default(0)
-  paidEtv   Float @default(0)
-
-  // Raw API data for reference
-  rawData Json? @db.Json
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@unique([clientId, url])
-  @@index([clientId, organicEtv])
-  @@map("top_pages")
-}
-
-model TrafficSource {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  name  String // "Organic", "Direct", "Referral", "Paid", "Other"
-  value Float  @default(0)
-
-  // Aggregated metrics
-  totalKeywords        Int @default(0)
-  totalEstimatedTraffic Float @default(0)
-  organicEstimatedTraffic Float @default(0)
-  averageRank          Float?
-  rankSampleSize       Int @default(0)
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@unique([clientId, name])
-  @@index([clientId])
-  @@map("traffic_sources")
-}
-
-model BacklinkTimeseries {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  date DateTime
-
-  newBacklinks            Int @default(0)
-  lostBacklinks           Int @default(0)
-  newReferringDomains     Int @default(0)
-  lostReferringDomains    Int @default(0)
-  newReferringMainDomains Int @default(0)
-  lostReferringMainDomains Int @default(0)
-
-  // Raw API data for reference
-  rawData Json? @db.Json
-
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@unique([clientId, date])
-  @@index([clientId, date])
-  @@map("backlink_timeseries")
-}
-
-model TargetKeyword {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  keyword       String
-  searchVolume  Int?
-  cpc           Float?
-  competition   String?
-  competitionValue Float?
-  monthlySearches Json? @db.Json // Array of monthly search volumes for past 12 months
-  keywordInfo   Json? @db.Json // Additional keyword information from API
-  
-  // Location and language
-  locationCode  Int?
-  locationName  String?
-  languageCode  String?
-  languageName  String?
-  
-  // SERP data
-  serpInfo      Json? @db.Json // Full SERP info object from API
-  serpItemTypes Json? @db.Json // Array of SERP feature types
-  googleUrl     String? // URL that ranks for this keyword
-  googlePosition Int? // Current Google ranking position
-  previousPosition Int? // Previous ranking position for change calculation
-  seResultsCount String? // Number of search results
-  
-  // Client relationship
-  clientId String
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@unique([clientId, keyword])
-  @@index([clientId, searchVolume])
-  @@index([clientId, googlePosition])
-  @@map("target_keywords")
-}
-
-model Ga4Metrics {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Date range for this metrics snapshot
-  startDate DateTime
-  endDate   DateTime
-
-  // Core GA4 metrics
-  totalUsers      Int // Website Visitors
-  activeUsers     Int
-  newUsers        Int // First Time Visitors
-  engagedSessions Int // Engaged Visitors
-  eventCount      Int
-  keyEvents       Int
-
-  // Traffic metrics
-  totalSessions    Int
-  organicSessions  Int // Organic Traffic
-  directSessions   Int
-  referralSessions Int
-  paidSessions     Int
-
-  // Engagement metrics
-  bounceRate         Float
-  avgSessionDuration Float
-  pagesPerSession    Float
-
-  // Conversion metrics
-  conversions    Int
-  conversionRate Float
-
-  // Trend data (stored as JSON arrays)
-  newUsersTrend    Json? @db.Json // Array of { date: string, value: number }
-  activeUsersTrend Json? @db.Json // Array of { date: string, value: number }
-  totalUsersTrend  Json? @db.Json // Array of { date: string, value: number } - Website Visitors trend
-
-  // Events data (stored as JSON array)
-  events Json? @db.Json // Array of { name: string, count: number, change?: string }
-
-  // Visitor sources data (stored as JSON array)
-  visitorSources Json? @db.Json // Array of { source: string, users: number }
-
-  // Client relationship
-  clientId String @unique // One record per client
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  @@index([clientId, endDate])
-  @@index([clientId, createdAt])
-  @@map("ga4_metrics")
+  EMAIL_VERIFY
+  INVITE
+  MAGIC_LOGIN
 }

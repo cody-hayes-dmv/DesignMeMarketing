@@ -172,7 +172,7 @@ router.post("/", authenticateToken, async (req, res) => {
         clientId: parsed.clientId,
         priority: parsed.priority,
         estimatedHours: parsed.estimatedHours,
-        proof: parsed.proof || undefined, // Store as JSON
+        proof: parsed.proof ? JSON.stringify(parsed.proof) : undefined,
       },
       include: taskInclude,
     });
@@ -204,7 +204,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
     // Handle proof field - ensure it's properly formatted
     const updateData: any = { ...updates };
     if (updates.proof !== undefined) {
-      updateData.proof = updates.proof || null;
+      updateData.proof = updates.proof ? JSON.stringify(updates.proof) : null;
     }
 
     const updatedTask = await prisma.task.update({

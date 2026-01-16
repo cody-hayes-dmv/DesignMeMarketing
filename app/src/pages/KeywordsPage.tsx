@@ -58,7 +58,7 @@ const formatNumber = (value: number | null | undefined) => {
 
 const KeywordsPage: React.FC = () => {
   const { user } = useSelector((state: RootState) => state.auth);
-  const [activeTab, setActiveTab] = useState<TabId>("research");
+  const [activeTab, setActiveTab] = useState<TabId>("tracked");
 
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
@@ -82,12 +82,14 @@ const KeywordsPage: React.FC = () => {
   const [addKeywordMessage, setAddKeywordMessage] = useState<string | null>(null);
 
   type LocationOption = {
+    location_code?: number;
     location_name: string;
     country_iso_code?: string | null;
     location_type?: string | null;
   };
 
   const DEFAULT_TRACK_LOCATION: LocationOption = {
+    location_code: 2840,
     location_name: "United States",
     country_iso_code: "US",
     location_type: "Country",
@@ -103,7 +105,7 @@ const KeywordsPage: React.FC = () => {
   const [researchSeed, setResearchSeed] = useState("");
   const [researchLocation, setResearchLocation] = useState<number>(DEFAULT_LOCATION);
   const [researchLanguage, setResearchLanguage] = useState<string>(DEFAULT_LANGUAGE);
-  const [researchLimit, setResearchLimit] = useState<number>(50);
+  const [researchLimit, setResearchLimit] = useState<number>(10);
   const [researchLoading, setResearchLoading] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
   const [researchResults, setResearchResults] = useState<ResearchKeyword[]>([]);
@@ -311,12 +313,20 @@ const KeywordsPage: React.FC = () => {
     try {
       setAddingKeyword(true);
       setAddKeywordMessage(null);
+      const typedLocation = trackLocationQuery.trim();
+      const selectedLocationName = (trackLocationSelected?.location_name || "").trim();
+      const useSelected = !!selectedLocationName && selectedLocationName.toLowerCase() === typedLocation.toLowerCase();
+      const locationNameToSend = typedLocation || selectedLocationName || DEFAULT_TRACK_LOCATION.location_name;
+
       // Auto-fetch data from DataForSEO when adding keyword
       await api.post(`/seo/keywords/${selectedClientId}`, {
         keyword: newKeywordValue.trim(),
         fetchFromDataForSEO: true, // Auto-fetch ranking data
         languageCode: DEFAULT_LANGUAGE,
-        location_name: trackLocationSelected?.location_name || DEFAULT_TRACK_LOCATION.location_name,
+        // Only send a code if the user actually selected this exact option.
+        locationCode: useSelected ? trackLocationSelected?.location_code : undefined,
+        // Always send the visible text so typed "Arkansas,United States" works too.
+        location_name: locationNameToSend,
         include_clickstream_data: true,
         include_serp_info: true,
       });
@@ -439,6 +449,17 @@ const KeywordsPage: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setActiveTab("tracked")}
+            className={`inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "tracked"
+                ? "bg-primary-600 text-white"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+            }`}
+          >
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Manually Add Keywords
+          </button>
+          <button
             onClick={() => setActiveTab("research")}
             className={`inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium ${
               activeTab === "research"
@@ -448,17 +469,6 @@ const KeywordsPage: React.FC = () => {
           >
             <Search className="h-4 w-4 mr-2" />
             Keyword Research
-          </button>
-          <button
-            onClick={() => setActiveTab("tracked")}
-            className={`inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium ${
-              activeTab === "tracked"
-                ? "bg-primary-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            <CheckCircle2 className="h-4 w-4 mr-2" />
-            Tracked Keywords
           </button>
         </div>
       </div>
@@ -575,25 +585,32 @@ const KeywordsPage: React.FC = () => {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <select
-                  value={assignClientId || ""}
-                  onChange={(e) => setAssignClientId(e.target.value)}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                >
-                  <option value="" disabled>
-                    Choose client
-                  </option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name || client.domain}
-                    </option>
-                  ))}
-                </select>
+                <div className="min-w-[240px]">
+                  <div className="flex h-11 overflow-hidden rounded-xl border-2 border-primary-500 bg-white shadow-sm focus-within:ring-2 focus-within:ring-primary-200">
+                    <div className="flex items-center bg-primary-600 px-3 text-[11px] font-semibold uppercase tracking-wider text-white">
+                      Client
+                    </div>
+                    <select
+                      value={assignClientId || ""}
+                      onChange={(e) => setAssignClientId(e.target.value)}
+                      className="h-11 w-full bg-white px-4 text-sm font-medium text-gray-900 focus:outline-none"
+                    >
+                      <option value="" disabled>
+                        Choose client
+                      </option>
+                      {clients.map((client) => (
+                        <option key={client.id} value={client.id}>
+                          {client.name || client.domain}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={handleAssignSelected}
                   disabled={assigningKeywords || Object.values(selectedSuggestions).every((value) => !value)}
-                  className="inline-flex items-center rounded-lg border border-primary-300 px-3 py-2 text-sm font-medium text-primary-600 hover:bg-primary-50 disabled:opacity-60"
+                  className="inline-flex h-11 items-center rounded-xl border-2 border-primary-300 bg-white px-4 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:opacity-60"
                 >
                   {assigningKeywords ? (
                     <>
@@ -719,34 +736,41 @@ const KeywordsPage: React.FC = () => {
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Tracked keywords</h2>
+                <h2 className="text-lg font-semibold text-gray-900">Manually add keywords</h2>
                 <p className="text-sm text-gray-500">
                   Keywords that are currently being monitored for ranking performance.
                 </p>
               </div>
-              <div className="flex items-center gap-3">
-                <select
-                  value={selectedClientId || ""}
-                  onChange={(e) => setSelectedClientId(e.target.value)}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                >
-                  <option value="" disabled>
-                    Select client
-                  </option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name || client.domain}
-                    </option>
-                  ))}
-                </select>
+              <div className="flex items-end gap-3">
+                <div className="min-w-[240px]">
+                  <div className="flex h-11 overflow-hidden rounded-xl border-2 border-primary-500 bg-white shadow-sm focus-within:ring-2 focus-within:ring-primary-200">
+                    <div className="flex items-center bg-primary-600 px-3 text-[11px] font-semibold uppercase tracking-wider text-white">
+                      Client
+                    </div>
+                    <select
+                      value={selectedClientId || ""}
+                      onChange={(e) => setSelectedClientId(e.target.value)}
+                      className="h-11 w-full bg-white px-4 text-sm font-medium text-gray-900 focus:outline-none"
+                    >
+                      <option value="" disabled>
+                        Select client
+                      </option>
+                      {clients.map((client) => (
+                        <option key={client.id} value={client.id}>
+                          {client.name || client.domain}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
                     value={trackSearchTerm}
                     onChange={(e) => setTrackSearchTerm(e.target.value)}
                     placeholder="Search tracked keywords"
-                    className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                    className="h-11 w-full rounded-xl border-2 border-gray-300 bg-white pl-9 pr-3 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
                   />
                 </div>
               </div>

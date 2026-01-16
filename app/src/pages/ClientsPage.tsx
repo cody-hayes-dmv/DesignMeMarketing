@@ -10,8 +10,6 @@ import {
   MoreVertical,
   Users,
   UserCheck,
-  Mail,
-  Ban,
   Search,
   Table,
   List,
@@ -30,6 +28,39 @@ import toast from "react-hot-toast";
 import api from "@/lib/api";
 import ConfirmDialog from "../components/ConfirmDialog";
 
+const INDUSTRY_OPTIONS = [
+  "Home Services",
+  "Construction and Contractors",
+  "Real Estate",
+  "Property Management",
+  "Automotive Services",
+  "Healthcare",
+  "Dental",
+  "Legal Services",
+  "Financial Services",
+  "Insurance",
+  "Professional Services",
+  "Marketing and Advertising",
+  "Technology and IT Services",
+  "Retail",
+  "E-commerce",
+  "Restaurants and Food Services",
+  "Hospitality and Lodging",
+  "Fitness and Wellness",
+  "Beauty and Personal Care",
+  "Education and Training",
+  "Nonprofit and Religious Organizations",
+  "Manufacturing",
+  "Logistics and Transportation",
+  "Travel and Tourism",
+  "Entertainment and Events",
+  "Trades and Skilled Labor",
+  "Cleaning and Maintenance Services",
+  "Security Services",
+  "Local Government or Municipality",
+  "Other",
+] as const;
+
 const ClientsPage = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate()
@@ -37,22 +68,24 @@ const ClientsPage = () => {
     (state: RootState) => state.client
   );
   const { user } = useSelector((state: RootState) => state.auth);
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<Number>(0);
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [openStatusId, setOpenStatusId] = useState("")
   const [enabled, setEnabled] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("all");
   const [clientForm, setClientForm] = useState({ 
     name: "", 
     domain: "",
     industry: "",
-    targets: [] as string[]
+    industryOther: "",
   });
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState("");
   const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const cardMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [openCardMenuId, setOpenCardMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(fetchClients() as any);
@@ -69,25 +102,41 @@ const ClientsPage = () => {
       if (openStatusId && !isClickOnDropdownButton && !isClickOnDropdownMenu) {
         setOpenStatusId("");
       }
+
+      // Close card menu when clicking outside
+      const isClickOnCardMenuButton = target.closest('.card-menu-button');
+      const isClickOnCardMenu = target.closest('[data-card-menu]');
+      if (openCardMenuId && !isClickOnCardMenuButton && !isClickOnCardMenu) {
+        setOpenCardMenuId(null);
+      }
     };
-    if (openStatusId) {
+    if (openStatusId || openCardMenuId) {
       document.addEventListener("mousedown", handleClickOutside);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [openStatusId]);
+  }, [openStatusId, openCardMenuId]);
 
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const selectedIndustry = clientForm.industry === "Other"
+      ? clientForm.industryOther.trim()
+      : clientForm.industry.trim();
+
+    if (!selectedIndustry) {
+      toast.error("Please select an industry.");
+      return;
+    }
+
     try {
-      const result = await dispatch(createClient({ data: {
+      await dispatch(createClient({ data: {
         name: clientForm.name,
         domain: clientForm.domain,
-        industry: clientForm.industry || undefined,
-        targets: clientForm.targets.length > 0 ? clientForm.targets : undefined,
+        industry: selectedIndustry,
       } }) as any);
-      setClientForm({ name: "", domain: "", industry: "", targets: [] });
+      setClientForm({ name: "", domain: "", industry: "", industryOther: "" });
       setShowCreateModal(false);
       toast.success("Client created successfully! Please connect GA4 to view analytics data.");
       // Refresh clients list
@@ -133,10 +182,21 @@ const ClientsPage = () => {
     navigate(`/agency/clients/${client.id}`, { state: { client } });
   };
 
+  const handleViewReportClick = (client: Client) => {
+    navigate(`/agency/clients/${client.id}`, { state: { client, tab: "report" } });
+  };
+
   const handleEditClick = (client: Client) => {
-    setSelectedClient(client);
-    setMode(1);
-    setOpen(true);
+    setEditingClient(client);
+    const currentIndustry = (client as any)?.industry ?? "";
+    const industryIsKnown = INDUSTRY_OPTIONS.includes(currentIndustry as any);
+    setClientForm({
+      name: client.name ?? "",
+      domain: client.domain ?? "",
+      industry: currentIndustry ? (industryIsKnown ? String(currentIndustry) : "Other") : "",
+      industryOther: currentIndustry && !industryIsKnown ? String(currentIndustry) : "",
+    });
+    setShowEditModal(true);
   };
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
@@ -160,17 +220,67 @@ const ClientsPage = () => {
     }
   };
 
+  const handleUpdateClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingClient) return;
+
+    const selectedIndustry = clientForm.industry === "Other"
+      ? clientForm.industryOther.trim()
+      : clientForm.industry.trim();
+
+    if (!selectedIndustry) {
+      toast.error("Please select an industry.");
+      return;
+    }
+
+    try {
+      await dispatch(updateClient({
+        id: editingClient.id,
+        data: {
+          name: clientForm.name,
+          domain: clientForm.domain,
+          industry: selectedIndustry,
+        },
+      }) as any);
+
+      toast.success("Client updated successfully!");
+      setShowEditModal(false);
+      setEditingClient(null);
+      setClientForm({ name: "", domain: "", industry: "", industryOther: "" });
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Failed to update client:", error);
+      // Toast is already shown by API interceptor
+    }
+  };
+
   // Clients already have statistics from the database
   const modifiedClients = clients
 
-  const getStatusBadge = (status: string) => {
-    const styles = {
-      ACTIVE: "bg-green-100 text-green-800",
-      PENDING: "bg-yellow-100 text-yellow-800",
-      REJECTED: "bg-gray-100 text-gray-800",
-    };
-    return styles[status as keyof typeof styles] || styles.ACTIVE;
-  };
+  const isArchivedStatus = (status: string) => status !== "ACTIVE";
+  const getStatusBadge = (status: string) =>
+    isArchivedStatus(status) ? "bg-gray-100 text-gray-800" : "bg-green-100 text-green-800";
+  const getStatusLabel = (status: string) => (isArchivedStatus(status) ? "Archived" : "Active");
+
+  const totalCount = modifiedClients.length;
+  const activeCount = modifiedClients.filter((m) => m.status === "ACTIVE").length;
+  const archivedCount = modifiedClients.filter((m) => isArchivedStatus(m.status)).length;
+
+  const filteredClients = modifiedClients
+    .filter((client) => {
+      if (statusFilter === "active") return client.status === "ACTIVE";
+      if (statusFilter === "archived") return isArchivedStatus(client.status);
+      return true;
+    })
+    .filter((client) => {
+      if (!searchTerm) return true;
+      const searchLower = searchTerm.toLowerCase();
+      return (
+        client.name.toLowerCase().includes(searchLower) ||
+        client.domain.toLowerCase().includes(searchLower) ||
+        (client.industry && client.industry.toLowerCase().includes(searchLower))
+      );
+    });
 
   return (
     <div className="p-8">
@@ -192,51 +302,53 @@ const ClientsPage = () => {
       </div>
 
       {/* Client */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+        <button
+          type="button"
+          onClick={() => setStatusFilter("all")}
+          className={`bg-white p-6 rounded-xl border transition-colors text-left ${statusFilter === "all" ? "border-primary-300 ring-2 ring-primary-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="Show all clients"
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Total Clients</p>
-              <p className="text-2xl font-bold text-primary-600">
-                {modifiedClients.length}
-              </p>
+              <p className="text-2xl font-bold text-primary-600">{totalCount}</p>
             </div>
             <Users className="h-8 w-8 text-primary-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter((prev) => (prev === "active" ? "all" : "active"))}
+          className={`bg-white p-6 rounded-xl border transition-colors text-left ${statusFilter === "active" ? "border-secondary-300 ring-2 ring-secondary-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="Show active clients"
+        >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Active</p>
-              <p className="text-2xl font-bold text-secondary-600">
-                {modifiedClients.filter((m) => m.status === "ACTIVE").length}
-              </p>
+              <p className="text-sm font-medium text-gray-600">Active Clients</p>
+              <p className="text-2xl font-bold text-secondary-600">{activeCount}</p>
             </div>
             <UserCheck className="h-8 w-8 text-secondary-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter((prev) => (prev === "archived" ? "all" : "archived"))}
+          className={`bg-white p-6 rounded-xl border transition-colors text-left ${statusFilter === "archived" ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="Show archived clients"
+        >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Pending</p>
-              <p className="text-2xl font-bold text-accent-600">
-                {modifiedClients.filter((m) => m.status === "PENDING").length}
-              </p>
+              <p className="text-sm font-medium text-gray-600">Archived Clients</p>
+              <p className="text-2xl font-bold text-gray-900">{archivedCount}</p>
             </div>
-            <Mail className="h-8 w-8 text-accent-600" />
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Rejected</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {modifiedClients.filter((m) => m.status === "REJECTED").length}
-              </p>
+            <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-semibold">
+              A
             </div>
-            <Ban className="h-8 w-8 text-gray-600" />
           </div>
-        </div>
+        </button>
       </div>
 
 
@@ -248,7 +360,7 @@ const ClientsPage = () => {
               <Search className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search name, domain, industry, targets ..."
+                placeholder="Search name, domain, industry ..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -285,25 +397,13 @@ const ClientsPage = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industy</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Targets</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {modifiedClients
-                  .filter((client) => {
-                    if (!searchTerm) return true;
-                    const searchLower = searchTerm.toLowerCase();
-                    return (
-                      client.name.toLowerCase().includes(searchLower) ||
-                      client.domain.toLowerCase().includes(searchLower) ||
-                      (client.industry && client.industry.toLowerCase().includes(searchLower)) ||
-                      (client.targets && client.targets.some((t: string) => t.toLowerCase().includes(searchLower)))
-                    );
-                  })
-                  .map((client) => (
+                {filteredClients.map((client) => (
                   <tr key={client.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-xs flex items-center gap-1">
                       <Building2 className="text-blue-600" size={18} />
@@ -319,11 +419,6 @@ const ClientsPage = () => {
                       </a>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">{client.industry ?? "-"}</td>
-                    <td className="flex gap-1 px-6 py-4 whitespace-nowrap text-xs">
-                      {client.targets?.map((target) => (
-                        <div className="py-1 px-3 bg-blue-50 text-center rounded-full text-blue-600 font-semibold">{target}</div>
-                      ))}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {user?.role === "SUPER_ADMIN" ? (
                         <div 
@@ -338,7 +433,7 @@ const ClientsPage = () => {
                             className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
                             onClick={() => setOpenStatusId(openStatusId === client.id ? "" : client.id)}
                           >
-                            {client.status}
+                            {getStatusLabel(client.status)}
                           </button>
                           {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
                             <div 
@@ -351,19 +446,22 @@ const ClientsPage = () => {
                               }}
                               onClick={(e) => e.stopPropagation()}
                             >
-                              {["ACTIVE", "PENDING", "REJECTED"].map((status) => (
+                              {[
+                                { label: "Active", value: "ACTIVE" },
+                                { label: "Archived", value: "REJECTED" },
+                              ].map(({ label, value }) => (
                                 <div
-                                  key={status}
+                                  key={value}
                                   className="px-4 py-2 text-xs hover:bg-gray-100 cursor-pointer first:rounded-t-md last:rounded-b-md"
                                   onClick={async (e) => {
                                     e.stopPropagation();
-                                    await dispatch(updateClient({ id: client.id, data: { status } }) as any);
+                                    await dispatch(updateClient({ id: client.id, data: { status: value } }) as any);
                                     setOpenStatusId("");
-                                    toast.success("Status updated successfully!");
+                                    toast.success("Client updated successfully!");
                                     dispatch(fetchClients() as any);
                                   }}
                                 >
-                                  {status}
+                                  {label}
                                 </div>
                               ))}
                             </div>,
@@ -372,7 +470,7 @@ const ClientsPage = () => {
                         </div>
                       ) : (
                       <span className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}>
-                        {client.status}
+                        {getStatusLabel(client.status)}
                       </span>
                       )}
                     </td>
@@ -416,18 +514,7 @@ const ClientsPage = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {modifiedClients
-            .filter((client) => {
-              if (!searchTerm) return true;
-              const searchLower = searchTerm.toLowerCase();
-              return (
-                client.name.toLowerCase().includes(searchLower) ||
-                client.domain.toLowerCase().includes(searchLower) ||
-                (client.industry && client.industry.toLowerCase().includes(searchLower)) ||
-                (client.targets && client.targets.some((t: string) => t.toLowerCase().includes(searchLower)))
-              );
-            })
-            .map((client) => (
+          {filteredClients.map((client) => (
             <div
               key={client.id}
               className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow"
@@ -458,22 +545,25 @@ const ClientsPage = () => {
                             className={`px-4 py-1 text-xs font-medium rounded-full ${getStatusBadge(client.status)}`}
                           onClick={() => setOpenStatusId(openStatusId === client.id ? "" : client.id)}
                           >
-                            {client.status}
+                            {getStatusLabel(client.status)}
                           </button>
                           {openStatusId === client.id && (
                           <div className="absolute mt-1 left-0 bg-white border border-gray-200 rounded-md shadow-lg z-10 min-w-[120px]">
-                              {["ACTIVE", "PENDING", "REJECTED"].map((status) => (
+                              {[
+                                { label: "Active", value: "ACTIVE" },
+                                { label: "Archived", value: "REJECTED" },
+                              ].map(({ label, value }) => (
                                 <div
-                                  key={status}
+                                  key={value}
                                 className="px-4 py-2 text-xs hover:bg-gray-100 cursor-pointer first:rounded-t-md last:rounded-b-md"
                                   onClick={async () => {
-                                    await dispatch(updateClient({ id: client.id, data: { status } }) as any);
+                                    await dispatch(updateClient({ id: client.id, data: { status: value } }) as any);
                                     setOpenStatusId("");
-                                  toast.success("Status updated successfully!");
+                                  toast.success("Client updated successfully!");
                                   dispatch(fetchClients() as any);
                                   }}
                                 >
-                                  {status}
+                                  {label}
                                 </div>
                               ))}
                             </div>
@@ -485,7 +575,7 @@ const ClientsPage = () => {
                             client.status
                           )}`}
                         >
-                          {client.status}
+                          {getStatusLabel(client.status)}
                         </span>
                     )}
                     <button
@@ -495,16 +585,68 @@ const ClientsPage = () => {
                     >
                       <Share2 className="h-4 w-4" />
                     </button>
-                    <button className="p-1 text-gray-400 hover:text-gray-600">
+                    <button
+                      className="p-1 text-gray-400 hover:text-gray-600 card-menu-button"
+                      ref={(el) => {
+                        if (el) cardMenuButtonRefs.current[client.id] = el;
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenCardMenuId((prev) => (prev === client.id ? null : client.id));
+                      }}
+                      title="More"
+                    >
                       <MoreVertical className="h-4 w-4" />
                     </button>
+                    {openCardMenuId === client.id && cardMenuButtonRefs.current[client.id] &&
+                      createPortal(
+                        <div
+                          data-card-menu
+                          className="fixed bg-white border border-gray-200 rounded-md shadow-lg min-w-[180px]"
+                          style={{
+                            top: `${cardMenuButtonRefs.current[client.id]!.getBoundingClientRect().bottom + 6}px`,
+                            left: `${cardMenuButtonRefs.current[client.id]!.getBoundingClientRect().left - 140}px`,
+                            zIndex: 9999,
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            className="w-full text-left px-4 py-2 text-xs hover:bg-gray-100 first:rounded-t-md"
+                            onClick={() => {
+                              setOpenCardMenuId(null);
+                              handleViewReportClick(client);
+                            }}
+                          >
+                            View Report
+                          </button>
+                          <button
+                            className="w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+                            onClick={() => {
+                              setOpenCardMenuId(null);
+                              handleViewClick(client);
+                            }}
+                          >
+                            Open Dashboard
+                          </button>
+                          <button
+                            className="w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 last:rounded-b-md"
+                            onClick={() => {
+                              setOpenCardMenuId(null);
+                              handleDeleteClient(client.id);
+                            }}
+                          >
+                            Delete Client
+                          </button>
+                        </div>,
+                        document.body
+                      )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div className="text-center p-3 bg-gray-50 rounded-lg">
                     <p className="text-lg font-bold text-gray-900">
-                      {client.keywords ?? 0}
+                      {Array.isArray(client.keywords) ? client.keywords.length : (client.keywords ?? 0)}
                     </p>
                     <p className="text-xs text-gray-600">Keywords</p>
                   </div>
@@ -525,9 +667,9 @@ const ClientsPage = () => {
                   </div>
                   <div className="text-center p-3 bg-gray-50 rounded-lg">
                     <p className="text-lg font-bold text-primary-600">
-                      {client.traffic?.toLocaleString() ?? "0"}
+                      {Math.round(Number(client.traffic30d ?? client.traffic ?? 0)).toLocaleString()}
                     </p>
-                    <p className="text-xs text-gray-600">Traffic</p>
+                    <p className="text-xs text-gray-600">Traffic (30d)</p>
                   </div>
                 </div>
 
@@ -538,7 +680,10 @@ const ClientsPage = () => {
                       Created {new Date(client.createdAt).toLocaleDateString()}
                     </span>
                   </div>
-                  <button className="text-primary-600 hover:text-primary-700 font-medium">
+                  <button
+                    className="text-primary-600 hover:text-primary-700 font-medium"
+                    onClick={() => handleViewReportClick(client)}
+                  >
                     View Details
                   </button>
                 </div>
@@ -588,17 +733,43 @@ const ClientsPage = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Industry (Optional)
+                  Industry
                 </label>
-                <input
-                  type="text"
+                <select
                   value={clientForm.industry}
-                  onChange={(e) =>
-                    setClientForm({ ...clientForm, industry: e.target.value })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="e.g., E-commerce, Healthcare, Finance"
-                />
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setClientForm((prev) => ({
+                      ...prev,
+                      industry: value,
+                      industryOther: value === "Other" ? prev.industryOther : "",
+                    }));
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                  required
+                >
+                  <option value="" disabled>
+                    Select industry
+                  </option>
+                  {INDUSTRY_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+
+                {clientForm.industry === "Other" && (
+                  <input
+                    type="text"
+                    value={clientForm.industryOther}
+                    onChange={(e) =>
+                      setClientForm((prev) => ({ ...prev, industryOther: e.target.value }))
+                    }
+                    className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder="Enter industry"
+                    required
+                  />
+                )}
               </div>
               <div className="flex space-x-4 pt-4">
                 <button
@@ -613,6 +784,108 @@ const ClientsPage = () => {
                   className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors"
                 >
                   Create Client
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Client Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold text-gray-900 mb-6">
+              Edit Client
+            </h2>
+            <form onSubmit={handleUpdateClient} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Client Name
+                </label>
+                <input
+                  type="text"
+                  value={clientForm.name}
+                  onChange={(e) =>
+                    setClientForm({ ...clientForm, name: e.target.value })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="Enter project name"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Domain
+                </label>
+                <input
+                  type="text"
+                  value={clientForm.domain}
+                  onChange={(e) =>
+                    setClientForm({ ...clientForm, domain: e.target.value })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="example.com or https://example.com"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Industry
+                </label>
+                <select
+                  value={clientForm.industry}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setClientForm((prev) => ({
+                      ...prev,
+                      industry: value,
+                      industryOther: value === "Other" ? prev.industryOther : "",
+                    }));
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                  required
+                >
+                  <option value="" disabled>
+                    Select industry
+                  </option>
+                  {INDUSTRY_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+
+                {clientForm.industry === "Other" && (
+                  <input
+                    type="text"
+                    value={clientForm.industryOther}
+                    onChange={(e) =>
+                      setClientForm((prev) => ({ ...prev, industryOther: e.target.value }))
+                    }
+                    className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder="Enter industry"
+                    required
+                  />
+                )}
+              </div>
+              <div className="flex space-x-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingClient(null);
+                    setClientForm({ name: "", domain: "", industry: "", industryOther: "" });
+                  }}
+                  className="flex-1 bg-gray-200 text-gray-800 py-3 px-6 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>
@@ -685,6 +958,7 @@ const ClientsPage = () => {
         title="Delete Client"
         message="Are you sure you want to delete this client? This action cannot be undone and all associated data will be permanently removed."
         confirmText="Delete"
+        requireConfirmText="DELETE"
         cancelText="Cancel"
         variant="danger"
       />

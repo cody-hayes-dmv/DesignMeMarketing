@@ -29,6 +29,28 @@ interface TargetKeyword {
   updatedAt: string;
 }
 
+const toStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+
+  if (typeof value === "string") {
+    // Sometimes stored as JSON string like '["video","images"]'
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === "string");
+    } catch {
+      // ignore JSON parse errors
+    }
+
+    // Sometimes stored as comma-separated string like "video,images"
+    if (value.includes(",")) return value.split(",").map((s) => s.trim()).filter(Boolean);
+
+    // single string -> treat as 1 item
+    if (value.trim()) return [value.trim()];
+  }
+
+  return [];
+};
+
 interface TargetKeywordsOverviewProps {
   clientId?: string | null;
   clientName?: string;
@@ -185,6 +207,8 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
 
   const getSERPFeaturesIcons = (serpItemTypes: string[] | null) => {
     if (!serpItemTypes || serpItemTypes.length === 0) return null;
+    const items = toStringArray(serpItemTypes);
+    if (items.length === 0) return null;
     
     const featureIcons: Record<string, { icon: string; color: string; label: string }> = {
       local_pack: { icon: "📍", color: "text-blue-600", label: "Google Maps" },
@@ -198,7 +222,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
       organic: { icon: "🔗", color: "text-gray-600", label: "Organic" },
     };
     
-    return serpItemTypes
+    return items
       .filter(type => featureIcons[type])
       .slice(0, 3) // Show max 3 icons
       .map(type => (

@@ -3,6 +3,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
 import { logout } from "@/store/slices/authSlice";
 import { BarChart3, LogOut, Settings, User } from "lucide-react";
+import zoesiBlueLogoUrl from "@/assets/zoesi-blue.png";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -12,6 +13,7 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children, title }) => {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
 
   const handleLogout = () => {
     dispatch(logout() as any);
@@ -23,11 +25,21 @@ const Layout: React.FC<LayoutProps> = ({ children, title }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center space-x-3">
-              <BarChart3 className="h-8 w-8 text-primary-600" />
+              {isSuperAdmin ? (
+                <img
+                  src={zoesiBlueLogoUrl}
+                  alt="Zoesi"
+                  className="h-10 w-auto max-w-[200px] object-contain"
+                />
+              ) : (
+                <BarChart3 className="h-8 w-8 text-primary-600" />
+              )}
               <div>
-                <h1 className="text-xl font-bold text-gray-900">
-                  YourSEODashboard
-                </h1>
+                {!isSuperAdmin && (
+                  <h1 className="text-xl font-bold text-gray-900">
+                    YourSEODashboard
+                  </h1>
+                )}
                 <p className="text-sm text-gray-600">{title}</p>
               </div>
             </div>

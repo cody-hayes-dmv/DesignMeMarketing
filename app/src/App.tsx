@@ -22,6 +22,8 @@ import SuperAdminDashboard from "./pages/SuperAdmin/SuperAdminDashboard";
 import WorkersPage from "./pages/WorkersPage";
 import ClientDashboardPage from "./pages/ClientDashboardPage";
 import ShareDashboardPage from "./pages/ShareDashboardPage";
+import AuthLandingPage from "./pages/AuthLandingPage";
+import ClientReportIndexPage from "./pages/ClientReportIndexPage";
 
 function App() {
   const dispatch = useDispatch();
@@ -67,9 +69,13 @@ function App() {
   // ADMIN and SUPER_ADMIN can access agency dashboard as well
   const dashboardUrls = {
     SUPER_ADMIN: "/superadmin/dashboard",
-    ADMIN: "/agency/dashboard", // Admin uses agency dashboard
+    ADMIN: "/agency/dashboard",
+    // Restore previous agency portal landing
     AGENCY: "/agency/dashboard",
+    // Restore previous worker portal landing
     WORKER: "/worker/dashboard",
+    // Client should land on report only
+    CLIENT: "/client/report",
   };
 
   // Agency routes with DashboardLayout - accessible by AGENCY, ADMIN, and SUPER_ADMIN
@@ -87,7 +93,7 @@ function App() {
     { path: "/agency/tasks", component: TasksPage },
   ];
 
-  // Agency routes with DashboardLayout
+  // Worker routes (restore previous version)
   const workerRoutes = [
     { path: "/worker/dashboard", component: WorkerDashboard },
     { path: "/worker/myagency", component: AgencyDashboardPage },
@@ -95,6 +101,15 @@ function App() {
     { path: "/worker/team", component: WorkerTeamPage },
     { path: "/worker/settings", component: SettingsPage },
   ];
+
+  // Client routes: report-only
+  const clientRoutes = [
+    { path: "/client/report", component: ClientReportIndexPage },
+    { path: "/client/report/:clientId", component: ClientDashboardPage },
+  ];
+
+  const isClientRestrictedPath = (path: string) =>
+    !(path === "/client/report" || path.startsWith("/client/report/"));
 
   const getRedirectUrl = () => {
     if (!user) return "/login";
@@ -130,6 +145,8 @@ function App() {
       <Routes>
       {/* Public share route - no auth required */}
       <Route path="/share/:token" element={<ShareDashboardPage />} />
+      {/* Auth landing (white-labeled entry) */}
+      <Route path="/portal" element={user && user.verified ? <Navigate to={getRedirectUrl()} replace /> : <AuthLandingPage />} />
       {/* Auth routes - only redirect if user is authenticated and verified */}
       <Route
         path="/login"
@@ -179,6 +196,33 @@ function App() {
         />
       ))}
 
+      {/* Client routes */}
+      {clientRoutes.map(({ path, component: Component }) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            (token && !user) ? (
+              <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500">Loading...</p>
+                </div>
+              </div>
+            ) : !user || !user.verified ? (
+              <Navigate to="/login" replace />
+            ) : user.role !== "CLIENT" ? (
+              <Navigate to={getRedirectUrl()} replace />
+            ) : isClientRestrictedPath(path) ? (
+              <Navigate to={dashboardUrls.CLIENT} replace />
+            ) : (
+              <DashboardLayout>
+                <Component />
+              </DashboardLayout>
+            )
+          }
+        />
+      ))}
 
       {/* Agency routes - accessible by AGENCY, ADMIN, and SUPER_ADMIN */}
       {agencyRoutes.map(({ path, component: Component }) => (
@@ -236,7 +280,7 @@ function App() {
           user && user.verified ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
-            <Navigate to="/login" replace />
+            <Navigate to="/portal" replace />
           )
         }
       />

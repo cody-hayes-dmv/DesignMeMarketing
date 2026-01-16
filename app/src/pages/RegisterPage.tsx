@@ -64,6 +64,10 @@ const RegisterPage = () => {
     window.location.href = "http://localhost:3000";
   };
 
+  const goBackToPortal = () => {
+    window.location.href = "http://localhost:3001/portal";
+  };
+
   const passwordsMatch = formData.password === formData.confirmPassword;
   const isPasswordValid = formData.password.length >= 6;
 
@@ -101,11 +105,11 @@ const RegisterPage = () => {
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <button
-          onClick={goBackToMarketing}
+          onClick={goBackToPortal}
           className="mb-8 flex items-center space-x-2 text-gray-600 hover:text-primary-600 transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          <span>Back to Marketing Site</span>
+          <span>Back</span>
         </button>
 
         <div className="bg-white rounded-2xl shadow-xl p-8">

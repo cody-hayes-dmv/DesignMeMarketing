@@ -30,6 +30,17 @@ router.get('/', authenticateToken, async (req, res) => {
                 },
                 orderBy: { createdAt: 'desc' },
             });
+        } else if (req.user.role === 'CLIENT') {
+            // Client users see only their own client(s)
+            clients = await prisma.client.findMany({
+                where: { userId: req.user.userId },
+                include: {
+                    user: {
+                        select: { id: true, name: true, email: true },
+                    },
+                },
+                orderBy: { createdAt: 'desc' },
+            });
         } else {
             // Worker/Agency users → get clients of their agency
             const memberships = await prisma.userAgency.findMany({
@@ -83,12 +94,21 @@ router.get('/', authenticateToken, async (req, res) => {
                     },
                 });
 
+                // Prefer GA4 total sessions (last saved snapshot is typically last 30 days)
+                // This is DB-only and does not call Google/DataForSEO.
+                const ga4Metrics = await prisma.ga4Metrics.findUnique({
+                    where: { clientId: client.id },
+                    select: { totalSessions: true, endDate: true },
+                });
+                const traffic30d = ga4Metrics?.totalSessions ?? null;
+
                 return {
                     ...client,
                     keywords: keywordStats._count.id || 0,
                     avgPosition: keywordStats._avg.currentPosition ? Math.round(keywordStats._avg.currentPosition * 10) / 10 : null,
                     topRankings: topRankingsCount || 0,
                     traffic: trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0,
+                    traffic30d,
                 };
             })
         );
@@ -141,7 +161,7 @@ router.post('/', authenticateToken, async (req, res) => {
                 name,
                 domain: normalizedDomain,
                 industry,
-                targets: targets || [],
+                targets: Array.isArray(targets) ? JSON.stringify(targets) : null,
                 status: clientStatus,
                 userId: req.user.userId,
             },
@@ -226,7 +246,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
             updateData.domain = normalizedDomain;
         }
         if (industry !== undefined) updateData.industry = industry;
-        if (targets !== undefined) updateData.targets = targets;
+        if (targets !== undefined) {
+            updateData.targets = Array.isArray(targets) ? JSON.stringify(targets) : null;
+        }
 
         // Restrict: only ADMIN / SUPER_ADMIN can update status
         if (status) {

@@ -4,7 +4,7 @@ import { RootState } from "@/store";
 import { fetchAgencies } from "@/store/slices/agencySlice";
 import { fetchClients } from "@/store/slices/clientSlice";
 import Layout from "@/components/Layout";
-import { Building2, Users, TrendingUp, Activity, Globe, CheckCircle, Clock } from "lucide-react";
+import { Building2, Users, Activity, Globe, CheckCircle } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 
@@ -24,8 +24,6 @@ const SuperAdminDashboard = () => {
   const totalClients = clients.length;
   const activeAgencies = agencies.filter(agency => agency.memberCount > 0).length;
   const activeClients = clients.filter(client => client.status === "ACTIVE").length;
-  const pendingClients = clients.filter(client => client.status === "PENDING").length;
-  const rejectedClients = clients.filter(client => client.status === "REJECTED").length;
 
   // Recent agencies (last 5)
   const recentAgencies = [...agencies]
@@ -141,51 +139,6 @@ const SuperAdminDashboard = () => {
           </div>
         </div>
 
-        {/* Additional Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-            <div className="flex items-center space-x-3">
-              <div className="bg-yellow-100 p-3 rounded-lg">
-                <Clock className="h-5 w-5 text-yellow-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-600">Pending Clients</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {clientsLoading ? "..." : pendingClients}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-            <div className="flex items-center space-x-3">
-              <div className="bg-red-100 p-3 rounded-lg">
-                <Users className="h-5 w-5 text-red-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-600">Rejected Clients</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {clientsLoading ? "..." : rejectedClients}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-            <div className="flex items-center space-x-3">
-              <div className="bg-purple-100 p-3 rounded-lg">
-                <TrendingUp className="h-5 w-5 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Members</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  {agenciesLoading ? "..." : agencies.reduce((sum, agency) => sum + agency.memberCount, 0)}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Recent Agencies and Clients */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Agencies */}
@@ -257,7 +210,14 @@ const SuperAdminDashboard = () => {
                 <div className="text-center py-8 text-gray-500">No clients yet</div>
               ) : (
                 <div className="space-y-4">
-                  {recentClients.map((client) => (
+                  {recentClients.map((client) => {
+                    const isArchived = client.status !== "ACTIVE";
+                    const statusLabel = isArchived ? "Archived" : "Active";
+                    const statusClass = isArchived
+                      ? "bg-gray-100 text-gray-800"
+                      : "bg-green-100 text-green-800";
+
+                    return (
                     <div
                       key={client.id}
                       className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
@@ -274,22 +234,17 @@ const SuperAdminDashboard = () => {
                       </div>
                       <div className="text-right">
                         <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            client.status === "ACTIVE"
-                              ? "bg-green-100 text-green-800"
-                              : client.status === "PENDING"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
+                          className={`px-2.5 py-1 text-xs font-semibold rounded-full ${statusClass}`}
                         >
-                          {client.status}
+                          {statusLabel}
                         </span>
                         <p className="text-xs text-gray-500 mt-1">
                           {format(new Date(client.createdAt), "MMM dd, yyyy")}
                         </p>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import React, { useState, useEffect, useMemo } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { login, clearError } from "@/store/slices/authSlice";
@@ -7,12 +7,30 @@ import { BarChart3, Mail, Lock, ArrowLeft, Eye, EyeOff } from "lucide-react";
 
 const LoginPage = () => {
   const dispatch = useDispatch();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { loading, error } = useSelector((state: RootState) => state.auth);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
   });
   const [showPassword, setShowPassword] = useState(false);
+
+  const loginAs = (searchParams.get("as") || "").toUpperCase();
+  const loginSubtitle = useMemo(() => {
+    switch (loginAs) {
+      case "CLIENT":
+        return "Client portal — report access only";
+      case "WORKER":
+        return "Worker portal — tasks and logins";
+      case "AGENCY":
+        return "Agency portal — client access";
+      case "ADMIN":
+        return "Admin portal";
+      default:
+        return "Sign in to continue";
+    }
+  }, [loginAs]);
 
   useEffect(() => {
     dispatch(clearError());
@@ -42,15 +60,20 @@ const LoginPage = () => {
     window.location.href = "http://localhost:3000";
   };
 
+
+  const goBackToPortal = () => {
+    window.location.href = "http://localhost:3001/portal";
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <button
-          onClick={goBackToMarketing}
+          onClick={goBackToPortal}
           className="mb-8 flex items-center space-x-2 text-gray-600 hover:text-primary-600 transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          <span>Back to Marketing Site</span>
+          <span>Back</span>
         </button>
 
         <div className="bg-white rounded-2xl shadow-xl p-8">
@@ -62,7 +85,7 @@ const LoginPage = () => {
               Welcome Back
             </h1>
             <p className="text-gray-600">
-              Sign in to your YourSEODashboard account
+              {loginSubtitle}
             </p>
           </div>
 
@@ -150,6 +173,7 @@ const LoginPage = () => {
               <Link
                 to="/register"
                 className="text-primary-600 hover:text-primary-700 font-medium transition-colors"
+                  state={location.state}
               >
                 Sign up here
               </Link>

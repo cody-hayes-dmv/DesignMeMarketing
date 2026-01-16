@@ -16,6 +16,7 @@ export interface Client {
   avgPosition?: number;
   topRankings?: number;
   traffic?: number;
+  traffic30d?: number | null;
 }
 
 export interface Keyword {

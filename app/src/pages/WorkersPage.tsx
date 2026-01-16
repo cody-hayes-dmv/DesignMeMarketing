@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Plus, Users, Mail, UserCheck, Trash2, X } from "lucide-react";
+import { Plus, Users, Mail, Trash2, X } from "lucide-react";
 import ConfirmDialog from "../components/ConfirmDialog";
 import api from "../lib/api";
 import { useSelector } from "react-redux";
@@ -55,11 +55,6 @@ const WorkersPage: React.FC = () => {
       setLoading(false);
     }
   };
-
-  const activeCount = useMemo(
-    () => workers.filter((member) => member.verified).length,
-    [workers]
-  );
 
   const pendingCount = useMemo(
     () => workers.filter((member) => member.invited && !member.verified).length,
@@ -161,7 +156,7 @@ const WorkersPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-white p-6 rounded-xl border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
@@ -171,17 +166,6 @@ const WorkersPage: React.FC = () => {
               </p>
             </div>
             <Users className="h-8 w-8 text-primary-600" />
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Active</p>
-              <p className="text-2xl font-bold text-green-600">
-                {loading ? "..." : activeCount}
-              </p>
-            </div>
-            <UserCheck className="h-8 w-8 text-green-600" />
           </div>
         </div>
         <div className="bg-white p-6 rounded-xl border border-gray-200">

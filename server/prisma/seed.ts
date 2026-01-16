@@ -158,9 +158,7 @@ async function main() {
       name: "Acme Co",
       domain: "acme.example",
       industry: "E-commerce",
-      targets: [
-        "US / Chicago"
-      ],
+      targets: JSON.stringify(["US / Chicago"]),
       loginUrl: "https://acme.example/wp-admin",
       username: "admin@acme.example",
       password: "Acme2024!",
@@ -174,9 +172,7 @@ async function main() {
       name: "Beta Soft",
       domain: "beta.example",
       industry: "SaaS",
-      targets: [
-        "US / Remote"
-      ],
+      targets: JSON.stringify(["US / Remote"]),
       loginUrl: "https://beta.example/login",
       username: "seo@beta.example",
       password: "BetaSEO2024!",
@@ -190,10 +186,7 @@ async function main() {
       name: "Nimbus Health",
       domain: "nimbus.example",
       industry: "Healthcare",
-      targets: [
-        "US / NY",
-        "US / NJ"
-      ],
+      targets: JSON.stringify(["US / NY", "US / NJ"]),
       loginUrl: "https://nimbus.example/admin",
       username: "healthcare@nimbus.example",
       password: "Nimbus2024!",

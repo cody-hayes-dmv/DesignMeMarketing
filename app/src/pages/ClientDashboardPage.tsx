@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import {
   FileText,
   Download,
@@ -181,10 +181,12 @@ const ClientDashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useSelector((state: RootState) => state.auth);
+  const isClientPortal = location.pathname.startsWith("/client/");
+  const reportOnly = user?.role === "CLIENT" || isClientPortal || Boolean((location.state as any)?.reportOnly);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"dashboard" | "report" | "backlinks" | "worklog">(
-    (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" })?.tab || "dashboard"
+    (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" })?.tab || (reportOnly ? "report" : "dashboard")
   );
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState<string>("");
@@ -201,6 +203,10 @@ const ClientDashboardPage: React.FC = () => {
   const [trafficSources, setTrafficSources] = useState<TrafficSourceSlice[]>([]);
   const [trafficSourcesLoading, setTrafficSourcesLoading] = useState(false);
   const [trafficSourcesError, setTrafficSourcesError] = useState<string | null>(null);
+  const [ga4DataRefreshKey, setGa4DataRefreshKey] = useState(0);
+  const prevGa4ReadyRef = useRef<boolean>(false);
+  const autoRefreshAttemptedRef = useRef<Record<string, boolean>>({});
+  const [autoRefreshingGa4, setAutoRefreshingGa4] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
   const modalDashboardContentRef = useRef<HTMLDivElement>(null);
@@ -211,7 +217,7 @@ const ClientDashboardPage: React.FC = () => {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [ga4Connected, setGa4Connected] = useState<boolean | null>(null);
-  const [ga4AccountEmail, setGa4AccountEmail] = useState<string | null>(null);
+  const [, setGa4AccountEmail] = useState<string | null>(null);
   const [ga4Connecting, setGa4Connecting] = useState(false);
   const [ga4StatusLoading, setGa4StatusLoading] = useState(true); // Track GA4 status check loading
   const [ga4ConnectionError, setGa4ConnectionError] = useState<string | null>(null);
@@ -728,10 +734,57 @@ const ClientDashboardPage: React.FC = () => {
       try {
         setFetchingSummary(true);
         setGa4ConnectionError(null);
-        const res = await api.get(buildDashboardUrl(clientId));
-        const payload = res.data || {};
-        const isGA4Connected = payload?.isGA4Connected || false;
-        const dataSource = payload?.dataSources?.traffic || "none";
+        const fetchDashboardPayload = async () => {
+          const res = await api.get(buildDashboardUrl(clientId));
+          return res.data || {};
+        };
+
+        const autoRefreshKey = `${clientId}:${dateRange}:${customStartDate ?? ""}:${customEndDate ?? ""}`;
+
+        let payload = await fetchDashboardPayload();
+        let isGA4Connected = payload?.isGA4Connected || false;
+        let dataSource = payload?.dataSources?.traffic || "none";
+
+        const looksLikeMissingGa4Metrics =
+          isGA4Connected &&
+          (payload?.activeUsers == null ||
+            payload?.newUsers == null ||
+            payload?.totalSessions == null);
+
+        // If GA4 is connected but GA4-backed metrics aren't present yet, auto-refresh once.
+        // This prevents the "first load shows blanks until manual browser refresh" glitch.
+        if (
+          isGA4Connected &&
+          (dataSource !== "ga4" || looksLikeMissingGa4Metrics) &&
+          !autoRefreshAttemptedRef.current[autoRefreshKey]
+        ) {
+          autoRefreshAttemptedRef.current[autoRefreshKey] = true;
+          try {
+            setAutoRefreshingGa4(true);
+            await api.post(`/seo/dashboard/${clientId}/refresh`);
+            payload = await fetchDashboardPayload();
+            isGA4Connected = payload?.isGA4Connected || false;
+            dataSource = payload?.dataSources?.traffic || "none";
+          } catch (refreshError) {
+            console.warn("Auto-refresh dashboard skipped/failed", refreshError);
+          } finally {
+            setAutoRefreshingGa4(false);
+          }
+        }
+
+        const ga4ReadyNow =
+          isGA4Connected &&
+          (dataSource === "ga4" ||
+            payload?.activeUsers != null ||
+            payload?.totalSessions != null);
+
+        if (ga4ReadyNow && !prevGa4ReadyRef.current) {
+          prevGa4ReadyRef.current = true;
+          // Trigger GA4-dependent sections (top events / visitor sources / traffic sources) to refetch
+          setGa4DataRefreshKey((k) => k + 1);
+        } else if (!ga4ReadyNow) {
+          prevGa4ReadyRef.current = false;
+        }
         
         // Validate GA4 connection: if marked as connected but data is not from GA4, connection might be invalid
         if (isGA4Connected && dataSource !== "ga4") {
@@ -898,6 +951,7 @@ const ClientDashboardPage: React.FC = () => {
 
   const fetchTopEvents = useCallback(async () => {
     if (!clientId) return;
+    if (ga4Connected !== true) return;
 
     try {
       setTopEventsLoading(true);
@@ -922,7 +976,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setTopEventsLoading(false);
     }
-  }, [clientId, dateRange, customStartDate, customEndDate]);
+  }, [clientId, dateRange, customStartDate, customEndDate, ga4Connected, ga4DataRefreshKey]);
 
   useEffect(() => {
     fetchTopEvents();
@@ -930,6 +984,7 @@ const ClientDashboardPage: React.FC = () => {
 
   const fetchVisitorSources = useCallback(async () => {
     if (!clientId) return;
+    if (ga4Connected !== true) return;
 
     try {
       setVisitorSourcesLoading(true);
@@ -954,7 +1009,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setVisitorSourcesLoading(false);
     }
-  }, [clientId, dateRange, customStartDate, customEndDate]);
+  }, [clientId, dateRange, customStartDate, customEndDate, ga4Connected, ga4DataRefreshKey]);
 
   useEffect(() => {
     fetchVisitorSources();
@@ -962,6 +1017,7 @@ const ClientDashboardPage: React.FC = () => {
 
   const fetchTrafficSources = useCallback(async () => {
     if (!clientId) return;
+    if (ga4Connected !== true) return;
 
     try {
       setTrafficSourcesLoading(true);
@@ -1003,7 +1059,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setTrafficSourcesLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, ga4Connected, ga4DataRefreshKey]);
 
   useEffect(() => {
     fetchTrafficSources();
@@ -1015,7 +1071,7 @@ const ClientDashboardPage: React.FC = () => {
     try {
       setReportLoading(true);
       setReportError(null);
-      const res = await api.get(`/seo/reports/${clientId}`, { params: { period: "monthly" } });
+      const res = await api.get(`/seo/reports/${clientId}`, { params: { period: "monthly", ensureFresh: true } });
       setServerReport(res.data || null);
     } catch (error: any) {
       console.error("Failed to load report", error);
@@ -1032,7 +1088,12 @@ const ClientDashboardPage: React.FC = () => {
   }, [loadReport]);
 
   const singleReportForClient: ClientReport | null = useMemo(() => {
-    if (serverReport && typeof serverReport === "object" && serverReport.id) {
+    if (
+      serverReport &&
+      typeof serverReport === "object" &&
+      serverReport.id &&
+      String(serverReport.clientId || "") === String(clientId || "")
+    ) {
       // Map backend seoReport to UI ClientReport
       const period = typeof serverReport.period === "string" ? serverReport.period : "Monthly";
       const dateStr = serverReport.reportDate ? format(new Date(serverReport.reportDate), "yyyy-MM-dd") : "";
@@ -1234,29 +1295,7 @@ const ClientDashboardPage: React.FC = () => {
           return;
         }
 
-        let messageListener: (event: MessageEvent) => void;
-        let manualCloseTimeout: number | null = null;
-
-        const closePopupSafely = () => {
-          try {
-            popup.close();
-          } catch (err) {
-            // Ignore COOP restrictions when closing
-          }
-        };
-
-        const cleanupPopup = () => {
-          if (messageListener) {
-            window.removeEventListener('message', messageListener);
-          }
-          if (manualCloseTimeout !== null) {
-            window.clearTimeout(manualCloseTimeout);
-            manualCloseTimeout = null;
-          }
-        };
-
-        // Listen for messages from the popup
-        messageListener = (event: MessageEvent) => {
+        const messageListener = (event: MessageEvent) => {
           // Accept messages from same origin or backend origin
           // The popup callback page is served from the backend, so messages come from backend origin
           try {
@@ -1287,6 +1326,25 @@ const ClientDashboardPage: React.FC = () => {
             closePopupSafely();
             toast.error(`GA4 connection failed: ${event.data.error || 'Unknown error'}`);
             setGa4Connecting(false);
+          }
+        };
+        let manualCloseTimeout: number | null = null;
+
+        const closePopupSafely = () => {
+          try {
+            popup.close();
+          } catch (err) {
+            // Ignore COOP restrictions when closing
+          }
+        };
+
+        const cleanupPopup = () => {
+          if (messageListener) {
+            window.removeEventListener('message', messageListener);
+          }
+          if (manualCloseTimeout !== null) {
+            window.clearTimeout(manualCloseTimeout);
+            manualCloseTimeout = null;
           }
         };
 
@@ -1459,8 +1517,8 @@ const ClientDashboardPage: React.FC = () => {
     });
   }, [dashboardSummary?.newUsersTrend]);
 
-  const activeUsersTrendData = useMemo(() => {
-    const trend = dashboardSummary?.activeUsersTrend ?? dashboardSummary?.totalUsersTrend;
+  const totalUsersTrendData = useMemo(() => {
+    const trend = dashboardSummary?.totalUsersTrend ?? dashboardSummary?.activeUsersTrend;
     if (!trend?.length) return [];
     return trend.map((point) => {
       const dateObj = new Date(point.date);
@@ -1468,10 +1526,10 @@ const ClientDashboardPage: React.FC = () => {
       const value = Number(point.value ?? 0);
       return {
         name: label,
-        activeUsers: Number.isFinite(value) ? value : 0,
+        totalUsers: Number.isFinite(value) ? value : 0,
       };
     });
-  }, [dashboardSummary?.activeUsersTrend, dashboardSummary?.totalUsersTrend]);
+  }, [dashboardSummary?.totalUsersTrend, dashboardSummary?.activeUsersTrend]);
 
   if (!clientId) {
     return (
@@ -1488,13 +1546,15 @@ const ClientDashboardPage: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center space-x-3">
-            <button
-              onClick={() => navigate(-1)}
-              className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>Back to Clients</span>
-            </button>
+            {!reportOnly && (
+              <button
+                onClick={() => navigate(-1)}
+                className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back to Clients</span>
+              </button>
+            )}
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mt-2">{client?.name || "Client Dashboard"}</h1>
           {client && (
@@ -1519,7 +1579,7 @@ const ClientDashboardPage: React.FC = () => {
           )}
         </div>
 
-        <div className="flex items-center space-x-3">
+        {!reportOnly && <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2">
             <select
               value={dateRange}
@@ -1538,7 +1598,7 @@ const ClientDashboardPage: React.FC = () => {
                   setShowCustomDatePicker(false);
                 }
               }}
-              className="border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             >
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
@@ -1647,38 +1707,40 @@ const ClientDashboardPage: React.FC = () => {
               </>
             )}
           </button>
-        </div>
+        </div>}
       </div>
 
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
-          {[
-            { id: "dashboard", label: "Dashboard", icon: Users },
-            { id: "report", label: "Report", icon: FileText },
-            { id: "backlinks", label: "Backlinks", icon: Search },
-            { id: "worklog", label: "Work Log", icon: Clock },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`py-2 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 ${
-                activeTab === tab.id
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              <tab.icon className="h-4 w-4" />
-              <span>{tab.label}</span>
-            </button>
-          ))}
-        </nav>
-      </div>
+      {!reportOnly && (
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8">
+            {[
+              { id: "dashboard", label: "Dashboard", icon: Users },
+              { id: "report", label: "Report", icon: FileText },
+              { id: "backlinks", label: "Backlinks", icon: Search },
+              { id: "worklog", label: "Work Log", icon: Clock },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                className={`py-2 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 ${
+                  activeTab === tab.id
+                    ? "border-primary-500 text-primary-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+              >
+                <tab.icon className="h-4 w-4" />
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
 
       {loading ? (
         <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">Loading client data...</div>
       ) : (
         <>
-          {activeTab === "dashboard" && (
+          {!reportOnly && activeTab === "dashboard" && (
             <div ref={dashboardContentRef} className="space-y-8">
               {/* GA4 Connection Status - Show loading skeleton while checking */}
               {ga4StatusLoading ? (
@@ -1732,6 +1794,19 @@ const ClientDashboardPage: React.FC = () => {
                         >
                           <X className="h-5 w-5" />
                         </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* One-time GA4 auto-refresh indicator */}
+                  {autoRefreshingGa4 && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                      <div className="flex items-center gap-3 text-emerald-900">
+                        <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+                        <div className="text-sm">
+                          <span className="font-medium">Refreshing GA4 data…</span>{" "}
+                          <span className="text-emerald-800">Just a moment while we pull the latest numbers.</span>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1918,23 +1993,23 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Active Users Trending</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Users Trending</h3>
                   <div className="h-64">
                     {ga4Connected ? (
-                      activeUsersTrendData.length > 0 ? (
+                      totalUsersTrendData.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={activeUsersTrendData}>
+                          <LineChart data={totalUsersTrendData}>
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="name" />
                             <YAxis />
                             <Tooltip />
                             <Legend />
-                            <Line type="monotone" dataKey="activeUsers" stroke="#10B981" strokeWidth={2} />
+                            <Line type="monotone" dataKey="totalUsers" name="Total Users" stroke="#10B981" strokeWidth={2} />
                           </LineChart>
                         </ResponsiveContainer>
                       ) : (
                         <div className="h-full flex items-center justify-center text-sm text-gray-500">
-                          No GA4 active-user data for this date range.
+                          No GA4 total-user data for this date range.
                         </div>
                       )
                     ) : (
@@ -1960,48 +2035,100 @@ const ClientDashboardPage: React.FC = () => {
                 subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
               />
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
-                </div>
-                {trafficSourcesError && (
-                  <p className="mb-4 text-sm text-rose-600">
-                    {trafficSourcesError}
-                  </p>
-                )}
-                <div className="h-64">
-                  {trafficSourcesLoading ? (
-                    <div className="flex items-center justify-center h-full">
-                      <p className="text-sm text-gray-500">Loading traffic sources...</p>
-                    </div>
-                  ) : resolvedTrafficSources.length === 0 ? (
-                    <div className="flex items-center justify-center h-full">
-                      <p className="text-sm text-gray-500">No traffic sources data available.</p>
-                    </div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={resolvedTrafficSources as any}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={80}
-                          label
-                        >
-                          {resolvedTrafficSources.map((entry, index) => (
-                            <Cell
-                              key={`traffic-source-${entry.name}-${index}`}
-                              fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
+                  </div>
+                  {trafficSourcesError && (
+                    <p className="mb-3 text-sm text-rose-600">
+                      {trafficSourcesError}
+                    </p>
                   )}
+                  <div className="h-56">
+                    {trafficSourcesLoading ? (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-sm text-gray-500">Loading traffic sources...</p>
+                      </div>
+                    ) : resolvedTrafficSources.length === 0 ? (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-sm text-gray-500">No traffic sources data available.</p>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={resolvedTrafficSources as any}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={70}
+                            label
+                          >
+                            {resolvedTrafficSources.map((entry, index) => (
+                              <Cell
+                                key={`traffic-source-${entry.name}-${index}`}
+                                fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-semibold text-gray-900">AI Search</h3>
+                    <span className="text-xs text-gray-500">Subscription active</span>
+                  </div>
+
+                  {/*
+                    NOTE: This is UI scaffolding. Hook `aiSearchRows` to your AI Search provider
+                    response once the API endpoint is in place.
+                  */}
+                  {(() => {
+                    const aiSearchRows: Array<{
+                      name: string;
+                      visibility: number;
+                      mentions: number;
+                      citedPages: number;
+                      dotClass: string;
+                    }> = [
+                      { name: "ChatGPT", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-gray-900" },
+                      { name: "AI Overview", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-blue-600" },
+                      { name: "AI Mode", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-red-500" },
+                      { name: "Gemini", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-green-600" },
+                    ];
+
+                    return (
+                      <div className="rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                          <div>AI Search</div>
+                          <div className="text-center">AI Visibility</div>
+                          <div className="text-center">Mentions</div>
+                          <div className="text-center">Cited Pages</div>
+                        </div>
+                        <div className="divide-y divide-gray-100">
+                          {aiSearchRows.map((row) => (
+                            <div key={row.name} className="grid grid-cols-4 px-3 py-2 text-sm">
+                              <div className="flex items-center gap-2 text-gray-900">
+                                <span className={`h-2.5 w-2.5 rounded-full ${row.dotClass}`} />
+                                <span className="font-medium">{row.name}</span>
+                              </div>
+                              <div className="text-center text-gray-900">{row.visibility.toLocaleString()}</div>
+                              <div className="text-center text-gray-900">{row.mentions.toLocaleString()}</div>
+                              <div className="text-center text-gray-900">{row.citedPages.toLocaleString()}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -2039,7 +2166,7 @@ const ClientDashboardPage: React.FC = () => {
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Key Events</h3>
+                    <h3 className="text-lg font-semibold text-gray-900">Conversions</h3>
                   </div>
                 {topEventsError && (
                   <p className="mb-4 text-sm text-rose-600">
@@ -2422,17 +2549,19 @@ const ClientDashboardPage: React.FC = () => {
             </div>
           )}
 
-          {activeTab === "report" && (
+          {(reportOnly || activeTab === "report") && (
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <h2 className="text-xl font-semibold text-gray-900">Reports</h2>
-                <button
-                  onClick={handleCreateReportClick}
-                  className="flex items-center justify-center px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                  title="Create report"
-                >
-                  Create Report
-                </button>
+                {!reportOnly && (
+                  <button
+                    onClick={handleCreateReportClick}
+                    className="flex items-center justify-center px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                    title="Create report"
+                  >
+                    Create Report
+                  </button>
+                )}
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -2942,18 +3071,18 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
 
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Active Users Trending</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Users Trending</h3>
                     <div className="h-64">
                       {ga4Connected ? (
-                        activeUsersTrendData.length > 0 ? (
+                        totalUsersTrendData.length > 0 ? (
                           <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={activeUsersTrendData}>
+                            <LineChart data={totalUsersTrendData}>
                               <CartesianGrid strokeDasharray="3 3" />
                               <XAxis dataKey="name" />
                               <YAxis />
                               <Tooltip />
                               <Legend />
-                              <Line type="monotone" dataKey="activeUsers" stroke="#10B981" strokeWidth={2} />
+                              <Line type="monotone" dataKey="totalUsers" name="Total Users" stroke="#10B981" strokeWidth={2} />
                             </LineChart>
                           </ResponsiveContainer>
                         ) : (
@@ -2977,48 +3106,96 @@ const ClientDashboardPage: React.FC = () => {
                   subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
                 />
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
-                  </div>
-                  {trafficSourcesError && (
-                    <p className="mb-4 text-sm text-rose-600">
-                      {trafficSourcesError}
-                    </p>
-                  )}
-                  <div className="h-64">
-                    {trafficSourcesLoading ? (
-                      <div className="flex items-center justify-center h-full">
-                        <p className="text-sm text-gray-500">Loading traffic sources...</p>
-                      </div>
-                    ) : resolvedTrafficSources.length === 0 ? (
-                      <div className="flex items-center justify-center h-full">
-                        <p className="text-sm text-gray-500">No traffic sources data available.</p>
-                      </div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-white p-4 rounded-xl border border-gray-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
+                    </div>
+                    {trafficSourcesError && (
+                      <p className="mb-3 text-sm text-rose-600">
+                        {trafficSourcesError}
+                      </p>
+                    )}
+                    <div className="h-56">
+                      {trafficSourcesLoading ? (
+                        <div className="flex items-center justify-center h-full">
+                          <p className="text-sm text-gray-500">Loading traffic sources...</p>
+                        </div>
+                      ) : resolvedTrafficSources.length === 0 ? (
+                        <div className="flex items-center justify-center h-full">
+                          <p className="text-sm text-gray-500">No traffic sources data available.</p>
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
                             <Pie
                               data={resolvedTrafficSources as any}
                               dataKey="value"
                               nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={80}
-                            label
-                          >
-                            {resolvedTrafficSources.map((entry, index) => (
-                              <Cell
-                                key={`traffic-source-${entry.name}-${index}`}
-                                fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
-                              />
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={70}
+                              label
+                            >
+                              {resolvedTrafficSources.map((entry, index) => (
+                                <Cell
+                                  key={`traffic-source-${entry.name}-${index}`}
+                                  fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
+                                />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-xl border border-gray-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-semibold text-gray-900">AI Search</h3>
+                      <span className="text-xs text-gray-500">Subscription active</span>
+                    </div>
+
+                    {(() => {
+                      const aiSearchRows: Array<{
+                        name: string;
+                        visibility: number;
+                        mentions: number;
+                        citedPages: number;
+                        dotClass: string;
+                      }> = [
+                        { name: "ChatGPT", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-gray-900" },
+                        { name: "AI Overview", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-blue-600" },
+                        { name: "AI Mode", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-red-500" },
+                        { name: "Gemini", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-green-600" },
+                      ];
+
+                      return (
+                        <div className="rounded-lg border border-gray-200 overflow-hidden">
+                          <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                            <div>AI Search</div>
+                            <div className="text-center">AI Visibility</div>
+                            <div className="text-center">Mentions</div>
+                            <div className="text-center">Cited Pages</div>
+                          </div>
+                          <div className="divide-y divide-gray-100">
+                            {aiSearchRows.map((row) => (
+                              <div key={row.name} className="grid grid-cols-4 px-3 py-2 text-sm">
+                                <div className="flex items-center gap-2 text-gray-900">
+                                  <span className={`h-2.5 w-2.5 rounded-full ${row.dotClass}`} />
+                                  <span className="font-medium">{row.name}</span>
+                                </div>
+                                <div className="text-center text-gray-900">{row.visibility.toLocaleString()}</div>
+                                <div className="text-center text-gray-900">{row.mentions.toLocaleString()}</div>
+                                <div className="text-center text-gray-900">{row.citedPages.toLocaleString()}</div>
+                              </div>
                             ))}
-                          </Pie>
-                          <Tooltip />
-                          <Legend />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../store";
 import { logout } from "../store/slices/authSlice";
+import logoUrl from "@/assets/zoesi-white.png";
 import {
   BarChart3,
   Home,
@@ -31,6 +32,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const dispatch = useDispatch();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const { user } = useSelector((state: RootState) => state.auth);
+  const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "AGENCY";
 
   const handleLogout = () => {
     dispatch(logout() as any);
@@ -198,13 +200,24 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
           } border-b border-gray-700 transition-all duration-300`}
       >
         <div className="flex items-center space-x-3">
-          <BarChart3
-            className={`${collapsed ? "h-6 w-6" : "h-8 w-8"
-              } text-primary-400 transition-all duration-300`}
-          />
+          {showZoesiLogo ? (
+            <img
+              src={logoUrl}
+              alt="Zoesi"
+              className={`${collapsed ? "h-6 w-6" : "h-10 max-w-[140px] w-auto"
+                } object-contain transition-all duration-300`}
+            />
+          ) : (
+            <BarChart3
+              className={`${collapsed ? "h-6 w-6" : "h-8 w-8"
+                } text-primary-400 transition-all duration-300`}
+            />
+          )}
           {!collapsed && (
             <div className="transition-opacity duration-300">
-              <h1 className="text-lg font-bold text-white">SEO Dashboard</h1>
+              {!showZoesiLogo && (
+                <h1 className="text-lg font-bold text-white">SEO Dashboard</h1>
+              )}
               <p className="text-xs text-gray-400">{user?.role} Panel</p>
             </div>
           )}

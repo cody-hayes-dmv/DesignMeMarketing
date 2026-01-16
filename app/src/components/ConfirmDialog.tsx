@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, X } from "lucide-react";
 
@@ -11,6 +11,7 @@ interface ConfirmDialogProps {
   confirmText?: string;
   cancelText?: string;
   variant?: "danger" | "warning" | "info";
+  requireConfirmText?: string;
 }
 
 const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
@@ -22,8 +23,14 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmText = "Confirm",
   cancelText = "Cancel",
   variant = "danger",
+  requireConfirmText,
 }) => {
-  if (!isOpen) return null;
+  const [typed, setTyped] = useState("");
+
+  useEffect(() => {
+    // Reset typed confirmation whenever dialog opens/closes
+    setTyped("");
+  }, [isOpen]);
 
   const variantStyles = {
     danger: {
@@ -48,10 +55,21 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   const styles = variantStyles[variant];
 
+  const normalizedTyped = useMemo(() => typed.trim().toUpperCase(), [typed]);
+  const requiredNormalized = useMemo(
+    () => (requireConfirmText ?? "").trim().toUpperCase(),
+    [requireConfirmText]
+  );
+  const needsTyping = Boolean(requiredNormalized);
+  const canConfirm = !needsTyping || normalizedTyped === requiredNormalized;
+
   const handleConfirm = () => {
+    if (!canConfirm) return;
     onConfirm();
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -88,6 +106,28 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 <p className="text-sm text-gray-600 leading-relaxed">
                   {message}
                 </p>
+
+                {needsTyping && (
+                  <div className="mt-4">
+                    <label className="block text-xs font-medium text-gray-600 mb-2">
+                      Type <span className="font-semibold text-gray-900">{requiredNormalized}</span> to confirm
+                    </label>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={typed}
+                      onChange={(e) => setTyped(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-offset-0 focus:ring-primary-500 focus:border-transparent"
+                      placeholder={requiredNormalized}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && canConfirm) {
+                          e.preventDefault();
+                          handleConfirm();
+                        }
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -102,7 +142,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             </button>
             <button
               onClick={handleConfirm}
-              className={`px-4 py-2 text-sm font-medium text-white ${styles.buttonBg} rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 ${styles.buttonFocus} transition-colors`}
+              disabled={!canConfirm}
+              className={`px-4 py-2 text-sm font-medium text-white ${styles.buttonBg} rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 ${styles.buttonFocus} transition-colors disabled:opacity-60 disabled:cursor-not-allowed`}
             >
               {confirmText}
             </button>

@@ -5,8 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import Layout from "@/components/Layout";
-import { Plus, Users, Building2, Mail, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2 } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -28,7 +27,6 @@ interface AgencyClient {
   name: string;
   domain: string;
   industry: string | null;
-  targets: string[] | null;
   status: string;
   createdAt: string;
   keywords: number;
@@ -47,6 +45,10 @@ const AgenciesPage = () => {
     const [selectedAgencyName, setSelectedAgencyName] = useState<string>("");
     const [members, setMembers] = useState<AgencyMember[]>([]);
     const [clients, setClients] = useState<AgencyClient[]>([]);
+    // Inline dropdown (accordion) per agency row
+    const [expandedAgencyId, setExpandedAgencyId] = useState<string | null>(null);
+    const [agencyClientsByAgencyId, setAgencyClientsByAgencyId] = useState<Record<string, AgencyClient[]>>({});
+    const [loadingAgencyClientsId, setLoadingAgencyClientsId] = useState<string | null>(null);
     const [loadingMembers, setLoadingMembers] = useState(false);
     const [loadingClients, setLoadingClients] = useState(false);
     const [openStatusId, setOpenStatusId] = useState("");
@@ -116,6 +118,35 @@ const AgenciesPage = () => {
         }
     };
 
+    const refreshAgencyClientsCache = async (agencyId: string) => {
+        const response = await api.get(`/agencies/${agencyId}/clients`);
+        setAgencyClientsByAgencyId((prev) => ({ ...prev, [agencyId]: response.data }));
+        return response.data as AgencyClient[];
+    };
+
+    const toggleAgencyClientsDropdown = async (agencyId: string, agencyName: string) => {
+        // Collapse if already open
+        if (expandedAgencyId === agencyId) {
+            setExpandedAgencyId(null);
+            return;
+        }
+
+        setExpandedAgencyId(agencyId);
+
+        // If cached, don't refetch on every expand
+        if (agencyClientsByAgencyId[agencyId]) return;
+
+        setLoadingAgencyClientsId(agencyId);
+        try {
+            await refreshAgencyClientsCache(agencyId);
+        } catch (error: any) {
+            console.error("Failed to fetch clients:", error);
+            toast.error(error.response?.data?.message || `Failed to fetch clients for ${agencyName}`);
+        } finally {
+            setLoadingAgencyClientsId(null);
+        }
+    };
+
     const getInitials = (name: string) => {
         return name
             .split(" ")
@@ -136,13 +167,12 @@ const AgenciesPage = () => {
     };
 
     const getStatusBadge = (status: string) => {
-        const styles = {
-            ACTIVE: "bg-green-100 text-green-800",
-            PENDING: "bg-yellow-100 text-yellow-800",
-            REJECTED: "bg-gray-100 text-gray-800",
-        };
-        return styles[status as keyof typeof styles] || styles.ACTIVE;
+        return status === "ACTIVE"
+            ? "bg-green-100 text-green-800"
+            : "bg-gray-100 text-gray-800";
     };
+
+    const getStatusLabel = (status: string) => (status === "ACTIVE" ? "Active" : "Archived");
 
     // Close status dropdown when clicking outside
     useEffect(() => {
@@ -215,6 +245,9 @@ const AgenciesPage = () => {
             if (selectedAgencyId) {
                 handleViewClients(selectedAgencyId, selectedAgencyName);
             }
+            if (expandedAgencyId) {
+                await refreshAgencyClientsCache(expandedAgencyId);
+            }
         } catch (error: any) {
             console.error("Failed to delete client:", error);
             setDeleteConfirm({ isOpen: false, clientId: null });
@@ -278,61 +311,236 @@ const AgenciesPage = () => {
                                 </tr>
                             ) : (
                                 agencies.map((agency) => (
-                                <tr key={agency.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm font-medium text-gray-900">
-                                            {agency.name}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <a
-                                            className="text-sm text-gray-600 underline"
-                                            href={
-                                                agency.subdomain
-                                                    ? `https://${agency.subdomain}.yourseodashboard.com`
+                                <React.Fragment key={agency.id}>
+                                    <tr
+                                        className="hover:bg-gray-50 cursor-pointer"
+                                        onClick={() => toggleAgencyClientsDropdown(agency.id, agency.name)}
+                                        aria-expanded={expandedAgencyId === agency.id}
+                                    >
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                                                {expandedAgencyId === agency.id ? (
+                                                    <ChevronDown className="h-4 w-4 text-gray-500" />
+                                                ) : (
+                                                    <ChevronRight className="h-4 w-4 text-gray-500" />
+                                                )}
+                                                {agency.name}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <a
+                                                className="text-sm text-gray-600 underline"
+                                                href={
+                                                    agency.subdomain
+                                                        ? `https://${agency.subdomain}.yourseodashboard.com`
                                                         : "#"
-                                            }
-                                            target="_blank" rel="noopener noreferrer"
+                                                }
+                                                target="_blank"
+                                                rel="noopener noreferrer"
                                                 onClick={(e) => {
+                                                    e.stopPropagation();
                                                     if (!agency.subdomain) {
                                                         e.preventDefault();
                                                     }
                                                 }}
-                                        >
-                                            {agency.subdomain
-                                                ? `${agency.subdomain}.yourseodashboard.com`
-                                                : "-"}
-                                        </a>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm text-gray-900">
-                                            {agency.memberCount}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm text-gray-600">
-                                            {new Date(agency.createdAt).toLocaleDateString()}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="flex items-center space-x-2">
-                                            <button
-                                                onClick={() => handleViewMembers(agency.id, agency.name)}
-                                                className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
-                                                title="View Members"
                                             >
-                                                <Users className="h-4 w-4" />
-                                            </button>
-                                            <button
-                                                onClick={() => handleViewClients(agency.id, agency.name)}
-                                                className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
-                                                title="View Clients"
-                                            >
-                                                <BuildingIcon className="h-4 w-4" />
-                                            </button>
-                                        </div>
-                                    </td>
+                                                {agency.subdomain
+                                                    ? `${agency.subdomain}.yourseodashboard.com`
+                                                    : "-"}
+                                            </a>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm text-gray-900">
+                                                {agency.memberCount}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm text-gray-600">
+                                                {new Date(agency.createdAt).toLocaleDateString()}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="flex items-center space-x-2">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleViewMembers(agency.id, agency.name);
+                                                    }}
+                                                    className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                    title="View Members"
+                                                >
+                                                    <Users className="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleViewClients(agency.id, agency.name);
+                                                    }}
+                                                    className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                    title="View Clients"
+                                                >
+                                                    <BuildingIcon className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </td>
                                     </tr>
+
+                                    {expandedAgencyId === agency.id && (
+                                        <tr className="bg-gray-50">
+                                            <td colSpan={5} className="px-6 py-4">
+                                                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                                    {loadingAgencyClientsId === agency.id ? (
+                                                        <div className="text-center py-6 text-gray-500 text-sm">
+                                                            Loading clients...
+                                                        </div>
+                                                    ) : (agencyClientsByAgencyId[agency.id] ?? []).length === 0 ? (
+                                                        <div className="text-center py-6 text-gray-500 text-sm">
+                                                            No clients found for this agency.
+                                                        </div>
+                                                    ) : (
+                                                        <div className="overflow-x-auto">
+                                                            <table className="w-full">
+                                                                <thead className="bg-gray-50">
+                                                                    <tr>
+                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain</th>
+                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industy</th>
+                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
+                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="bg-white divide-y divide-gray-200">
+                                                                    {(agencyClientsByAgencyId[agency.id] ?? []).map((client) => (
+                                                                        <tr key={client.id} className="hover:bg-gray-50">
+                                                                            <td className="px-6 py-4 whitespace-nowrap text-xs flex items-center gap-1">
+                                                                                <BuildingIcon className="text-blue-600" size={18} />
+                                                                                {client.name}
+                                                                            </td>
+                                                                            <td className="px-6 py-4 whitespace-nowrap text-xs">
+                                                                                <a
+                                                                                    className="text-sm text-gray-600 underline"
+                                                                                    href={client.domain.startsWith("http") ? client.domain : `https://${client.domain}`}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    onClick={(e) => e.stopPropagation()}
+                                                                                >
+                                                                                    {client.domain}
+                                                                                </a>
+                                                                            </td>
+                                                                            <td className="px-6 py-4 whitespace-nowrap text-xs">{client.industry ?? "-"}</td>
+                                                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                                                <div
+                                                                                    className="relative inline-block status-dropdown"
+                                                                                    ref={(el) => {
+                                                                                        if (el) {
+                                                                                            statusButtonRefs.current[client.id] = el;
+                                                                                        }
+                                                                                    }}
+                                                                                >
+                                                                                    <button
+                                                                                        className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            setOpenStatusId(openStatusId === client.id ? "" : client.id);
+                                                                                        }}
+                                                                                    >
+                                                                                        {getStatusLabel(client.status)}
+                                                                                    </button>
+                                                                                    {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
+                                                                                        <div
+                                                                                            data-status-dropdown-menu
+                                                                                            className="fixed bg-white border border-gray-200 rounded-md shadow-lg min-w-[120px]"
+                                                                                            style={{
+                                                                                                top: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().bottom + 4}px`,
+                                                                                                left: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().left}px`,
+                                                                                                zIndex: 9999
+                                                                                            }}
+                                                                                            onClick={(e) => e.stopPropagation()}
+                                                                                        >
+                                                                                            {[
+                                                                                                { label: "Active", value: "ACTIVE" },
+                                                                                                { label: "Archived", value: "REJECTED" },
+                                                                                            ].map(({ label, value }) => (
+                                                                                                <div
+                                                                                                    key={value}
+                                                                                                    className="px-4 py-2 text-xs hover:bg-gray-100 cursor-pointer first:rounded-t-md last:rounded-b-md"
+                                                                                                    onClick={async (e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        try {
+                                                                                                            await dispatch(updateClient({ id: client.id, data: { status: value } }) as any);
+                                                                                                            setOpenStatusId("");
+                                                                                                            toast.success("Status updated successfully!");
+                                                                                                            await refreshAgencyClientsCache(agency.id);
+                                                                                                        } catch (error: any) {
+                                                                                                            console.error("Failed to update status:", error);
+                                                                                                            setOpenStatusId("");
+                                                                                                        }
+                                                                                                    }}
+                                                                                                >
+                                                                                                    {label}
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>,
+                                                                                        document.body
+                                                                                    )}
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-6 py-4 whitespace-nowrap text-xs">
+                                                                                {client.createdAt ? format(new Date(client.createdAt), "yyyy-MM-dd") : "-"}
+                                                                            </td>
+                                                                            <td className="px-6 py-4 whitespace-nowrap text-xs">
+                                                                                <div className="flex items-center space-x-2">
+                                                                                    <button
+                                                                                        className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleViewClick(client);
+                                                                                        }}
+                                                                                    >
+                                                                                        <Eye className="h-4 w-4" />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleShareClick(client);
+                                                                                        }}
+                                                                                        title="Share"
+                                                                                    >
+                                                                                        <Share2 className="h-4 w-4" />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleEditClick(client);
+                                                                                        }}
+                                                                                    >
+                                                                                        <Edit className="h-4 w-4" />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleDeleteClient(client.id);
+                                                                                        }}
+                                                                                    >
+                                                                                        <Trash2 className="h-4 w-4" />
+                                                                                    </button>
+                                                                                </div>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
                                 ))
                             )}
                         </tbody>
@@ -414,7 +622,7 @@ const AgenciesPage = () => {
                     <div className="bg-white rounded-xl p-8 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold text-gray-900">
-                                Agency Members
+                                Agency
                             </h2>
                             <button
                                 onClick={() => {
@@ -524,7 +732,7 @@ const AgenciesPage = () => {
                     <div className="bg-white rounded-xl p-8 max-w-6xl w-full mx-4 max-h-[80vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold text-gray-900">
-                                Clients - {selectedAgencyName}
+                                Agency Clients - {selectedAgencyName}
                             </h2>
                             <button
                                 onClick={() => {
@@ -554,7 +762,6 @@ const AgenciesPage = () => {
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industy</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Targets</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -578,11 +785,6 @@ const AgenciesPage = () => {
                                                     </a>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-xs">{client.industry ?? "-"}</td>
-                                                <td className="flex gap-1 px-6 py-4 whitespace-nowrap text-xs">
-                                                    {client.targets?.map((target, index) => (
-                                                        <div key={index} className="py-1 px-3 bg-blue-50 text-center rounded-full text-blue-600 font-semibold">{target}</div>
-                                                    ))}
-                                                </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div 
                                                         className="relative inline-block status-dropdown"
@@ -596,7 +798,7 @@ const AgenciesPage = () => {
                                                             className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
                                                             onClick={() => setOpenStatusId(openStatusId === client.id ? "" : client.id)}
                                                         >
-                                                            {client.status}
+                                                            {getStatusLabel(client.status)}
                                                         </button>
                                                         {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
                                                             <div 
@@ -609,14 +811,17 @@ const AgenciesPage = () => {
                                                                 }}
                                                                 onClick={(e) => e.stopPropagation()}
                                                             >
-                                                                {["ACTIVE", "PENDING", "REJECTED"].map((status) => (
+                                                                {[
+                                                                    { label: "Active", value: "ACTIVE" },
+                                                                    { label: "Archived", value: "REJECTED" },
+                                                                ].map(({ label, value }) => (
                                                                     <div
-                                                                        key={status}
+                                                                        key={value}
                                                                         className="px-4 py-2 text-xs hover:bg-gray-100 cursor-pointer first:rounded-t-md last:rounded-b-md"
                                                                         onClick={async (e) => {
                                                                             e.stopPropagation();
                                                                             try {
-                                                                                await dispatch(updateClient({ id: client.id, data: { status } }) as any);
+                                                                                await dispatch(updateClient({ id: client.id, data: { status: value } }) as any);
                                                                                 setOpenStatusId("");
                                                                                 toast.success("Status updated successfully!");
                                                                                 if (selectedAgencyId) {
@@ -628,7 +833,7 @@ const AgenciesPage = () => {
                                                                             }
                                                                         }}
                                                                     >
-                                                                        {status}
+                                                                        {label}
                                                                     </div>
                                                                 ))}
                                                             </div>,
@@ -734,6 +939,7 @@ const AgenciesPage = () => {
                     title="Delete Client"
                     message="Are you sure you want to delete this client? This action cannot be undone."
                     confirmText="Delete"
+                    requireConfirmText="DELETE"
                     variant="danger"
                 />
             )}

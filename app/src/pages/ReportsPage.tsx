@@ -727,7 +727,7 @@ const ReportsPage: React.FC = () => {
                           </p>
                           <p className="text-sm text-gray-600">{scheduleText}</p>
                           <p className="text-xs text-gray-500 mt-1">
-                            Recipients: {schedule.recipients.join(", ")}
+                            Recipients: {(Array.isArray(schedule.recipients) ? schedule.recipients : []).join(", ")                            }
                           </p>
                           {schedule.nextRunAt && (
                             <p className="text-xs text-gray-500">

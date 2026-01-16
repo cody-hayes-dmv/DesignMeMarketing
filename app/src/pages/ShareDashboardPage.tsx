@@ -21,6 +21,7 @@ interface TrafficSourceSlice {
   name: string;
   value: number;
   color: string;
+  [key: string]: string | number;
 }
 
 interface BacklinkTimeseriesItem {
@@ -62,6 +63,7 @@ interface DashboardSummary {
   keyEvents: number | null;
   newUsersTrend?: TrendPoint[] | null;
   activeUsersTrend?: TrendPoint[] | null;
+  totalUsersTrend?: TrendPoint[] | null;
   isGA4Connected?: boolean;
   ga4Events?: Array<{
     name: string;
@@ -530,8 +532,8 @@ const ShareDashboardPage: React.FC = () => {
     });
   }, [dashboardSummary?.newUsersTrend]);
 
-  const activeUsersTrendData = useMemo(() => {
-    const trend = dashboardSummary?.activeUsersTrend;
+  const totalUsersTrendData = useMemo(() => {
+    const trend = dashboardSummary?.totalUsersTrend ?? dashboardSummary?.activeUsersTrend;
     if (!trend?.length) return [];
     return trend.map((point) => {
       const dateObj = new Date(point.date);
@@ -539,10 +541,10 @@ const ShareDashboardPage: React.FC = () => {
       const value = Number(point.value ?? 0);
       return {
         name: label,
-        activeUsers: Number.isFinite(value) ? value : 0,
+        totalUsers: Number.isFinite(value) ? value : 0,
       };
     });
-  }, [dashboardSummary?.activeUsersTrend]);
+  }, [dashboardSummary?.totalUsersTrend, dashboardSummary?.activeUsersTrend]);
 
   if (!token) {
     return (
@@ -736,18 +738,18 @@ const ShareDashboardPage: React.FC = () => {
               </div>
 
               <div className="bg-white p-6 rounded-xl border border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Active Users Trending</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Users Trending</h3>
                 <div className="h-64">
                   {dashboardSummary?.isGA4Connected ? (
-                    activeUsersTrendData.length > 0 ? (
+                    totalUsersTrendData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={activeUsersTrendData}>
+                        <LineChart data={totalUsersTrendData}>
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="name" />
                           <YAxis />
                           <Tooltip />
                           <Legend />
-                          <Line type="monotone" dataKey="activeUsers" stroke="#10B981" strokeWidth={2} />
+                          <Line type="monotone" dataKey="totalUsers" name="Total Users" stroke="#10B981" strokeWidth={2} />
                         </LineChart>
                       </ResponsiveContainer>
                     ) : (

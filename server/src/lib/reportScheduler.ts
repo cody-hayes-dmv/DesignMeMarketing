@@ -153,9 +153,11 @@ export async function generateReportPDFBuffer(report: any, client: any): Promise
     const doc = new PDFDocument({ margin: 40 });
     const chunks: Buffer[] = [];
 
-    doc.on('data', (chunk) => chunks.push(chunk));
+    // doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', (err) => reject(err));
+    // doc.on('error', (err) => reject(err));
+    doc.on("error", (err: Error) => reject(err));
 
     const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
     const reportDate = new Date(report.reportDate).toLocaleDateString();
@@ -479,8 +481,16 @@ export async function processScheduledReports(): Promise<void> {
           data: { scheduleId: schedule.id }
         });
 
-        // Send email to recipients
-        const recipients = schedule.recipients as string[];
+        // Send email to recipients (stored as JSON string)
+        const recipients: string[] = (() => {
+          if (!schedule.recipients) return [];
+          try {
+            const parsed = JSON.parse(String(schedule.recipients));
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })();
         if (recipients && recipients.length > 0) {
           console.log(`[Report Scheduler] Sending emails to: ${recipients.join(", ")}`);
           
