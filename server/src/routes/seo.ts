@@ -1040,7 +1040,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
     let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import("../lib/ga4.js");
+        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, fetchGA4EngagementSummary, saveGA4MetricsToDB } = await import("../lib/ga4.js");
         
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
@@ -1059,14 +1059,24 @@ router.get("/share/:token/dashboard", async (req, res) => {
             conversions: dbMetrics.conversions,
             conversionRate: dbMetrics.conversionRate,
             activeUsers: dbMetrics.activeUsers,
-            // Keep parity with main dashboard metric naming
-            engagedSessions: dbMetrics.engagedSessions,
             eventCount: dbMetrics.eventCount,
             newUsers: dbMetrics.newUsers,
             keyEvents: dbMetrics.keyEvents,
             newUsersTrend: dbMetrics.newUsersTrend,
             activeUsersTrend: dbMetrics.activeUsersTrend,
           };
+
+          // Ensure engagedSessions stays accurate even when other metrics are served from DB cache.
+          try {
+            const engagement = await fetchGA4EngagementSummary(clientId, startDate, endDate);
+            if (engagement) {
+              (ga4Data as any).engagedSessions = engagement.engagedSessions;
+              (ga4Data as any).engagementRate = engagement.engagementRate;
+            }
+          } catch (engError) {
+            console.warn("[Share Dashboard] Failed to fetch GA4 engagement-only summary:", engError);
+          }
+
           ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
           trafficDataSource = "ga4";
         } else {
@@ -2968,7 +2978,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, saveGA4MetricsToDB } = await import("../lib/ga4.js");
+        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, fetchGA4EngagementSummary, saveGA4MetricsToDB } = await import("../lib/ga4.js");
         
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
@@ -2993,6 +3003,18 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
             newUsersTrend: dbMetrics.newUsersTrend,
             activeUsersTrend: dbMetrics.activeUsersTrend,
           };
+
+          // Ensure engagedSessions stays accurate even when other metrics are served from DB cache.
+          try {
+            const engagement = await fetchGA4EngagementSummary(clientId, startDate, endDate);
+            if (engagement) {
+              (ga4Data as any).engagedSessions = engagement.engagedSessions;
+              (ga4Data as any).engagementRate = engagement.engagementRate;
+            }
+          } catch (engError) {
+            console.warn("[Dashboard] Failed to fetch GA4 engagement-only summary:", engError);
+          }
+
           ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
           trafficDataSource = "ga4";
         } else {

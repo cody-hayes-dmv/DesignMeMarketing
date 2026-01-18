@@ -821,6 +821,56 @@ export async function fetchGA4EventsData(
 }
 
 /**
+ * Fetch engagement-only metrics from GA4 (fast path)
+ * Used to populate engagedSessions even when other metrics come from DB cache.
+ */
+export async function fetchGA4EngagementSummary(
+  clientId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<{ engagedSessions: number; engagementRate: number | null } | null> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { ga4PropertyId: true },
+  });
+
+  if (!client?.ga4PropertyId) {
+    return null;
+  }
+
+  const analytics = await getAnalyticsClient(clientId);
+  const propertyId = client.ga4PropertyId.startsWith("properties/") ? client.ga4PropertyId : `properties/${client.ga4PropertyId}`;
+
+  const startDateStr = startDate.toISOString().split("T")[0];
+  const endDateStr = endDate.toISOString().split("T")[0];
+
+  try {
+    const [response] = await analytics.runReport({
+      property: propertyId,
+      dateRanges: [{ startDate: startDateStr, endDate: endDateStr }],
+      metrics: [{ name: "engagedSessions" }, { name: "engagementRate" }],
+    } as any);
+
+    const row = response?.rows?.[0];
+    const engagedSessions = parseInt(row?.metricValues?.[0]?.value || "0", 10);
+    const engagementRateRaw = row?.metricValues?.[1]?.value;
+    const engagementRate = engagementRateRaw !== undefined && engagementRateRaw !== null ? Number(engagementRateRaw) : null;
+
+    return {
+      engagedSessions: Number.isFinite(engagedSessions) ? engagedSessions : 0,
+      engagementRate: engagementRate !== null && Number.isFinite(engagementRate) ? engagementRate : null,
+    };
+  } catch (error: any) {
+    console.warn("[GA4] Engagement-only request failed:", {
+      error: error.message,
+      code: error.code,
+      propertyId,
+    });
+    return null;
+  }
+}
+
+/**
  * Save GA4 metrics to database
  */
 export async function saveGA4MetricsToDB(
@@ -962,11 +1012,23 @@ export async function getGA4MetricsFromDB(
   }> | null;
 } | null> {
   try {
+    const dateKey = (d: unknown) => {
+      try {
+        return new Date(d as any).toISOString().slice(0, 10);
+      } catch {
+        return "";
+      }
+    };
+
+    const requestedStartKey = dateKey(startDate);
+    const requestedEndKey = dateKey(endDate);
+
     // Find the most recent metrics snapshot that overlaps with the requested date range
     // IMPORTANT: Some DBs may not have newer GA4 columns yet (totalUsers, engagedSessions, engagementRate, visitorSources).
     // To avoid "Unknown column" crashes, only select the stable base columns and compute fallbacks in JS.
     const metrics = await prisma.$queryRaw<any[]>`
       SELECT
+        startDate, endDate,
         totalSessions, organicSessions, directSessions, referralSessions, paidSessions,
         bounceRate, avgSessionDuration, pagesPerSession,
         conversions, conversionRate,
@@ -985,6 +1047,23 @@ export async function getGA4MetricsFromDB(
     }
 
     const metric = metrics[0];
+
+    // IMPORTANT:
+    // We store only a single GA4 snapshot per client. If the saved snapshot does NOT match the
+    // requested date range, using it would show wrong totals/trends (e.g., 30-day data for a 7-day view).
+    // So only use cached data when the day-level start/end match exactly.
+    const storedStartKey = dateKey(metric.startDate);
+    const storedEndKey = dateKey(metric.endDate);
+    if (
+      !requestedStartKey ||
+      !requestedEndKey ||
+      !storedStartKey ||
+      !storedEndKey ||
+      storedStartKey !== requestedStartKey ||
+      storedEndKey !== requestedEndKey
+    ) {
+      return null;
+    }
 
     // Convert JSON fields back to arrays (MySQL returns JSON as objects, not strings)
     const newUsersTrend: TrendPoint[] = metric.newUsersTrend

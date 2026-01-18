@@ -171,7 +171,8 @@ const formatDashboardSummary = (payload: any): DashboardSummary => ({
   // Backward compatibility
   totalUsers: parseNumericValue(payload?.totalUsers ?? payload?.activeUsers),
   firstTimeVisitors: parseNumericValue(payload?.firstTimeVisitors ?? payload?.newUsers),
-  engagedVisitors: parseNumericValue(payload?.engagedVisitors ?? payload?.keyEvents),
+  // Engaged Visitors should reflect GA4 engaged sessions (NOT key events / conversions)
+  engagedVisitors: parseNumericValue(payload?.engagedVisitors ?? payload?.engagedSessions),
   newUsersTrend: normalizeTrendPoints(payload?.newUsersTrend),
   totalUsersTrend: normalizeTrendPoints(payload?.totalUsersTrend ?? payload?.activeUsersTrend),
 });
