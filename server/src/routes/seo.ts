@@ -23,8 +23,14 @@ let googleAdsLocationsLoadPromise: Promise<DataForSEOGoogleAdsLocation[]> | null
 const GOOGLE_ADS_LOCATIONS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 function normalizeLocationName(value: string): string {
-  // Keep commas exactly as provided; just normalize whitespace for storage/display.
-  return String(value || "").trim().replace(/\s+/g, " ");
+  // Normalize for matching DataForSEO location list:
+  // - trim
+  // - normalize comma spacing: "Arkansas,United States" -> "Arkansas, United States"
+  // - collapse multiple spaces
+  return String(value || "")
+    .trim()
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/\s+/g, " ");
 }
 
 function normalizeLocationNameForMatch(value: string): string {
@@ -272,8 +278,9 @@ async function fetchKeywordDataFromDataForSEO(
         // Search for client's domain in organic results
         for (let i = 0; i < organicResults.length; i++) {
           const item = organicResults[i];
-          const itemUrl = item.url || "";
-          const itemHost = normalizeHost(itemUrl);
+          const itemUrl = String(item?.url || "");
+          const itemDomain = String(item?.domain || "");
+          const itemHost = normalizeHost(itemUrl || itemDomain);
           
           if (
             clientHost &&
@@ -282,8 +289,18 @@ async function fetchKeywordDataFromDataForSEO(
               itemHost.endsWith(`.${clientHost}`) ||
               clientHost.endsWith(`.${itemHost}`))
           ) {
-            currentPosition = i + 1; // Position is 1-indexed
-            googleUrl = itemUrl; // Store the URL that ranks
+            // DataForSEO provides rank metadata; use it when available (more accurate than array index).
+            const rankAbsolute = Number(item?.rank_absolute);
+            const rankGroup = Number(item?.rank_group);
+            const resolvedRank = Number.isFinite(rankGroup) && rankGroup > 0
+              ? rankGroup
+              : Number.isFinite(rankAbsolute) && rankAbsolute > 0
+                ? rankAbsolute
+                : i + 1;
+
+            currentPosition = resolvedRank;
+            // Prefer the ranking page URL; fall back to domain if needed.
+            googleUrl = itemUrl || (itemDomain ? `https://${itemDomain}` : null);
             break;
           }
         }
@@ -805,15 +822,16 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    // Permission check - ADMIN/SUPER_ADMIN and AGENCY users can access reports
+    // Permission check - Admins, agency members, or the client owner (CLIENT role)
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
       select: { agencyId: true }
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -1802,13 +1820,14 @@ router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
 
     // Permission check
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
       select: { agencyId: true }
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -1922,13 +1941,14 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
 
     // Permission check
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
       select: { agencyId: true }
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -1954,46 +1974,75 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     if (keywordData.fetchFromDataForSEO) {
       // 1) Keyword overview (volume/cpc/difficulty). Do not block ranking if this fails.
       try {
-        const overview = await fetchKeywordOverviewFromDataForSEO({
-          keywords: [keywordData.keyword],
-          languageCode: keywordData.languageCode,
-          locationCode: resolvedLocationCode,
-          locationName: resolvedLocationName || "United States",
-          includeClickstreamData: (keywordData as any).include_clickstream_data,
-          includeSerpInfo: (keywordData as any).include_serp_info,
-        });
+        const fetchOverview = async (locationCode: number, locationName: string) => {
+          return await fetchKeywordOverviewFromDataForSEO({
+            keywords: [keywordData.keyword],
+            languageCode: keywordData.languageCode,
+            locationCode,
+            locationName,
+            includeClickstreamData: (keywordData as any).include_clickstream_data,
+            includeSerpInfo: (keywordData as any).include_serp_info,
+          });
+        };
 
+        let lastOverviewItem: any = null;
+        const applyOverviewItem = (item: any) => {
+          lastOverviewItem = item;
+          const searchVolume = Number(item?.keyword_info?.search_volume);
+          if (Number.isFinite(searchVolume) && searchVolume >= 0) {
+            keywordData.searchVolume = Math.round(searchVolume);
+          }
+
+          const difficulty = Number(item?.keyword_properties?.keyword_difficulty);
+          if (Number.isFinite(difficulty)) {
+            keywordData.difficulty = difficulty;
+          }
+
+          const cpc = Number(item?.keyword_info?.cpc);
+          if (Number.isFinite(cpc) && cpc >= 0) {
+            keywordData.cpc = cpc;
+          }
+
+          const competitionLevel = item?.keyword_info?.competition_level;
+          if (typeof competitionLevel === "string" && competitionLevel.length > 0) {
+            keywordData.competition = competitionLevel;
+          }
+
+          const checkUrl = item?.serp_info?.check_url;
+          if (typeof checkUrl === "string" && checkUrl.startsWith("http")) {
+            keywordData.googleUrl = checkUrl;
+          }
+
+          const serpItemTypes = item?.serp_info?.serp_item_types;
+          if (Array.isArray(serpItemTypes) && serpItemTypes.length > 0) {
+            keywordData.serpFeatures = serpItemTypes;
+          }
+        };
+
+        // First pass: use the requested location.
+        const overview = await fetchOverview(resolvedLocationCode, resolvedLocationName || "United States");
         serpData = overview.raw;
-        const item = overview.item;
+        applyOverviewItem(overview.item);
 
-        const searchVolume = Number(item?.keyword_info?.search_volume);
-        if (Number.isFinite(searchVolume) && searchVolume >= 0) {
-          keywordData.searchVolume = Math.round(searchVolume);
-        }
+        // Some very broad keywords (or some sub-locations) can return sparse/zero metrics.
+        // Fallback: if we got basically no useful metrics, retry overview at US level to fill in volume/CPC/difficulty.
+        const hasUsefulOverviewMetrics =
+          (typeof keywordData.searchVolume === "number" && keywordData.searchVolume > 0) ||
+          (typeof keywordData.difficulty === "number" && Number.isFinite(keywordData.difficulty)) ||
+          (typeof keywordData.cpc === "number" && Number.isFinite(keywordData.cpc) && keywordData.cpc > 0) ||
+          (typeof keywordData.competition === "string" && keywordData.competition.length > 0);
 
-        const difficulty = Number(item?.keyword_properties?.keyword_difficulty);
-        if (Number.isFinite(difficulty)) {
-          keywordData.difficulty = difficulty;
-        }
-
-        const cpc = Number(item?.keyword_info?.cpc);
-        if (Number.isFinite(cpc) && cpc >= 0) {
-          keywordData.cpc = cpc;
-        }
-
-        const competitionLevel = item?.keyword_info?.competition_level;
-        if (typeof competitionLevel === "string" && competitionLevel.length > 0) {
-          keywordData.competition = competitionLevel;
-        }
-
-        const checkUrl = item?.serp_info?.check_url;
-        if (typeof checkUrl === "string" && checkUrl.startsWith("http")) {
-          keywordData.googleUrl = checkUrl;
-        }
-
-        const serpItemTypes = item?.serp_info?.serp_item_types;
-        if (Array.isArray(serpItemTypes) && serpItemTypes.length > 0) {
-          keywordData.serpFeatures = serpItemTypes;
+        if (!hasUsefulOverviewMetrics && resolvedLocationCode !== 2840) {
+          try {
+            const fallback = await fetchOverview(2840, "United States");
+            // Prefer keeping the first location's raw payload for debugging, but fill in missing metrics.
+            applyOverviewItem(fallback.item);
+          } catch (fallbackErr: any) {
+            console.warn(
+              "Keyword Overview fallback (US) failed:",
+              fallbackErr?.message || fallbackErr
+            );
+          }
         }
 
         // Prisma `Int` maps to 32-bit signed; DataForSEO can exceed it.
@@ -2004,7 +2053,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
           return Math.min(MAX_INT, Math.max(0, Math.round(numeric)));
         };
 
-        const seResultsCount = clampDbInt(item?.serp_info?.se_results_count);
+        const seResultsCount = clampDbInt(lastOverviewItem?.serp_info?.se_results_count);
         if (seResultsCount !== null) {
           keywordData.totalResults = seResultsCount;
         }
@@ -2118,6 +2167,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
             ? String(item.serp_info.se_results_count)
             : undefined,
         languageCode: keywordData.languageCode,
+        locationCode: resolvedLocationCode,
         locationName: resolvedLocationName || "United States",
       };
 
@@ -2167,7 +2217,14 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
     }
 
     const { clientId, keywordId } = req.params;
-    const { locationCode = 2840, languageCode = "en" } = req.body;
+    const refreshParams = z.object({
+      locationCode: z.number().int().optional(),
+      languageCode: z.string().optional().default("en"),
+      locationName: z.string().optional(),
+      location_name: z.string().optional(),
+      include_clickstream_data: z.boolean().optional(),
+      include_serp_info: z.boolean().optional(),
+    }).parse(req.body ?? {});
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -2199,26 +2256,121 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
       return res.status(404).json({ message: "Keyword not found" });
     }
 
-    // Fetch fresh data from DataForSEO
+    const requestedLocationNameRaw =
+      refreshParams.locationName ||
+      (refreshParams as any).location_name ||
+      (keyword as any).locationName ||
+      "United States";
+    const resolvedLocationName = normalizeLocationName(requestedLocationNameRaw || "United States");
+    const resolvedLocationCode =
+      refreshParams.locationCode ?? (await resolveLocationCodeFromName(resolvedLocationName)) ?? 2840;
+    const languageCode = refreshParams.languageCode || "en";
+
+    const updateData: any = {};
+
+    // 1) Refresh overview metrics (volume/cpc/difficulty/competition + serp features/url).
+    // This can be slow, so we keep it separate from SERP rank fetching.
+    let overviewRaw: any = null;
+    try {
+      const fetchOverview = async (locationCode: number, locationName: string) => {
+        return await fetchKeywordOverviewFromDataForSEO({
+          keywords: [keyword.keyword],
+          languageCode,
+          locationCode,
+          locationName,
+          includeClickstreamData: (refreshParams as any).include_clickstream_data,
+          includeSerpInfo: (refreshParams as any).include_serp_info,
+        });
+      };
+
+      let lastOverviewItem: any = null;
+      const applyOverviewItem = (item: any) => {
+        lastOverviewItem = item;
+
+        const searchVolume = Number(item?.keyword_info?.search_volume);
+        if (Number.isFinite(searchVolume) && searchVolume > 0) {
+          updateData.searchVolume = Math.round(searchVolume);
+        }
+
+        const difficulty = Number(item?.keyword_properties?.keyword_difficulty);
+        if (Number.isFinite(difficulty)) {
+          updateData.difficulty = difficulty;
+        }
+
+        const cpc = Number(item?.keyword_info?.cpc);
+        if (Number.isFinite(cpc) && cpc > 0) {
+          updateData.cpc = cpc;
+        }
+
+        const competitionLevel = item?.keyword_info?.competition_level;
+        if (typeof competitionLevel === "string" && competitionLevel.length > 0) {
+          updateData.competition = competitionLevel;
+        }
+
+        const checkUrl = item?.serp_info?.check_url;
+        if (typeof checkUrl === "string" && checkUrl.startsWith("http")) {
+          updateData.googleUrl = checkUrl;
+        }
+
+        const serpItemTypes = item?.serp_info?.serp_item_types;
+        if (Array.isArray(serpItemTypes) && serpItemTypes.length > 0) {
+          updateData.serpFeatures = JSON.stringify(serpItemTypes);
+        }
+
+        // Prisma `Int` maps to 32-bit signed; DataForSEO can exceed it.
+        const clampDbInt = (value: unknown) => {
+          const MAX_INT = 2147483647;
+          const numeric = Number(value);
+          if (!Number.isFinite(numeric)) return null;
+          return Math.min(MAX_INT, Math.max(0, Math.round(numeric)));
+        };
+        const seResultsCount = clampDbInt(item?.serp_info?.se_results_count);
+        if (seResultsCount !== null && seResultsCount > 0) {
+          updateData.totalResults = seResultsCount;
+        }
+      };
+
+      const overview = await fetchOverview(resolvedLocationCode, resolvedLocationName);
+      overviewRaw = overview.raw;
+      applyOverviewItem(overview.item);
+
+      const hasUsefulOverviewMetrics =
+        (typeof updateData.searchVolume === "number" && updateData.searchVolume > 0) ||
+        (typeof updateData.difficulty === "number" && Number.isFinite(updateData.difficulty)) ||
+        (typeof updateData.cpc === "number" && Number.isFinite(updateData.cpc) && updateData.cpc > 0) ||
+        (typeof updateData.competition === "string" && updateData.competition.length > 0);
+
+      if (!hasUsefulOverviewMetrics && resolvedLocationCode !== 2840) {
+        try {
+          const fallback = await fetchOverview(2840, "United States");
+          applyOverviewItem(fallback.item);
+        } catch (fallbackErr) {
+          console.warn("Keyword refresh overview fallback (US) failed:", fallbackErr);
+        }
+      }
+    } catch (overviewErr) {
+      console.warn("Keyword refresh overview fetch failed (will still fetch ranking):", overviewErr);
+    }
+
+    // 2) Refresh SERP ranking (position/url + features + total results) for this client domain.
     const dataForSEOData = await fetchKeywordDataFromDataForSEO(
       keyword.keyword,
       client.domain,
-      locationCode,
+      resolvedLocationCode,
       languageCode
     );
 
     // Update previous position before updating current position
-    const updateData: any = {};
     if (keyword.currentPosition !== null) {
       updateData.previousPosition = keyword.currentPosition;
     }
 
     // Update with new position data
-    if (dataForSEOData.currentPosition !== null) {
+    if (typeof dataForSEOData.currentPosition === "number" && dataForSEOData.currentPosition > 0) {
       updateData.currentPosition = dataForSEOData.currentPosition;
     }
 
-    if (dataForSEOData.bestPosition !== null) {
+    if (typeof dataForSEOData.bestPosition === "number" && dataForSEOData.bestPosition > 0) {
       // Only update bestPosition if it's better (lower number) than current
       if (keyword.bestPosition === null || dataForSEOData.bestPosition < keyword.bestPosition) {
         updateData.bestPosition = dataForSEOData.bestPosition;
@@ -2241,16 +2393,39 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
       updateData.totalResults = dataForSEOData.totalResults;
     }
 
-    // Update the keyword
-    const updatedKeyword = await prisma.keyword.update({
-      where: { id: keywordId },
-      data: updateData
-    });
+    // Keep the keyword's chosen location for future refreshes.
+    updateData.locationName = resolvedLocationName;
+
+    // Update the keyword (backwards-compatible with DBs missing keywords.locationName)
+    let updatedKeyword: any;
+    try {
+      updatedKeyword = await prisma.keyword.update({
+        where: { id: keywordId },
+        data: updateData,
+      });
+    } catch (error: any) {
+      if (error?.code === "P2022" && String(error?.meta?.column || "").includes("locationName")) {
+        delete updateData.locationName;
+        updatedKeyword = await prisma.keyword.update({
+          where: { id: keywordId },
+          data: updateData,
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    const positionChanged =
+      typeof updateData.currentPosition === "number"
+        ? updateData.currentPosition !== keyword.currentPosition
+        : false;
 
     res.json({
       keyword: updatedKeyword,
       serpData: dataForSEOData.serpData,
-      positionChanged: updateData.currentPosition !== keyword.currentPosition
+      overviewRaw,
+      location: { locationCode: resolvedLocationCode, locationName: resolvedLocationName, languageCode },
+      positionChanged,
     });
   } catch (error: any) {
     console.error("Refresh keyword error:", error);
@@ -2286,13 +2461,14 @@ router.delete("/keywords/:clientId/:keywordId", authenticateToken, async (req, r
 
     // Permission check
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
       select: { agencyId: true }
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -2603,7 +2779,12 @@ router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) 
               organicIsLost: page.organic.isLost,
               paidCount: page.paid.count,
               paidEtv: page.paid.etv,
-              rawData: page.raw || null,
+              rawData:
+                page.raw == null
+                  ? null
+                  : typeof page.raw === "string"
+                    ? page.raw
+                    : JSON.stringify(page.raw),
             },
             create: {
               clientId,
@@ -2619,7 +2800,12 @@ router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) 
               organicIsLost: page.organic.isLost,
               paidCount: page.paid.count,
               paidEtv: page.paid.etv,
-              rawData: page.raw || null,
+              rawData:
+                page.raw == null
+                  ? null
+                  : typeof page.raw === "string"
+                    ? page.raw
+                    : JSON.stringify(page.raw),
             },
           })
         )
@@ -2725,7 +2911,12 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
             lostReferringDomains: item.lostReferringDomains,
             newReferringMainDomains: item.newReferringMainDomains,
             lostReferringMainDomains: item.lostReferringMainDomains,
-            rawData: item.raw || null,
+            rawData:
+              item.raw == null
+                ? null
+                : typeof item.raw === "string"
+                  ? item.raw
+                  : JSON.stringify(item.raw),
           },
         });
       })
@@ -2759,72 +2950,102 @@ router.post("/agency/dashboard/refresh", authenticateToken, async (req, res) => 
       return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
     }
 
-    // Get all clients
-    const allClients = await prisma.client.findMany({
-      where: {
-        domain: { not: null as any },
-      },
-      select: { id: true, domain: true },
-      take: 10, // Limit to avoid too many API calls
-    });
+    const force = coerceBoolean(req.query.force);
 
-    const normalizeDomain = (domain: string) => {
-      return domain
-        .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    };
+    const refreshedClients = await dedupeInFlight("agency-dashboard-refresh", async () => {
+      // Get all clients
+      const allClients = await prisma.client.findMany({
+        where: {
+          domain: { not: null as any },
+        },
+        select: { id: true, domain: true },
+        take: 10, // Limit to avoid too many API calls
+      });
 
-    const refreshedClients: any[] = [];
+      const normalizeDomain = (domain: string) => {
+        return domain
+          .replace(/^https?:\/\//, "")
+          .replace(/^www\./, "")
+          .replace(/\/$/, "")
+          .toLowerCase();
+      };
 
-    // Refresh data for each client
-    for (const client of allClients) {
-      if (client.domain) {
+      const results: Array<{
+        clientId: string;
+        domain: string | null;
+        status: "success" | "error" | "skipped";
+        lastRefreshedAt?: Date | null;
+        nextAllowedAt?: Date | null;
+      }> = [];
+
+      // Refresh data for each client (throttled per client to avoid repeated billable pulls)
+      for (const client of allClients) {
+        if (!client.domain) continue;
+
+        const lastRefreshedAt = await getLatestTrafficSourceUpdatedAt(client.id);
+        const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+
+        if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+          results.push({
+            clientId: client.id,
+            domain: client.domain,
+            status: "skipped",
+            lastRefreshedAt,
+            nextAllowedAt,
+          });
+          continue;
+        }
+
         try {
-          const targetDomain = normalizeDomain(client.domain);
-          
-          // Refresh traffic sources and save to DB
-          const trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 50, 2840, "English");
-          
-          // Delete existing traffic sources for this client
-          await prisma.trafficSource.deleteMany({
-            where: { clientId: client.id },
+          await dedupeInFlight(`agency-dashboard-refresh:${client.id}`, async () => {
+            const targetDomain = normalizeDomain(client.domain!);
+
+            // Refresh traffic sources and save to DB
+            const trafficSourceSummary = await fetchTrafficSourcesFromRankedKeywords(targetDomain, 50, 2840, "English");
+
+            // Delete existing traffic sources for this client
+            await prisma.trafficSource.deleteMany({
+              where: { clientId: client.id },
+            });
+
+            // Save new traffic sources to database
+            await Promise.all(
+              trafficSourceSummary.breakdown.map((item) =>
+                prisma.trafficSource.create({
+                  data: {
+                    clientId: client.id,
+                    name: item.name,
+                    value: item.value,
+                    totalKeywords: trafficSourceSummary.totalKeywords,
+                    totalEstimatedTraffic: trafficSourceSummary.totalEstimatedTraffic,
+                    organicEstimatedTraffic: trafficSourceSummary.organicEstimatedTraffic,
+                    averageRank: trafficSourceSummary.averageRank,
+                    rankSampleSize: trafficSourceSummary.rankSampleSize,
+                  },
+                })
+              )
+            );
           });
 
-          // Save new traffic sources to database
-          await Promise.all(
-            trafficSourceSummary.breakdown.map((item) =>
-              prisma.trafficSource.create({
-                data: {
-                  clientId: client.id,
-                  name: item.name,
-                  value: item.value,
-                  totalKeywords: trafficSourceSummary.totalKeywords,
-                  totalEstimatedTraffic: trafficSourceSummary.totalEstimatedTraffic,
-                  organicEstimatedTraffic: trafficSourceSummary.organicEstimatedTraffic,
-                  averageRank: trafficSourceSummary.averageRank,
-                  rankSampleSize: trafficSourceSummary.rankSampleSize,
-                },
-              })
-            )
-          );
-          
-          refreshedClients.push({
+          results.push({
             clientId: client.id,
             domain: client.domain,
             status: "success",
+            lastRefreshedAt: new Date(),
+            nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
           });
         } catch (error) {
           console.error(`Failed to refresh data for client ${client.id}:`, error);
-          refreshedClients.push({
+          results.push({
             clientId: client.id,
             domain: client.domain,
             status: "error",
           });
         }
       }
-    }
+
+      return results;
+    });
 
     res.json({
       message: "Agency dashboard data refreshed successfully",
@@ -2862,13 +3083,14 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
 
     // Permission check
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
       select: { agencyId: true }
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -5018,13 +5240,14 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
     }
 
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
       select: { agencyId: true },
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -5162,13 +5385,14 @@ router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
     }
 
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
       select: { agencyId: true },
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -5662,14 +5886,39 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
       return res.status(403).json({ message: "Access denied" });
     }
 
-    // Get tracked keywords (from keywords table) for this client
+    const normalizeKeywordKey = (value: unknown) => {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, " ")
+        .replace(/\s+/g, " ");
+    };
+
+    // Get tracked keywords (from keywords table) for this client (for filtering + rank fallback)
     const trackedKeywords = await prisma.keyword.findMany({
       where: { clientId },
-      select: { keyword: true },
+      select: {
+        keyword: true,
+        currentPosition: true,
+        previousPosition: true,
+        googleUrl: true,
+      },
     });
-    
+
     // Create a set of tracked keyword strings for fast lookup
-    const trackedKeywordSet = new Set(trackedKeywords.map(k => k.keyword.toLowerCase()));
+    const trackedKeywordSet = new Set(trackedKeywords.map((k) => normalizeKeywordKey(k.keyword)));
+
+    // Map tracked positions by keyword for fallback in Target Keywords table
+    const trackedByKeyword = new Map(
+      trackedKeywords.map((k) => [
+        normalizeKeywordKey(k.keyword),
+        {
+          currentPosition: k.currentPosition ?? null,
+          previousPosition: k.previousPosition ?? null,
+          googleUrl: k.googleUrl ?? null,
+        },
+      ])
+    );
 
     // Get target keywords from database
     const allTargetKeywords = await prisma.targetKeyword.findMany({
@@ -5681,11 +5930,28 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
     });
 
     // Filter to only include target keywords that are also tracked
-    const targetKeywords = allTargetKeywords.filter(tk => 
-      trackedKeywordSet.has(tk.keyword.toLowerCase())
+    const targetKeywords = allTargetKeywords.filter((tk) =>
+      trackedKeywordSet.has(normalizeKeywordKey(tk.keyword))
     );
 
-    res.json(targetKeywords);
+    // Normalize location display (comma spacing) without mutating DB
+    res.json(
+      targetKeywords.map((tk) => ({
+        ...tk,
+        locationName: tk.locationName ? normalizeLocationName(tk.locationName) : tk.locationName,
+        // If TargetKeyword rank hasn't been populated yet, fall back to tracked keyword rank.
+        googlePosition:
+          tk.googlePosition ??
+          trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.currentPosition ??
+          null,
+        previousPosition:
+          tk.previousPosition ??
+          trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.previousPosition ??
+          null,
+        // Also fall back googleUrl if it's missing on target keyword.
+        googleUrl: tk.googleUrl ?? trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.googleUrl ?? null,
+      }))
+    );
   } catch (error: any) {
     console.error("Get target keywords error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -5754,6 +6020,17 @@ router.post("/target-keywords/:clientId", authenticateToken, async (req, res) =>
       return res.status(400).json({ message: "Target keyword already exists for this client" });
     }
 
+    const normalizedLocationName = keywordData.locationName
+      ? normalizeLocationName(keywordData.locationName)
+      : null;
+
+    // If a non-US location name was provided but the code is default/missing, try to resolve it.
+    const shouldResolveLocation =
+      Boolean(normalizedLocationName) &&
+      normalizeLocationNameForMatch(normalizedLocationName || "") !== normalizeLocationNameForMatch("United States");
+    const resolvedLocationCode =
+      shouldResolveLocation ? await resolveLocationCodeFromName(normalizedLocationName!) : null;
+
     // Create target keyword
     const targetKeyword = await prisma.targetKeyword.create({
       data: {
@@ -5763,8 +6040,8 @@ router.post("/target-keywords/:clientId", authenticateToken, async (req, res) =>
         cpc: keywordData.cpc || null,
         competition: keywordData.competition || null,
         competitionValue: keywordData.competitionValue || null,
-        locationCode: keywordData.locationCode || null,
-        locationName: keywordData.locationName || null,
+        locationCode: resolvedLocationCode ?? keywordData.locationCode ?? null,
+        locationName: normalizedLocationName ?? keywordData.locationName ?? null,
         languageCode: keywordData.languageCode || null,
         languageName: keywordData.languageName || null,
       },
@@ -5921,10 +6198,16 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
       const updates = await Promise.all(
         toRefresh.map(async (tk) => {
           try {
+            const normalizedLocationName = tk.locationName ? normalizeLocationName(tk.locationName) : null;
+            const resolvedLocationCode =
+              tk.locationCode ??
+              (normalizedLocationName ? await resolveLocationCodeFromName(normalizedLocationName) : null) ??
+              2840;
+
             const serp = await fetchKeywordDataFromDataForSEO(
               tk.keyword,
               client.domain,
-              tk.locationCode || 2840,
+              resolvedLocationCode,
               tk.languageCode || "en"
             );
 
@@ -5936,6 +6219,8 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
             return prisma.targetKeyword.update({
               where: { id: tk.id },
               data: {
+                locationCode: resolvedLocationCode,
+                ...(normalizedLocationName ? { locationName: normalizedLocationName } : {}),
                 googlePosition: nextPos,
                 previousPosition,
                 googleUrl: serp.googleUrl ?? tk.googleUrl,
@@ -5975,7 +6260,29 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
 
     for (const kw of keywordsNeedingRank) {
       try {
-        const serp = await fetchKeywordDataFromDataForSEO(kw.keyword, client.domain, 2840, "en");
+        const existingTk = await prisma.targetKeyword.findUnique({
+          where: {
+            clientId_keyword: {
+              clientId,
+              keyword: kw.keyword,
+            },
+          },
+          select: { locationCode: true, locationName: true, languageCode: true },
+        });
+
+        const normalizedLocationName = existingTk?.locationName ? normalizeLocationName(existingTk.locationName) : null;
+        const resolvedLocationCode =
+          existingTk?.locationCode ??
+          (normalizedLocationName ? await resolveLocationCodeFromName(normalizedLocationName) : null) ??
+          2840;
+        const resolvedLanguageCode = existingTk?.languageCode || "en";
+
+        const serp = await fetchKeywordDataFromDataForSEO(
+          kw.keyword,
+          client.domain,
+          resolvedLocationCode,
+          resolvedLanguageCode
+        );
         if (serp?.googleUrl) kw.googleUrl = serp.googleUrl;
         if (typeof serp?.currentPosition === "number" && serp.currentPosition > 0) kw.googlePosition = serp.currentPosition;
         if (serp?.serpData) kw.serpInfo = serp.serpData;

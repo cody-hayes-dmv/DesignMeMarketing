@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { useLocation } from "react-router-dom";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store";
 import Sidebar from "./Sidebar";
 
 interface DashboardLayoutProps {
@@ -9,6 +11,8 @@ interface DashboardLayoutProps {
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { user } = useSelector((state: RootState) => state.auth);
+  const isClient = user?.role === "CLIENT";
 
   // Get page title based on current route
   const getPageTitle = () => {
@@ -40,8 +44,15 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/worker/team") return "Team";
     if (path === "/worker/settings") return "Settings";
 
+    if (path === "/client/report" || path.startsWith("/client/report/")) return "Report";
+
     return "Dashboard";
   };
+
+  // Client portal is report-only: no sidebar/header chrome.
+  if (isClient) {
+    return <div className="min-h-screen bg-gray-50">{children}</div>;
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import api from "@/lib/api";
+import { logout } from "@/store/slices/authSlice";
 
 type ClientLite = {
   id: string;
@@ -9,6 +11,7 @@ type ClientLite = {
 
 const ClientReportIndexPage: React.FC = () => {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +55,16 @@ const ClientReportIndexPage: React.FC = () => {
       <div className="p-8">
         <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
           <p className="text-sm text-rose-600">{error}</p>
+          <button
+            type="button"
+            onClick={() => {
+              dispatch(logout() as any);
+              navigate("/login", { replace: true });
+            }}
+            className="mt-4 inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Back to Login
+          </button>
         </div>
       </div>
     );

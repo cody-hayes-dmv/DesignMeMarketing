@@ -235,46 +235,29 @@ const KeywordsPage: React.FC = () => {
       // Add as tracked keywords - auto-fetch data from DataForSEO
       await Promise.all(
         keywords.map((item) =>
-          api.post(`/seo/keywords/${assignClientId}`, {
-            keyword: item.keyword,
-            searchVolume: Number(item.searchVolume) || 0,
-            difficulty: item.difficulty ?? undefined,
-            cpc: item.cpc ?? undefined,
-            competition:
-              item.competitionLevel ||
-              (item.competition !== null ? item.competition.toFixed(2) : undefined),
-            fetchFromDataForSEO: true, // Auto-fetch ranking data
-            locationCode: researchLocation,
-            languageCode: researchLanguage,
-          })
+          api.post(
+            `/seo/keywords/${assignClientId}`,
+            {
+              keyword: item.keyword,
+              searchVolume: Number(item.searchVolume) || 0,
+              difficulty: item.difficulty ?? undefined,
+              cpc: item.cpc ?? undefined,
+              competition:
+                item.competitionLevel ||
+                (item.competition !== null ? item.competition.toFixed(2) : undefined),
+              fetchFromDataForSEO: true, // Auto-fetch ranking data
+              locationCode: researchLocation,
+              languageCode: researchLanguage,
+            },
+            { timeout: 60000 }
+          )
         )
       );
 
-      // Always add as target keywords when tracking
-      try {
-        await Promise.all(
-          keywords.map((item) =>
-            api.post(`/seo/target-keywords/${assignClientId}`, {
-              keyword: item.keyword,
-              searchVolume: Number(item.searchVolume) || 0,
-              cpc: item.cpc ?? undefined,
-              competition: item.competitionLevel || undefined,
-              competitionValue: item.competition !== null ? item.competition : undefined,
-              locationCode: researchLocation,
-              languageCode: researchLanguage,
-            }).catch((err) => {
-              // Ignore errors for keywords that already exist as target keywords
-              if (err?.response?.status !== 400 || !err?.response?.data?.message?.includes("already exists")) {
-                console.warn(`Failed to add ${item.keyword} as target keyword:`, err);
-              }
-            })
-          )
-        );
-      } catch (targetError) {
-        console.error("Some keywords failed to be added as target keywords:", targetError);
-      }
+      // Note: the server already upserts Target Keywords when creating tracked keywords,
+      // so we don't need a second /target-keywords call here (avoids duplicate errors/toasts).
 
-      const successMessage = `Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking and target keywords.`;
+      const successMessage = `Added ${keywords.length} keyword${keywords.length > 1 ? "s" : ""} to tracking.`;
       toast.success(successMessage);
       setAssignMessage(successMessage);
       if (assignClientId === selectedClientId) {
@@ -319,17 +302,24 @@ const KeywordsPage: React.FC = () => {
       const locationNameToSend = typedLocation || selectedLocationName || DEFAULT_TRACK_LOCATION.location_name;
 
       // Auto-fetch data from DataForSEO when adding keyword
-      await api.post(`/seo/keywords/${selectedClientId}`, {
-        keyword: newKeywordValue.trim(),
-        fetchFromDataForSEO: true, // Auto-fetch ranking data
-        languageCode: DEFAULT_LANGUAGE,
-        // Only send a code if the user actually selected this exact option.
-        locationCode: useSelected ? trackLocationSelected?.location_code : undefined,
-        // Always send the visible text so typed "Arkansas,United States" works too.
-        location_name: locationNameToSend,
-        include_clickstream_data: true,
-        include_serp_info: true,
-      });
+      await api.post(
+        `/seo/keywords/${selectedClientId}`,
+        {
+          keyword: newKeywordValue.trim(),
+          fetchFromDataForSEO: true, // Auto-fetch ranking data
+          languageCode: DEFAULT_LANGUAGE,
+          // Only send a code if the user actually selected this exact option.
+          locationCode: useSelected ? trackLocationSelected?.location_code : undefined,
+          // Always send the visible text so typed "Arkansas,UnitedStates" works too.
+          location_name: locationNameToSend,
+          include_clickstream_data: true,
+          include_serp_info: true,
+        },
+        { timeout: 60000 }
+      );
+
+      // Note: server upserts Target Keywords during /seo/keywords create,
+      // so we don't call /target-keywords here (prevents "already exists" toast after re-adding).
 
       toast.success("Keyword added and data fetched successfully!");
       setAddKeywordMessage("Keyword added successfully. Ranking data will be fetched automatically.");
@@ -340,7 +330,10 @@ const KeywordsPage: React.FC = () => {
       setTrackedKeywords(keywordList);
     } catch (error: any) {
       console.error("Failed to add keyword", error);
-      const errorMsg = error?.response?.data?.message || "Failed to add keyword.";
+      let errorMsg = error?.response?.data?.message || "Failed to add keyword.";
+      if (error?.code === "ECONNABORTED" || String(error?.message || "").toLowerCase().includes("timeout")) {
+        errorMsg = "Request timed out while fetching keyword data. Please try again (this can take ~30-60 seconds).";
+      }
       setAddKeywordMessage(errorMsg);
       // Toast is already shown by API interceptor
     } finally {
@@ -396,16 +389,29 @@ const KeywordsPage: React.FC = () => {
     if (!selectedClientId) return;
     try {
       setRefreshingKeywordIds((prev) => ({ ...prev, [keywordId]: true }));
-      await api.post(`/seo/keywords/${selectedClientId}/${keywordId}/refresh`, {
-        locationCode: DEFAULT_LOCATION,
-        languageCode: DEFAULT_LANGUAGE,
-      });
+      const kw = trackedKeywords.find((k) => k.id === keywordId);
+      await api.post(
+        `/seo/keywords/${selectedClientId}/${keywordId}/refresh`,
+        {
+          // Prefer the keyword's stored locationName; backend will resolve locationCode.
+          locationName: kw?.locationName || undefined,
+          // Keep defaults for safety if locationName is missing.
+          locationCode: kw?.locationName ? undefined : DEFAULT_LOCATION,
+          languageCode: DEFAULT_LANGUAGE,
+          include_clickstream_data: true,
+          include_serp_info: true,
+        },
+        { timeout: 60000 }
+      );
       toast.success("Keyword data refreshed successfully!");
       const res = await api.get(`/seo/keywords/${selectedClientId}`);
       const keywordList: Keyword[] = Array.isArray(res.data) ? res.data : [];
       setTrackedKeywords(keywordList);
     } catch (error: any) {
       console.error("Failed to refresh keyword", error);
+      if (error?.code === "ECONNABORTED" || String(error?.message || "").toLowerCase().includes("timeout")) {
+        toast.error("Refresh timed out. Please try again (this can take ~30-60 seconds).");
+      }
       // Toast is already shown by API interceptor
     } finally {
       setRefreshingKeywordIds((prev) => ({ ...prev, [keywordId]: false }));

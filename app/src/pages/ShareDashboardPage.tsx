@@ -4,7 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { Download, TrendingUp, TrendingDown, Search, Users, Loader2, UserPlus, Activity } from "lucide-react";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import api from "@/lib/api";
-import { format } from "date-fns";
+import { endOfWeek, format, startOfWeek } from "date-fns";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import toast from "react-hot-toast";
@@ -259,7 +259,8 @@ const ShareDashboardPage: React.FC = () => {
     try {
       setBacklinkTimeseriesLoading(true);
       const res = await api.get(`/seo/share/${encodeURIComponent(token)}/backlinks/timeseries`, {
-        params: { range: Number(dateRange) || 30, group: "day" },
+        // Weekly UI uses last 4 weeks of daily data (28 days).
+        params: { range: 28, group: "day" },
       });
       const data = Array.isArray(res.data) ? res.data : [];
       const normalized = data
@@ -274,7 +275,7 @@ const ShareDashboardPage: React.FC = () => {
 
       // Match main dashboard: newest dates first (not sorted by volume)
       normalized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setBacklinkTimeseries(normalized.slice(0, 15));
+      setBacklinkTimeseries(normalized);
       setBacklinkTimeseriesError(null);
     } catch (error: any) {
       console.error("Failed to fetch backlink timeseries", error);
@@ -289,6 +290,46 @@ const ShareDashboardPage: React.FC = () => {
   useEffect(() => {
     fetchBacklinkTimeseries();
   }, [fetchBacklinkTimeseries]);
+
+  const weeklyBacklinkTimeseries = useMemo(() => {
+    const weeks = 4;
+    const weekStartsOn = 1 as const; // Monday
+    const now = new Date();
+
+    const buckets: Array<{
+      key: string; // yyyy-MM-dd (week start)
+      label: string;
+      newBacklinks: number;
+      lostBacklinks: number;
+    }> = [];
+    const byKey = new Map<string, (typeof buckets)[number]>();
+
+    for (let i = 0; i < weeks; i++) {
+      const ref = new Date(now);
+      ref.setDate(ref.getDate() - i * 7);
+      const ws = startOfWeek(ref, { weekStartsOn });
+      const we = endOfWeek(ref, { weekStartsOn });
+      const key = format(ws, "yyyy-MM-dd");
+      const label = `${format(ws, "MMM d")} – ${format(we, "MMM d")}`;
+      const bucket = { key, label, newBacklinks: 0, lostBacklinks: 0 };
+      buckets.push(bucket);
+      byKey.set(key, bucket);
+    }
+
+    for (const item of backlinkTimeseries) {
+      const dt = new Date(item.date);
+      if (!Number.isFinite(dt.getTime())) continue;
+      const ws = startOfWeek(dt, { weekStartsOn });
+      const key = format(ws, "yyyy-MM-dd");
+      const bucket = byKey.get(key);
+      if (!bucket) continue;
+      bucket.newBacklinks += Number(item.newBacklinks) || 0;
+      bucket.lostBacklinks += Number(item.lostBacklinks) || 0;
+    }
+
+    buckets.sort((a, b) => (a.key < b.key ? 1 : -1));
+    return buckets;
+  }, [backlinkTimeseries]);
 
   useEffect(() => {
     if (!token) return;
@@ -1050,7 +1091,7 @@ const ShareDashboardPage: React.FC = () => {
               <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
-                  <p className="text-sm text-gray-500">Daily backlinks acquired (last {dateRange} days)</p>
+                  <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
                 </div>
               </div>
               <div className="p-6 space-y-4">
@@ -1062,22 +1103,16 @@ const ShareDashboardPage: React.FC = () => {
                   <p className="text-sm text-gray-500">No backlink data available yet.</p>
                 ) : (() => {
                   const maxNewBacklinks =
-                    backlinkTimeseries.reduce((acc, cur) => Math.max(acc, cur.newBacklinks), 0) || 1;
+                    weeklyBacklinkTimeseries.reduce((acc, cur) => Math.max(acc, cur.newBacklinks), 0) || 1;
 
-                  return backlinkTimeseries.map((item) => {
-                    let displayDate = item.date;
-                    try {
-                      displayDate = format(new Date(item.date), "yyyy-MM-dd");
-                    } catch {
-                      // keep original date string if parsing fails
-                    }
-
-                    const widthPercent = Math.max((item.newBacklinks / maxNewBacklinks) * 100, 2);
+                  return weeklyBacklinkTimeseries.map((item) => {
+                    const widthPercent =
+                      item.newBacklinks === 0 ? 2 : Math.max((item.newBacklinks / maxNewBacklinks) * 100, 2);
 
                     return (
-                      <div key={`${item.date}-${item.newBacklinks}`} className="space-y-1">
+                      <div key={item.key} className="space-y-1">
                         <div className="flex items-center justify-between text-xs text-gray-500">
-                          <span>{displayDate}</span>
+                          <span>{item.label}</span>
                           <span className="font-medium text-gray-600">
                             {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
                           </span>

@@ -73,8 +73,10 @@ const WorkersPage: React.FC = () => {
       return false;
     }
 
-    if (!email.endsWith("@gmail.com")) {
-      setInviteError("Please enter a Gmail address ending with @gmail.com");
+    // Allow any valid email address (Gmail-only is not technically required).
+    const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!emailLooksValid) {
+      setInviteError("Please enter a valid email address");
       return false;
     }
 
@@ -285,7 +287,7 @@ const WorkersPage: React.FC = () => {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Invite Worker</h3>
-                <p className="text-sm text-gray-500">Invite a worker using their Gmail address.</p>
+                <p className="text-sm text-gray-500">Invite a worker using their email address.</p>
               </div>
               <button
                 onClick={() => {
@@ -310,16 +312,16 @@ const WorkersPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Gmail Address</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
                 <input
                   type="email"
                   value={inviteForm.email}
                   onChange={(e) => setInviteForm((prev) => ({ ...prev, email: e.target.value }))}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  placeholder="name@gmail.com"
+                  placeholder="name@company.com"
                   required
                 />
-                <p className="mt-1 text-xs text-gray-500">Only Gmail addresses are accepted.</p>
+                <p className="mt-1 text-xs text-gray-500">We’ll send an invitation link to this email.</p>
               </div>
 
               {inviteError && (

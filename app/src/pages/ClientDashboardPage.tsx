@@ -29,15 +29,15 @@ import {
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
-import { format } from "date-fns";
+import { endOfWeek, format, startOfWeek } from "date-fns";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import toast from "react-hot-toast";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
+import { logout } from "@/store/slices/authSlice";
 import {
   backlinksData,
-  workLogData,
 } from "@/data/reportSamples";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
@@ -62,6 +62,19 @@ interface ClientReport {
   };
   clientId: string;
 }
+
+type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
+type WorkLogTask = {
+  id: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  assignee?: { id: string; name?: string | null; email: string } | null;
+  createdBy?: { id: string; name?: string | null; email: string } | null;
+};
 
 interface BacklinkTimeseriesItem {
   date: string;
@@ -181,6 +194,7 @@ const ClientDashboardPage: React.FC = () => {
   const { clientId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const isClientPortal = location.pathname.startsWith("/client/");
   const reportOnly = user?.role === "CLIENT" || isClientPortal || Boolean((location.state as any)?.reportOnly);
@@ -207,6 +221,10 @@ const ClientDashboardPage: React.FC = () => {
   const [ga4DataRefreshKey, setGa4DataRefreshKey] = useState(0);
   const prevGa4ReadyRef = useRef<boolean>(false);
   const autoRefreshAttemptedRef = useRef<Record<string, boolean>>({});
+  const autoDataForSeoAttemptedRef = useRef<{
+    topPages: Record<string, boolean>;
+    backlinks: Record<string, boolean>;
+  }>({ topPages: {}, backlinks: {} });
   const [autoRefreshingGa4, setAutoRefreshingGa4] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
@@ -273,6 +291,25 @@ const ClientDashboardPage: React.FC = () => {
   const [clientReportEmailSubject, setClientReportEmailSubject] = useState("");
   const [clientReportSubmitting, setClientReportSubmitting] = useState(false);
 
+  // Work log (tasks linked to this client)
+  const [workLogTasks, setWorkLogTasks] = useState<WorkLogTask[]>([]);
+  const [workLogLoading, setWorkLogLoading] = useState(false);
+  const [workLogError, setWorkLogError] = useState<string | null>(null);
+  const [workLogModalOpen, setWorkLogModalOpen] = useState(false);
+  const [workLogModalMode, setWorkLogModalMode] = useState<"create" | "edit" | "view">("create");
+  const [selectedWorkLogTaskId, setSelectedWorkLogTaskId] = useState<string | null>(null);
+  const [workLogForm, setWorkLogForm] = useState<{
+    title: string;
+    description: string;
+    category: string;
+    status: TaskStatus;
+  }>({
+    title: "",
+    description: "",
+    category: "",
+    status: "TODO",
+  });
+
   const formatGa4ErrorMessage = useCallback((rawError: string | null): string => {
     if (!rawError) {
       return "GA4 connection failed. Please try again.";
@@ -323,6 +360,135 @@ const ClientDashboardPage: React.FC = () => {
     }
     return url;
   }, [dateRange, customStartDate, customEndDate]);
+
+  const fetchWorkLog = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setWorkLogLoading(true);
+      setWorkLogError(null);
+      const res = await api.get(`/tasks/worklog/${clientId}`);
+      const tasks = (Array.isArray(res.data) ? res.data : []) as WorkLogTask[];
+      setWorkLogTasks(tasks);
+    } catch (e: any) {
+      console.error("Failed to fetch work log", e);
+      setWorkLogError(e?.response?.data?.message || "Failed to load work log.");
+      setWorkLogTasks([]);
+    } finally {
+      setWorkLogLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (activeTab === "worklog") {
+      fetchWorkLog();
+    }
+  }, [activeTab, fetchWorkLog]);
+
+  const taskStatusLabel = (s: TaskStatus) => {
+    switch (s) {
+      case "DONE":
+        return "Completed";
+      case "IN_PROGRESS":
+        return "In Progress";
+      case "REVIEW":
+        return "In Review";
+      default:
+        return "Pending";
+    }
+  };
+
+  const taskStatusClass = (s: TaskStatus) => {
+    switch (s) {
+      case "DONE":
+        return "bg-green-100 text-green-800";
+      case "IN_PROGRESS":
+        return "bg-blue-100 text-blue-800";
+      case "REVIEW":
+        return "bg-purple-100 text-purple-800";
+      default:
+        return "bg-yellow-100 text-yellow-800";
+    }
+  };
+
+  const openWorkLogCreate = () => {
+    setWorkLogModalMode("create");
+    setSelectedWorkLogTaskId(null);
+    setWorkLogForm({ title: "", description: "", category: "", status: "TODO" });
+    setWorkLogModalOpen(true);
+  };
+
+  const openWorkLogView = (taskId: string) => {
+    const task = workLogTasks.find((t) => t.id === taskId);
+    if (task) {
+      setWorkLogForm({
+        title: task.title || "",
+        description: task.description || "",
+        category: task.category || "",
+        status: task.status,
+      });
+    }
+    setWorkLogModalMode("view");
+    setSelectedWorkLogTaskId(taskId);
+    setWorkLogModalOpen(true);
+  };
+
+  const openWorkLogEdit = (taskId: string) => {
+    const task = workLogTasks.find((t) => t.id === taskId);
+    if (task) {
+      setWorkLogForm({
+        title: task.title || "",
+        description: task.description || "",
+        category: task.category || "",
+        status: task.status,
+      });
+    }
+    setWorkLogModalMode("edit");
+    setSelectedWorkLogTaskId(taskId);
+    setWorkLogModalOpen(true);
+  };
+
+  const handleSaveWorkLog = async () => {
+    if (!clientId) return;
+    const payload = {
+      title: workLogForm.title.trim(),
+      description: workLogForm.description.trim() || undefined,
+      category: workLogForm.category.trim() || undefined,
+      status: workLogForm.status,
+      clientId,
+    };
+
+    if (!payload.title) {
+      toast.error("Title is required.");
+      return;
+    }
+
+    try {
+      if (workLogModalMode === "create") {
+        await api.post("/tasks", payload);
+        toast.success("Work log entry created.");
+      } else if (workLogModalMode === "edit" && selectedWorkLogTaskId) {
+        await api.put(`/tasks/${selectedWorkLogTaskId}`, payload);
+        toast.success("Work log entry updated.");
+      }
+      setWorkLogModalOpen(false);
+      await fetchWorkLog();
+    } catch (e: any) {
+      console.error("Work log save failed", e);
+      toast.error(e?.response?.data?.message || "Failed to save work log entry.");
+    }
+  };
+
+  const handleDeleteWorkLog = async (taskId: string) => {
+    if (!window.confirm("Delete this work log entry?")) return;
+    try {
+      await api.delete(`/tasks/${taskId}`);
+      toast.success("Work log entry deleted.");
+      await fetchWorkLog();
+    } catch (e: any) {
+      console.error("Work log delete failed", e);
+      toast.error(e?.response?.data?.message || "Failed to delete work log entry.");
+    }
+  };
 
   const handleExportPdf = useCallback(async () => {
     if (!dashboardContentRef.current) {
@@ -490,11 +656,34 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setRefreshingTopPages(true);
-      await api.post(`/seo/top-pages/${clientId}/refresh`);
-      toast.success("Top pages refreshed successfully!");
-      // Refetch top pages
-      const res = await api.get(`/seo/top-pages/${clientId}`);
-      setTopPages(res.data || []);
+      const refreshRes = await api.post(`/seo/top-pages/${clientId}/refresh`);
+      const skipped = Boolean(refreshRes?.data?.skipped);
+      const message = String(refreshRes?.data?.message || "").trim();
+
+      if (skipped) {
+        toast(message || "Using cached top pages data (refresh limited to every 48 hours).");
+      } else {
+        toast.success(message || "Top pages refreshed successfully!");
+      }
+
+      // Refetch top pages (same formatting as initial load)
+      const res = await api.get(`/seo/top-pages/${clientId}`, { params: { limit: 10 } });
+      const data = Array.isArray(res.data) ? res.data : [];
+      const formatted = data.map((item: any) => ({
+        url: item?.url || item?.page_address || "",
+        keywords: Number(item?.organic?.count ?? item?.metrics?.organic?.count ?? 0),
+        estimatedTraffic: Number(item?.organic?.etv ?? item?.metrics?.organic?.etv ?? 0),
+        top1: Number(item?.organic?.pos1 ?? item?.metrics?.organic?.pos_1 ?? 0),
+        top3: Number(item?.organic?.pos2_3 ?? item?.metrics?.organic?.pos_2_3 ?? 0),
+        top10: Number(item?.organic?.pos4_10 ?? item?.metrics?.organic?.pos_4_10 ?? 0),
+        newKeywords: Number(item?.organic?.isNew ?? item?.metrics?.organic?.is_new ?? 0),
+        upKeywords: Number(item?.organic?.isUp ?? item?.metrics?.organic?.is_up ?? 0),
+        downKeywords: Number(item?.organic?.isDown ?? item?.metrics?.organic?.is_down ?? 0),
+        lostKeywords: Number(item?.organic?.isLost ?? item?.metrics?.organic?.is_lost ?? 0),
+        paidTraffic: Number(item?.paid?.etv ?? item?.metrics?.paid?.etv ?? 0),
+      }));
+
+      setTopPages(formatted);
       setTopPagesError(null);
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to refresh top pages");
@@ -507,22 +696,33 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setRefreshingBacklinks(true);
-      await api.post(`/seo/backlinks/${clientId}/refresh`);
-      toast.success("Backlinks refreshed successfully!");
-      // Refetch backlink timeseries
+      const refreshRes = await api.post(`/seo/backlinks/${clientId}/refresh`);
+      const skipped = Boolean(refreshRes?.data?.skipped);
+      const message = String(refreshRes?.data?.message || "").trim();
+
+      if (skipped) {
+        toast(message || "Using cached backlinks data (refresh limited to every 48 hours).");
+      } else {
+        toast.success(message || "Backlinks refreshed successfully!");
+      }
+
+      // Refetch backlink timeseries (weekly UI uses last 4 weeks / 28 days)
       const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
-        params: { range: 30 },
+        params: { range: 28 },
       });
-      const normalized = (res.data || []).map((item: any) => ({
-        date: item.date,
-        newBacklinks: item.newBacklinks || 0,
-        lostBacklinks: item.lostBacklinks || 0,
-        newReferringDomains: item.newReferringDomains || 0,
-        lostReferringDomains: item.lostReferringDomains || 0,
-      })).sort((a: any, b: any) => {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      });
-      setBacklinkTimeseries(normalized.slice(0, 15));
+      const data = Array.isArray(res.data) ? res.data : [];
+      const normalized = data
+        .map((item: any) => ({
+          date: item.date,
+          newBacklinks: Number(item.newBacklinks ?? item.new_backlinks ?? 0),
+          lostBacklinks: Number(item.lostBacklinks ?? item.lost_backlinks ?? 0),
+          newReferringDomains: Number(item.newReferringDomains ?? item.new_referring_domains ?? 0),
+          lostReferringDomains: Number(item.lostReferringDomains ?? item.lost_referring_domains ?? 0),
+        }))
+        .filter((item) => item.date)
+        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      setBacklinkTimeseries(normalized);
       setBacklinkTimeseriesError(null);
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to refresh backlinks");
@@ -868,8 +1068,8 @@ const ClientDashboardPage: React.FC = () => {
     try {
       setBacklinkTimeseriesLoading(true);
       const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
-        // Backend supports `range` (days). Default to last 30 days.
-        params: { range: 30 },
+        // Weekly UI uses last 4 weeks of daily data (28 days).
+        params: { range: 28 },
       });
       const data = Array.isArray(res.data) ? res.data : [];
       const normalized = data
@@ -884,8 +1084,36 @@ const ClientDashboardPage: React.FC = () => {
 
       // Show most recent days first (matches API ordering / "New Links" intent)
       normalized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setBacklinkTimeseries(normalized.slice(0, 15));
+      setBacklinkTimeseries(normalized);
       setBacklinkTimeseriesError(null);
+
+      // If DB is empty, auto-refresh once for SUPER_ADMIN to populate data (throttled server-side).
+      if (
+        normalized.length === 0 &&
+        user?.role === "SUPER_ADMIN" &&
+        !autoDataForSeoAttemptedRef.current.backlinks[clientId]
+      ) {
+        autoDataForSeoAttemptedRef.current.backlinks[clientId] = true;
+        try {
+          await api.post(`/seo/backlinks/${clientId}/refresh`);
+          const res2 = await api.get(`/seo/backlinks/${clientId}/timeseries`, { params: { range: 28 } });
+          const data2 = Array.isArray(res2.data) ? res2.data : [];
+          const normalized2 = data2
+            .map((item: any) => ({
+              date: item.date,
+              newBacklinks: Number(item.newBacklinks ?? item.new_backlinks ?? 0),
+              lostBacklinks: Number(item.lostBacklinks ?? item.lost_backlinks ?? 0),
+              newReferringDomains: Number(item.newReferringDomains ?? item.new_referring_domains ?? 0),
+              lostReferringDomains: Number(item.lostReferringDomains ?? item.lost_referring_domains ?? 0),
+            }))
+            .filter((item) => item.date)
+            .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setBacklinkTimeseries(normalized2);
+          setBacklinkTimeseriesError(null);
+        } catch (refreshError) {
+          console.warn("Auto-refresh backlinks skipped/failed", refreshError);
+        }
+      }
     } catch (error: any) {
       console.error("Failed to fetch backlink timeseries", error);
       setBacklinkTimeseries([]);
@@ -895,11 +1123,51 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setBacklinkTimeseriesLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, user?.role]);
 
   useEffect(() => {
     fetchBacklinkTimeseries();
   }, [fetchBacklinkTimeseries]);
+
+  const weeklyBacklinkTimeseries = useMemo(() => {
+    const weeks = 4;
+    const weekStartsOn = 1 as const; // Monday
+    const now = new Date();
+
+    const buckets: Array<{
+      key: string; // yyyy-MM-dd (week start)
+      label: string;
+      newBacklinks: number;
+      lostBacklinks: number;
+    }> = [];
+    const byKey = new Map<string, (typeof buckets)[number]>();
+
+    for (let i = 0; i < weeks; i++) {
+      const ref = new Date(now);
+      ref.setDate(ref.getDate() - i * 7);
+      const ws = startOfWeek(ref, { weekStartsOn });
+      const we = endOfWeek(ref, { weekStartsOn });
+      const key = format(ws, "yyyy-MM-dd");
+      const label = `${format(ws, "MMM d")} – ${format(we, "MMM d")}`;
+      const bucket = { key, label, newBacklinks: 0, lostBacklinks: 0 };
+      buckets.push(bucket);
+      byKey.set(key, bucket);
+    }
+
+    for (const item of backlinkTimeseries) {
+      const dt = new Date(item.date);
+      if (!Number.isFinite(dt.getTime())) continue;
+      const ws = startOfWeek(dt, { weekStartsOn });
+      const key = format(ws, "yyyy-MM-dd");
+      const bucket = byKey.get(key);
+      if (!bucket) continue;
+      bucket.newBacklinks += Number(item.newBacklinks) || 0;
+      bucket.lostBacklinks += Number(item.lostBacklinks) || 0;
+    }
+
+    buckets.sort((a, b) => (a.key < b.key ? 1 : -1));
+    return buckets;
+  }, [backlinkTimeseries]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -927,6 +1195,37 @@ const ClientDashboardPage: React.FC = () => {
 
         setTopPages(formatted);
         setTopPagesError(null);
+
+        // If DB is empty, auto-refresh once for SUPER_ADMIN to populate data (throttled server-side).
+        if (
+          formatted.length === 0 &&
+          user?.role === "SUPER_ADMIN" &&
+          !autoDataForSeoAttemptedRef.current.topPages[clientId]
+        ) {
+          autoDataForSeoAttemptedRef.current.topPages[clientId] = true;
+          try {
+            await api.post(`/seo/top-pages/${clientId}/refresh`);
+            const res2 = await api.get(`/seo/top-pages/${clientId}`, { params: { limit: 10 } });
+            const data2 = Array.isArray(res2.data) ? res2.data : [];
+            const formatted2 = data2.map((item: any) => ({
+              url: item?.url || item?.page_address || "",
+              keywords: Number(item?.organic?.count ?? item?.metrics?.organic?.count ?? 0),
+              estimatedTraffic: Number(item?.organic?.etv ?? item?.metrics?.organic?.etv ?? 0),
+              top1: Number(item?.organic?.pos1 ?? item?.metrics?.organic?.pos_1 ?? 0),
+              top3: Number(item?.organic?.pos2_3 ?? item?.metrics?.organic?.pos_2_3 ?? 0),
+              top10: Number(item?.organic?.pos4_10 ?? item?.metrics?.organic?.pos_4_10 ?? 0),
+              newKeywords: Number(item?.organic?.isNew ?? item?.metrics?.organic?.is_new ?? 0),
+              upKeywords: Number(item?.organic?.isUp ?? item?.metrics?.organic?.is_up ?? 0),
+              downKeywords: Number(item?.organic?.isDown ?? item?.metrics?.organic?.is_down ?? 0),
+              lostKeywords: Number(item?.organic?.isLost ?? item?.metrics?.organic?.is_lost ?? 0),
+              paidTraffic: Number(item?.paid?.etv ?? item?.metrics?.paid?.etv ?? 0),
+            }));
+            setTopPages(formatted2);
+            setTopPagesError(null);
+          } catch (refreshError) {
+            console.warn("Auto-refresh top pages skipped/failed", refreshError);
+          }
+        }
       } catch (error: any) {
         console.error("Failed to fetch top pages", error);
         setTopPages([]);
@@ -939,7 +1238,7 @@ const ClientDashboardPage: React.FC = () => {
     };
 
     fetchTopPages();
-  }, [clientId]);
+  }, [clientId, user?.role]);
 
   const fetchTopEvents = useCallback(async () => {
     if (!clientId) return;
@@ -1533,18 +1832,32 @@ const ClientDashboardPage: React.FC = () => {
     );
   }
 
+  const handleBackToLogin = () => {
+    dispatch(logout() as any);
+    navigate("/login", { replace: true });
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center space-x-3">
-            {!reportOnly && (
+            {!reportOnly ? (
               <button
                 onClick={() => navigate(-1)}
                 className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
                 <ArrowLeft className="h-4 w-4" />
                 <span>Back to Clients</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleBackToLogin}
+                className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back to Login</span>
               </button>
             )}
           </div>
@@ -2473,7 +2786,7 @@ const ClientDashboardPage: React.FC = () => {
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
-                <p className="text-sm text-gray-500">Daily backlinks acquired (last 30 days)</p>
+                <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
               </div>
               {user?.role === "SUPER_ADMIN" && (
               <button
@@ -2507,22 +2820,16 @@ const ClientDashboardPage: React.FC = () => {
                 <p className="text-sm text-gray-500">No backlink data available yet.</p>
               ) : (() => {
                 const maxNewBacklinks =
-                  backlinkTimeseries.reduce((acc, cur) => Math.max(acc, cur.newBacklinks), 0) || 1;
+                  weeklyBacklinkTimeseries.reduce((acc, cur) => Math.max(acc, cur.newBacklinks), 0) || 1;
 
-                return backlinkTimeseries.map((item) => {
-                  let displayDate = item.date;
-                  try {
-                    displayDate = format(new Date(item.date), "yyyy-MM-dd");
-                  } catch {
-                    // keep original date string if parsing fails
-                  }
-
-                  const widthPercent = Math.max((item.newBacklinks / maxNewBacklinks) * 100, 2);
+                return weeklyBacklinkTimeseries.map((item) => {
+                  const widthPercent =
+                    item.newBacklinks === 0 ? 2 : Math.max((item.newBacklinks / maxNewBacklinks) * 100, 2);
 
                   return (
-                    <div key={`${item.date}-${item.newBacklinks}`} className="space-y-1">
+                    <div key={item.key} className="space-y-1">
                       <div className="flex items-center justify-between text-xs text-gray-500">
-                        <span>{displayDate}</span>
+                        <span>{item.label}</span>
                         <span className="font-medium text-gray-600">
                           {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
                         </span>
@@ -2862,12 +3169,16 @@ const ClientDashboardPage: React.FC = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900">Work Log</h2>
-                <button
-                  className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center"
-                  title="Add entry"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
+                {!reportOnly && (
+                  <button
+                    type="button"
+                    onClick={openWorkLogCreate}
+                    className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center"
+                    title="Add entry"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                )}
               </div>
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
@@ -2882,51 +3193,185 @@ const ClientDashboardPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {workLogData.map((log, index) => (
-                        <tr key={index} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{log.date}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{log.workType}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{log.description}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span
-                              className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                log.status === "Completed"
-                                  ? "bg-green-100 text-green-800"
-                                  : log.status === "In Progress"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }`}
-                            >
-                              {log.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                            <button
-                              className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
-                              title="View entry"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            <button
-                              className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
-                              title="Edit entry"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                            <button
-                              className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
-                              title="Delete entry"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                      {workLogLoading ? (
+                        <tr>
+                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                            Loading work log...
                           </td>
                         </tr>
-                      ))}
+                      ) : workLogError ? (
+                        <tr>
+                          <td className="px-6 py-6 text-sm text-rose-600" colSpan={5}>
+                            {workLogError}
+                          </td>
+                        </tr>
+                      ) : workLogTasks.length === 0 ? (
+                        <tr>
+                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                            No work logged yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        workLogTasks.map((task) => {
+                          const dateRaw = task.updatedAt || task.createdAt;
+                          const date = (() => {
+                            try {
+                              return new Date(dateRaw).toISOString().slice(0, 10);
+                            } catch {
+                              return "";
+                            }
+                          })();
+                          const workType = (task.category || "General").trim() || "General";
+                          const description = (task.description || task.title || "").trim();
+                          return (
+                            <tr key={task.id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{date}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{description}</td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${taskStatusClass(task.status)}`}>
+                                  {taskStatusLabel(task.status)}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                                <button
+                                  type="button"
+                                  className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
+                                  title="View entry"
+                                  onClick={() => openWorkLogView(task.id)}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
+                                {!reportOnly && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
+                                      title="Edit entry"
+                                      onClick={() => openWorkLogEdit(task.id)}
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
+                                      title="Delete entry"
+                                      onClick={() => handleDeleteWorkLog(task.id)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
             </div>
+          )}
+
+          {workLogModalOpen && createPortal(
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/50"
+                onClick={() => setWorkLogModalOpen(false)}
+              />
+              <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-200">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {workLogModalMode === "create"
+                      ? "Add Work Log Entry"
+                      : workLogModalMode === "edit"
+                      ? "Edit Work Log Entry"
+                      : "Work Log Entry"}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setWorkLogModalOpen(false)}
+                    className="p-2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="px-6 py-5 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                    <input
+                      type="text"
+                      value={workLogForm.title}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, title: e.target.value })}
+                      disabled={workLogModalMode === "view"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      placeholder="e.g. Optimized homepage title tags"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                    <input
+                      type="text"
+                      value={workLogForm.category}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
+                      disabled={workLogModalMode === "view"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      placeholder="e.g. Technical, Content, Link Building"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <textarea
+                      value={workLogForm.description}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
+                      disabled={workLogModalMode === "view"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      rows={4}
+                      placeholder="Details about the work performed..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select
+                      value={workLogForm.status}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
+                      disabled={workLogModalMode === "view"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                    >
+                      <option value="TODO">Pending</option>
+                      <option value="IN_PROGRESS">In Progress</option>
+                      <option value="REVIEW">In Review</option>
+                      <option value="DONE">Completed</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setWorkLogModalOpen(false)}
+                    className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    Close
+                  </button>
+                  {workLogModalMode !== "view" && (
+                    <button
+                      type="button"
+                      onClick={handleSaveWorkLog}
+                      className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                    >
+                      Save
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>,
+            document.body
           )}
         </>
       )}
@@ -3311,7 +3756,7 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
-                      <p className="text-sm text-gray-500">Daily backlinks acquired (last 30 days)</p>
+                      <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
                     </div>
                     {user?.role === "SUPER_ADMIN" && (
                       <button
@@ -3345,22 +3790,16 @@ const ClientDashboardPage: React.FC = () => {
                       <p className="text-sm text-gray-500">No backlink data available yet.</p>
                     ) : (() => {
                       const maxNewBacklinks =
-                        backlinkTimeseries.reduce((acc, cur) => Math.max(acc, cur.newBacklinks), 0) || 1;
+                        weeklyBacklinkTimeseries.reduce((acc, cur) => Math.max(acc, cur.newBacklinks), 0) || 1;
 
-                      return backlinkTimeseries.map((item) => {
-                        let displayDate = item.date;
-                        try {
-                          displayDate = format(new Date(item.date), "yyyy-MM-dd");
-                        } catch {
-                          // keep original date string if parsing fails
-                        }
-
-                        const widthPercent = Math.max((item.newBacklinks / maxNewBacklinks) * 100, 2);
+                      return weeklyBacklinkTimeseries.map((item) => {
+                        const widthPercent =
+                          item.newBacklinks === 0 ? 2 : Math.max((item.newBacklinks / maxNewBacklinks) * 100, 2);
 
                         return (
-                          <div key={`${item.date}-${item.newBacklinks}`} className="space-y-1">
+                          <div key={item.key} className="space-y-1">
                             <div className="flex items-center justify-between text-xs text-gray-500">
-                              <span>{displayDate}</span>
+                              <span>{item.label}</span>
                               <span className="font-medium text-gray-600">
                                 {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
                               </span>

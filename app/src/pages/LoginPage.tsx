@@ -29,6 +29,8 @@ const LoginPage = () => {
         return "Agency portal — client access";
       case "ADMIN":
         return "Admin portal";
+      case "SUPER_ADMIN":
+        return "Super Admin portal — full access";
       default:
         return "Sign in to continue";
     }

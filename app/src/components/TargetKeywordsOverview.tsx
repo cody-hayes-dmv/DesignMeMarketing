@@ -473,7 +473,11 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                       <td className="px-6 py-4 whitespace-nowrap">
                         {(() => {
                           const change = getPositionChange(keyword.googlePosition, keyword.previousPosition);
-                          if (change === null || change === 0) {
+                          // If we don't have both positions, we can't compute change.
+                          if (change === null) {
+                            return <div className="text-sm text-gray-400">—</div>;
+                          }
+                          if (change === 0) {
                             return <div className="text-sm text-gray-600">0</div>;
                           }
                           const isPositive = change < 0; // Negative change means moved up (better position)

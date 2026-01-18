@@ -101,6 +101,68 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
+// Work log for a client (tasks associated with clientId)
+// IMPORTANT: This route must be before "/:id"
+router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: { select: { agencyId: true } },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+
+    let hasAccess = isAdmin || isOwner;
+    if (!hasAccess) {
+      const memberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const userAgencyIds = memberships.map((m) => m.agencyId);
+      const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+      hasAccess = clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const tasks = await prisma.task.findMany({
+      where: { clientId },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        category: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        assignee: { select: { id: true, name: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    return res.json(tasks);
+  } catch (error) {
+    console.error("Fetch client work log error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 
 // Get single task
 router.get("/:id", authenticateToken, async (req, res) => {

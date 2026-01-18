@@ -2,7 +2,7 @@ import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import zoesiBlueLogoUrl from "@/assets/zoesi-blue.png";
 
-type LoginRole = "ADMIN" | "AGENCY" | "CLIENT" | "WORKER";
+type LoginRole = "SUPER_ADMIN" | "ADMIN" | "AGENCY" | "CLIENT" | "WORKER";
 
 const getBrandName = () => {
   const host = window.location.hostname;
@@ -23,6 +23,7 @@ const roleCards: Array<{
   title: string;
   subtitle: string;
 }> = [
+  { role: "SUPER_ADMIN", title: "Super Admin", subtitle: "Full access." },
   { role: "ADMIN", title: "Admin", subtitle: "Manage agencies, clients, and reporting." },
   { role: "AGENCY", title: "Agency", subtitle: "View and manage your clients." },
   { role: "CLIENT", title: "Client", subtitle: "View your report only." },
