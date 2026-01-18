@@ -340,6 +340,7 @@ const ClientDashboardPage: React.FC = () => {
     try {
       setExportingPdf(true);
       document.body.style.overflow = "hidden";
+      element.classList.add("pdf-exporting");
 
       const canvas = await html2canvas(element, {
         scale: 2,
@@ -378,6 +379,7 @@ const ClientDashboardPage: React.FC = () => {
       toast.error(error?.message || "Failed to export dashboard PDF. Please try again.");
     } finally {
       document.body.style.overflow = previousOverflow;
+      element.classList.remove("pdf-exporting");
       setExportingPdf(false);
     }
   }, [activeTab, client?.name]);
@@ -507,15 +509,8 @@ const ClientDashboardPage: React.FC = () => {
       await api.post(`/seo/backlinks/${clientId}/refresh`);
       toast.success("Backlinks refreshed successfully!");
       // Refetch backlink timeseries
-      const dateTo = new Date();
-      const dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - 30);
       const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
-        params: {
-          dateFrom: dateFrom.toISOString().split('T')[0],
-          dateTo: dateTo.toISOString().split('T')[0],
-          groupRange: "day",
-        },
+        params: { range: 30 },
       });
       const normalized = (res.data || []).map((item: any) => ({
         date: item.date,
@@ -872,7 +867,8 @@ const ClientDashboardPage: React.FC = () => {
     try {
       setBacklinkTimeseriesLoading(true);
       const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
-        params: { range: 30, group: "day" },
+        // Backend supports `range` (days). Default to last 30 days.
+        params: { range: 30 },
       });
       const data = Array.isArray(res.data) ? res.data : [];
       const normalized = data
@@ -885,13 +881,8 @@ const ClientDashboardPage: React.FC = () => {
         }))
         .filter((item) => item.date);
 
-      // Sort by new link count (descending), then by date (descending) as tiebreaker
-      normalized.sort((a, b) => {
-        if (b.newBacklinks !== a.newBacklinks) {
-          return b.newBacklinks - a.newBacklinks;
-        }
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      });
+      // Show most recent days first (matches API ordering / "New Links" intent)
+      normalized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setBacklinkTimeseries(normalized.slice(0, 15));
       setBacklinkTimeseriesError(null);
     } catch (error: any) {
@@ -1655,6 +1646,7 @@ const ClientDashboardPage: React.FC = () => {
               type="button"
               onClick={handleRefreshDashboard}
               disabled={refreshingDashboard}
+              data-pdf-hide="true"
               className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
               title="Refresh dashboard data from DataForSEO and GA4"
             >
@@ -1742,142 +1734,145 @@ const ClientDashboardPage: React.FC = () => {
         <>
           {!reportOnly && activeTab === "dashboard" && (
             <div ref={dashboardContentRef} className="space-y-8">
-              {/* GA4 Connection Status - Show loading skeleton while checking */}
-              {ga4StatusLoading ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 animate-pulse">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="h-6 bg-gray-200 rounded w-48 mb-3"></div>
-                      <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
-                      <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
-                      <div className="h-10 bg-gray-200 rounded w-32"></div>
+              {/* GA4 connection UI (hidden in PDF export) */}
+              <div data-pdf-hide="true">
+                {/* GA4 Connection Status - Show loading skeleton while checking */}
+                {ga4StatusLoading ? (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 animate-pulse">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="h-6 bg-gray-200 rounded w-48 mb-3"></div>
+                        <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
+                        <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
+                        <div className="h-10 bg-gray-200 rounded w-32"></div>
+                      </div>
+                      <div className="h-5 w-5 bg-gray-200 rounded"></div>
                     </div>
-                    <div className="h-5 w-5 bg-gray-200 rounded"></div>
                   </div>
-                </div>
-              ) : (
-                <>
-                  {/* GA4 Connection Error Banner - Show when connection is invalid */}
-                  {ga4ConnectionError && (
-                    <div className="bg-red-50 border border-red-200 rounded-xl p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-red-900 mb-2 flex items-center gap-2">
-                            <AlertTriangle className="h-5 w-5" />
-                            GA4 Connection Invalid
-                          </h3>
-                          <p className="text-sm text-red-800 mb-4">
-                            {ga4ConnectionError} GA4 data has been cleared to prevent displaying stale information.
-                          </p>
+                ) : (
+                  <>
+                    {/* GA4 Connection Error Banner - Show when connection is invalid */}
+                    {ga4ConnectionError && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h3 className="text-lg font-semibold text-red-900 mb-2 flex items-center gap-2">
+                              <AlertTriangle className="h-5 w-5" />
+                              GA4 Connection Invalid
+                            </h3>
+                            <p className="text-sm text-red-800 mb-4">
+                              {ga4ConnectionError} GA4 data has been cleared to prevent displaying stale information.
+                            </p>
+                            <button
+                              onClick={handleConnectGA4}
+                              disabled={ga4Connecting}
+                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {ga4Connecting ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span>Connecting...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw className="h-4 w-4" />
+                                  <span>Reconnect GA4</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                           <button
-                            onClick={handleConnectGA4}
-                            disabled={ga4Connecting}
-                            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                            onClick={() => setGa4ConnectionError(null)}
+                            className="text-red-600 hover:text-red-800"
+                            title="Dismiss warning"
                           >
-                            {ga4Connecting ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <span>Connecting...</span>
-                              </>
-                            ) : (
-                              <>
-                                <RefreshCw className="h-4 w-4" />
-                                <span>Reconnect GA4</span>
-                              </>
-                            )}
+                            <X className="h-5 w-5" />
                           </button>
                         </div>
-                        <button
-                          onClick={() => setGa4ConnectionError(null)}
-                          className="text-red-600 hover:text-red-800"
-                          title="Dismiss warning"
-                        >
-                          <X className="h-5 w-5" />
-                        </button>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* One-time GA4 auto-refresh indicator */}
-                  {autoRefreshingGa4 && (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                      <div className="flex items-center gap-3 text-emerald-900">
-                        <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
-                        <div className="text-sm">
-                          <span className="font-medium">Refreshing GA4 data…</span>{" "}
-                          <span className="text-emerald-800">Just a moment while we pull the latest numbers.</span>
+                    {/* One-time GA4 auto-refresh indicator */}
+                    {autoRefreshingGa4 && (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                        <div className="flex items-center gap-3 text-emerald-900">
+                          <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+                          <div className="text-sm">
+                            <span className="font-medium">Refreshing GA4 data…</span>{" "}
+                            <span className="text-emerald-800">Just a moment while we pull the latest numbers.</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
-                  
-                  {/* GA4 Connection Banner */}
-                  {/* Show banner when GA4 is not connected (false = confirmed not connected) */}
-                  {ga4Connected === false && !ga4ConnectionError && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-yellow-900 mb-2">
-                            Connect Google Analytics 4
-                          </h3>
-                          <p className="text-sm text-yellow-800 mb-4">
-                            To view real traffic and analytics data, please connect your Google Analytics 4 account. 
-                            Without GA4 connection, traffic metrics cannot be displayed.
-                          </p>
+                    )}
+                    
+                    {/* GA4 Connection Banner */}
+                    {/* Show banner when GA4 is not connected (false = confirmed not connected) */}
+                    {ga4Connected === false && !ga4ConnectionError && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h3 className="text-lg font-semibold text-yellow-900 mb-2">
+                              Connect Google Analytics 4
+                            </h3>
+                            <p className="text-sm text-yellow-800 mb-4">
+                              To view real traffic and analytics data, please connect your Google Analytics 4 account. 
+                              Without GA4 connection, traffic metrics cannot be displayed.
+                            </p>
+                            <button
+                              onClick={handleConnectGA4}
+                              disabled={ga4Connecting}
+                              className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {ga4Connecting ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span>Connecting...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Search className="h-4 w-4" />
+                                  <span>Connect GA4</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                           <button
-                            onClick={handleConnectGA4}
-                            disabled={ga4Connecting}
-                            className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                            onClick={() => setGa4Connected(null)}
+                            className="text-yellow-600 hover:text-yellow-800 ml-4"
                           >
-                            {ga4Connecting ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <span>Connecting...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Search className="h-4 w-4" />
-                                <span>Connect GA4</span>
-                              </>
-                            )}
+                            <X className="h-5 w-5" />
                           </button>
                         </div>
-                        <button
-                          onClick={() => setGa4Connected(null)}
-                          className="text-yellow-600 hover:text-yellow-800 ml-4"
-                        >
-                          <X className="h-5 w-5" />
-                        </button>
+                      </div>
+                    )}
+                    {/* GA4 Connected Banner with Disconnect button */}
+                    {ga4Connected === true && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                        <TrendingUp className="h-4 w-4 text-emerald-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-900">
+                          GA4 is connected
+                        </p>
+                        <p className="text-xs text-emerald-800">
+                          You can disconnect and connect a different GA4 property at any time.
+                        </p>
                       </div>
                     </div>
-                  )}
-                  {/* GA4 Connected Banner with Disconnect button */}
-                  {ga4Connected === true && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                      <TrendingUp className="h-4 w-4 text-emerald-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-900">
-                        GA4 is connected
-                      </p>
-                      <p className="text-xs text-emerald-800">
-                        You can disconnect and connect a different GA4 property at any time.
-                      </p>
-                    </div>
+                    <button
+                      onClick={handleDisconnectGA4}
+                      disabled={ga4Connecting}
+                      className="bg-white border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
+                    </button>
                   </div>
-                  <button
-                    onClick={handleDisconnectGA4}
-                    disabled={ga4Connecting}
-                    className="bg-white border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
-                  </button>
-                </div>
-                  )}
-                </>
-              )}
+                    )}
+                  </>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
@@ -2211,6 +2206,7 @@ const ClientDashboardPage: React.FC = () => {
                       type="button"
                       onClick={handleRefreshTopPages}
                       disabled={refreshingTopPages}
+                      data-pdf-hide="true"
                       className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
                       title="Refresh top pages from DataForSEO"
                     >
@@ -2483,6 +2479,7 @@ const ClientDashboardPage: React.FC = () => {
                 type="button"
                   onClick={handleRefreshBacklinks}
                   disabled={refreshingBacklinks}
+                  data-pdf-hide="true"
                   className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
                   title="Refresh backlinks from DataForSEO"
                 >
@@ -3320,6 +3317,7 @@ const ClientDashboardPage: React.FC = () => {
                         type="button"
                         onClick={handleRefreshBacklinks}
                         disabled={refreshingBacklinks}
+                        data-pdf-hide="true"
                         className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
                         title="Refresh backlinks from DataForSEO"
                       >

@@ -869,6 +869,8 @@ export async function saveGA4MetricsToDB(
         clientId: clientId,
       },
       update: {
+        startDate,
+        endDate,
         activeUsers: trafficData.activeUsers,
         eventCount: trafficData.eventCount,
         newUsers: trafficData.newUsers,
@@ -961,53 +963,22 @@ export async function getGA4MetricsFromDB(
 } | null> {
   try {
     // Find the most recent metrics snapshot that overlaps with the requested date range
-    // Use raw query to handle missing columns (totalUsers, engagedSessions, visitorSources) gracefully
-    // Try to select visitorSources, but handle if column doesn't exist
-    let metrics: any[];
-    try {
-      metrics = await prisma.$queryRaw<any[]>`
-        SELECT 
-          totalSessions, organicSessions, directSessions, referralSessions, paidSessions,
-          bounceRate, avgSessionDuration, pagesPerSession,
-          conversions, conversionRate,
-          activeUsers, eventCount, newUsers, keyEvents,
-          newUsersTrend, activeUsersTrend, events,
-          COALESCE(totalUsers, activeUsers) as totalUsers,
-          COALESCE(engagedSessions, keyEvents) as engagedSessions,
-          engagementRate,
-          visitorSources
-        FROM ga4_metrics
-        WHERE clientId = ${clientId}
-          AND startDate <= ${endDate}
-          AND endDate >= ${startDate}
-        ORDER BY endDate DESC
-        LIMIT 1
-      `;
-    } catch (error: any) {
-      // If visitorSources column doesn't exist, retry without it
-      if (error.code === 'P2010' && error.meta?.message?.includes('visitorSources')) {
-        metrics = await prisma.$queryRaw<any[]>`
-          SELECT 
-            totalSessions, organicSessions, directSessions, referralSessions, paidSessions,
-            bounceRate, avgSessionDuration, pagesPerSession,
-            conversions, conversionRate,
-            activeUsers, eventCount, newUsers, keyEvents,
-            newUsersTrend, activeUsersTrend, events,
-            COALESCE(totalUsers, activeUsers) as totalUsers,
-            COALESCE(engagedSessions, keyEvents) as engagedSessions,
-            engagementRate,
-            NULL as visitorSources
-          FROM ga4_metrics
-          WHERE clientId = ${clientId}
-            AND startDate <= ${endDate}
-            AND endDate >= ${startDate}
-          ORDER BY endDate DESC
-          LIMIT 1
-        `;
-      } else {
-        throw error;
-      }
-    }
+    // IMPORTANT: Some DBs may not have newer GA4 columns yet (totalUsers, engagedSessions, engagementRate, visitorSources).
+    // To avoid "Unknown column" crashes, only select the stable base columns and compute fallbacks in JS.
+    const metrics = await prisma.$queryRaw<any[]>`
+      SELECT
+        totalSessions, organicSessions, directSessions, referralSessions, paidSessions,
+        bounceRate, avgSessionDuration, pagesPerSession,
+        conversions, conversionRate,
+        activeUsers, eventCount, newUsers, keyEvents,
+        newUsersTrend, activeUsersTrend, events
+      FROM ga4_metrics
+      WHERE clientId = ${clientId}
+        AND startDate <= ${endDate}
+        AND endDate >= ${startDate}
+      ORDER BY endDate DESC
+      LIMIT 1
+    `;
 
     if (!metrics || metrics.length === 0) {
       return null;
@@ -1025,10 +996,6 @@ export async function getGA4MetricsFromDB(
     const events = metric.events
       ? (Array.isArray(metric.events) ? metric.events : (typeof metric.events === 'string' ? JSON.parse(metric.events) : metric.events)) as Array<{ name: string; count: number; change?: string }>
       : null;
-    const visitorSources = metric.visitorSources
-      ? (Array.isArray(metric.visitorSources) ? metric.visitorSources : (typeof metric.visitorSources === 'string' ? JSON.parse(metric.visitorSources) : metric.visitorSources)) as Array<{ source: string; users: number }>
-      : null;
-
     return {
       totalSessions: Number(metric.totalSessions),
       organicSessions: Number(metric.organicSessions),
@@ -1047,11 +1014,11 @@ export async function getGA4MetricsFromDB(
       newUsersTrend,
       activeUsersTrend,
       events,
-      visitorSources,
-      // Handle optional fields that might not exist in database yet
-      totalUsers: metric.totalUsers ? Number(metric.totalUsers) : Number(metric.activeUsers),
-      engagedSessions: metric.engagedSessions ? Number(metric.engagedSessions) : Number(metric.keyEvents),
-      engagementRate: metric.engagementRate ? Number(metric.engagementRate) : null,
+      visitorSources: null,
+      // Fallbacks (DB may not have these columns yet)
+      totalUsers: Number(metric.activeUsers),
+      engagedSessions: Number(metric.keyEvents),
+      engagementRate: null,
     };
   } catch (error: any) {
     console.error('[GA4] Failed to get metrics from database:', error);

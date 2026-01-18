@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { login, clearError } from "@/store/slices/authSlice";
-import { BarChart3, Mail, Lock, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import zoesiLogo from "@/assets/zoesi-blue.png";
 
 const LoginPage = () => {
   const dispatch = useDispatch();
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { loading, error } = useSelector((state: RootState) => state.auth);
   const [formData, setFormData] = useState({
@@ -56,13 +58,8 @@ const LoginPage = () => {
     });
   };
 
-  const goBackToMarketing = () => {
-    window.location.href = "http://localhost:3000";
-  };
-
-
   const goBackToPortal = () => {
-    window.location.href = "http://localhost:3001/portal";
+    navigate("/portal");
   };
 
   return (
@@ -79,10 +76,10 @@ const LoginPage = () => {
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <BarChart3 className="h-12 w-12 text-primary-600" />
+              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              Welcome Back
+              ZOESI
             </h1>
             <p className="text-gray-600">
               {loginSubtitle}

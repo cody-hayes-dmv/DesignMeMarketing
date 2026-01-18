@@ -11,3 +11,17 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* PDF export mode (used by ClientDashboardPage export) */
+.pdf-exporting [data-pdf-hide="true"] {
+  display: none !important;
+}
+
+.pdf-exporting .shadow,
+.pdf-exporting .shadow-sm,
+.pdf-exporting .shadow-md,
+.pdf-exporting .shadow-lg,
+.pdf-exporting .shadow-xl,
+.pdf-exporting .shadow-2xl {
+  box-shadow: none !important;
+}

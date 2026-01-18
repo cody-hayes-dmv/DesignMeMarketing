@@ -1059,6 +1059,8 @@ router.get("/share/:token/dashboard", async (req, res) => {
             conversions: dbMetrics.conversions,
             conversionRate: dbMetrics.conversionRate,
             activeUsers: dbMetrics.activeUsers,
+            // Keep parity with main dashboard metric naming
+            engagedSessions: dbMetrics.engagedSessions,
             eventCount: dbMetrics.eventCount,
             newUsers: dbMetrics.newUsers,
             keyEvents: dbMetrics.keyEvents,
@@ -1079,6 +1081,20 @@ router.get("/share/:token/dashboard", async (req, res) => {
           }
           trafficDataSource = "ga4";
           
+          // Persist the fetched GA4 snapshot so share links don't refetch (and timeout) every view.
+          // This also makes the share dashboard stable if GA4 is temporarily unavailable later.
+          try {
+            await saveGA4MetricsToDB(
+              clientId,
+              startDate,
+              endDate,
+              ga4Data as any,
+              (ga4EventsData as any) ?? undefined
+            );
+          } catch (saveError) {
+            console.warn("[Share Dashboard] Failed to save GA4 snapshot to DB:", saveError);
+          }
+
           console.log(`[Share Dashboard] ✅ Successfully fetched GA4 data from API for client ${clientId}`);
         }
       } catch (ga4Error: any) {
@@ -1186,8 +1202,13 @@ router.get("/share/:token/dashboard", async (req, res) => {
       eventCount,
       newUsers,
       keyEvents,
+      // Backward-compatible names used by the main dashboard UI
+      totalUsers: activeUsers,
+      firstTimeVisitors: newUsers,
+      engagedVisitors: ga4Data?.engagedSessions ?? null,
       newUsersTrend: ga4Data?.newUsersTrend || null,
       activeUsersTrend: ga4Data?.activeUsersTrend || null,
+      totalUsersTrend: ga4Data?.activeUsersTrend || null,
       isGA4Connected: isGA4Connected,
       dataSources: {
         traffic: trafficDataSource === "ga4" ? "ga4" : (trafficSourceSummary ? "database" : latestReport ? "seo_report" : "fallback"),
@@ -1376,28 +1397,101 @@ router.get("/share/:token/traffic-sources", async (req, res) => {
     }
 
     const clientId = tokenData.clientId;
+    const { period = "30", start, end } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
-      select: { id: true, domain: true }
+      select: { id: true, domain: true, ga4RefreshToken: true, ga4PropertyId: true, ga4ConnectedAt: true }
     });
 
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    // Read from database only
+    // Calculate date range (same behavior as the authenticated endpoint)
+    let startDate: Date;
+    let endDate: Date;
+    if (start && end) {
+      startDate = new Date(start as string);
+      endDate = new Date(end as string);
+      if (endDate > new Date()) {
+        endDate = new Date();
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({ message: "Start date must be before end date" });
+      }
+    } else {
+      const days = parseInt(period as string);
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      endDate = new Date();
+    }
+
+    // Prefer GA4-derived traffic sources so share matches the main dashboard.
+    const isGA4Connected = !!(client.ga4RefreshToken && client.ga4PropertyId && client.ga4ConnectedAt);
+    if (isGA4Connected) {
+      try {
+        const { fetchGA4TrafficData } = await import("../lib/ga4.js");
+        const ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
+
+        const breakdown: Array<{ name: string; value: number }> = [];
+        if (ga4Data.organicSessions > 0) breakdown.push({ name: "Organic", value: ga4Data.organicSessions });
+        if (ga4Data.directSessions > 0) breakdown.push({ name: "Direct", value: ga4Data.directSessions });
+        if (ga4Data.referralSessions > 0) breakdown.push({ name: "Referral", value: ga4Data.referralSessions });
+        if (ga4Data.paidSessions > 0) breakdown.push({ name: "Paid", value: ga4Data.paidSessions });
+
+        const knownSessions =
+          ga4Data.organicSessions + ga4Data.directSessions + ga4Data.referralSessions + ga4Data.paidSessions;
+        const otherSessions = ga4Data.totalSessions - knownSessions;
+        if (otherSessions > 0) {
+          breakdown.push({ name: "Other", value: otherSessions });
+        }
+
+        breakdown.sort((a, b) => b.value - a.value);
+
+        return res.json({
+          breakdown,
+          totalKeywords: 0,
+          totalEstimatedTraffic: ga4Data.totalSessions,
+          organicEstimatedTraffic: ga4Data.organicSessions,
+          averageRank: null,
+          rankSampleSize: 0,
+        });
+      } catch (ga4Error) {
+        console.warn("[Share Dashboard] Failed to fetch GA4 traffic sources, falling back to DB:", ga4Error);
+      }
+    }
+
+    // Fallback: read from database (DataForSEO-based traffic sources)
     const trafficSources = await prisma.trafficSource.findMany({
       where: { clientId },
       orderBy: { value: "desc" },
     });
 
-    const breakdown = trafficSources.map((ts) => ({
-      name: ts.name,
-      value: ts.value,
-    })).filter((item) => item.value > 0);
+    const firstSource = trafficSources[0];
+    const breakdown = trafficSources
+      .map((ts) => ({ name: ts.name, value: ts.value }))
+      .filter((item) => item.value > 0);
 
-    res.json(breakdown);
+    const trafficSourceSummary = firstSource
+      ? {
+          breakdown,
+          totalKeywords: firstSource.totalKeywords,
+          totalEstimatedTraffic: firstSource.totalEstimatedTraffic,
+          organicEstimatedTraffic: firstSource.organicEstimatedTraffic,
+          averageRank: firstSource.averageRank,
+          rankSampleSize: firstSource.rankSampleSize,
+        }
+      : {
+          breakdown,
+          totalKeywords: 0,
+          totalEstimatedTraffic: 0,
+          organicEstimatedTraffic: 0,
+          averageRank: null,
+          rankSampleSize: 0,
+        };
+
+    res.json(trafficSourceSummary);
   } catch (error: any) {
     console.error("Share traffic sources fetch error:", error);
     res.status(500).json({ message: "Failed to fetch traffic sources data" });
@@ -1414,7 +1508,7 @@ router.get("/share/:token/events/top", async (req, res) => {
     }
 
     const clientId = tokenData.clientId;
-    const { period = "30", start, end, limit = "10" } = req.query;
+    const { period = "30", start, end, limit = "10", type = "events" } = req.query;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -1456,15 +1550,75 @@ router.get("/share/:token/events/top", async (req, res) => {
       endDate = new Date();
     }
 
-    // Fetch top events
-    const { fetchGA4TopEvents } = await import("../lib/ga4TopEvents.js");
+    // Fetch top events (events or key events) - match authenticated endpoint behavior
+    const { fetchGA4TopEvents, fetchGA4TopKeyEvents } = await import("../lib/ga4TopEvents.js");
     const eventsLimit = parseInt(limit as string) || 10;
-    const events = await fetchGA4TopEvents(clientId, startDate, endDate, eventsLimit);
+    const mode = String(type || "events").toLowerCase();
+    const events =
+      mode === "keyevents" || mode === "key_events" || mode === "key-events"
+        ? await fetchGA4TopKeyEvents(clientId, startDate, endDate, eventsLimit)
+        : await fetchGA4TopEvents(clientId, startDate, endDate, eventsLimit);
 
     res.json(events);
   } catch (error: any) {
     console.error("Share top events fetch error:", error);
     res.status(500).json({ message: "Failed to fetch top events data" });
+  }
+});
+
+// Share endpoint for visitor sources (GA4 session sources)
+router.get("/share/:token/visitor-sources", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const tokenData = verifyShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+
+    const clientId = tokenData.clientId;
+    const { period = "30", start, end, limit = "10" } = req.query;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, ga4RefreshToken: true, ga4PropertyId: true, ga4ConnectedAt: true }
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isGA4Connected = !!(client.ga4RefreshToken && client.ga4PropertyId && client.ga4ConnectedAt);
+    if (!isGA4Connected) {
+      return res.json([]);
+    }
+
+    // Calculate date range
+    let startDate: Date;
+    let endDate: Date;
+    if (start && end) {
+      startDate = new Date(start as string);
+      endDate = new Date(end as string);
+      if (endDate > new Date()) {
+        endDate = new Date();
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({ message: "Start date must be before end date" });
+      }
+    } else {
+      const days = parseInt(period as string);
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      endDate = new Date();
+    }
+
+    // Fetch from GA4 API (DB caching isn't currently available for visitor sources)
+    const { fetchGA4VisitorSources } = await import("../lib/ga4VisitorSources.js");
+    const sourcesLimit = parseInt(limit as string) || 10;
+    const sources = await fetchGA4VisitorSources(clientId, startDate, endDate, sourcesLimit);
+    res.json(sources);
+  } catch (error: any) {
+    console.error("Share visitor sources fetch error:", error);
+    res.status(500).json({ message: "Failed to fetch visitor sources data" });
   }
 });
 

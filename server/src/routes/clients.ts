@@ -8,12 +8,42 @@ const router = express.Router();
 
 const createClientSchema = z.object({
     name: z.string().min(1),
-    domain: z.string().url().or(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$/)),
+    // Accept common inputs (domain.com, www.domain.com, https://domain.com/path) and normalize server-side.
+    domain: z.string().min(1),
     industry: z.string().optional(),
     targets: z.array(z.string()).optional(),
     // Status is ignored - determined by user role (SUPER_ADMIN = ACTIVE, others = PENDING)
     status: z.enum(['ACTIVE', 'PENDING', 'REJECTED']).optional(),
 });
+
+function normalizeDomainInput(input: string): string {
+    const raw = String(input || '').trim();
+    if (!raw) throw new Error('Domain is required');
+
+    let host = '';
+    try {
+        const url = new URL(raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`);
+        host = url.hostname;
+    } catch {
+        // Fallback parsing for weird inputs
+        host = raw
+            .replace(/^https?:\/\//, '')
+            .split('/')[0]
+            .split('?')[0]
+            .split('#')[0]
+            .split(':')[0];
+    }
+
+    host = host.replace(/^www\./, '').toLowerCase();
+
+    // Basic hostname validation: allow subdomains
+    const hostnameOk = /^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(host);
+    if (!hostnameOk) {
+        throw new Error('Invalid domain. Please enter a valid hostname like "example.com".');
+    }
+
+    return host;
+}
 
 // Get all clients
 router.get('/', authenticateToken, async (req, res) => {
@@ -125,12 +155,8 @@ router.post('/', authenticateToken, async (req, res) => {
     try {
         const { name, domain, industry, targets, status } = createClientSchema.parse(req.body);
 
-        // Normalize domain (remove protocol if present)
-        let normalizedDomain = domain;
-        if (domain.startsWith('http://') || domain.startsWith('https://')) {
-            normalizedDomain = domain.replace(/^https?:\/\//, '');
-        }
-        normalizedDomain = normalizedDomain.replace(/^www\./, '');
+        // Normalize domain (strip protocol/www/path)
+        const normalizedDomain = normalizeDomainInput(domain);
 
         // Check if client with this domain or name already exists
         const existingDomain = await prisma.client.findUnique({
@@ -174,6 +200,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
         res.status(201).json(client);
     } catch (error: any) {
+        if (error?.message?.includes('Invalid domain')) {
+            return res.status(400).json({ message: error.message });
+        }
         if (error.name === 'ZodError') {
             return res.status(400).json({ message: 'Invalid input', errors: error.errors });
         }
@@ -238,12 +267,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         const updateData: any = {};
         if (name) updateData.name = name;
         if (domain) {
-            let normalizedDomain = domain;
-            if (domain.startsWith('http://') || domain.startsWith('https://')) {
-                normalizedDomain = domain.replace(/^https?:\/\//, '');
-            }
-            normalizedDomain = normalizedDomain.replace(/^www\./, '');
-            updateData.domain = normalizedDomain;
+            updateData.domain = normalizeDomainInput(domain);
         }
         if (industry !== undefined) updateData.industry = industry;
         if (targets !== undefined) {

@@ -40,6 +40,7 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url = error.config?.url ?? "";
     const isAuth = /\/auth\/(login|register|verify)$/i.test(url);
+    const isShare = /\/seo\/share\//i.test(url); // public shared dashboard endpoints
     
     // Get error message from response
     const errorMessage = error.response?.data?.message || error.message || "An error occurred";
@@ -50,7 +51,8 @@ api.interceptors.response.use(
     const lastShown = recentErrors.get(errorKey);
     
     // Don't show toast for auth errors (handled by login/register pages)
-    if (!isAuth) {
+    // Don't show global toasts for share endpoints (share page handles its own UX)
+    if (!isAuth && !isShare) {
       // Only show toast if we haven't shown this exact error recently
       if (!lastShown || now - lastShown > ERROR_DEBOUNCE_MS) {
         recentErrors.set(errorKey, now);
@@ -81,6 +83,12 @@ api.interceptors.response.use(
           toast.error(errorMessage);
         }
       }
+    }
+
+    // IMPORTANT:
+    // A 401 on share endpoints means "invalid/expired share link" and should NOT log the user out.
+    if (isShare && status === 401) {
+      // no-op: keep existing session token
     }
     
     return Promise.reject(error); // keep rejections for RTK to handle

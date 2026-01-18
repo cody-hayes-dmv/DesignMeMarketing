@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { register, clearError } from "@/store/slices/authSlice";
 import {
-  BarChart3,
   Mail,
   Lock,
   User,
@@ -13,9 +12,11 @@ import {
   EyeOff,
   CheckCircle,
 } from "lucide-react";
+import zoesiLogo from "@/assets/zoesi-blue.png";
 
 const RegisterPage = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { loading, error } = useSelector((state: RootState) => state.auth);
   const [formData, setFormData] = useState({
     email: "",
@@ -60,12 +61,8 @@ const RegisterPage = () => {
     });
   };
 
-  const goBackToMarketing = () => {
-    window.location.href = "http://localhost:3000";
-  };
-
   const goBackToPortal = () => {
-    window.location.href = "http://localhost:3001/portal";
+    navigate("/portal");
   };
 
   const passwordsMatch = formData.password === formData.confirmPassword;
@@ -115,7 +112,7 @@ const RegisterPage = () => {
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <BarChart3 className="h-12 w-12 text-primary-600" />
+              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">
               Create Your Account
