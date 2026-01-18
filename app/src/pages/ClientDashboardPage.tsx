@@ -41,6 +41,7 @@ import {
 } from "@/data/reportSamples";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 interface TrafficSourceSlice {
   name: string;
@@ -309,6 +310,11 @@ const ClientDashboardPage: React.FC = () => {
     category: "",
     status: "TODO",
   });
+  const [workLogDeleteConfirm, setWorkLogDeleteConfirm] = useState<{
+    isOpen: boolean;
+    taskId: string | null;
+    taskTitle: string | null;
+  }>({ isOpen: false, taskId: null, taskTitle: null });
 
   const formatGa4ErrorMessage = useCallback((rawError: string | null): string => {
     if (!rawError) {
@@ -478,8 +484,17 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const handleDeleteWorkLog = async (taskId: string) => {
-    if (!window.confirm("Delete this work log entry?")) return;
+  const handleDeleteWorkLog = (taskId: string, taskTitle?: string | null) => {
+    setWorkLogDeleteConfirm({
+      isOpen: true,
+      taskId,
+      taskTitle: taskTitle ?? null,
+    });
+  };
+
+  const confirmDeleteWorkLog = async () => {
+    const taskId = workLogDeleteConfirm.taskId;
+    if (!taskId) return;
     try {
       await api.delete(`/tasks/${taskId}`);
       toast.success("Work log entry deleted.");
@@ -487,6 +502,13 @@ const ClientDashboardPage: React.FC = () => {
     } catch (e: any) {
       console.error("Work log delete failed", e);
       toast.error(e?.response?.data?.message || "Failed to delete work log entry.");
+    } finally {
+      setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null });
+      // If the user deleted the entry they were editing/viewing, close the modal.
+      if (selectedWorkLogTaskId === taskId) {
+        setWorkLogModalOpen(false);
+        setSelectedWorkLogTaskId(null);
+      }
     }
   };
 
@@ -3256,7 +3278,7 @@ const ClientDashboardPage: React.FC = () => {
                                       type="button"
                                       className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
                                       title="Delete entry"
-                                      onClick={() => handleDeleteWorkLog(task.id)}
+                                      onClick={() => handleDeleteWorkLog(task.id, task.title)}
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </button>
@@ -3352,6 +3374,15 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
 
                 <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                  {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.title)}
+                      className="mr-auto px-4 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setWorkLogModalOpen(false)}
@@ -3375,6 +3406,17 @@ const ClientDashboardPage: React.FC = () => {
           )}
         </>
       )}
+
+      <ConfirmDialog
+        isOpen={workLogDeleteConfirm.isOpen}
+        onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null })}
+        onConfirm={() => void confirmDeleteWorkLog()}
+        title="Delete work log entry"
+        message={`Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
 
       {/* View Report Modal */}
       {viewReportModalOpen && selectedReport && createPortal(
