@@ -49,25 +49,36 @@ app.get("/health", (req, res) => {
 // Error handling
 app.use(errorHandler);
 
-app.listen(PORT, async () => {
+const server = app.listen(PORT);
+
+server.on("listening", async () => {
   console.log(`Server running on port ${PORT}`);
-  
+
   // Start report scheduler cron job (runs every hour)
   const { processScheduledReports, refreshAllGA4Data } = await import("./lib/reportScheduler.js");
-  
+
   // Run immediately on startup (for testing)
   processScheduledReports().catch(console.error);
-  
+
   // Then run every hour
   setInterval(() => {
     processScheduledReports().catch(console.error);
   }, 60 * 60 * 1000); // 1 hour in milliseconds
-  
+
   // GA4 auto-refresh: Check every hour, but only runs on Monday mornings
   setInterval(() => {
     refreshAllGA4Data().catch(console.error);
   }, 60 * 60 * 1000); // Check every hour
-  
+
   console.log("Report scheduler started (runs every hour)");
   console.log("GA4 auto-refresh scheduler started (runs Monday mornings)");
+});
+
+server.on("error", (err: any) => {
+  if (err?.code === "EADDRINUSE") {
+    console.error(`[Server] Port ${PORT} is already in use. Stop the other server process and retry.`);
+    process.exit(1);
+  }
+  console.error("[Server] Failed to start:", err);
+  process.exit(1);
 });

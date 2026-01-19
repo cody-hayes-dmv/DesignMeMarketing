@@ -36,9 +36,6 @@ import toast from "react-hot-toast";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { logout } from "@/store/slices/authSlice";
-import {
-  backlinksData,
-} from "@/data/reportSamples";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -84,6 +81,30 @@ interface BacklinkTimeseriesItem {
   newReferringDomains: number;
   lostReferringDomains: number;
 }
+
+type BacklinkFilter = "all" | "new" | "lost";
+type BacklinkRow = {
+  id: string;
+  sourceUrl: string;
+  targetUrl: string;
+  anchorText: string | null;
+  domainRating: number | null;
+  urlRating: number | null;
+  traffic: number | null;
+  isFollow: boolean;
+  isLost: boolean;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AiSearchVisibilityRow = {
+  name: "ChatGPT" | "AI Overview" | "AI Mode" | "Gemini";
+  visibility: number;
+  mentions: number;
+  citedPages: number;
+};
 
 interface TopPageItem {
   url: string;
@@ -213,6 +234,31 @@ const ClientDashboardPage: React.FC = () => {
   const [backlinkTimeseries, setBacklinkTimeseries] = useState<BacklinkTimeseriesItem[]>([]);
   const [backlinkTimeseriesLoading, setBacklinkTimeseriesLoading] = useState(false);
   const [backlinkTimeseriesError, setBacklinkTimeseriesError] = useState<string | null>(null);
+  const [backlinksFilter, setBacklinksFilter] = useState<BacklinkFilter>("all");
+  const [backlinks, setBacklinks] = useState<BacklinkRow[]>([]);
+  const [backlinksLoading, setBacklinksLoading] = useState(false);
+  const [backlinksError, setBacklinksError] = useState<string | null>(null);
+  const [addBacklinkModalOpen, setAddBacklinkModalOpen] = useState(false);
+  const [addingBacklink, setAddingBacklink] = useState(false);
+  const [addBacklinkForm, setAddBacklinkForm] = useState<{
+    sourceUrl: string;
+    targetUrl: string;
+    anchorText: string;
+    domainRating: string;
+    isFollow: boolean;
+  }>({ sourceUrl: "", targetUrl: "", anchorText: "", domainRating: "", isFollow: true });
+  const [importBacklinksModalOpen, setImportBacklinksModalOpen] = useState(false);
+  const [importingBacklinks, setImportingBacklinks] = useState(false);
+  const [importBacklinksText, setImportBacklinksText] = useState("");
+  const [backlinkDeleteConfirm, setBacklinkDeleteConfirm] = useState<{
+    isOpen: boolean;
+    backlinkId: string | null;
+    label: string | null;
+    isLost: boolean;
+  }>({ isOpen: false, backlinkId: null, label: null, isLost: false });
+  const [aiSearchRows, setAiSearchRows] = useState<AiSearchVisibilityRow[]>([]);
+  const [aiSearchLoading, setAiSearchLoading] = useState(false);
+  const [aiSearchError, setAiSearchError] = useState<string | null>(null);
   const [topPages, setTopPages] = useState<TopPageItem[]>([]);
   const [topPagesLoading, setTopPagesLoading] = useState(false);
   const [topPagesError, setTopPagesError] = useState<string | null>(null);
@@ -746,12 +792,24 @@ const ClientDashboardPage: React.FC = () => {
 
       setBacklinkTimeseries(normalized);
       setBacklinkTimeseriesError(null);
+
+      // Also refresh the backlinks table if it's being viewed
+      try {
+        const listRes = await api.get(`/seo/backlinks/${clientId}`, {
+          params: { filter: backlinksFilter, days: 30, limit: 200, sortBy: "domainRating", order: "desc" },
+        });
+        const list = Array.isArray(listRes.data) ? (listRes.data as BacklinkRow[]) : [];
+        setBacklinks(list);
+        setBacklinksError(null);
+      } catch (listErr: any) {
+        console.warn("Failed to refresh backlinks list", listErr);
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to refresh backlinks");
     } finally {
       setRefreshingBacklinks(false);
     }
-  }, [clientId]);
+  }, [backlinksFilter, clientId]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;
@@ -1190,6 +1248,185 @@ const ClientDashboardPage: React.FC = () => {
     buckets.sort((a, b) => (a.key < b.key ? 1 : -1));
     return buckets;
   }, [backlinkTimeseries]);
+
+  const backlinksKpis = useMemo(() => {
+    const totalBacklinks = Number(dashboardSummary?.backlinkStats?.total ?? 0) || 0;
+    const avgDomainRating = Number(dashboardSummary?.backlinkStats?.avgDomainRating ?? 0) || 0;
+    const lostCount = Number(dashboardSummary?.backlinkStats?.lost ?? 0) || 0;
+    const newLast4Weeks = weeklyBacklinkTimeseries.reduce((sum, w) => sum + (Number(w.newBacklinks) || 0), 0) || 0;
+    return { totalBacklinks, avgDomainRating, lostCount, newLast4Weeks };
+  }, [dashboardSummary, weeklyBacklinkTimeseries]);
+
+  const fetchBacklinksList = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setBacklinksLoading(true);
+      const res = await api.get(`/seo/backlinks/${clientId}`, {
+        params: {
+          filter: backlinksFilter,
+          days: 30,
+          limit: 200,
+          sortBy: "domainRating",
+          order: "desc",
+        },
+      });
+      const data = Array.isArray(res.data) ? (res.data as BacklinkRow[]) : [];
+      setBacklinks(data);
+      setBacklinksError(null);
+    } catch (error: any) {
+      console.error("Failed to fetch backlinks", error);
+      setBacklinks([]);
+      setBacklinksError(error?.response?.data?.message || "Unable to load backlinks");
+    } finally {
+      setBacklinksLoading(false);
+    }
+  }, [clientId, backlinksFilter]);
+
+  useEffect(() => {
+    if (activeTab !== "backlinks") return;
+    void fetchBacklinksList();
+  }, [activeTab, fetchBacklinksList]);
+
+  const openAddBacklink = useCallback(() => {
+    if (reportOnly) return;
+    const defaultTarget = (() => {
+      const domain = (client?.domain || "").trim();
+      if (!domain) return "";
+      if (/^https?:\/\//i.test(domain)) return domain;
+      return `https://${domain}`;
+    })();
+    setAddBacklinkForm({ sourceUrl: "", targetUrl: defaultTarget, anchorText: "", domainRating: "", isFollow: true });
+    setAddBacklinkModalOpen(true);
+  }, [client?.domain, reportOnly]);
+
+  const submitAddBacklink = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setAddingBacklink(true);
+      const domainRatingNum = addBacklinkForm.domainRating.trim() ? Number(addBacklinkForm.domainRating) : null;
+      await api.post(`/seo/backlinks/${clientId}`, {
+        sourceUrl: addBacklinkForm.sourceUrl.trim(),
+        targetUrl: addBacklinkForm.targetUrl.trim() || undefined,
+        anchorText: addBacklinkForm.anchorText.trim() || null,
+        domainRating: domainRatingNum != null && Number.isFinite(domainRatingNum) ? domainRatingNum : null,
+        isFollow: addBacklinkForm.isFollow,
+      });
+      toast.success("Backlink added");
+      setAddBacklinkModalOpen(false);
+      await fetchBacklinksList();
+    } catch (error: any) {
+      console.error("Failed to add backlink", error);
+      toast.error(error?.response?.data?.message || "Failed to add backlink");
+    } finally {
+      setAddingBacklink(false);
+    }
+  }, [addBacklinkForm, clientId, fetchBacklinksList]);
+
+  const submitImportBacklinks = useCallback(async () => {
+    if (!clientId) return;
+    const rows = importBacklinksText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((sourceUrl) => ({ sourceUrl }));
+
+    if (rows.length === 0) {
+      toast.error("Paste at least 1 URL (one per line).");
+      return;
+    }
+
+    try {
+      setImportingBacklinks(true);
+      const res = await api.post(`/seo/backlinks/${clientId}/import`, { rows });
+      const imported = Number(res?.data?.imported ?? rows.length) || rows.length;
+      toast.success(`Imported ${imported} backlinks`);
+      setImportBacklinksModalOpen(false);
+      setImportBacklinksText("");
+      await fetchBacklinksList();
+    } catch (error: any) {
+      console.error("Failed to import backlinks", error);
+      toast.error(error?.response?.data?.message || "Failed to import backlinks");
+    } finally {
+      setImportingBacklinks(false);
+    }
+  }, [clientId, fetchBacklinksList, importBacklinksText]);
+
+  const requestRemoveBacklink = useCallback((link: BacklinkRow) => {
+    if (reportOnly) return;
+    const label = (() => {
+      try {
+        return new URL(link.sourceUrl).hostname || link.sourceUrl;
+      } catch {
+        return link.sourceUrl;
+      }
+    })();
+    setBacklinkDeleteConfirm({ isOpen: true, backlinkId: link.id, label, isLost: Boolean(link.isLost) });
+  }, [reportOnly]);
+
+  const confirmRemoveBacklink = useCallback(async () => {
+    if (!clientId || !backlinkDeleteConfirm.backlinkId) return;
+    const deletingId = backlinkDeleteConfirm.backlinkId;
+    const deletingIsLost = backlinkDeleteConfirm.isLost;
+    try {
+      await api.delete(`/seo/backlinks/${clientId}/${deletingId}`);
+      toast.success("Backlink removed");
+      setBacklinks((prev) => prev.filter((b) => b.id !== deletingId));
+      setDashboardSummary((prev) => {
+        if (!prev) return prev;
+        const stats = prev.backlinkStats;
+        if (!stats) return prev;
+        const nextTotal = Math.max(0, Number(stats.total ?? 0) - (deletingIsLost ? 0 : 1));
+        const nextLost = Math.max(0, Number(stats.lost ?? 0) - (deletingIsLost ? 1 : 0));
+        return {
+          ...prev,
+          backlinkStats: {
+            ...stats,
+            total: nextTotal,
+            lost: nextLost,
+          },
+        } as any;
+      });
+      await fetchBacklinksList();
+    } catch (error: any) {
+      console.error("Failed to remove backlink", error);
+      toast.error(error?.response?.data?.message || "Failed to remove backlink");
+    } finally {
+      setBacklinkDeleteConfirm({ isOpen: false, backlinkId: null, label: null, isLost: false });
+    }
+  }, [backlinkDeleteConfirm.backlinkId, backlinkDeleteConfirm.isLost, clientId, fetchBacklinksList]);
+
+  const fetchAiSearchVisibility = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setAiSearchLoading(true);
+      const params: any = {};
+      if (dateRange === "custom" && customStartDate && customEndDate) {
+        params.start = customStartDate;
+        params.end = customEndDate;
+      } else {
+        params.period = dateRange;
+      }
+      const res = await api.get(`/seo/ai-search-visibility/${clientId}`, { params, timeout: 30000 });
+      const rows = Array.isArray(res?.data?.rows) ? (res.data.rows as AiSearchVisibilityRow[]) : [];
+      setAiSearchRows(rows);
+      setAiSearchError(null);
+    } catch (error: any) {
+      console.error("Failed to fetch AI Search visibility", error);
+      setAiSearchRows([]);
+      if (error?.code === "ECONNABORTED") {
+        setAiSearchError("AI Search Visibility is taking longer than expected. Please refresh in a moment.");
+      } else {
+        setAiSearchError(error?.response?.data?.message || "Unable to load AI Search Visibility");
+      }
+    } finally {
+      setAiSearchLoading(false);
+    }
+  }, [clientId, customEndDate, customStartDate, dateRange]);
+
+  useEffect(() => {
+    if (activeTab !== "dashboard") return;
+    void fetchAiSearchVisibility();
+  }, [activeTab, fetchAiSearchVisibility]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -2414,52 +2651,49 @@ const ClientDashboardPage: React.FC = () => {
 
                 <div className="bg-white p-4 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-gray-900">AI Search</h3>
-                    <span className="text-xs text-gray-500">Subscription active</span>
+                    <h3 className="text-lg font-semibold text-gray-900">AI Search Visibility</h3>
                   </div>
 
-                  {/*
-                    NOTE: This is UI scaffolding. Hook `aiSearchRows` to your AI Search provider
-                    response once the API endpoint is in place.
-                  */}
-                  {(() => {
-                    const aiSearchRows: Array<{
-                      name: string;
-                      visibility: number;
-                      mentions: number;
-                      citedPages: number;
-                      dotClass: string;
-                    }> = [
-                      { name: "ChatGPT", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-gray-900" },
-                      { name: "AI Overview", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-blue-600" },
-                      { name: "AI Mode", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-red-500" },
-                      { name: "Gemini", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-green-600" },
-                    ];
+                  {aiSearchError && <p className="mb-3 text-sm text-rose-600">{aiSearchError}</p>}
 
-                    return (
-                      <div className="rounded-lg border border-gray-200 overflow-hidden">
-                        <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-                          <div>AI Search</div>
-                          <div className="text-center">AI Visibility</div>
-                          <div className="text-center">Mentions</div>
-                          <div className="text-center">Cited Pages</div>
-                        </div>
-                        <div className="divide-y divide-gray-100">
-                          {aiSearchRows.map((row) => (
-                            <div key={row.name} className="grid grid-cols-4 px-3 py-2 text-sm">
+                  <div className="rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                      <div>AI Search</div>
+                      <div className="text-center">AI Visibility</div>
+                      <div className="text-center">Mentions</div>
+                      <div className="text-center">Cited Pages</div>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {aiSearchLoading ? (
+                        <div className="px-3 py-4 text-sm text-gray-500">Loading AI Search visibility...</div>
+                      ) : (aiSearchRows?.length || 0) === 0 ? (
+                        <div className="px-3 py-4 text-sm text-gray-500">No AI Search visibility data available.</div>
+                      ) : (
+                        ([
+                          { name: "ChatGPT", dotClass: "bg-gray-900" },
+                          { name: "AI Overview", dotClass: "bg-blue-600" },
+                          { name: "AI Mode", dotClass: "bg-red-500" },
+                          { name: "Gemini", dotClass: "bg-green-600" },
+                        ] as const).map((meta) => {
+                          const row =
+                            aiSearchRows.find((r) => r.name === meta.name) ||
+                            ({ name: meta.name, visibility: 0, mentions: 0, citedPages: 0 } as AiSearchVisibilityRow);
+                          const visibilityDisplay = `${Number(row.visibility || 0)}%`;
+                          return (
+                            <div key={meta.name} className="grid grid-cols-4 px-3 py-2 text-sm">
                               <div className="flex items-center gap-2 text-gray-900">
-                                <span className={`h-2.5 w-2.5 rounded-full ${row.dotClass}`} />
-                                <span className="font-medium">{row.name}</span>
+                                <span className={`h-2.5 w-2.5 rounded-full ${meta.dotClass}`} />
+                                <span className="font-medium">{meta.name}</span>
                               </div>
-                              <div className="text-center text-gray-900">{row.visibility.toLocaleString()}</div>
-                              <div className="text-center text-gray-900">{row.mentions.toLocaleString()}</div>
-                              <div className="text-center text-gray-900">{row.citedPages.toLocaleString()}</div>
+                              <div className="text-center text-gray-900">{visibilityDisplay}</div>
+                              <div className="text-center text-gray-900">{Number(row.mentions || 0).toLocaleString()}</div>
+                              <div className="text-center text-gray-900">{Number(row.citedPages || 0).toLocaleString()}</div>
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -3100,41 +3334,51 @@ const ClientDashboardPage: React.FC = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900">Backlinks Overview</h2>
-                <div className="flex items-center space-x-3">
-                  <button className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2">
-                    <Upload className="h-4 w-4" />
-                    <span>Import Backlink</span>
-                  </button>
-                  <button className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2">
-                    <Plus className="h-4 w-4" />
-                    <span>Add Backlink</span>
-                  </button>
-                </div>
+                {!reportOnly && (
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => setImportBacklinksModalOpen(true)}
+                      className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
+                    >
+                      <Upload className="h-4 w-4" />
+                      <span>Import Backlink</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openAddBacklink}
+                      className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Add Backlink</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <p className="text-sm font-medium text-gray-600">Total Backlinks</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">532</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.totalBacklinks}</p>
                   <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
                     <TrendingUp className="h-4 w-4" />
-                    <span>+27 new this month</span>
+                    <span>+{backlinksKpis.newLast4Weeks} new (last 4 weeks)</span>
                   </div>
                 </div>
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <p className="text-sm font-medium text-gray-600">Average Domain Rating</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">68</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.avgDomainRating ? backlinksKpis.avgDomainRating.toFixed(0) : "—"}</p>
                   <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
                     <TrendingUp className="h-4 w-4" />
-                    <span>+4 vs last month</span>
+                    <span>Calculated from tracked backlinks</span>
                   </div>
                 </div>
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <p className="text-sm font-medium text-gray-600">Lost Backlinks</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">12</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.lostCount}</p>
                   <div className="mt-3 flex items-center space-x-2 text-sm text-red-600">
                     <TrendingDown className="h-4 w-4" />
-                    <span>-3 vs last month</span>
+                    <span>Tracked lost backlinks</span>
                   </div>
                 </div>
               </div>
@@ -3146,9 +3390,33 @@ const ClientDashboardPage: React.FC = () => {
                     <p className="text-sm text-gray-500 mt-1">Monitor follow vs nofollow backlinks and their quality.</p>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <button className="px-3 py-1 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">All</button>
-                    <button className="px-3 py-1 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">New</button>
-                    <button className="px-3 py-1 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Lost</button>
+                    <button
+                      type="button"
+                      onClick={() => setBacklinksFilter("all")}
+                      className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
+                        backlinksFilter === "all" ? "border-primary-200 text-primary-700 bg-primary-50" : "border-gray-200 text-gray-700"
+                      }`}
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBacklinksFilter("new")}
+                      className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
+                        backlinksFilter === "new" ? "border-primary-200 text-primary-700 bg-primary-50" : "border-gray-200 text-gray-700"
+                      }`}
+                    >
+                      New
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBacklinksFilter("lost")}
+                      className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
+                        backlinksFilter === "lost" ? "border-primary-200 text-primary-700 bg-primary-50" : "border-gray-200 text-gray-700"
+                      }`}
+                    >
+                      Lost
+                    </button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -3164,22 +3432,83 @@ const ClientDashboardPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {backlinksData.map((link, index) => (
-                        <tr key={index} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{link.source}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{link.anchorText}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{link.domainRating}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{link.publishDate}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${link.manuallyCreated ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"}`}>
-                              {link.manuallyCreated ? "Manual" : "Natural"}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <button className="text-primary-600 hover:text-primary-800">View</button>
+                      {backlinksLoading ? (
+                        <tr>
+                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                            Loading backlinks...
                           </td>
                         </tr>
-                      ))}
+                      ) : backlinksError ? (
+                        <tr>
+                          <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
+                            {backlinksError}
+                          </td>
+                        </tr>
+                      ) : backlinks.length === 0 ? (
+                        <tr>
+                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                            No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO.
+                          </td>
+                        </tr>
+                      ) : (
+                        backlinks.map((link) => {
+                          const source = (() => {
+                            try {
+                              return new URL(link.sourceUrl).hostname || link.sourceUrl;
+                            } catch {
+                              return link.sourceUrl;
+                            }
+                          })();
+                          const publishRaw = link.firstSeen || link.createdAt;
+                          const publishDate = (() => {
+                            try {
+                              return new Date(publishRaw).toISOString().slice(0, 10);
+                            } catch {
+                              return "";
+                            }
+                          })();
+                          const isManual = !link.firstSeen && !link.lastSeen;
+                          return (
+                            <tr key={link.id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{link.anchorText || "—"}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {typeof link.domainRating === "number" ? link.domainRating : "—"}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{publishDate || "—"}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                <span
+                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                    isManual ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"
+                                  }`}
+                                >
+                                  {isManual ? "Manual" : link.isLost ? "Lost" : "Natural"}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="inline-flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    className="text-primary-600 hover:text-primary-800"
+                                    onClick={() => window.open(link.sourceUrl, "_blank", "noopener,noreferrer")}
+                                  >
+                                    View
+                                  </button>
+                                  {!reportOnly && (
+                                    <button
+                                      type="button"
+                                      className="text-red-600 hover:text-red-800 inline-flex items-center gap-1"
+                                      onClick={() => requestRemoveBacklink(link)}
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -3407,6 +3736,155 @@ const ClientDashboardPage: React.FC = () => {
         </>
       )}
 
+      {/* Add Backlink Modal */}
+      {!reportOnly &&
+        addBacklinkModalOpen &&
+        createPortal(
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-lg rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">Add Backlink</h3>
+                <button
+                  type="button"
+                  onClick={() => setAddBacklinkModalOpen(false)}
+                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="px-6 py-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Source URL</label>
+                  <input
+                    type="text"
+                    value={addBacklinkForm.sourceUrl}
+                    onChange={(e) => setAddBacklinkForm((p) => ({ ...p, sourceUrl: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="https://example.com/page"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Target URL</label>
+                  <input
+                    type="text"
+                    value={addBacklinkForm.targetUrl}
+                    onChange={(e) => setAddBacklinkForm((p) => ({ ...p, targetUrl: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="https://your-site.com/"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Anchor Text (optional)</label>
+                  <input
+                    type="text"
+                    value={addBacklinkForm.anchorText}
+                    onChange={(e) => setAddBacklinkForm((p) => ({ ...p, anchorText: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="e.g. best seo services"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Domain Rating (optional)</label>
+                    <input
+                      type="number"
+                      value={addBacklinkForm.domainRating}
+                      onChange={(e) => setAddBacklinkForm((p) => ({ ...p, domainRating: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      placeholder="e.g. 65"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={addBacklinkForm.isFollow}
+                        onChange={(e) => setAddBacklinkForm((p) => ({ ...p, isFollow: e.target.checked }))}
+                      />
+                      Follow link
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setAddBacklinkModalOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={addingBacklink}
+                  onClick={() => void submitAddBacklink()}
+                  className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {addingBacklink ? "Saving..." : "Add"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Import Backlinks Modal */}
+      {!reportOnly &&
+        importBacklinksModalOpen &&
+        createPortal(
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Import Backlinks</h3>
+                  <p className="text-sm text-gray-500 mt-1">Paste source URLs (one per line). Target URL defaults to this client.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImportBacklinksModalOpen(false)}
+                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="px-6 py-4 space-y-3">
+                <textarea
+                  value={importBacklinksText}
+                  onChange={(e) => setImportBacklinksText(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  rows={10}
+                  placeholder={"https://example.com/page-1\nhttps://example.com/page-2"}
+                />
+                <p className="text-xs text-gray-500">
+                  Tip: after importing, you can click the top “Refresh” button (Super Admin) to pull live/lost backlink data from DataForSEO.
+                </p>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setImportBacklinksModalOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={importingBacklinks}
+                  onClick={() => void submitImportBacklinks()}
+                  className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {importingBacklinks ? "Importing..." : "Import"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
       <ConfirmDialog
         isOpen={workLogDeleteConfirm.isOpen}
         onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null })}
@@ -3414,6 +3892,17 @@ const ClientDashboardPage: React.FC = () => {
         title="Delete work log entry"
         message={`Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`}
         confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      <ConfirmDialog
+        isOpen={backlinkDeleteConfirm.isOpen}
+        onClose={() => setBacklinkDeleteConfirm({ isOpen: false, backlinkId: null, label: null, isLost: false })}
+        onConfirm={() => void confirmRemoveBacklink()}
+        title="Remove backlink"
+        message={`Remove backlink from "${backlinkDeleteConfirm.label || "this source"}"? This will delete the backlink row from this client.`}
+        confirmText="Remove"
         cancelText="Cancel"
         variant="danger"
       />
@@ -3639,48 +4128,50 @@ const ClientDashboardPage: React.FC = () => {
 
                   <div className="bg-white p-4 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-lg font-semibold text-gray-900">AI Search</h3>
+                      <h3 className="text-lg font-semibold text-gray-900">AI Search Visibility</h3>
                       <span className="text-xs text-gray-500">Subscription active</span>
                     </div>
 
-                    {(() => {
-                      const aiSearchRows: Array<{
-                        name: string;
-                        visibility: number;
-                        mentions: number;
-                        citedPages: number;
-                        dotClass: string;
-                      }> = [
-                        { name: "ChatGPT", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-gray-900" },
-                        { name: "AI Overview", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-blue-600" },
-                        { name: "AI Mode", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-red-500" },
-                        { name: "Gemini", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-green-600" },
-                      ];
+                    {aiSearchError && <p className="mb-3 text-sm text-rose-600">{aiSearchError}</p>}
 
-                      return (
-                        <div className="rounded-lg border border-gray-200 overflow-hidden">
-                          <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-                            <div>AI Search</div>
-                            <div className="text-center">AI Visibility</div>
-                            <div className="text-center">Mentions</div>
-                            <div className="text-center">Cited Pages</div>
-                          </div>
-                          <div className="divide-y divide-gray-100">
-                            {aiSearchRows.map((row) => (
-                              <div key={row.name} className="grid grid-cols-4 px-3 py-2 text-sm">
+                    <div className="rounded-lg border border-gray-200 overflow-hidden">
+                      <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                        <div>AI Search</div>
+                        <div className="text-center">AI Visibility</div>
+                        <div className="text-center">Mentions</div>
+                        <div className="text-center">Cited Pages</div>
+                      </div>
+                      <div className="divide-y divide-gray-100">
+                        {aiSearchLoading ? (
+                          <div className="px-3 py-4 text-sm text-gray-500">Loading AI Search visibility...</div>
+                        ) : (aiSearchRows?.length || 0) === 0 ? (
+                          <div className="px-3 py-4 text-sm text-gray-500">No AI Search visibility data available.</div>
+                        ) : (
+                          ([
+                            { name: "ChatGPT", dotClass: "bg-gray-900" },
+                            { name: "AI Overview", dotClass: "bg-blue-600" },
+                            { name: "AI Mode", dotClass: "bg-red-500" },
+                            { name: "Gemini", dotClass: "bg-green-600" },
+                          ] as const).map((meta) => {
+                            const row =
+                              aiSearchRows.find((r) => r.name === meta.name) ||
+                              ({ name: meta.name, visibility: 0, mentions: 0, citedPages: 0 } as AiSearchVisibilityRow);
+                            const visibilityDisplay = `${Number(row.visibility || 0)}%`;
+                            return (
+                              <div key={meta.name} className="grid grid-cols-4 px-3 py-2 text-sm">
                                 <div className="flex items-center gap-2 text-gray-900">
-                                  <span className={`h-2.5 w-2.5 rounded-full ${row.dotClass}`} />
-                                  <span className="font-medium">{row.name}</span>
+                                  <span className={`h-2.5 w-2.5 rounded-full ${meta.dotClass}`} />
+                                  <span className="font-medium">{meta.name}</span>
                                 </div>
-                                <div className="text-center text-gray-900">{row.visibility.toLocaleString()}</div>
-                                <div className="text-center text-gray-900">{row.mentions.toLocaleString()}</div>
-                                <div className="text-center text-gray-900">{row.citedPages.toLocaleString()}</div>
+                                <div className="text-center text-gray-900">{visibilityDisplay}</div>
+                                <div className="text-center text-gray-900">{Number(row.mentions || 0).toLocaleString()}</div>
+                                <div className="text-center text-gray-900">{Number(row.citedPages || 0).toLocaleString()}</div>
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 

@@ -656,7 +656,7 @@ const KeywordsPage: React.FC = () => {
                       CPC (USD)
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
-                      Competition
+                      Competitive density 
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
                       Difficulty
@@ -895,7 +895,7 @@ const KeywordsPage: React.FC = () => {
                       CPC
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
-                      Competition
+                      Competitive density
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
                       Current position

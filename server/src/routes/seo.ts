@@ -796,6 +796,108 @@ async function fetchBacklinkTimeseriesSummaryFromDataForSEO(
     .filter((item) => item.date);
 }
 
+type DataForSEOBacklinkListItem = {
+  sourceUrl: string;
+  targetUrl: string;
+  anchorText: string | null;
+  domainRating: number | null;
+  urlRating: number | null;
+  traffic: number | null;
+  isFollow: boolean;
+  firstSeen: Date | null;
+  lastSeen: Date | null;
+};
+
+function parseDataForSeoDate(value: unknown): Date | null {
+  if (!value || typeof value !== "string") return null;
+  const d = new Date(value);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+async function fetchBacklinksListFromDataForSEO(
+  target: string,
+  statusType: "live" | "lost",
+  limit: number = 200,
+  offset: number = 0
+): Promise<DataForSEOBacklinkListItem[]> {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) {
+    throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
+  }
+
+  const requestBody = [
+    {
+      target,
+      backlinks_status_type: statusType,
+      include_subdomains: true,
+      limit,
+      offset,
+      // Prefer strongest referring domains first
+      order_by: ["domain_from_rank,desc"],
+    },
+  ];
+
+  const endpoint = "https://api.dataforseo.com/v3/backlinks/backlinks/live";
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${base64Auth}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const items: any[] =
+    data?.tasks?.[0]?.result?.[0]?.items && Array.isArray(data.tasks[0].result[0].items)
+      ? data.tasks[0].result[0].items
+      : [];
+
+  return items
+    .map((it) => {
+      const sourceUrl = typeof it?.url_from === "string" ? it.url_from : "";
+      const targetUrl = typeof it?.url_to === "string" ? it.url_to : "";
+      if (!sourceUrl || !targetUrl) return null;
+
+      const anchorText =
+        typeof it?.anchor === "string"
+          ? it.anchor
+          : typeof it?.anchor_text === "string"
+            ? it.anchor_text
+            : null;
+
+      const domainFromRank = Number(it?.domain_from_rank);
+      const pageFromRank = Number(it?.page_from_rank);
+      const trafficNum = Number(it?.traffic ?? it?.page_from_traffic);
+
+      const dofollow =
+        typeof it?.dofollow === "boolean"
+          ? it.dofollow
+          : typeof it?.do_follow === "boolean"
+            ? it.do_follow
+            : true;
+
+      return {
+        sourceUrl,
+        targetUrl,
+        anchorText,
+        domainRating: Number.isFinite(domainFromRank) ? domainFromRank : null,
+        urlRating: Number.isFinite(pageFromRank) ? pageFromRank : null,
+        traffic: Number.isFinite(trafficNum) ? Math.max(0, Math.round(trafficNum)) : null,
+        isFollow: dofollow,
+        firstSeen: parseDataForSeoDate(it?.first_seen),
+        lastSeen: parseDataForSeoDate(it?.last_seen),
+      } satisfies DataForSEOBacklinkListItem;
+    })
+    .filter((v): v is DataForSEOBacklinkListItem => Boolean(v));
+}
+
 // Get SEO reports for a client
 router.get("/reports/:clientId", authenticateToken, async (req, res) => {
   try {
@@ -2871,7 +2973,7 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
 
       const targetDomain = normalizeDomain(client.domain);
     
-    // Get date range (last 30 days)
+    // Get date range (last 30 days) for timeseries summary
     const dateTo = new Date();
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - 30);
@@ -2922,7 +3024,60 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
       })
     );
 
-      return { items: savedItems.length, notFound: false as const };
+      // Also refresh backlink list (live + lost) into DB so the Backlinks tab can show real rows.
+      // Keep manual backlinks (firstSeen=null) by only deleting non-manual ones.
+      let backlinksInserted = 0;
+      try {
+        await prisma.backlink.deleteMany({
+          where: {
+            clientId,
+            OR: [{ firstSeen: { not: null } }, { lastSeen: { not: null } }],
+          },
+        });
+
+        const [liveLinks, lostLinks] = await Promise.all([
+          fetchBacklinksListFromDataForSEO(targetDomain, "live", 200, 0),
+          fetchBacklinksListFromDataForSEO(targetDomain, "lost", 200, 0),
+        ]);
+
+        const createRows = [
+          ...liveLinks.map((l) => ({
+            clientId,
+            sourceUrl: l.sourceUrl,
+            targetUrl: l.targetUrl,
+            anchorText: l.anchorText ?? undefined,
+            domainRating: l.domainRating ?? undefined,
+            urlRating: l.urlRating ?? undefined,
+            traffic: l.traffic ?? undefined,
+            isFollow: l.isFollow,
+            isLost: false,
+            firstSeen: l.firstSeen ?? undefined,
+            lastSeen: l.lastSeen ?? undefined,
+          })),
+          ...lostLinks.map((l) => ({
+            clientId,
+            sourceUrl: l.sourceUrl,
+            targetUrl: l.targetUrl,
+            anchorText: l.anchorText ?? undefined,
+            domainRating: l.domainRating ?? undefined,
+            urlRating: l.urlRating ?? undefined,
+            traffic: l.traffic ?? undefined,
+            isFollow: l.isFollow,
+            isLost: true,
+            firstSeen: l.firstSeen ?? undefined,
+            lastSeen: l.lastSeen ?? undefined,
+          })),
+        ];
+
+        if (createRows.length > 0) {
+          const created = await prisma.backlink.createMany({ data: createRows });
+          backlinksInserted = created.count;
+        }
+      } catch (backlinksErr) {
+        console.warn("[Backlinks Refresh] Failed to refresh backlink list:", backlinksErr);
+      }
+
+      return { items: savedItems.length, backlinksInserted, notFound: false as const };
     });
 
     if (result.notFound) {
@@ -2933,6 +3088,7 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
       message: "Backlinks refreshed successfully",
       skipped: false,
       items: result.items,
+      backlinksInserted: (result as any).backlinksInserted ?? 0,
       lastRefreshedAt: new Date(),
       nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
     });
@@ -3061,7 +3217,18 @@ router.post("/agency/dashboard/refresh", authenticateToken, async (req, res) => 
 router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { lost = "false", sortBy = "domainRating", order = "desc" } = req.query;
+    const lost = typeof req.query.lost === "string" ? req.query.lost : "false";
+    const filter = typeof req.query.filter === "string" ? req.query.filter : undefined; // all|new|lost
+    const sortByRaw = typeof req.query.sortBy === "string" ? req.query.sortBy : "domainRating";
+    const orderRaw = typeof req.query.order === "string" ? req.query.order : "desc";
+    const limitRaw = typeof req.query.limit === "string" ? req.query.limit : "200";
+    const daysRaw = typeof req.query.days === "string" ? req.query.days : "30";
+
+    const allowedSortFields = new Set(["domainRating", "firstSeen", "lastSeen", "traffic", "createdAt"]);
+    const sortBy = allowedSortFields.has(sortByRaw) ? sortByRaw : "domainRating";
+    const order: "asc" | "desc" = orderRaw === "asc" ? "asc" : "desc";
+    const limit = Math.min(500, Math.max(1, Number(limitRaw) || 200));
+    const days = Math.min(365, Math.max(1, Number(daysRaw) || 30));
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -3096,22 +3263,680 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const whereClause: any = { 
-      clientId,
-      isLost: lost === "true"
-    };
+    const whereClause: any = { clientId };
+
+    // Backwards compat: ?lost=true/false
+    // New: ?filter=all|new|lost
+    const normalizedFilter = (filter || "").toLowerCase();
+    if (normalizedFilter === "lost" || lost === "true") {
+      whereClause.isLost = true;
+    } else if (normalizedFilter === "new") {
+      whereClause.isLost = false;
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+      whereClause.firstSeen = { gte: from };
+    } else if (normalizedFilter === "all" || lost === "all") {
+      // no isLost constraint
+    } else {
+      // default to live links only (existing behavior)
+      whereClause.isLost = false;
+    }
 
     const backlinks = await prisma.backlink.findMany({
       where: whereClause,
       orderBy: {
-        [sortBy as string]: order as "asc" | "desc"
-      }
+        [sortBy]: order
+      },
+      take: limit,
     });
 
     res.json(backlinks);
   } catch (error) {
     console.error("Fetch backlinks error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+function normalizeUrlInput(value: string): string {
+  const raw = (value || "").trim();
+  if (!raw) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  // Default to https
+  return `https://${raw}`;
+}
+
+// Add a manual backlink (non-DataForSEO; preserved during refresh)
+router.post("/backlinks/:clientId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    // Disallow CLIENT role mutations (report-only)
+    if (req.user.role === "CLIENT") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const body = z
+      .object({
+        sourceUrl: z.string().min(1),
+        targetUrl: z.string().optional(),
+        anchorText: z.string().optional().nullable(),
+        domainRating: z.number().optional().nullable(),
+        urlRating: z.number().optional().nullable(),
+        traffic: z.number().int().optional().nullable(),
+        isFollow: z.boolean().optional(),
+        isLost: z.boolean().optional(),
+      })
+      .parse(req.body);
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const sourceUrl = normalizeUrlInput(body.sourceUrl);
+    const targetUrl = normalizeUrlInput(body.targetUrl || client.domain || "");
+    if (!sourceUrl || !targetUrl) {
+      return res.status(400).json({ message: "sourceUrl and targetUrl are required" });
+    }
+
+    const created = await prisma.backlink.create({
+      data: {
+        clientId,
+        sourceUrl,
+        targetUrl,
+        anchorText: body.anchorText ?? null,
+        domainRating: body.domainRating ?? null,
+        urlRating: body.urlRating ?? null,
+        traffic: body.traffic ?? null,
+        isFollow: body.isFollow ?? true,
+        isLost: body.isLost ?? false,
+        // Mark manual so refresh preserves it
+        firstSeen: null,
+        lastSeen: null,
+      },
+    });
+
+    return res.json(created);
+  } catch (error: any) {
+    console.error("Create manual backlink error:", error);
+    return res.status(500).json({ message: error?.message || "Internal server error" });
+  }
+});
+
+// Import manual backlinks (paste/CSV parsed on client)
+router.post("/backlinks/:clientId/import", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    if (req.user.role === "CLIENT") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const body = z
+      .object({
+        rows: z
+          .array(
+            z.object({
+              sourceUrl: z.string().min(1),
+              targetUrl: z.string().optional(),
+              anchorText: z.string().optional().nullable(),
+              domainRating: z.number().optional().nullable(),
+              urlRating: z.number().optional().nullable(),
+              traffic: z.number().int().optional().nullable(),
+              isFollow: z.boolean().optional(),
+              isLost: z.boolean().optional(),
+            })
+          )
+          .min(1)
+          .max(500),
+      })
+      .parse(req.body);
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const defaultTargetUrl = normalizeUrlInput(client.domain || "");
+
+    const data = body.rows
+      .map((r) => ({
+        clientId,
+        sourceUrl: normalizeUrlInput(r.sourceUrl),
+        targetUrl: normalizeUrlInput(r.targetUrl || defaultTargetUrl),
+        anchorText: r.anchorText ?? null,
+        domainRating: r.domainRating ?? null,
+        urlRating: r.urlRating ?? null,
+        traffic: r.traffic ?? null,
+        isFollow: r.isFollow ?? true,
+        isLost: r.isLost ?? false,
+        firstSeen: null,
+        lastSeen: null,
+      }))
+      .filter((r) => Boolean(r.sourceUrl) && Boolean(r.targetUrl));
+
+    if (data.length === 0) {
+      return res.status(400).json({ message: "No valid rows to import" });
+    }
+
+    const result = await prisma.backlink.createMany({ data });
+    return res.json({ imported: result.count });
+  } catch (error: any) {
+    console.error("Import manual backlinks error:", error);
+    return res.status(500).json({ message: error?.message || "Internal server error" });
+  }
+});
+
+// Delete a backlink row
+router.delete("/backlinks/:clientId/:backlinkId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId, backlinkId } = req.params;
+
+    // Disallow CLIENT role mutations (report-only)
+    if (req.user.role === "CLIENT") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const backlink = await prisma.backlink.findUnique({ where: { id: backlinkId } });
+    if (!backlink || backlink.clientId !== clientId) {
+      return res.status(404).json({ message: "Backlink not found" });
+    }
+
+    await prisma.backlink.delete({ where: { id: backlinkId } });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error("Delete backlink error:", error);
+    return res.status(500).json({ message: error?.message || "Internal server error" });
+  }
+});
+
+// AI Search Visibility (best-effort real data)
+// - ChatGPT/Gemini: GA4 referral sessions + unique landing pages (proxy for cited pages)
+// - AI Overview / AI Mode: counts based on cached SERP item types in target keywords (DataForSEO)
+router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { period = "30", start, end } = req.query;
+    const force = coerceBoolean(req.query.force);
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    // Handle custom date range or period
+    let startDate: Date;
+    let endDate: Date;
+    if (start && end) {
+      startDate = new Date(start as string);
+      endDate = new Date(end as string);
+      if (isNaN(startDate.getTime())) return res.status(400).json({ message: "Invalid start date" });
+      if (isNaN(endDate.getTime())) return res.status(400).json({ message: "Invalid end date" });
+      if (endDate > new Date()) endDate = new Date();
+      if (startDate > endDate) return res.status(400).json({ message: "Start date must be before end date" });
+    } else {
+      const days = parseInt(period as string);
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - (Number.isFinite(days) ? days : 30));
+      endDate = new Date();
+    }
+
+    const isGA4Connected = !!(client.ga4RefreshToken && client.ga4PropertyId && client.ga4ConnectedAt);
+
+    let chatgpt = { sessions: 0, users: 0, citedPages: 0, visibility: 0 };
+    let gemini = { sessions: 0, users: 0, citedPages: 0, visibility: 0 };
+
+    if (isGA4Connected) {
+      try {
+        const { fetchGA4AiSearchVisibility } = await import("../lib/ga4AiSearchVisibility.js");
+        const ga4 = await fetchGA4AiSearchVisibility(clientId, startDate, endDate);
+        const total = ga4.totalSessions || 0;
+        const chat = ga4.providers.chatgpt;
+        const gem = ga4.providers.gemini;
+        chatgpt = {
+          sessions: chat.sessions,
+          users: chat.users,
+          citedPages: chat.citedPages,
+          visibility: total > 0 ? Math.round((chat.sessions / total) * 100) : 0,
+        };
+        gemini = {
+          sessions: gem.sessions,
+          users: gem.users,
+          citedPages: gem.citedPages,
+          visibility: total > 0 ? Math.round((gem.sessions / total) * 100) : 0,
+        };
+      } catch (e) {
+        console.warn("[AI Search Visibility] GA4 fetch failed:", e);
+      }
+    }
+
+    // AI Overview / AI Mode from cached SERP item types (best effort for mentions/visibility)
+    const tks = await prisma.targetKeyword.findMany({
+      where: { clientId },
+      select: { serpItemTypes: true },
+    });
+    const parsedTypes = tks
+      .map((tk) => {
+        const raw = tk.serpItemTypes;
+        if (!raw) return [];
+        try {
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? (arr as any[]).map(String) : [];
+        } catch {
+          return [];
+        }
+      })
+      .filter((arr) => Array.isArray(arr));
+
+    const totalKeywordsWithSerpTypes = parsedTypes.length;
+    const aiOverviewMentions = parsedTypes.filter((arr) => arr.some((t) => String(t).toLowerCase().includes("ai_overview"))).length;
+    const aiModeMentions = parsedTypes.filter((arr) => arr.some((t) => String(t).toLowerCase().includes("ai_mode") || String(t).toLowerCase().includes("ai mode"))).length;
+
+    const aiOverviewVisibility =
+      totalKeywordsWithSerpTypes > 0 ? Math.round((aiOverviewMentions / totalKeywordsWithSerpTypes) * 100) : 0;
+    const aiModeVisibility =
+      totalKeywordsWithSerpTypes > 0 ? Math.round((aiModeMentions / totalKeywordsWithSerpTypes) * 100) : 0;
+
+    // Cited pages for AI Overview / AI Mode via DataForSEO SERP live calls (billable) but cached/throttled (48h)
+    const normalizeHost = (value: string) => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      try {
+        const url = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
+        return url.hostname.replace(/^www\./, "").toLowerCase();
+      } catch {
+        return raw
+          .replace(/^https?:\/\//, "")
+          .replace(/^www\./, "")
+          .split("/")[0]
+          .toLowerCase();
+      }
+    };
+
+    const clientHost = normalizeHost(client.domain || "");
+    let cacheTableAvailable = true;
+    let cache: any = null;
+    try {
+      cache = await prisma.aiSearchSerpCache.findUnique({ where: { clientId } });
+    } catch (e) {
+      // If the table doesn't exist yet (migration not applied), skip caching instead of failing the request.
+      cacheTableAvailable = false;
+      console.warn("[AI Search Visibility] ai_search_serp_cache not available (migration pending).");
+      cache = null;
+    }
+    const cacheFresh = isFresh(cache?.updatedAt ?? null, DATAFORSEO_REFRESH_TTL_MS);
+
+    const extractUrlsFromObject = (node: any, urls: Set<string>, depth: number) => {
+      if (depth > 6) return;
+      if (node == null) return;
+      if (typeof node === "string") {
+        if (node.startsWith("http://") || node.startsWith("https://")) urls.add(node);
+        return;
+      }
+      if (Array.isArray(node)) {
+        for (const it of node) extractUrlsFromObject(it, urls, depth + 1);
+        return;
+      }
+      if (typeof node === "object") {
+        for (const [k, v] of Object.entries(node)) {
+          const key = String(k).toLowerCase();
+          if ((key === "url" || key === "link" || key === "source_url" || key === "page_url") && typeof v === "string") {
+            if (v.startsWith("http://") || v.startsWith("https://")) urls.add(v);
+          }
+          extractUrlsFromObject(v, urls, depth + 1);
+        }
+      }
+    };
+
+    const filterClientUrls = (urls: Iterable<string>) => {
+      const out = new Set<string>();
+      for (const u of urls) {
+        try {
+          const host = normalizeHost(u);
+          if (!clientHost || !host) continue;
+          if (host === clientHost || host.endsWith(`.${clientHost}`) || clientHost.endsWith(`.${host}`)) {
+            out.add(u);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return out;
+    };
+
+    const refreshSerpCache = async () => {
+      if (!client.domain || !clientHost) return null;
+      // Limit to a small sample to control billable calls
+      const sample = await prisma.targetKeyword.findMany({
+        where: { clientId },
+        orderBy: [{ searchVolume: "desc" }, { updatedAt: "desc" }],
+        take: 8,
+        select: {
+          keyword: true,
+          locationCode: true,
+          languageCode: true,
+        },
+      });
+
+      const aiOverviewUrls = new Set<string>();
+      const aiModeUrls = new Set<string>();
+      let checked = 0;
+
+      const base64Auth = process.env.DATAFORSEO_BASE64;
+      if (!base64Auth) {
+        throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
+      }
+
+      const fetchSerpLiveAdvanced = async (opts: {
+        keyword: string;
+        locationCode: number;
+        languageCode: string;
+        mode: "organic" | "ai_mode";
+      }) => {
+        const endpoint =
+          opts.mode === "ai_mode"
+            ? "https://api.dataforseo.com/v3/serp/google/ai_mode/live/advanced"
+            : "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
+
+        const requestBody: any[] = [
+          {
+            keyword: opts.keyword,
+            language_code: opts.languageCode,
+            location_code: opts.locationCode,
+            // keep costs down
+            calculate_rectangles: false,
+          },
+        ];
+
+        // AI Mode endpoint supports loading async AI overview blocks; helps surface citations
+        if (opts.mode === "ai_mode") {
+          requestBody[0].load_async_ai_overview = true;
+        }
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${base64Auth}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        const result = data?.tasks?.[0]?.result?.[0] ?? null;
+        return result;
+      };
+
+      for (const tk of sample) {
+        const kw = String(tk.keyword || "").trim();
+        if (!kw) continue;
+        checked += 1;
+
+        // AI Overview citations from standard (organic) SERP
+        const organicResult = await fetchSerpLiveAdvanced({
+          keyword: kw,
+          locationCode: tk.locationCode || 2840,
+          languageCode: tk.languageCode || "en",
+          mode: "organic",
+        });
+        const organicItems: any[] = Array.isArray(organicResult?.items) ? organicResult.items : [];
+        for (const item of organicItems) {
+          const t = String(item?.type || "").toLowerCase();
+          if (!t) continue;
+          if (t.includes("ai_overview")) {
+            const urls = new Set<string>();
+            extractUrlsFromObject(item, urls, 0);
+            for (const u of filterClientUrls(urls)) aiOverviewUrls.add(u);
+          }
+        }
+
+        // AI Mode citations from the AI Mode SERP endpoint
+        const aiModeResult = await fetchSerpLiveAdvanced({
+          keyword: kw,
+          locationCode: tk.locationCode || 2840,
+          languageCode: tk.languageCode || "en",
+          mode: "ai_mode",
+        });
+        const aiModeItems: any[] = Array.isArray(aiModeResult?.items) ? aiModeResult.items : [];
+        for (const item of aiModeItems) {
+          const t = String(item?.type || "").toLowerCase();
+          if (!t) continue;
+          // In AI Mode endpoint, the AI content is usually represented as ai_overview (+ sub-items)
+          if (t.includes("ai_overview")) {
+            const urls = new Set<string>();
+            extractUrlsFromObject(item, urls, 0);
+            for (const u of filterClientUrls(urls)) aiModeUrls.add(u);
+          }
+        }
+      }
+
+      if (!cacheTableAvailable) {
+        // Table missing — return computed values without persisting (avoid Prisma errors/noise)
+        return {
+          fetchedAt: new Date(),
+          updatedAt: new Date(),
+          checkedKeywords: checked,
+          aiOverviewCitedPages: aiOverviewUrls.size,
+          aiModeCitedPages: aiModeUrls.size,
+        } as any;
+      }
+
+      try {
+        const upserted = await prisma.aiSearchSerpCache.upsert({
+          where: { clientId },
+          update: {
+            fetchedAt: new Date(),
+            checkedKeywords: checked,
+            aiOverviewCitedPages: aiOverviewUrls.size,
+            aiModeCitedPages: aiModeUrls.size,
+            aiOverviewCitedUrls: JSON.stringify(Array.from(aiOverviewUrls)),
+            aiModeCitedUrls: JSON.stringify(Array.from(aiModeUrls)),
+          },
+          create: {
+            clientId,
+            fetchedAt: new Date(),
+            checkedKeywords: checked,
+            aiOverviewCitedPages: aiOverviewUrls.size,
+            aiModeCitedPages: aiModeUrls.size,
+            aiOverviewCitedUrls: JSON.stringify(Array.from(aiOverviewUrls)),
+            aiModeCitedUrls: JSON.stringify(Array.from(aiModeUrls)),
+          },
+        });
+        return upserted;
+      } catch (e) {
+        // If the table is missing, Prisma logs can be noisy; keep this warning minimal.
+        console.warn("[AI Search Visibility] Failed to persist ai_search_serp_cache.");
+        return {
+          fetchedAt: new Date(),
+          updatedAt: new Date(),
+          checkedKeywords: checked,
+          aiOverviewCitedPages: aiOverviewUrls.size,
+          aiModeCitedPages: aiModeUrls.size,
+        } as any;
+      }
+    };
+
+    let serpCache = cache;
+    let serpRefreshQueued = false;
+
+    // Important:
+    // DataForSEO SERP calls can be slow/billable. Do NOT run them during normal dashboard load.
+    // Only run when explicitly forced (or you can wire a "Refresh" button on the UI).
+    if (force) {
+      serpCache = await dedupeInFlight(`ai-search-serp-cache:${clientId}`, async () => {
+        if (!cacheTableAvailable) {
+          return await refreshSerpCache();
+        }
+        let latest: any = null;
+        try {
+          latest = await prisma.aiSearchSerpCache.findUnique({ where: { clientId } });
+        } catch {
+          latest = null;
+        }
+        const fresh = isFresh(latest?.updatedAt ?? null, DATAFORSEO_REFRESH_TTL_MS);
+        if (fresh) return latest;
+        return await refreshSerpCache();
+      });
+    } else if (!cacheFresh && req.user.role === "SUPER_ADMIN") {
+      // Queue a background refresh (deduped) so the next load gets fresh data,
+      // but keep this request fast (prevents frontend timeouts).
+      serpRefreshQueued = true;
+      void dedupeInFlight(`ai-search-serp-cache:${clientId}`, async () => {
+        try {
+          if (!cacheTableAvailable) return await refreshSerpCache();
+          const latest = await prisma.aiSearchSerpCache.findUnique({ where: { clientId } });
+          const fresh = isFresh(latest?.updatedAt ?? null, DATAFORSEO_REFRESH_TTL_MS);
+          if (fresh) return latest;
+          return await refreshSerpCache();
+        } catch (e) {
+          console.warn("[AI Search Visibility] Background refresh failed:", e);
+          return null;
+        }
+      });
+    }
+
+    const aiOverviewCitedPages = serpCache?.aiOverviewCitedPages ?? 0;
+    const aiModeCitedPages = serpCache?.aiModeCitedPages ?? 0;
+
+    return res.json({
+      rows: [
+        { name: "ChatGPT", visibility: chatgpt.visibility, mentions: chatgpt.sessions, citedPages: chatgpt.citedPages },
+        { name: "AI Overview", visibility: aiOverviewVisibility, mentions: aiOverviewMentions, citedPages: aiOverviewCitedPages },
+        { name: "AI Mode", visibility: aiModeVisibility, mentions: aiModeMentions, citedPages: aiModeCitedPages },
+        { name: "Gemini", visibility: gemini.visibility, mentions: gemini.sessions, citedPages: gemini.citedPages },
+      ],
+      meta: {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        ga4Connected: isGA4Connected,
+        totalKeywordsWithSerpTypes,
+        serpCitedPages: {
+          aiOverview: aiOverviewCitedPages,
+          aiMode: aiModeCitedPages,
+        },
+        serpRefreshQueued,
+        serpCache: serpCache
+          ? {
+              fetchedAt: serpCache.fetchedAt,
+              checkedKeywords: serpCache.checkedKeywords,
+              nextAllowedAt: new Date(new Date(serpCache.updatedAt).getTime() + DATAFORSEO_REFRESH_TTL_MS),
+            }
+          : null,
+      },
+    });
+  } catch (error: any) {
+    console.error("AI Search visibility error:", error);
+    return res.status(500).json({ message: "Failed to fetch AI Search Visibility" });
   }
 });
 
