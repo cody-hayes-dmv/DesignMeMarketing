@@ -20,6 +20,7 @@ model User {
   clients        Client[]
   assignedTaksks Task[]       @relation("TaskAssignee")
   createdTass    Task[]       @relation("TaskCreator")
+  taskComments   TaskComment[]
   tokens         Token[]
   memberships    UserAgency[]
 
@@ -70,6 +71,7 @@ model Task {
   createdById    String?
   assigneeId     String?
   clientId       String?
+  comments       TaskComment[]
   agency         Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
   client         Client?    @relation(fields: [clientId], references: [id])
@@ -80,6 +82,21 @@ model Task {
   @@index([clientId], map: "tasks_clientId_fkey")
   @@index([createdById], map: "tasks_createdById_fkey")
   @@map("tasks")
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  body      String   @db.LongText
+  taskId    String
+  authorId  String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([authorId])
+  @@map("task_comments")
 }
 
 model Token {

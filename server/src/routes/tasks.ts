@@ -69,6 +69,30 @@ const taskInclude = {
   // Note: proof is a JSON field, so it's automatically included
 };
 
+const commentBodySchema = z.object({
+  body: z.string().min(1).max(5000),
+});
+
+async function getTaskForAccess(taskId: string) {
+  return prisma.task.findUnique({
+    where: { id: taskId },
+    include: {
+      ...taskInclude,
+      agency: {
+        include: {
+          members: { select: { userId: true } },
+        },
+      },
+    },
+  });
+}
+
+function canAccessTask(user: any, task: any) {
+  const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
+  const inAgency = Boolean(task?.agency?.members?.some((m: any) => m.userId === user.userId));
+  return isAdmin || inAgency;
+}
+
 // Get tasks
 router.get("/", authenticateToken, async (req, res) => {
   try {
@@ -160,6 +184,102 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Fetch client work log error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Task comments: list
+// IMPORTANT: Must be before "/:id"
+router.get("/:id/comments", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const task = await getTaskForAccess(id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
+
+    const comments = await prisma.taskComment.findMany({
+      where: { taskId: id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        body: true,
+        createdAt: true,
+        updatedAt: true,
+        author: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    return res.json(comments);
+  } catch (error) {
+    console.error("Fetch task comments error:", error);
+    return res.status(500).json({ message: "Failed to fetch comments" });
+  }
+});
+
+// Task comments: create
+// IMPORTANT: Must be before "/:id"
+router.post("/:id/comments", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "CLIENT") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const { id } = req.params;
+    const { body } = commentBodySchema.parse(req.body);
+
+    const task = await getTaskForAccess(id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
+
+    const created = await prisma.taskComment.create({
+      data: { taskId: id, authorId: req.user.userId, body },
+      select: {
+        id: true,
+        body: true,
+        createdAt: true,
+        updatedAt: true,
+        author: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    return res.status(201).json(created);
+  } catch (error: any) {
+    console.error("Create task comment error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid comment", errors: error.errors });
+    }
+    return res.status(500).json({ message: "Failed to create comment" });
+  }
+});
+
+// Task comments: delete (author or admin)
+// IMPORTANT: Must be before "/:id"
+router.delete("/:id/comments/:commentId", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "CLIENT") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const { id, commentId } = req.params;
+    const task = await getTaskForAccess(id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
+
+    const comment = await prisma.taskComment.findUnique({ where: { id: commentId } });
+    if (!comment || comment.taskId !== id) {
+      return res.status(404).json({ message: "Comment not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isAuthor = comment.authorId === req.user.userId;
+    if (!isAdmin && !isAuthor) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    await prisma.taskComment.delete({ where: { id: commentId } });
+    return res.status(204).send();
+  } catch (error) {
+    console.error("Delete task comment error:", error);
+    return res.status(500).json({ message: "Failed to delete comment" });
   }
 });
 
