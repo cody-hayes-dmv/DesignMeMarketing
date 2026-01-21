@@ -18,7 +18,7 @@ SELECT UUID(), @now, @now, 'Set up GHL', NULL, 'Onboarding', 'high', 1, 2, t.`id
 FROM `onboarding_templates` t WHERE t.`name` = 'Standard SEO Onboarding';
 
 INSERT INTO `onboarding_tasks` (`id`, `createdAt`, `updatedAt`, `title`, `description`, `category`, `priority`, `estimatedHours`, `order`, `templateId`)
-SELECT UUID(), @now, @now, 'Set up clawed project', NULL, 'Onboarding', 'high', 1, 3, t.`id`
+SELECT UUID(), @now, @now, 'Set up Claude project', NULL, 'Onboarding', 'high', 1, 3, t.`id`
 FROM `onboarding_templates` t WHERE t.`name` = 'Standard SEO Onboarding';
 
 INSERT INTO `onboarding_tasks` (`id`, `createdAt`, `updatedAt`, `title`, `description`, `category`, `priority`, `estimatedHours`, `order`, `templateId`)

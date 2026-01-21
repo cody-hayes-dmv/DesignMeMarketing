@@ -226,7 +226,7 @@ async function main() {
       order: 2,
     },
     {
-      title: "Set up clawed project",
+      title: "Set up Claude project",
       description: null,
       category: "Onboarding",
       priority: "high",
