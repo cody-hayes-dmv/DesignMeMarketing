@@ -20,6 +20,7 @@ import AgencyDashboardPage from "./pages/Agency/AgencyDashboardPage";
 import AgenciesPage from "./pages/SuperAdmin/AgenciesPage";
 import SuperAdminDashboard from "./pages/SuperAdmin/SuperAdminDashboard";
 import WorkersPage from "./pages/WorkersPage";
+import VendastaPage from "./pages/VendastaPage";
 import ClientDashboardPage from "./pages/ClientDashboardPage";
 import ShareDashboardPage from "./pages/ShareDashboardPage";
 import AuthLandingPage from "./pages/AuthLandingPage";
@@ -83,6 +84,7 @@ function App() {
     { path: "/agency/dashboard", component: AgencyDashboardPage },
     { path: "/agency/agencies", component: AgenciesPage },
     { path: "/agency/clients", component: ClientsPage },
+    { path: "/agency/vendasta", component: VendastaPage },
     { path: "/agency/keywords", component: KeywordsPage },
     { path: "/agency/rankings", component: RankingsPage },
     { path: "/agency/reports", component: ReportsPage },

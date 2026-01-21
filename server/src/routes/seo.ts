@@ -1845,30 +1845,90 @@ router.get("/share/:token/ranked-keywords/history", async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    const allHistory = await prisma.rankedKeywordsHistory.findMany({
-      where: { clientId },
-      orderBy: [
-        { year: "asc" },
-        { month: "asc" }
-      ]
-    });
+    let allHistory: any[] = [];
+    try {
+      allHistory = await prisma.rankedKeywordsHistory.findMany({
+        where: { clientId },
+        orderBy: [{ year: "asc" }, { month: "asc" }],
+        select: {
+          month: true,
+          year: true,
+          totalKeywords: true,
+          top3: true,
+          top10: true,
+          page2: true,
+          pos21_30: true,
+          pos31_50: true,
+          pos51Plus: true,
+        } as any,
+      });
+    } catch (error: any) {
+      if (error?.code === "P2022") {
+        allHistory = await prisma.rankedKeywordsHistory.findMany({
+          where: { clientId },
+          orderBy: [{ year: "asc" }, { month: "asc" }],
+          select: { month: true, year: true, totalKeywords: true },
+        });
+      } else {
+        throw error;
+      }
+    }
 
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
     
-    const dbMonthlyData: Record<string, { month: number; year: number; totalKeywords: number; date: string }> = {};
+    const dbMonthlyData: Record<
+      string,
+      {
+        month: number;
+        year: number;
+        totalKeywords: number;
+        top3: number;
+        top10: number;
+        page2: number;
+        pos21_30: number;
+        pos31_50: number;
+        pos51Plus: number;
+        date: string;
+      }
+    > = {};
     allHistory.forEach((item) => {
       const key = `${item.year}-${String(item.month).padStart(2, '0')}`;
+      const total = Number(item.totalKeywords || 0);
+      const top3 = Number(item.top3 || 0);
+      const top10 = Number(item.top10 || 0);
+      const page2 = Number(item.page2 || 0);
+      const pos21_30 = Number(item.pos21_30 || 0);
+      const pos31_50 = Number(item.pos31_50 || 0);
+      const knownSum = top3 + top10 + page2 + pos21_30 + pos31_50;
+      const pos51Plus = Number(item.pos51Plus || 0) || Math.max(0, total - knownSum);
       dbMonthlyData[key] = {
         month: item.month,
         year: item.year,
-        totalKeywords: item.totalKeywords,
+        totalKeywords: total,
+        top3,
+        top10,
+        page2,
+        pos21_30,
+        pos31_50,
+        pos51Plus,
         date: `${item.year}-${String(item.month).padStart(2, '0')}-01`
       };
     });
 
-    const completeData: Array<{ month: number; year: number; totalKeywords: number; date: string }> = [];
+    const completeData: Array<{
+      month: number;
+      year: number;
+      totalKeywords: number;
+      top3: number;
+      top10: number;
+      page2: number;
+      pos21_30: number;
+      pos31_50: number;
+      pos51Plus: number;
+      date: string;
+    }> = [];
     
     for (let i = 11; i >= 0; i--) {
       const targetDate = new Date(currentYear, currentMonth - 1 - i, 1);
@@ -1884,6 +1944,12 @@ router.get("/share/:token/ranked-keywords/history", async (req, res) => {
           month: targetMonth,
           year: targetYear,
           totalKeywords: 0,
+          top3: 0,
+          top10: 0,
+          page2: 0,
+          pos21_30: 0,
+          pos31_50: 0,
+          pos51Plus: 0,
           date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
         });
       }
@@ -5357,11 +5423,47 @@ async function fetchHistoricalRankOverviewFromDataForSEO(
         }
       }
 
+      // Position distribution → our chart buckets.
+      // Buckets requested:
+      // 1–3 (Top 3), 4–10 (Top 10), 11–20 (Page 2), 21–30, 31–50, 51+
+      const organic = item?.metrics?.organic || {};
+      const n = (v: any) => (typeof v === "number" && Number.isFinite(v) ? Number(v) : Number(v ?? 0) || 0);
+
+      const pos1 = n(organic.pos_1);
+      const pos2_3 = n(organic.pos_2_3);
+      const pos4_10 = n(organic.pos_4_10);
+      const pos11_20 = n(organic.pos_11_20);
+      const pos21_30 = n(organic.pos_21_30);
+      const pos31_40 = n(organic.pos_31_40);
+      const pos41_50 = n(organic.pos_41_50);
+      const pos51_60 = n(organic.pos_51_60);
+      const pos61_70 = n(organic.pos_61_70);
+      const pos71_80 = n(organic.pos_71_80);
+      const pos81_90 = n(organic.pos_81_90);
+      const pos91_100 = n(organic.pos_91_100);
+      const pos101Plus = n(organic.pos_101_plus ?? organic.pos_101Plus ?? organic.pos_101);
+
+      const top3 = pos1 + pos2_3;
+      const top10 = pos4_10;
+      const page2 = pos11_20;
+      const pos31_50 = pos31_40 + pos41_50;
+      const pos51PlusDetailed = pos51_60 + pos61_70 + pos71_80 + pos81_90 + pos91_100 + pos101Plus;
+
+      const knownSum = top3 + top10 + page2 + pos21_30 + pos31_50;
+      const remainder = Math.max(0, Number(totalKeywords || 0) - knownSum);
+      const pos51Plus = pos51PlusDetailed > 0 ? pos51PlusDetailed : remainder;
+
       const formatted = {
         date: `${year}-${String(month).padStart(2, '0')}-01`, // Format as YYYY-MM-DD
         month: month, // 1-12
         year: year,
         totalKeywords: Number(totalKeywords), // Ensure it's a number
+        top3,
+        top10,
+        page2,
+        pos21_30,
+        pos31_50,
+        pos51Plus,
         rawData: item // Keep raw data for debugging
       };
       
@@ -5850,13 +5952,35 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
 
     // Read from database only - no API calls for agency users
     // Get all historical data from database
-    const allHistory = await prisma.rankedKeywordsHistory.findMany({
-      where: { clientId },
-      orderBy: [
-        { year: "asc" },
-        { month: "asc" }
-      ]
-    });
+    let allHistory: any[] = [];
+    try {
+      allHistory = await prisma.rankedKeywordsHistory.findMany({
+        where: { clientId },
+        orderBy: [{ year: "asc" }, { month: "asc" }],
+        select: {
+          month: true,
+          year: true,
+          totalKeywords: true,
+          top3: true,
+          top10: true,
+          page2: true,
+          pos21_30: true,
+          pos31_50: true,
+          pos51Plus: true,
+        } as any,
+      });
+    } catch (error: any) {
+      // Backwards-compatible fallback for DBs that haven't been migrated yet
+      if (error?.code === "P2022") {
+        allHistory = await prisma.rankedKeywordsHistory.findMany({
+          where: { clientId },
+          orderBy: [{ year: "asc" }, { month: "asc" }],
+          select: { month: true, year: true, totalKeywords: true },
+        });
+      } else {
+        throw error;
+      }
+    }
 
     console.log(`Found ${allHistory.length} months in database`);
 
@@ -5865,18 +5989,57 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
     
-    const dbMonthlyData: Record<string, { month: number; year: number; totalKeywords: number; date: string }> = {};
+    const dbMonthlyData: Record<
+      string,
+      {
+        month: number;
+        year: number;
+        totalKeywords: number;
+        top3: number;
+        top10: number;
+        page2: number;
+        pos21_30: number;
+        pos31_50: number;
+        pos51Plus: number;
+        date: string;
+      }
+    > = {};
     allHistory.forEach((item) => {
       const key = `${item.year}-${String(item.month).padStart(2, '0')}`;
+      const total = Number(item.totalKeywords || 0);
+      const top3 = Number(item.top3 || 0);
+      const top10 = Number(item.top10 || 0);
+      const page2 = Number(item.page2 || 0);
+      const pos21_30 = Number(item.pos21_30 || 0);
+      const pos31_50 = Number(item.pos31_50 || 0);
+      const knownSum = top3 + top10 + page2 + pos21_30 + pos31_50;
+      const pos51Plus = Number(item.pos51Plus || 0) || Math.max(0, total - knownSum);
       dbMonthlyData[key] = {
         month: item.month,
         year: item.year,
-        totalKeywords: item.totalKeywords,
+        totalKeywords: total,
+        top3,
+        top10,
+        page2,
+        pos21_30,
+        pos31_50,
+        pos51Plus,
         date: `${item.year}-${String(item.month).padStart(2, '0')}-01`
       };
     });
 
-    const completeData: Array<{ month: number; year: number; totalKeywords: number; date: string }> = [];
+    const completeData: Array<{
+      month: number;
+      year: number;
+      totalKeywords: number;
+      top3: number;
+      top10: number;
+      page2: number;
+      pos21_30: number;
+      pos31_50: number;
+      pos51Plus: number;
+      date: string;
+    }> = [];
     
     // Generate all 12 months, filling with database data or 0
     for (let i = 11; i >= 0; i--) {
@@ -5894,6 +6057,12 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
           month: targetMonth,
           year: targetYear,
           totalKeywords: 0,
+          top3: 0,
+          top10: 0,
+          page2: 0,
+          pos21_30: 0,
+          pos31_50: 0,
+          pos51Plus: 0,
           date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
         });
       }
@@ -5941,7 +6110,21 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
 
       // Group by month and year, taking the latest value for each month
       // This handles cases where there are multiple data points per month (e.g., weekly snapshots)
-      const monthlyData: Record<string, { month: number; year: number; totalKeywords: number; date: string }> = {};
+      const monthlyData: Record<
+        string,
+        {
+          month: number;
+          year: number;
+          totalKeywords: number;
+          top3?: number;
+          top10?: number;
+          page2?: number;
+          pos21_30?: number;
+          pos31_50?: number;
+          pos51Plus?: number;
+          date: string;
+        }
+      > = {};
       
       historicalData.forEach((item: any) => {
         // Create unique key for each month-year combination
@@ -5953,6 +6136,12 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
             month: item.month,
             year: item.year,
             totalKeywords: item.totalKeywords,
+            top3: item.top3 ?? 0,
+            top10: item.top10 ?? 0,
+            page2: item.page2 ?? 0,
+            pos21_30: item.pos21_30 ?? 0,
+            pos31_50: item.pos31_50 ?? 0,
+            pos51Plus: item.pos51Plus ?? 0,
             date: item.date
           };
         }
@@ -5974,7 +6163,18 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
       const currentYear = now.getFullYear();
       const currentMonth = now.getMonth() + 1; // 1-12
       
-      const completeData: Array<{ month: number; year: number; totalKeywords: number; date: string }> = [];
+      const completeData: Array<{
+        month: number;
+        year: number;
+        totalKeywords: number;
+        top3: number;
+        top10: number;
+        page2: number;
+        pos21_30: number;
+        pos31_50: number;
+        pos51Plus: number;
+        date: string;
+      }> = [];
       
       // Generate all 12 months
       for (let i = 11; i >= 0; i--) {
@@ -5985,7 +6185,26 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
         
         const existingData = monthlyData[key];
         if (existingData) {
-          completeData.push(existingData);
+          const total = Number(existingData.totalKeywords || 0);
+          const top3 = Number(existingData.top3 || 0);
+          const top10 = Number(existingData.top10 || 0);
+          const page2 = Number(existingData.page2 || 0);
+          const pos21_30 = Number(existingData.pos21_30 || 0);
+          const pos31_50 = Number(existingData.pos31_50 || 0);
+          const knownSum = top3 + top10 + page2 + pos21_30 + pos31_50;
+          const pos51Plus = Number(existingData.pos51Plus || 0) || Math.max(0, total - knownSum);
+          completeData.push({
+            month: existingData.month,
+            year: existingData.year,
+            totalKeywords: total,
+            top3,
+            top10,
+            page2,
+            pos21_30,
+            pos31_50,
+            pos51Plus,
+            date: existingData.date,
+          });
         } else {
           // Fill missing months with 0 or use previous month's value
           const prevValue = completeData.length > 0 
@@ -5995,6 +6214,12 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
             month: targetMonth,
             year: targetYear,
             totalKeywords: 0, // Use 0 for missing months to show accurate data
+            top3: 0,
+            top10: 0,
+            page2: 0,
+            pos21_30: 0,
+            pos31_50: 0,
+            pos51Plus: 0,
             date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
           });
         }
@@ -6013,13 +6238,25 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
             },
             update: {
               totalKeywords: item.totalKeywords,
-            },
+              top3: item.top3,
+              top10: item.top10,
+              page2: item.page2,
+              pos21_30: item.pos21_30,
+              pos31_50: item.pos31_50,
+              pos51Plus: item.pos51Plus,
+            } as any,
             create: {
               clientId,
               month: item.month,
               year: item.year,
               totalKeywords: item.totalKeywords,
-            },
+              top3: item.top3,
+              top10: item.top10,
+              page2: item.page2,
+              pos21_30: item.pos21_30,
+              pos31_50: item.pos31_50,
+              pos51Plus: item.pos51Plus,
+            } as any,
           })
         )
       );

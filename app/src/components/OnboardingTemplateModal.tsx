@@ -54,13 +54,44 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
   const [selectedTemplate, setSelectedTemplate] = useState<OnboardingTemplate | null>(null);
   const [selectedClient, setSelectedClient] = useState<string>("");
   const [selectedWorker, setSelectedWorker] = useState<string>("");
-  const [dueDate, setDueDate] = useState<string>("");
+  const [initialDueDate, setInitialDueDate] = useState<Date>(() => {
+    const now = new Date();
+    return now;
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+
+  const INITIAL_DUE_DATE_BUSINESS_DAYS = 3;
+  const INITIAL_DUE_DATE_TASK_COUNT = 4; // only the first 3–4 tasks get due dates (set to 4)
+
+  const addBusinessDays = (start: Date, businessDays: number) => {
+    const d = new Date(start);
+    d.setHours(0, 0, 0, 0);
+    let added = 0;
+    while (added < businessDays) {
+      d.setDate(d.getDate() + 1);
+      const day = d.getDay();
+      // 0 = Sunday, 6 = Saturday
+      if (day !== 0 && day !== 6) {
+        added += 1;
+      }
+    }
+    return d;
+  };
+
+  const formatYYYYMMDD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
+  const initialDueDateStr = formatYYYYMMDD(initialDueDate);
 
   // Fetch templates, clients, and workers on modal open
   useEffect(() => {
     if (open) {
+      setInitialDueDate(addBusinessDays(new Date(), INITIAL_DUE_DATE_BUSINESS_DAYS));
       fetchTemplates();
       fetchClients();
       fetchWorkers();
@@ -114,7 +145,12 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
         status: "TODO" as const,
         clientId: selectedClient,
         assigneeId: selectedWorker || null,
-        dueDate: dueDate || null,
+        // Only the first few onboarding tasks get an automatic due date.
+        // All other tasks require manual due dates.
+        dueDate:
+          templateTask.order > 0 && templateTask.order <= INITIAL_DUE_DATE_TASK_COUNT
+            ? initialDueDateStr
+            : null,
         estimatedHours: templateTask.estimatedHours,
         priority: templateTask.priority,
       }));
@@ -138,7 +174,6 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
     setSelectedTemplate(null);
     setSelectedClient("");
     setSelectedWorker("");
-    setDueDate("");
     setError("");
   };
 
@@ -276,17 +311,17 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
                   </select>
                 </div>
 
-                {/* Due Date */}
+                {/* Initial Due Date (auto) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Due Date
+                    Initial due date
                   </label>
-                  <input
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
+                  <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-800">
+                    {initialDueDateStr} (auto: {INITIAL_DUE_DATE_BUSINESS_DAYS} business days)
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Applies only to tasks #{1}–#{INITIAL_DUE_DATE_TASK_COUNT}. All other tasks require manual due dates.
+                  </p>
                 </div>
               </div>
             </div>
@@ -322,6 +357,15 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
                             {task.category && (
                               <span className="px-2 py-1 bg-gray-200 rounded">
                                 {task.category}
+                              </span>
+                            )}
+                            {task.order > 0 && task.order <= INITIAL_DUE_DATE_TASK_COUNT ? (
+                              <span className="px-2 py-1 bg-primary-100 text-primary-700 rounded">
+                                Due: {initialDueDateStr}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 bg-white border border-gray-200 rounded text-gray-500">
+                                No due date
                               </span>
                             )}
                             {task.estimatedHours && (

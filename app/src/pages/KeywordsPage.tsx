@@ -789,7 +789,7 @@ const KeywordsPage: React.FC = () => {
               <div className="flex items-start gap-3">
                 <div className="flex-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Keyword
+                    Seed Keyword
                   </label>
                   <div className="mt-1 flex items-center gap-3">
                     <input
@@ -889,7 +889,7 @@ const KeywordsPage: React.FC = () => {
                       Search volume
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
-                      Difficulty
+                      Keyword Difficulty
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
                       CPC

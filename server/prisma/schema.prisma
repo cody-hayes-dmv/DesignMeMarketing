@@ -250,6 +250,12 @@ model RankedKeywordsHistory {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   totalKeywords Int
+  top3          Int      @default(0)
+  top10         Int      @default(0)
+  page2         Int      @default(0)
+  pos21_30      Int      @default(0)
+  pos31_50      Int      @default(0)
+  pos51Plus     Int      @default(0)
   clientId      String
   month         Int
   year          Int

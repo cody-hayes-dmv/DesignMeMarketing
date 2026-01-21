@@ -14,6 +14,7 @@ import {
   LogOut,
   Users,
   Building2,
+  Store,
   Menu,
   ChevronLeft,
   PersonStanding,
@@ -82,6 +83,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       path: "/agency/clients",
       hasSubMenu: false,
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+    },
+    {
+      icon: Store,
+      label: "Vendasta",
+      path: "/agency/vendasta",
+      hasSubMenu: false,
+      roles: ["ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: UserCog,

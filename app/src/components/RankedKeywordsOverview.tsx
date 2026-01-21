@@ -39,11 +39,23 @@ interface RankedKeywordsHistoryPoint {
   month: number;
   year: number;
   totalKeywords: number;
+  top3?: number;
+  top10?: number;
+  page2?: number;
+  pos21_30?: number;
+  pos31_50?: number;
+  pos51Plus?: number;
 }
 
 interface ChartDatum {
   month: string;
-  keywords: number;
+  total: number;
+  top3: number;
+  top10: number;
+  page2: number;
+  pos21_30: number;
+  pos31_50: number;
+  pos51Plus: number;
 }
 
 interface RankedKeywordsOverviewProps {
@@ -64,11 +76,61 @@ const formatHistory = (history: RankedKeywordsHistoryPoint[]): ChartDatum[] => {
   return history
     .map((item) => ({
       month: `${monthNames[item.month - 1]} ${item.year}`,
-      keywords: Number(item.totalKeywords ?? 0),
+      total: Number(item.totalKeywords ?? 0),
+      top3: Number(item.top3 ?? 0),
+      top10: Number(item.top10 ?? 0),
+      page2: Number(item.page2 ?? 0),
+      pos21_30: Number(item.pos21_30 ?? 0),
+      pos31_50: Number(item.pos31_50 ?? 0),
+      pos51Plus: Number(item.pos51Plus ?? 0),
       sortKey: item.year * 100 + item.month,
     }))
     .sort((a, b) => a.sortKey - b.sortKey)
     .map(({ sortKey, ...rest }) => rest);
+};
+
+const SERIES = [
+  { key: "top3" as const, name: "1–3 (Top 3)", color: "#FACC15" }, // yellow
+  { key: "top10" as const, name: "4–10 (Top 10)", color: "#1E40AF" }, // dark blue
+  { key: "page2" as const, name: "11–20", color: "#3B82F6" }, // blue
+  { key: "pos21_30" as const, name: "21–30", color: "#166534" }, // dark green
+  { key: "pos31_50" as const, name: "31–50", color: "#22C55E" }, // green
+  { key: "pos51Plus" as const, name: "51+", color: "#8B5CF6" }, // any color (purple)
+] as const;
+
+const RankedKeywordsLegend = () => {
+  return (
+    <ul className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+      {SERIES.map((s) => (
+        <li key={s.key} className="flex items-center gap-2 text-xs text-gray-600">
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: s.color }} />
+          <span>{s.name}</span>
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+const RankedKeywordsTooltip = ({ active, label, payload }: any) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const total = payload.reduce((sum: number, p: any) => sum + (Number(p?.value) || 0), 0);
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow">
+      <p className="text-xs font-medium text-gray-700">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-gray-900">Total: {total.toLocaleString()}</p>
+      <div className="mt-2 space-y-1">
+        {payload.map((p: any) => (
+          <div key={p.dataKey} className="flex items-center justify-between gap-4 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.color }} />
+              <span className="text-gray-600 truncate">{p.name}</span>
+            </div>
+            <span className="font-medium text-gray-800">{(Number(p.value) || 0).toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
@@ -375,24 +437,24 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                       allowDecimals={false}
                     />
                     <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#fff",
-                        border: "1px solid #E5E7EB",
-                        borderRadius: "8px",
-                        boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-                      }}
-                      formatter={(value: number) => [value.toLocaleString(), "Keywords"]}
+                      content={<RankedKeywordsTooltip />}
                     />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="keywords"
-                      stroke="#2563EB"
-                      strokeWidth={3}
-                      dot={{ r: 4, strokeWidth: 0, fill: "#60A5FA" }}
-                      activeDot={{ r: 6, fill: "#1D4ED8" }}
-                      name="Total Keywords Ranked"
+                    <Legend
+                      content={<RankedKeywordsLegend />}
+                      wrapperStyle={{ width: "100%", display: "flex", justifyContent: "center" }}
                     />
+                    {SERIES.map((s) => (
+                      <Line
+                        key={s.key}
+                        type="monotone"
+                        dataKey={s.key}
+                        stroke={s.color}
+                        strokeWidth={2.5}
+                        dot={{ r: 3, strokeWidth: 0, fill: s.color }}
+                        activeDot={{ r: 5, fill: s.color }}
+                        name={s.name}
+                      />
+                    ))}
                   </LineChart>
                 ) : (
                   <BarChart data={history}>
@@ -412,21 +474,23 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                       allowDecimals={false}
                     />
                     <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#fff",
-                        border: "1px solid #E5E7EB",
-                        borderRadius: "8px",
-                        boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-                      }}
-                      formatter={(value: number) => [value.toLocaleString(), "Keywords"]}
+                      content={<RankedKeywordsTooltip />}
                     />
-                    <Legend />
-                    <Bar
-                      dataKey="keywords"
-                      name="Total Keywords Ranked"
-                      fill="#3B82F6"
-                      radius={[6, 6, 0, 0]}
+                    <Legend
+                      content={<RankedKeywordsLegend />}
+                      wrapperStyle={{ width: "100%", display: "flex", justifyContent: "center" }}
                     />
+                    {/* Stacked bars so rank ranges are visually segmented */}
+                    {SERIES.map((s, idx, arr) => (
+                      <Bar
+                        key={s.key}
+                        dataKey={s.key}
+                        name={s.name}
+                        fill={s.color}
+                        stackId="a"
+                        radius={idx === arr.length - 1 ? [6, 6, 0, 0] : [0, 0, 0, 0]}
+                      />
+                    ))}
                   </BarChart>
                 )}
               </ResponsiveContainer>
