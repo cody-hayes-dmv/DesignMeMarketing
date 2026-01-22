@@ -96,10 +96,12 @@ function canAccessTask(user: any, task: any) {
 // Get tasks
 router.get("/", authenticateToken, async (req, res) => {
   try {
+    const clientIdParam = typeof req.query.clientId === "string" ? req.query.clientId : undefined;
     let tasks;
 
     if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
       tasks = await prisma.task.findMany({
+        where: clientIdParam ? { clientId: clientIdParam } : undefined,
         include: taskInclude,
         orderBy: { createdAt: "desc" },
       });
@@ -112,7 +114,10 @@ router.get("/", authenticateToken, async (req, res) => {
       const agencyIds = memberships.map((m) => m.agencyId);
 
       tasks = await prisma.task.findMany({
-        where: { agencyId: { in: agencyIds } },
+        where: {
+          agencyId: { in: agencyIds },
+          ...(clientIdParam ? { clientId: clientIdParam } : {}),
+        },
         include: taskInclude,
         orderBy: { createdAt: "desc" },
       });

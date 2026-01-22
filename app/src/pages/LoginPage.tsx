@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { login, clearError } from "@/store/slices/authSlice";
-import { Mail, Lock, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import zoesiLogo from "@/assets/zoesi-blue.png";
 
 const LoginPage = () => {
   const dispatch = useDispatch();
   const location = useLocation();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { loading, error } = useSelector((state: RootState) => state.auth);
   const [formData, setFormData] = useState({
@@ -60,21 +59,9 @@ const LoginPage = () => {
     });
   };
 
-  const goBackToPortal = () => {
-    navigate("/portal");
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
-        <button
-          onClick={goBackToPortal}
-          className="mb-8 flex items-center space-x-2 text-gray-600 hover:text-primary-600 transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back</span>
-        </button>
-
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">

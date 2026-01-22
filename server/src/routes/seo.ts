@@ -6571,12 +6571,30 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
     }
 
     const { clientId } = req.params;
+    const force = String((req.query as any)?.force || "").toLowerCase() === "true";
     const client = await prisma.client.findUnique({
       where: { id: clientId },
     });
 
     if (!client || !client.domain) {
       return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+
+    // Throttle DataForSEO refreshes to avoid repeated charges (48h), unless force=true.
+    const latest = await prisma.rankedKeywordsHistory.findFirst({
+      where: { clientId },
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    });
+    const lastRefreshedAt = latest?.updatedAt ?? null;
+    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+    if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+      return res.json({
+        skipped: true,
+        message: "Using cached ranked keywords history (refresh limited to every 48 hours).",
+        lastRefreshedAt,
+        nextAllowedAt,
+      });
     }
 
     // Fetch historical data from DataForSEO Historical Rank Overview API

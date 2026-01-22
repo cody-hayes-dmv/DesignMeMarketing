@@ -24,6 +24,7 @@ import {
   Edit,
   Send,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   AlertTriangle,
 } from "lucide-react";
@@ -33,6 +34,7 @@ import { endOfWeek, format, startOfWeek } from "date-fns";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import toast from "react-hot-toast";
+import { createNonOverlappingPieValueLabel } from "@/utils/recharts";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { logout } from "@/store/slices/authSlice";
@@ -45,6 +47,8 @@ interface TrafficSourceSlice {
   value: number;
   color: string;
 }
+
+const BACKLINKS_PAGE_SIZES = [25, 50, 100, 250] as const;
 
 interface ClientReport {
   id: string;
@@ -74,7 +78,7 @@ type WorkLogTask = {
   createdBy?: { id: string; name?: string | null; email: string } | null;
 };
 
-type BacklinkFilter = "all" | "new" | "lost";
+type BacklinkFilter = "all" | "new";
 type BacklinkRow = {
   id: string;
   sourceUrl: string;
@@ -234,6 +238,8 @@ const ClientDashboardPage: React.FC = () => {
   const [backlinks, setBacklinks] = useState<BacklinkRow[]>([]);
   const [backlinksLoading, setBacklinksLoading] = useState(false);
   const [backlinksError, setBacklinksError] = useState<string | null>(null);
+  const [backlinksPageSize, setBacklinksPageSize] = useState<(typeof BACKLINKS_PAGE_SIZES)[number]>(25);
+  const [backlinksPage, setBacklinksPage] = useState(1);
   const [addBacklinkModalOpen, setAddBacklinkModalOpen] = useState(false);
   const [addingBacklink, setAddingBacklink] = useState(false);
   const [addBacklinkForm, setAddBacklinkForm] = useState<{
@@ -1240,7 +1246,6 @@ const ClientDashboardPage: React.FC = () => {
     const lostCount = Number(dashboardSummary?.backlinkStats?.lost ?? 0) || 0;
     // These should match the Backlinks table tabs:
     // - New tab: last 4 weeks new backlinks (unique rows)
-    // - Lost tab: last 4 weeks lost backlinks (unique rows)
     const newLast4Weeks =
       Number(dashboardSummary?.backlinkStats?.newLast4Weeks ?? 0) ||
       weeklyBacklinkTimeseries.reduce((sum, w) => sum + (Number(w.newBacklinks) || 0), 0) ||
@@ -1252,11 +1257,39 @@ const ClientDashboardPage: React.FC = () => {
     return { totalBacklinks, avgDomainRating, lostCount, newLast4Weeks, lostLast4Weeks };
   }, [dashboardSummary, weeklyBacklinkTimeseries]);
 
+  // Backlinks pagination (applies to "All" and "New" tables)
+  const backlinksPagination = useMemo(() => {
+    const totalRows = backlinks.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / backlinksPageSize));
+    const page = Math.min(Math.max(1, backlinksPage), totalPages);
+    const startIdx = (page - 1) * backlinksPageSize;
+    const endIdx = Math.min(totalRows, startIdx + backlinksPageSize);
+    const from = totalRows === 0 ? 0 : startIdx + 1;
+    const to = endIdx;
+    const rows = backlinks.slice(startIdx, endIdx);
+    return { totalRows, totalPages, page, from, to, rows };
+  }, [backlinks, backlinksPage, backlinksPageSize]);
+
+  useEffect(() => {
+    // Reset paging when switching tabs (All/New)
+    setBacklinksPage(1);
+  }, [backlinksFilter]);
+
+  useEffect(() => {
+    // Reset paging when page size changes
+    setBacklinksPage(1);
+  }, [backlinksPageSize]);
+
+  useEffect(() => {
+    // Clamp page if data size changes (e.g. filter/search refresh)
+    setBacklinksPage((p) => Math.min(p, backlinksPagination.totalPages));
+  }, [backlinksPagination.totalPages]);
+
   const fetchBacklinksList = useCallback(async () => {
     if (!clientId) return;
     try {
       setBacklinksLoading(true);
-      const daysForList = backlinksFilter === "all" ? 365 : 28; // New/Lost tabs are "last 4 weeks"
+      const daysForList = backlinksFilter === "all" ? 365 : 28; // New tab is "last 4 weeks"
       const res = await api.get(`/seo/backlinks/${clientId}`, {
         params: {
           filter: backlinksFilter,
@@ -2658,7 +2691,8 @@ const ClientDashboardPage: React.FC = () => {
                             cx="50%"
                             cy="50%"
                             outerRadius={70}
-                            label
+                            labelLine={false}
+                            label={createNonOverlappingPieValueLabel({ fontSizePx: 16 }) as any}
                           >
                             {resolvedTrafficSources.map((entry, index) => (
                               <Cell
@@ -3438,15 +3472,6 @@ const ClientDashboardPage: React.FC = () => {
                     >
                       New
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setBacklinksFilter("lost")}
-                      className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
-                        backlinksFilter === "lost" ? "border-primary-200 text-primary-700 bg-primary-50" : "border-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Lost
-                    </button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -3479,13 +3504,11 @@ const ClientDashboardPage: React.FC = () => {
                           <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
                             {backlinksFilter === "all"
                               ? "No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO."
-                              : backlinksFilter === "new"
-                              ? "No new backlinks found in the last 4 weeks."
-                              : "No lost backlinks found in the last 4 weeks."}
+                              : "No new backlinks found in the last 4 weeks."}
                           </td>
                         </tr>
                       ) : (
-                        backlinks.map((link) => {
+                        backlinksPagination.rows.map((link) => {
                           const source = (() => {
                             try {
                               return new URL(link.sourceUrl).hostname || link.sourceUrl;
@@ -3548,6 +3571,56 @@ const ClientDashboardPage: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
+
+                {!backlinksLoading && !backlinksError && backlinks.length > 0 && (
+                  <div className="border-t border-gray-200 px-6 py-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                        <span>Rows per page</span>
+                        <select
+                          value={backlinksPageSize}
+                          onChange={(e) =>
+                            setBacklinksPageSize(Number(e.target.value) as (typeof BACKLINKS_PAGE_SIZES)[number])
+                          }
+                          className="rounded-lg border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                          {BACKLINKS_PAGE_SIZES.map((size) => (
+                            <option key={size} value={size}>
+                              {size}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-xs text-gray-500">
+                          Showing {backlinksPagination.from}–{backlinksPagination.to} of {backlinksPagination.totalRows}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setBacklinksPage((p) => Math.max(1, p - 1))}
+                          disabled={backlinksPagination.page <= 1}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          Prev
+                        </button>
+                        <span className="text-sm text-gray-600">
+                          Page {backlinksPagination.page} of {backlinksPagination.totalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setBacklinksPage((p) => Math.min(backlinksPagination.totalPages, p + 1))}
+                          disabled={backlinksPagination.page >= backlinksPagination.totalPages}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Next
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -4145,7 +4218,8 @@ const ClientDashboardPage: React.FC = () => {
                               cx="50%"
                               cy="50%"
                               outerRadius={70}
-                              label
+                              labelLine={false}
+                              label={createNonOverlappingPieValueLabel({ fontSizePx: 16 }) as any}
                             >
                               {resolvedTrafficSources.map((entry, index) => (
                                 <Cell

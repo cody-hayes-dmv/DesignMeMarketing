@@ -23,7 +23,6 @@ import WorkersPage from "./pages/WorkersPage";
 import VendastaPage from "./pages/VendastaPage";
 import ClientDashboardPage from "./pages/ClientDashboardPage";
 import ShareDashboardPage from "./pages/ShareDashboardPage";
-import AuthLandingPage from "./pages/AuthLandingPage";
 import ClientReportIndexPage from "./pages/ClientReportIndexPage";
 
 function App() {
@@ -147,8 +146,8 @@ function App() {
       <Routes>
       {/* Public share route - no auth required */}
       <Route path="/share/:token" element={<ShareDashboardPage />} />
-      {/* Auth landing (white-labeled entry) */}
-      <Route path="/portal" element={user && user.verified ? <Navigate to={getRedirectUrl()} replace /> : <AuthLandingPage />} />
+      {/* Backwards-compatible alias: redirect old portal entry to login */}
+      <Route path="/portal" element={<Navigate to="/login" replace />} />
       {/* Auth routes - only redirect if user is authenticated and verified */}
       <Route
         path="/login"
@@ -282,7 +281,7 @@ function App() {
           user && user.verified ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
-            <Navigate to="/portal" replace />
+            <Navigate to="/login" replace />
           )
         }
       />

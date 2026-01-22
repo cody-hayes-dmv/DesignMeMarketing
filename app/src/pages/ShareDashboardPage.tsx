@@ -8,6 +8,7 @@ import { endOfWeek, format, startOfWeek } from "date-fns";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import toast from "react-hot-toast";
+import { createNonOverlappingPieValueLabel } from "@/utils/recharts";
 
 interface TrafficSourceSlice {
   name: string;
@@ -883,7 +884,8 @@ const ShareDashboardPage: React.FC = () => {
                           cx="50%"
                           cy="50%"
                           outerRadius={70}
-                          label
+                          labelLine={false}
+                          label={createNonOverlappingPieValueLabel({ fontSizePx: 16 }) as any}
                         >
                           {resolvedTrafficSources.map((entry, index) => (
                             <Cell

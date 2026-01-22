@@ -119,7 +119,7 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
       const monthLabel = `${monthNames[monthStart.getMonth()]} ${monthStart.getFullYear()}`;
       return {
         title: `Monthly Deliverables - ${monthLabel}`,
-        description: `Auto-generated monthly deliverables for ${monthLabel}.`,
+        description: `Monthly deliverables for ${monthLabel}.`,
         category: "Deliverables",
         status: "TODO" as const,
         clientId: selectedClient,

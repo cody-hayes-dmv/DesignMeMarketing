@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { format } from "date-fns";
 import { RootState } from "@/store";
@@ -47,12 +47,14 @@ const TasksPage = () => {
     const [enabled, setEnabled] = useState(false);
     const [showCredentials, setShowCredentials] = useState<Record<string, boolean>>({});
     const [filterStatus, setFilterStatus] = useState<string>("all");
+    const [filterClientId, setFilterClientId] = useState<string>("all");
     const [showOnboardingModal, setShowOnboardingModal] = useState(false);
     const { tasks } = useSelector((state: RootState) => state.task)
     const { user } = useSelector((state: RootState) => state.auth);
 
     // Only non-workers can create
     const canCreate = (user?.role as ROLE | undefined) !== "WORKER";
+    const canFilterByClient = (user?.role as ROLE | undefined) !== "CLIENT";
 
     const handleCreateClick = () => {
         setSelectedTask(null);
@@ -103,6 +105,16 @@ const TasksPage = () => {
         return tasks.filter(task => isOverdue(task.dueDate)).length;
     };
 
+    const clientOptions = useMemo(() => {
+        const map = new Map<string, { id: string; name: string }>();
+        for (const t of tasks) {
+            if (t.client?.id && t.client?.name) {
+                map.set(t.client.id, { id: t.client.id, name: t.client.name });
+            }
+        }
+        return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }, [tasks]);
+
     const filtered = tasks.filter((t) => {
         const q = searchTerm.toLowerCase();
         const matchesSearch = (
@@ -116,8 +128,11 @@ const TasksPage = () => {
         const matchesStatus = filterStatus === "all" || 
             (filterStatus === "overdue" && isOverdue(t.dueDate)) ||
             t.status.toLowerCase() === filterStatus.toLowerCase();
+
+        const matchesClient =
+            filterClientId === "all" || (t.client?.id ? t.client.id === filterClientId : false);
         
-        return matchesSearch && matchesStatus;
+        return matchesSearch && matchesStatus && matchesClient;
     });
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
@@ -235,6 +250,25 @@ const TasksPage = () => {
                         </div>
                     </div>
                     
+                    {/* Client Filter */}
+                    {canFilterByClient && (
+                        <div className="flex items-center space-x-2">
+                            <Globe className="h-5 w-5 text-gray-400" />
+                            <select
+                                value={filterClientId}
+                                onChange={(e) => setFilterClientId(e.target.value)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            >
+                                <option value="all">All Clients</option>
+                                {clientOptions.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
                     {/* Status Filter */}
                     <div className="flex items-center space-x-2">
                         <Filter className="h-5 w-5 text-gray-400" />

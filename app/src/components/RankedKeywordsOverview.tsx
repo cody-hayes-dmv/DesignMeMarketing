@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -98,6 +98,10 @@ const SERIES = [
   { key: "pos51Plus" as const, name: "51+", color: "#8B5CF6" }, // any color (purple)
 ] as const;
 
+// For stacked bars, the order of <Bar> controls bottom-to-top stacking.
+// We want Top 3 (yellow) on top, so render it last.
+const BAR_STACK_SERIES = [...SERIES].reverse();
+
 const RankedKeywordsLegend = () => {
   return (
     <ul className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
@@ -153,6 +157,7 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [chartType, setChartType] = useState<ChartType>("line");
   const [refreshing, setRefreshing] = useState(false);
+  const autoRefreshAttemptedRef = useRef<Record<string, boolean>>({});
 
   const hasData = Boolean(summary?.current);
 
@@ -205,7 +210,6 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
       setHistory(formatHistory(data));
     } catch (error: any) {
       console.error("Failed to load ranked keywords history", error);
-      setHistory([]);
       const errorMsg = error?.response?.data?.message || "Unable to load ranked keywords history";
       setHistoryError(errorMsg);
       // Toast is already shown by API interceptor
@@ -238,6 +242,44 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
       setRefreshing(false);
     }
   }, [clientId, user?.role, fetchSummary, fetchHistory]);
+
+  // If the widget has no ranked-keywords data on first load, auto-refresh once for SUPER_ADMIN.
+  // This makes the initial open behave like clicking Refresh (server-side throttling still applies).
+  useEffect(() => {
+    if (!clientId) return;
+    if (user?.role !== "SUPER_ADMIN" || !enableRefresh) return;
+    if (summaryLoading || historyLoading || refreshing) return;
+    if (summaryError || historyError) return;
+    if (summary?.current) return; // already have data
+    if (autoRefreshAttemptedRef.current[clientId]) return;
+
+    // Cross-navigation TTL guard: don't keep calling refresh endpoints on every visit.
+    const ttlMs = 48 * 60 * 60 * 1000;
+    const key = `rk_auto_refresh_${clientId}`;
+    try {
+      const last = Number(localStorage.getItem(key) || "0");
+      if (Number.isFinite(last) && last > 0 && Date.now() - last < ttlMs) {
+        return;
+      }
+      localStorage.setItem(key, String(Date.now()));
+    } catch {
+      // ignore storage failures; server-side throttling still protects charges
+    }
+
+    autoRefreshAttemptedRef.current[clientId] = true;
+    void handleRefresh();
+  }, [
+    clientId,
+    enableRefresh,
+    handleRefresh,
+    historyError,
+    historyLoading,
+    refreshing,
+    summary,
+    summaryError,
+    summaryLoading,
+    user?.role,
+  ]);
 
   const changeBadge = useMemo(() => {
     if (!summary || summary.change === null || summary.change === undefined || summary.change === 0) {
@@ -274,6 +316,8 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
       return summary.current.updatedAt;
     }
   }, [summary?.current?.updatedAt]);
+
+  const isHistoryInitialLoading = historyLoading && history.length === 0;
 
   if (!clientId) {
     return (
@@ -402,7 +446,7 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
             </div>
           )}
 
-          {historyLoading ? (
+          {isHistoryInitialLoading ? (
             <div className="flex h-64 items-center justify-center">
               <span className="inline-flex items-center gap-2 text-sm text-gray-500">
                 <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
@@ -417,7 +461,13 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="h-72">
+            <div className="relative h-72">
+              {historyLoading && (
+                <div className="absolute right-2 top-2 z-10 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white/90 px-2 py-1 text-xs text-gray-600 shadow-sm">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary-600" />
+                  Updating…
+                </div>
+              )}
               <ResponsiveContainer width="100%" height="100%">
                 {chartType === "line" ? (
                   <LineChart data={history}>
@@ -480,8 +530,8 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                       content={<RankedKeywordsLegend />}
                       wrapperStyle={{ width: "100%", display: "flex", justifyContent: "center" }}
                     />
-                    {/* Stacked bars so rank ranges are visually segmented */}
-                    {SERIES.map((s, idx, arr) => (
+                    {/* Stacked bars: render bottom-to-top (yellow on top). */}
+                    {BAR_STACK_SERIES.map((s, idx, arr) => (
                       <Bar
                         key={s.key}
                         dataKey={s.key}

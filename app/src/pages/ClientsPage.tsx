@@ -29,36 +29,36 @@ import api from "@/lib/api";
 import ConfirmDialog from "../components/ConfirmDialog";
 
 const INDUSTRY_OPTIONS = [
-  "Home Services",
-  "Construction and Contractors",
-  "Real Estate",
-  "Property Management",
   "Automotive Services",
-  "Healthcare",
-  "Dental",
-  "Legal Services",
-  "Financial Services",
-  "Insurance",
-  "Professional Services",
-  "Marketing and Advertising",
-  "Technology and IT Services",
-  "Retail",
-  "E-commerce",
-  "Restaurants and Food Services",
-  "Hospitality and Lodging",
-  "Fitness and Wellness",
   "Beauty and Personal Care",
-  "Education and Training",
-  "Nonprofit and Religious Organizations",
-  "Manufacturing",
-  "Logistics and Transportation",
-  "Travel and Tourism",
-  "Entertainment and Events",
-  "Trades and Skilled Labor",
   "Cleaning and Maintenance Services",
-  "Security Services",
+  "Construction and Contractors",
+  "Dental",
+  "E-commerce",
+  "Education and Training",
+  "Entertainment and Events",
+  "Financial Services",
+  "Fitness and Wellness",
+  "Healthcare",
+  "Home Services",
+  "Hospitality and Lodging",
+  "Insurance",
+  "Legal Services",
   "Local Government or Municipality",
+  "Logistics and Transportation",
+  "Manufacturing",
+  "Marketing and Advertising",
+  "Nonprofit and Religious Organizations",
   "Other",
+  "Professional Services",
+  "Property Management",
+  "Real Estate",
+  "Restaurants and Food Services",
+  "Retail",
+  "Security Services",
+  "Technology and IT Services",
+  "Trades and Skilled Labor",
+  "Travel and Tourism",
 ] as const;
 
 const ClientsPage = () => {
@@ -703,7 +703,7 @@ const ClientsPage = () => {
             <form onSubmit={handleCreateClient} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Client Name
+                  Company Name
                 </label>
                 <input
                   type="text"
@@ -801,7 +801,7 @@ const ClientsPage = () => {
             <form onSubmit={handleUpdateClient} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Client Name
+                  Company Name
                 </label>
                 <input
                   type="text"
