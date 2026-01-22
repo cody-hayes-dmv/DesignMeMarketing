@@ -133,6 +133,8 @@ model Client {
   username              String?
   password              String?
   notes                 String?
+  // Stores extended onboarding / account details as JSON string.
+  accountInfo           String?                 @db.LongText
   ga4AccessToken        String?                 @db.Text
   ga4RefreshToken       String?                 @db.Text
   ga4PropertyId         String?

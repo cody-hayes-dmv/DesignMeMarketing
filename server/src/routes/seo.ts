@@ -723,9 +723,21 @@ async function fetchKeywordSuggestionsFromDataForSEO(
   return items.map((item) => {
     const keywordData = item?.keyword_data || {};
     const keywordInfo = keywordData?.keyword_info || item?.keyword_info || {};
+    // DataForSEO Labs related keywords returns keyword difficulty under keyword_properties.
+    // (It may also expose competition_index; keep that as a fallback.)
+    const keywordDifficultyRaw =
+      keywordData?.keyword_properties?.keyword_difficulty ?? item?.keyword_properties?.keyword_difficulty;
+    const keywordDifficulty = Number(keywordDifficultyRaw);
+
     const competitionIndex = keywordInfo?.competition_index;
-    const normalizedDifficulty =
-      typeof competitionIndex === "number" ? Math.max(0, Math.min(100, Math.round(competitionIndex * 100))) : null;
+    const competitionIndexAsPercent =
+      typeof competitionIndex === "number"
+        ? Math.max(0, Math.min(100, Math.round(competitionIndex * 100)))
+        : null;
+
+    const normalizedDifficulty = Number.isFinite(keywordDifficulty)
+      ? Math.max(0, Math.min(100, Math.round(keywordDifficulty)))
+      : competitionIndexAsPercent;
 
     return {
       keyword: keywordData?.keyword || item?.keyword || "",

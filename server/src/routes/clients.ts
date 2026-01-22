@@ -12,9 +12,44 @@ const createClientSchema = z.object({
     domain: z.string().min(1),
     industry: z.string().optional(),
     targets: z.array(z.string()).optional(),
+    // Website info
+    loginUrl: z.string().optional(),
+    username: z.string().optional(),
+    password: z.string().optional(),
+    // Extended onboarding/account info blob
+    accountInfo: z.record(z.any()).optional(),
     // Status is ignored - determined by user role (SUPER_ADMIN = ACTIVE, others = PENDING)
     status: z.enum(['ACTIVE', 'PENDING', 'REJECTED']).optional(),
 });
+
+const restrictedAccountInfoKeys = [
+    'seoRoadmapStartMonth',
+    'pagesPerMonth',
+    'technicalHoursPerMonth',
+    'campaignDurationMonths',
+] as const;
+
+function sanitizeAccountInfo(input: any, canEditRestricted: boolean) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    const next: Record<string, any> = { ...(input as any) };
+    if (!canEditRestricted) {
+        for (const k of restrictedAccountInfoKeys) {
+            if (k in next) delete next[k];
+        }
+    }
+    return next;
+}
+
+function parseAccountInfoString(raw: any): Record<string, any> | null {
+    if (!raw || typeof raw !== 'string') return null;
+    try {
+        const obj = JSON.parse(raw);
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+        return obj as Record<string, any>;
+    } catch {
+        return null;
+    }
+}
 
 function normalizeDomainInput(input: string): string {
     const raw = String(input || '').trim();
@@ -153,7 +188,7 @@ router.get('/', authenticateToken, async (req, res) => {
 // Create a client
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { name, domain, industry, targets, status } = createClientSchema.parse(req.body);
+        const { name, domain, industry, targets, loginUrl, username, password, accountInfo } = createClientSchema.parse(req.body);
 
         // Normalize domain (strip protocol/www/path)
         const normalizedDomain = normalizeDomainInput(domain);
@@ -177,9 +212,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
         // Determine status: SUPER_ADMIN always creates ACTIVE, others always create PENDING
         const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+        const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'WORKER';
         // SUPER_ADMIN always creates ACTIVE, ignore status parameter
         // Other roles always create PENDING, ignore status parameter
         const clientStatus = isSuperAdmin ? 'ACTIVE' : 'PENDING';
+
+        const safeAccountInfo = sanitizeAccountInfo(accountInfo, canEditRestricted);
 
         // Create client
         const client = await prisma.client.create({
@@ -188,6 +226,10 @@ router.post('/', authenticateToken, async (req, res) => {
                 domain: normalizedDomain,
                 industry,
                 targets: Array.isArray(targets) ? JSON.stringify(targets) : null,
+                loginUrl: loginUrl || null,
+                username: username || null,
+                password: password || null,
+                accountInfo: safeAccountInfo ? JSON.stringify(safeAccountInfo) : null,
                 status: clientStatus,
                 userId: req.user.userId,
             },
@@ -222,7 +264,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update a client
 router.put('/:id', authenticateToken, async (req, res) => {
     const clientId = req.params.id;
-    const { name, domain, status, industry, targets } = req.body.data || req.body;
+    const { name, domain, status, industry, targets, loginUrl, username, password, accountInfo } = req.body.data || req.body;
 
     try {
         // Check if client exists and user has access
@@ -272,6 +314,21 @@ router.put('/:id', authenticateToken, async (req, res) => {
         if (industry !== undefined) updateData.industry = industry;
         if (targets !== undefined) {
             updateData.targets = Array.isArray(targets) ? JSON.stringify(targets) : null;
+        }
+        if (loginUrl !== undefined) updateData.loginUrl = loginUrl || null;
+        if (username !== undefined) updateData.username = username || null;
+        if (password !== undefined) updateData.password = password || null;
+
+        // accountInfo merge (do not allow non-super-admin/worker to modify SEO roadmap fields)
+        if (accountInfo !== undefined) {
+            const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'WORKER';
+            const incoming = sanitizeAccountInfo(accountInfo, canEditRestricted);
+            if (incoming === null) {
+                updateData.accountInfo = null;
+            } else {
+                const existingObj = parseAccountInfoString((existing as any).accountInfo) || {};
+                updateData.accountInfo = JSON.stringify({ ...existingObj, ...incoming });
+            }
         }
 
         // Restrict: only ADMIN / SUPER_ADMIN can update status

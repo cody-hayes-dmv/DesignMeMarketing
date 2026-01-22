@@ -7,7 +7,11 @@ export interface Client {
   domain: string;
   status: "ACTIVE" | "PENDING" | "REJECTED";
   industry?: string;
-  targets?: string[];
+  targets?: string[] | string | null;
+  loginUrl?: string | null;
+  username?: string | null;
+  password?: string | null;
+  accountInfo?: string | Record<string, any> | null;
   createdAt: string;
   updatedAt: string;
   userId: string;
