@@ -74,14 +74,6 @@ type WorkLogTask = {
   createdBy?: { id: string; name?: string | null; email: string } | null;
 };
 
-interface BacklinkTimeseriesItem {
-  date: string;
-  newBacklinks: number;
-  lostBacklinks: number;
-  newReferringDomains: number;
-  lostReferringDomains: number;
-}
-
 type BacklinkFilter = "all" | "new" | "lost";
 type BacklinkRow = {
   id: string;
@@ -130,6 +122,7 @@ interface DashboardSummary {
   organicSessions: number | null;
   averagePosition: number | null;
   conversions: number | null;
+  organicSearchEngagedSessions?: number | null;
   // New GA4 metrics
   activeUsers: number | null;
   eventCount: number | null;
@@ -231,9 +224,12 @@ const ClientDashboardPage: React.FC = () => {
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [fetchingSummary, setFetchingSummary] = useState(false);
-  const [backlinkTimeseries, setBacklinkTimeseries] = useState<BacklinkTimeseriesItem[]>([]);
-  const [backlinkTimeseriesLoading, setBacklinkTimeseriesLoading] = useState(false);
-  const [backlinkTimeseriesError, setBacklinkTimeseriesError] = useState<string | null>(null);
+  const [backlinksForChart, setBacklinksForChart] = useState<{
+    newRows: BacklinkRow[];
+    lostRows: BacklinkRow[];
+  }>({ newRows: [], lostRows: [] });
+  const [backlinksForChartLoading, setBacklinksForChartLoading] = useState(false);
+  const [backlinksForChartError, setBacklinksForChartError] = useState<string | null>(null);
   const [backlinksFilter, setBacklinksFilter] = useState<BacklinkFilter>("all");
   const [backlinks, setBacklinks] = useState<BacklinkRow[]>([]);
   const [backlinksLoading, setBacklinksLoading] = useState(false);
@@ -761,6 +757,63 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [clientId]);
 
+  const fetchBacklinksForChart = useCallback(async () => {
+    if (!clientId) return;
+
+    const paramsBase = {
+      days: 28, // last 4 weeks
+      limit: 5000,
+      sortBy: "domainRating",
+      order: "desc",
+    } as const;
+
+    const fetchBoth = async () => {
+      const [newRes, lostRes] = await Promise.all([
+        api.get(`/seo/backlinks/${clientId}`, { params: { ...paramsBase, filter: "new" } }),
+        api.get(`/seo/backlinks/${clientId}`, { params: { ...paramsBase, filter: "lost" } }),
+      ]);
+      const newRows = Array.isArray(newRes.data) ? (newRes.data as BacklinkRow[]) : [];
+      const lostRows = Array.isArray(lostRes.data) ? (lostRes.data as BacklinkRow[]) : [];
+      return { newRows, lostRows };
+    };
+
+    try {
+      setBacklinksForChartLoading(true);
+      const { newRows, lostRows } = await fetchBoth();
+      setBacklinksForChart({ newRows, lostRows });
+      setBacklinksForChartError(null);
+
+      // If DB is empty, auto-refresh once for SUPER_ADMIN to populate data (throttled server-side).
+      if (
+        newRows.length === 0 &&
+        lostRows.length === 0 &&
+        user?.role === "SUPER_ADMIN" &&
+        !autoDataForSeoAttemptedRef.current.backlinks[clientId]
+      ) {
+        autoDataForSeoAttemptedRef.current.backlinks[clientId] = true;
+        try {
+          await api.post(`/seo/backlinks/${clientId}/refresh`);
+          const refreshed = await fetchBoth();
+          setBacklinksForChart(refreshed);
+          setBacklinksForChartError(null);
+        } catch (refreshError) {
+          console.warn("Auto-refresh backlinks skipped/failed", refreshError);
+        }
+      }
+    } catch (error: any) {
+      console.error("Failed to fetch backlinks chart rows", error);
+      setBacklinksForChart({ newRows: [], lostRows: [] });
+      const errorMsg = error?.response?.data?.message || "Unable to load backlink trends";
+      setBacklinksForChartError(errorMsg);
+    } finally {
+      setBacklinksForChartLoading(false);
+    }
+  }, [clientId, user?.role]);
+
+  useEffect(() => {
+    void fetchBacklinksForChart();
+  }, [fetchBacklinksForChart]);
+
   const handleRefreshBacklinks = useCallback(async () => {
     if (!clientId) return;
     try {
@@ -775,42 +828,29 @@ const ClientDashboardPage: React.FC = () => {
         toast.success(message || "Backlinks refreshed successfully!");
       }
 
-      // Refetch backlink timeseries (weekly UI uses last 4 weeks / 28 days)
-      const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
-        params: { range: 28 },
-      });
-      const data = Array.isArray(res.data) ? res.data : [];
-      const normalized = data
-        .map((item: any) => ({
-          date: item.date,
-          newBacklinks: Number(item.newBacklinks ?? item.new_backlinks ?? 0),
-          lostBacklinks: Number(item.lostBacklinks ?? item.lost_backlinks ?? 0),
-          newReferringDomains: Number(item.newReferringDomains ?? item.new_referring_domains ?? 0),
-          lostReferringDomains: Number(item.lostReferringDomains ?? item.lost_referring_domains ?? 0),
-        }))
-        .filter((item) => item.date)
-        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      setBacklinkTimeseries(normalized);
-      setBacklinkTimeseriesError(null);
+      // Refetch chart rows (built from backlink rows; matches the table)
+      await fetchBacklinksForChart();
 
       // Also refresh the backlinks table if it's being viewed
-      try {
-        const listRes = await api.get(`/seo/backlinks/${clientId}`, {
-          params: { filter: backlinksFilter, days: 30, limit: 5000, sortBy: "domainRating", order: "desc" },
-        });
-        const list = Array.isArray(listRes.data) ? (listRes.data as BacklinkRow[]) : [];
-        setBacklinks(list);
-        setBacklinksError(null);
-      } catch (listErr: any) {
-        console.warn("Failed to refresh backlinks list", listErr);
+      if (activeTab === "backlinks") {
+        try {
+          const daysForList = backlinksFilter === "all" ? 365 : 28;
+          const listRes = await api.get(`/seo/backlinks/${clientId}`, {
+            params: { filter: backlinksFilter, days: daysForList, limit: 5000, sortBy: "domainRating", order: "desc" },
+          });
+          const list = Array.isArray(listRes.data) ? (listRes.data as BacklinkRow[]) : [];
+          setBacklinks(list);
+          setBacklinksError(null);
+        } catch (listErr: any) {
+          console.warn("Failed to refresh backlinks list", listErr);
+        }
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to refresh backlinks");
     } finally {
       setRefreshingBacklinks(false);
     }
-  }, [backlinksFilter, clientId]);
+  }, [activeTab, backlinksFilter, clientId, fetchBacklinksForChart]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;
@@ -1143,73 +1183,6 @@ const ClientDashboardPage: React.FC = () => {
     fetchSummary();
   }, [clientId, dateRange, customStartDate, customEndDate, buildDashboardUrl]);
 
-  const fetchBacklinkTimeseries = useCallback(async () => {
-    if (!clientId) return;
-
-    try {
-      setBacklinkTimeseriesLoading(true);
-      const res = await api.get(`/seo/backlinks/${clientId}/timeseries`, {
-        // Weekly UI uses last 4 weeks of daily data (28 days).
-        params: { range: 28 },
-      });
-      const data = Array.isArray(res.data) ? res.data : [];
-      const normalized = data
-        .map((item: any) => ({
-          date: item.date,
-          newBacklinks: Number(item.newBacklinks ?? item.new_backlinks ?? 0),
-          lostBacklinks: Number(item.lostBacklinks ?? item.lost_backlinks ?? 0),
-          newReferringDomains: Number(item.newReferringDomains ?? item.new_referring_domains ?? 0),
-          lostReferringDomains: Number(item.lostReferringDomains ?? item.lost_referring_domains ?? 0),
-        }))
-        .filter((item) => item.date);
-
-      // Show most recent days first (matches API ordering / "New Links" intent)
-      normalized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setBacklinkTimeseries(normalized);
-      setBacklinkTimeseriesError(null);
-
-      // If DB is empty, auto-refresh once for SUPER_ADMIN to populate data (throttled server-side).
-      if (
-        normalized.length === 0 &&
-        user?.role === "SUPER_ADMIN" &&
-        !autoDataForSeoAttemptedRef.current.backlinks[clientId]
-      ) {
-        autoDataForSeoAttemptedRef.current.backlinks[clientId] = true;
-        try {
-          await api.post(`/seo/backlinks/${clientId}/refresh`);
-          const res2 = await api.get(`/seo/backlinks/${clientId}/timeseries`, { params: { range: 28 } });
-          const data2 = Array.isArray(res2.data) ? res2.data : [];
-          const normalized2 = data2
-            .map((item: any) => ({
-              date: item.date,
-              newBacklinks: Number(item.newBacklinks ?? item.new_backlinks ?? 0),
-              lostBacklinks: Number(item.lostBacklinks ?? item.lost_backlinks ?? 0),
-              newReferringDomains: Number(item.newReferringDomains ?? item.new_referring_domains ?? 0),
-              lostReferringDomains: Number(item.lostReferringDomains ?? item.lost_referring_domains ?? 0),
-            }))
-            .filter((item) => item.date)
-            .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setBacklinkTimeseries(normalized2);
-          setBacklinkTimeseriesError(null);
-        } catch (refreshError) {
-          console.warn("Auto-refresh backlinks skipped/failed", refreshError);
-        }
-      }
-    } catch (error: any) {
-      console.error("Failed to fetch backlink timeseries", error);
-      setBacklinkTimeseries([]);
-      const errorMsg = error?.response?.data?.message || "Unable to load backlink timeseries";
-      setBacklinkTimeseriesError(errorMsg);
-      // Toast is already shown by API interceptor, but we can add more context if needed
-    } finally {
-      setBacklinkTimeseriesLoading(false);
-    }
-  }, [clientId, user?.role]);
-
-  useEffect(() => {
-    fetchBacklinkTimeseries();
-  }, [fetchBacklinkTimeseries]);
-
   const weeklyBacklinkTimeseries = useMemo(() => {
     const weeks = 4;
     const weekStartsOn = 1 as const; // Monday
@@ -1235,20 +1208,31 @@ const ClientDashboardPage: React.FC = () => {
       byKey.set(key, bucket);
     }
 
-    for (const item of backlinkTimeseries) {
-      const dt = new Date(item.date);
+    for (const row of backlinksForChart.newRows) {
+      const raw = row.firstSeen || row.createdAt;
+      const dt = new Date(raw);
       if (!Number.isFinite(dt.getTime())) continue;
       const ws = startOfWeek(dt, { weekStartsOn });
       const key = format(ws, "yyyy-MM-dd");
       const bucket = byKey.get(key);
       if (!bucket) continue;
-      bucket.newBacklinks += Number(item.newBacklinks) || 0;
-      bucket.lostBacklinks += Number(item.lostBacklinks) || 0;
+      bucket.newBacklinks += 1;
+    }
+
+    for (const row of backlinksForChart.lostRows) {
+      const raw = row.lastSeen || row.updatedAt || row.createdAt;
+      const dt = new Date(raw);
+      if (!Number.isFinite(dt.getTime())) continue;
+      const ws = startOfWeek(dt, { weekStartsOn });
+      const key = format(ws, "yyyy-MM-dd");
+      const bucket = byKey.get(key);
+      if (!bucket) continue;
+      bucket.lostBacklinks += 1;
     }
 
     buckets.sort((a, b) => (a.key < b.key ? 1 : -1));
     return buckets;
-  }, [backlinkTimeseries]);
+  }, [backlinksForChart.lostRows, backlinksForChart.newRows]);
 
   const backlinksKpis = useMemo(() => {
     const totalBacklinks = Number(dashboardSummary?.backlinkStats?.total ?? 0) || 0;
@@ -2054,18 +2038,19 @@ const ClientDashboardPage: React.FC = () => {
     return "—";
   }, [dashboardSummary?.totalUsers, dashboardSummary?.activeUsers, fetchingSummary, ga4Connected]);
 
-  // Organic Traffic (from organicSessions)
+  // Organic Traffic (Organic Search - Engaged Sessions)
   const organicTrafficDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (ga4Connected !== true) return "—";
-    if (dashboardSummary?.organicSessions !== null && dashboardSummary?.organicSessions !== undefined) {
-      const numeric = Number(dashboardSummary.organicSessions);
+    const value = dashboardSummary?.organicSearchEngagedSessions;
+    if (value !== null && value !== undefined) {
+      const numeric = Number(value);
       if (Number.isFinite(numeric)) {
         return Math.round(numeric).toLocaleString();
       }
     }
     return "—";
-  }, [dashboardSummary?.organicSessions, fetchingSummary, ga4Connected]);
+  }, [dashboardSummary?.organicSearchEngagedSessions, fetchingSummary, ga4Connected]);
 
   // First Time Visitors (same as New Users)
   const firstTimeVisitorsDisplay = useMemo(() => {
@@ -3109,11 +3094,11 @@ const ClientDashboardPage: React.FC = () => {
               )}
             </div>
             <div className="p-6 space-y-4">
-              {backlinkTimeseriesLoading ? (
+              {backlinksForChartLoading ? (
                 <p className="text-sm text-gray-500">Loading backlink trends...</p>
-              ) : backlinkTimeseriesError ? (
-                <p className="text-sm text-red-600">{backlinkTimeseriesError}</p>
-              ) : backlinkTimeseries.length === 0 ? (
+              ) : backlinksForChartError ? (
+                <p className="text-sm text-red-600">{backlinksForChartError}</p>
+              ) : backlinksForChart.newRows.length === 0 && backlinksForChart.lostRows.length === 0 ? (
                 <p className="text-sm text-gray-500">No backlink data available yet.</p>
               ) : (() => {
                 const maxNewBacklinks =
@@ -3132,7 +3117,7 @@ const ClientDashboardPage: React.FC = () => {
                             item.newBacklinks === 0 ? "text-gray-900" : "text-emerald-600"
                           }`}
                         >
-                          {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
+                          {`${item.newBacklinks} new`}
                         </span>
                       </div>
                       <div className="flex items-center space-x-3">
@@ -3143,7 +3128,7 @@ const ClientDashboardPage: React.FC = () => {
                           />
                         </div>
                         <span className="text-xs text-gray-600 whitespace-nowrap">
-                          {backlinkTimeseriesLoading ? "..." : `-${item.lostBacklinks} lost`}
+                          {`-${item.lostBacklinks} lost`}
                         </span>
                       </div>
                     </div>
@@ -4366,11 +4351,11 @@ const ClientDashboardPage: React.FC = () => {
                     )}
                   </div>
                   <div className="p-6 space-y-4">
-                    {backlinkTimeseriesLoading ? (
+                    {backlinksForChartLoading ? (
                       <p className="text-sm text-gray-500">Loading backlink trends...</p>
-                    ) : backlinkTimeseriesError ? (
-                      <p className="text-sm text-red-600">{backlinkTimeseriesError}</p>
-                    ) : backlinkTimeseries.length === 0 ? (
+                    ) : backlinksForChartError ? (
+                      <p className="text-sm text-red-600">{backlinksForChartError}</p>
+                    ) : backlinksForChart.newRows.length === 0 && backlinksForChart.lostRows.length === 0 ? (
                       <p className="text-sm text-gray-500">No backlink data available yet.</p>
                     ) : (() => {
                       const maxNewBacklinks =
@@ -4389,7 +4374,7 @@ const ClientDashboardPage: React.FC = () => {
                                   item.newBacklinks === 0 ? "text-gray-900" : "text-emerald-600"
                                 }`}
                               >
-                                {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
+                                {`${item.newBacklinks} new`}
                               </span>
                             </div>
                             <div className="flex items-center space-x-3">
@@ -4400,7 +4385,7 @@ const ClientDashboardPage: React.FC = () => {
                                 />
                               </div>
                               <span className="text-xs text-gray-600 whitespace-nowrap">
-                                {backlinkTimeseriesLoading ? "..." : `-${item.lostBacklinks} lost`}
+                                {`-${item.lostBacklinks} lost`}
                               </span>
                             </div>
                           </div>

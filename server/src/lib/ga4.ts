@@ -207,6 +207,7 @@ export async function fetchGA4TrafficData(
   directSessions: number;
   referralSessions: number;
   paidSessions: number;
+  organicSearchEngagedSessions: number;
   bounceRate: number;
   avgSessionDuration: number;
   pagesPerSession: number;
@@ -245,7 +246,13 @@ export async function fetchGA4TrafficData(
   console.log(`[GA4] Stored property ID: ${client.ga4PropertyId}, Formatted: ${propertyId}`);
 
   // Run requests with individual error handling to avoid one failure breaking all requests
-  let sessionsResponse, usersResponse, engagementResponse, conversionsResponse, trendResponse, keyEventsResponse;
+  let sessionsResponse,
+    usersResponse,
+    engagementResponse,
+    conversionsResponse,
+    trendResponse,
+    keyEventsResponse,
+    engagedSessionsByChannelResponse;
   
   // Helper to safely run a report request
   const safeRunReport = async (requestConfig: any, requestName: string) => {
@@ -265,81 +272,107 @@ export async function fetchGA4TrafficData(
 
   try {
     // Run core requests in parallel (these are most important)
-    const [sessionsResult, usersResult, engagementResult, trendResult] = await Promise.all([
+    const [sessionsResult, usersResult, engagementResult, trendResult, engagedSessionsByChannelResult] = await Promise.all([
       // Sessions by channel
-      safeRunReport({
-        property: propertyId,
-        dateRanges: [
-          {
-            startDate: startDateStr,
-            endDate: endDateStr,
-          },
-        ],
-        dimensions: [{ name: 'sessionDefaultChannelGroup' }],
-        metrics: [{ name: 'sessions' }],
-      }, 'Sessions by channel'),
-      
+      safeRunReport(
+        {
+          property: propertyId,
+          dateRanges: [
+            {
+              startDate: startDateStr,
+              endDate: endDateStr,
+            },
+          ],
+          dimensions: [{ name: "sessionDefaultChannelGroup" }],
+          metrics: [{ name: "sessions" }],
+        },
+        "Sessions by channel"
+      ),
+
       // Users + events
-      safeRunReport({
-        property: propertyId,
-        dateRanges: [
-          {
-            startDate: startDateStr,
-            endDate: endDateStr,
-          },
-        ],
-        metrics: [
-          { name: 'activeUsers' },
-          { name: 'totalUsers' },
-          { name: 'newUsers' },
-          { name: 'eventCount' },
-        ],
-      }, 'Users and Events'),
-      
+      safeRunReport(
+        {
+          property: propertyId,
+          dateRanges: [
+            {
+              startDate: startDateStr,
+              endDate: endDateStr,
+            },
+          ],
+          metrics: [
+            { name: "activeUsers" },
+            { name: "totalUsers" },
+            { name: "newUsers" },
+            { name: "eventCount" },
+          ],
+        },
+        "Users and Events"
+      ),
+
       // Engagement metrics
-      safeRunReport({
-        property: propertyId,
-        dateRanges: [
-          {
-            startDate: startDateStr,
-            endDate: endDateStr,
-          },
-        ],
-        metrics: [
-          { name: 'bounceRate' },
-          { name: 'averageSessionDuration' },
-          { name: 'screenPageViewsPerSession' },
-          { name: 'engagedSessions' }, // Engaged Sessions from GA4
-          { name: 'engagementRate' }, // Engagement rate as decimal
-        ],
-      }, 'Engagement'),
-      
+      safeRunReport(
+        {
+          property: propertyId,
+          dateRanges: [
+            {
+              startDate: startDateStr,
+              endDate: endDateStr,
+            },
+          ],
+          metrics: [
+            { name: "bounceRate" },
+            { name: "averageSessionDuration" },
+            { name: "screenPageViewsPerSession" },
+            { name: "engagedSessions" }, // Engaged Sessions from GA4
+            { name: "engagementRate" }, // Engagement rate as decimal
+          ],
+        },
+        "Engagement"
+      ),
+
       // Trend data (daily new users + active users)
-      safeRunReport({
-        property: propertyId,
-        dateRanges: [
-          {
-            startDate: startDateStr,
-            endDate: endDateStr,
-          },
-        ],
-        dimensions: [{ name: 'date' }],
-        metrics: [
-          { name: 'newUsers' },
-          { name: 'activeUsers' },
-        ],
-        orderBys: [
-          {
-            dimension: { dimensionName: 'date' },
-          },
-        ],
-      }, 'Trend data'),
+      safeRunReport(
+        {
+          property: propertyId,
+          dateRanges: [
+            {
+              startDate: startDateStr,
+              endDate: endDateStr,
+            },
+          ],
+          dimensions: [{ name: "date" }],
+          metrics: [{ name: "newUsers" }, { name: "activeUsers" }],
+          orderBys: [
+            {
+              dimension: { dimensionName: "date" },
+            },
+          ],
+        },
+        "Trend data"
+      ),
+
+      // Engaged sessions by channel (used for Organic Traffic = Organic Search engaged sessions)
+      safeRunReport(
+        {
+          property: propertyId,
+          dateRanges: [
+            {
+              startDate: startDateStr,
+              endDate: endDateStr,
+            },
+          ],
+          dimensions: [{ name: "sessionDefaultChannelGroup" }],
+          metrics: [{ name: "engagedSessions" }],
+        },
+        "Engaged sessions by channel"
+      ),
     ]);
 
     sessionsResponse = sessionsResult;
     usersResponse = usersResult;
     engagementResponse = engagementResult;
     trendResponse = trendResult;
+    engagedSessionsByChannelResponse = engagedSessionsByChannelResult;
 
     // Try conversions separately (this often fails if conversion events aren't configured)
     conversionsResponse = await safeRunReport({
@@ -484,15 +517,30 @@ export async function fetchGA4TrafficData(
       const sessions = parseInt(row.metricValues?.[0]?.value || '0', 10);
       totalSessions += sessions;
 
-      const channelLower = channel.toLowerCase();
-      if (channelLower.includes('organic') || channelLower.includes('search')) {
+      const channelLower = channel.toLowerCase().trim();
+      // Be strict to avoid counting "Paid Search" as organic.
+      if (channelLower.includes("paid")) {
+        paidSessions += sessions;
+      } else if (channelLower === "organic search" || channelLower.includes("organic search")) {
         organicSessions += sessions;
       } else if (channelLower.includes('direct')) {
         directSessions += sessions;
       } else if (channelLower.includes('referral') || channelLower.includes('social')) {
         referralSessions += sessions;
-      } else if (channelLower.includes('paid') || channelLower.includes('cpc') || channelLower.includes('ppc')) {
-        paidSessions += sessions;
+      }
+    }
+  }
+
+  // Parse engaged sessions by channel to get Organic Search engaged sessions
+  let organicSearchEngagedSessions = 0;
+  if (engagedSessionsByChannelResponse?.rows) {
+    for (const row of engagedSessionsByChannelResponse.rows) {
+      const channel = row.dimensionValues?.[0]?.value || "";
+      const engaged = parseInt(row.metricValues?.[0]?.value || "0", 10);
+      const channelLower = channel.toLowerCase().trim();
+      if (channelLower.includes("paid")) continue;
+      if (channelLower === "organic search" || channelLower.includes("organic search")) {
+        organicSearchEngagedSessions += engaged;
       }
     }
   }
@@ -648,6 +696,7 @@ export async function fetchGA4TrafficData(
     directSessions,
     referralSessions,
     paidSessions,
+    organicSearchEngagedSessions,
     bounceRate,
     avgSessionDuration,
     pagesPerSession,
@@ -663,6 +712,59 @@ export async function fetchGA4TrafficData(
     newUsersTrend,
     activeUsersTrend, // Replaces totalUsersTrend
   };
+}
+
+/**
+ * Fetch Organic Search engaged sessions (GA4) for a given period.
+ * Used by the dashboard when serving cached GA4 metrics from DB.
+ */
+export async function fetchGA4OrganicSearchEngagedSessions(
+  clientId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<number | null> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { ga4PropertyId: true },
+  });
+
+  if (!client?.ga4PropertyId) return null;
+
+  const analytics = await getAnalyticsClient(clientId);
+  const propertyId = client.ga4PropertyId.startsWith("properties/")
+    ? client.ga4PropertyId
+    : `properties/${client.ga4PropertyId}`;
+
+  const startDateStr = startDate.toISOString().split("T")[0];
+  const endDateStr = endDate.toISOString().split("T")[0];
+
+  try {
+    const [response] = await analytics.runReport({
+      property: propertyId,
+      dateRanges: [{ startDate: startDateStr, endDate: endDateStr }],
+      dimensions: [{ name: "sessionDefaultChannelGroup" }],
+      metrics: [{ name: "engagedSessions" }],
+    });
+
+    let organic = 0;
+    for (const row of response?.rows || []) {
+      const channel = row.dimensionValues?.[0]?.value || "";
+      const engaged = parseInt(row.metricValues?.[0]?.value || "0", 10);
+      const channelLower = channel.toLowerCase().trim();
+      if (channelLower.includes("paid")) continue;
+      if (channelLower === "organic search" || channelLower.includes("organic search")) {
+        organic += engaged;
+      }
+    }
+    return Number.isFinite(organic) ? organic : 0;
+  } catch (error: any) {
+    console.warn("[GA4] Organic Search engaged sessions request failed:", {
+      error: error.message,
+      code: error.code,
+      propertyId,
+    });
+    return null;
+  }
 }
 
 /**

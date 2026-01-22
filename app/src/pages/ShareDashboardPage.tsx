@@ -60,6 +60,7 @@ interface DashboardSummary {
   organicSessions: number | null;
   averagePosition: number | null;
   conversions: number | null;
+  organicSearchEngagedSessions?: number | null;
   // GA4 metrics
   activeUsers: number | null;
   eventCount: number | null;
@@ -553,11 +554,11 @@ const ShareDashboardPage: React.FC = () => {
     return "—";
   }, [dashboardSummary?.totalUsers, dashboardSummary?.activeUsers, fetchingSummary, dashboardSummary?.isGA4Connected]);
 
-  // Organic Traffic (from organicSessions)
+  // Organic Traffic (Organic Search - Engaged Sessions)
   const organicTrafficDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (dashboardSummary?.isGA4Connected !== true) return "—";
-    const value = dashboardSummary?.organicSessions;
+    const value = dashboardSummary?.organicSearchEngagedSessions;
     if (value !== null && value !== undefined) {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
@@ -565,7 +566,7 @@ const ShareDashboardPage: React.FC = () => {
       }
     }
     return "—";
-  }, [dashboardSummary?.organicSessions, fetchingSummary, dashboardSummary?.isGA4Connected]);
+  }, [dashboardSummary?.organicSearchEngagedSessions, fetchingSummary, dashboardSummary?.isGA4Connected]);
 
   // First Time Visitors (same as New Users)
   const newUsersDisplay = useMemo(() => {

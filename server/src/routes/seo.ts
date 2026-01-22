@@ -1512,7 +1512,14 @@ router.get("/share/:token/dashboard", async (req, res) => {
     let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, fetchGA4EngagementSummary, saveGA4MetricsToDB } = await import("../lib/ga4.js");
+        const {
+          getGA4MetricsFromDB,
+          fetchGA4TrafficData,
+          fetchGA4EventsData,
+          fetchGA4EngagementSummary,
+          fetchGA4OrganicSearchEngagedSessions,
+          saveGA4MetricsToDB,
+        } = await import("../lib/ga4.js");
         
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
@@ -1548,6 +1555,16 @@ router.get("/share/:token/dashboard", async (req, res) => {
             }
           } catch (engError) {
             console.warn("[Share Dashboard] Failed to fetch GA4 engagement-only summary:", engError);
+          }
+
+          // Organic Search engaged sessions (for "Organic Traffic" card)
+          try {
+            const organicEngaged = await fetchGA4OrganicSearchEngagedSessions(clientId, startDate, endDate);
+            if (organicEngaged !== null && organicEngaged !== undefined) {
+              (ga4Data as any).organicSearchEngagedSessions = organicEngaged;
+            }
+          } catch (organicEngError) {
+            console.warn("[Share Dashboard] Failed to fetch GA4 organic engaged sessions:", organicEngError);
           }
 
           ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
@@ -1700,6 +1717,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
       client,
       totalSessions,
       organicSessions,
+      organicSearchEngagedSessions: ga4Data?.organicSearchEngagedSessions ?? null,
       averagePosition,
       conversions,
       // GA4 metrics
@@ -4484,7 +4502,14 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     let ga4EventsData = null;
     if (isGA4Connected) {
       try {
-        const { getGA4MetricsFromDB, fetchGA4TrafficData, fetchGA4EventsData, fetchGA4EngagementSummary, saveGA4MetricsToDB } = await import("../lib/ga4.js");
+        const {
+          getGA4MetricsFromDB,
+          fetchGA4TrafficData,
+          fetchGA4EventsData,
+          fetchGA4EngagementSummary,
+          fetchGA4OrganicSearchEngagedSessions,
+          saveGA4MetricsToDB,
+        } = await import("../lib/ga4.js");
         
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
@@ -4503,6 +4528,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
             conversions: dbMetrics.conversions,
             conversionRate: dbMetrics.conversionRate,
             activeUsers: dbMetrics.activeUsers,
+            totalUsers: dbMetrics.totalUsers,
             eventCount: dbMetrics.eventCount,
             newUsers: dbMetrics.newUsers,
             keyEvents: dbMetrics.keyEvents,
@@ -4519,6 +4545,16 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
             }
           } catch (engError) {
             console.warn("[Dashboard] Failed to fetch GA4 engagement-only summary:", engError);
+          }
+
+          // Organic Search engaged sessions (for "Organic Traffic" card)
+          try {
+            const organicEngaged = await fetchGA4OrganicSearchEngagedSessions(clientId, startDate, endDate);
+            if (organicEngaged !== null && organicEngaged !== undefined) {
+              (ga4Data as any).organicSearchEngagedSessions = organicEngaged;
+            }
+          } catch (organicEngError) {
+            console.warn("[Dashboard] Failed to fetch GA4 organic engaged sessions:", organicEngError);
           }
 
           ga4EventsData = dbMetrics.events ? { events: dbMetrics.events } : null;
@@ -4721,6 +4757,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     res.json({
       totalSessions,
       organicSessions,
+      organicSearchEngagedSessions: ga4Data?.organicSearchEngagedSessions ?? null,
       averagePosition,
       conversions,
       // New GA4 metrics
@@ -5612,7 +5649,7 @@ router.delete("/reports/:reportId", authenticateToken, async (req, res) => {
 
 
 // Fetch historical rank overview from DataForSEO
-// Using the Historical Rank Overview endpoint: POST /v3/dataforseo_labs/historical_rank_overview/live
+// Using the Historical Rank Overview endpoint: POST /v3/dataforseo_labs/google/historical_rank_overview/live
 // Returns historical data showing total keywords ranked over time
 async function fetchHistoricalRankOverviewFromDataForSEO(
   domain: string,
@@ -5662,21 +5699,46 @@ async function fetchHistoricalRankOverviewFromDataForSEO(
   }];
 
   try {
-    const response = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/historical_rank_overview/live", {
-      method: "POST",
-      headers: {
-        "Authorization": `Basic ${base64Auth}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(requestBody)
-    });
+    // Use the current (non-legacy) endpoint under /google/.
+    // Some accounts/environments have seen the legacy endpoint reject `date_to`.
+    const endpoint = "https://api.dataforseo.com/v3/dataforseo_labs/google/historical_rank_overview/live";
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    const doRequest = async (body: any) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${base64Auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+      }
+
+      return await response.json();
+    };
+
+    let data = await doRequest(requestBody);
+
+    // If DataForSEO rejects `date_to` for any reason, retry without it (it is optional).
+    const task0 = data?.tasks?.[0];
+    const statusMessage = String(task0?.status_message || "");
+    if (task0?.status_code === 40501 && /Invalid Field:\s*'date_to'\./i.test(statusMessage)) {
+      console.warn("[DataForSEO] historical_rank_overview: retrying without date_to (API rejected date_to)");
+      const retryBody = [
+        {
+          target: normalizedDomain,
+          location_code: locationCode,
+          language_code: languageCode,
+          date_from: dateFrom,
+          correlate: true,
+        },
+      ];
+      data = await doRequest(retryBody);
     }
-
-    const data = await response.json();
 
     // Log the full response for debugging
     console.log("DataForSEO Historical Rank Overview API Response:", JSON.stringify(data, null, 2));
@@ -7187,11 +7249,11 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
           }
 
           const data = result.value;
-          // Use new metrics
-          ga4Summary.websiteVisitors += data.activeUsers || 0;
-          ga4Summary.organicSessions += data.eventCount || 0;
-          ga4Summary.firstTimeVisitors += data.newUsers || 0;
-          ga4Summary.engagedVisitors += data.keyEvents || 0;
+          // Values used by the Agency dashboard cards
+          ga4Summary.websiteVisitors += data.totalUsers || 0; // Website Visitors -> Total Users
+          ga4Summary.organicSessions += data.organicSearchEngagedSessions || 0; // Organic Traffic -> Organic Search engaged sessions
+          ga4Summary.firstTimeVisitors += data.newUsers || 0; // First Time Visitors -> New Users
+          ga4Summary.engagedVisitors += data.engagedSessions || 0; // Engaged Visitors -> Engaged Sessions (total)
           ga4Summary.connectedClients += 1;
 
           data.newUsersTrend?.forEach((point: any) => {
