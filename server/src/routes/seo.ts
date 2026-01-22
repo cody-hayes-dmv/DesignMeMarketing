@@ -105,13 +105,26 @@ async function getLatestTopPagesUpdatedAt(clientId: string): Promise<Date | null
 }
 
 async function getLatestBacklinksUpdatedAt(clientId: string): Promise<Date | null> {
-  // Backlink refresh writes backlinkTimeseries records (not necessarily backlink list records)
+  // Backlink refresh writes backlinkTimeseries and (optionally) backlink list records.
   const latestTimeseries = await prisma.backlinkTimeseries.findFirst({
     where: { clientId },
     orderBy: { updatedAt: "desc" },
     select: { updatedAt: true },
   });
-  return latestTimeseries?.updatedAt ?? null;
+  const latestBacklinkRow = await prisma.backlink.findFirst({
+    where: {
+      clientId,
+      // Only consider DataForSEO-synced rows for freshness; manual rows shouldn't block refresh.
+      OR: [{ firstSeen: { not: null } }, { lastSeen: { not: null } }],
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+
+  const a = latestTimeseries?.updatedAt ?? null;
+  const b = latestBacklinkRow?.updatedAt ?? null;
+  if (a && b) return a > b ? a : b;
+  return a ?? b;
 }
 
 async function fetchGoogleAdsLocationsFromDataForSEO(): Promise<DataForSEOGoogleAdsLocation[]> {
@@ -809,8 +822,40 @@ type DataForSEOBacklinkListItem = {
 };
 
 function parseDataForSeoDate(value: unknown): Date | null {
-  if (!value || typeof value !== "string") return null;
-  const d = new Date(value);
+  if (value == null) return null;
+
+  // DataForSEO typically returns strings, but be defensive.
+  if (typeof value === "number") {
+    const d = new Date(value);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+
+  // Common DataForSEO formats:
+  // - "YYYY-MM-DD"
+  // - "YYYY-MM-DD HH:mm:ss"
+  // - "YYYY-MM-DD HH:mm:ss +00:00"
+  // Normalize to ISO so JS Date parsing is consistent.
+  let normalized = raw;
+
+  // If it looks like "YYYY-MM-DD", treat as UTC midnight.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    normalized = `${normalized}T00:00:00Z`;
+  } else if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(normalized)) {
+    // Replace first whitespace between date/time with 'T'
+    normalized = normalized.replace(/^(\d{4}-\d{2}-\d{2})\s+/, "$1T");
+    // If no timezone, assume UTC.
+    if (!/[zZ]$/.test(normalized) && !/[+-]\d{2}:\d{2}$/.test(normalized)) {
+      normalized = `${normalized}Z`;
+    }
+    // If timezone is in form "T...:ss +00:00", remove extra space.
+    normalized = normalized.replace(/\s+([+-]\d{2}:\d{2})$/, "$1");
+  }
+
+  const d = new Date(normalized);
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
@@ -896,6 +941,313 @@ async function fetchBacklinksListFromDataForSEO(
       } satisfies DataForSEOBacklinkListItem;
     })
     .filter((v): v is DataForSEOBacklinkListItem => Boolean(v));
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) return [arr];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// Auto-sync cursor for background jobs (rotates through clients without scanning all at once)
+let backlinksAutoSyncLastClientId: string | null = null;
+let backlinksAutoSyncInFlight = false;
+
+async function fetchBacklinksListAllFromDataForSEO(params: {
+  targetDomain: string;
+  statusType: "live" | "lost";
+  perPage?: number;
+  maxItems?: number;
+}): Promise<DataForSEOBacklinkListItem[]> {
+  const perPage = Math.min(1000, Math.max(50, Number(params.perPage ?? 200)));
+  const maxItems = Math.min(20000, Math.max(0, Number(params.maxItems ?? 5000)));
+
+  const all: DataForSEOBacklinkListItem[] = [];
+  for (let offset = 0; offset < maxItems; offset += perPage) {
+    const page = await fetchBacklinksListFromDataForSEO(params.targetDomain, params.statusType, perPage, offset);
+    all.push(...page);
+    if (page.length < perPage) break;
+  }
+  return all.slice(0, maxItems);
+}
+
+async function refreshBacklinksForClientInternal(params: {
+  clientId: string;
+  force?: boolean;
+}): Promise<{
+  message: string;
+  skipped: boolean;
+  items: number;
+  backlinksInserted: number;
+  lastRefreshedAt: Date | null;
+  nextAllowedAt: Date | null;
+}> {
+  const { clientId } = params;
+  const force = Boolean(params.force);
+
+  const lastRefreshedAt = await getLatestBacklinksUpdatedAt(clientId);
+  const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+  // If the backlinks list hasn't been synced yet (no non-manual backlinks),
+  // don't skip even if timeseries is fresh — otherwise UI can show New Links but an empty Backlinks list.
+  const nonManualBacklinksCount = await prisma.backlink.count({
+    where: {
+      clientId,
+      OR: [{ firstSeen: { not: null } }, { lastSeen: { not: null } }],
+    },
+  });
+
+  if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS) && nonManualBacklinksCount > 0) {
+    return {
+      message: "Using cached backlinks data (refresh limited to every 48 hours).",
+      skipped: true,
+      items: 0,
+      backlinksInserted: 0,
+      lastRefreshedAt,
+      nextAllowedAt,
+    };
+  }
+
+  const result = await dedupeInFlight(`backlinks-refresh:${clientId}`, async () => {
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+    });
+
+    if (!client || !client.domain) {
+      return { notFound: true as const };
+    }
+
+    const normalizeDomain = (domain: string) => {
+      return domain
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
+    };
+
+    const targetDomain = normalizeDomain(client.domain);
+
+    // Get date range (last 30 days) for timeseries summary
+    // IMPORTANT: normalize to UTC day boundaries so deleteMany matches stored rows
+    // (we store timeseries dates as day-granularity timestamps, typically 00:00:00Z).
+    const toUtcStartOfDay = (d: Date) =>
+      new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+    const toUtcEndOfDay = (d: Date) =>
+      new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+
+    const dateTo = toUtcEndOfDay(new Date());
+    const dateFrom = toUtcStartOfDay(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+
+    const summary = await fetchBacklinkTimeseriesSummaryFromDataForSEO(
+      targetDomain,
+      dateFrom.toISOString().split("T")[0],
+      dateTo.toISOString().split("T")[0],
+      "day"
+    );
+
+    // Delete existing timeseries data for this date range
+    await prisma.backlinkTimeseries.deleteMany({
+      where: {
+        clientId,
+        date: {
+          gte: dateFrom,
+          lte: dateTo,
+        },
+      },
+    });
+
+    // Save new timeseries data to database
+    const savedItems = await Promise.all(
+      summary.map((item) => {
+        if (!item.date) {
+          throw new Error("Missing date in backlink timeseries item");
+        }
+        // Normalize again to UTC day boundary to avoid accidental mismatches/duplicates.
+        const parsed = new Date(item.date);
+        const date = toUtcStartOfDay(parsed);
+
+        const rawData =
+          item.raw == null ? null : typeof item.raw === "string" ? item.raw : JSON.stringify(item.raw);
+
+        // Use upsert to make refresh idempotent and safe under concurrency.
+        // This prevents unique constraint crashes if a row already exists for (clientId, date).
+        return prisma.backlinkTimeseries.upsert({
+          where: {
+            clientId_date: {
+              clientId,
+              date,
+            },
+          },
+          create: {
+            clientId,
+            date,
+            newBacklinks: item.newBacklinks,
+            lostBacklinks: item.lostBacklinks,
+            newReferringDomains: item.newReferringDomains,
+            lostReferringDomains: item.lostReferringDomains,
+            newReferringMainDomains: item.newReferringMainDomains,
+            lostReferringMainDomains: item.lostReferringMainDomains,
+            rawData,
+          },
+          update: {
+            newBacklinks: item.newBacklinks,
+            lostBacklinks: item.lostBacklinks,
+            newReferringDomains: item.newReferringDomains,
+            lostReferringDomains: item.lostReferringDomains,
+            newReferringMainDomains: item.newReferringMainDomains,
+            lostReferringMainDomains: item.lostReferringMainDomains,
+            rawData,
+          },
+        });
+      })
+    );
+
+    // Also refresh backlink list (live + lost) into DB so the Backlinks tab can show real rows.
+    // Keep manual backlinks (firstSeen=null) by only deleting non-manual ones.
+    let backlinksInserted = 0;
+    try {
+      const maxBacklinksToSync = Number(process.env.DATAFORSEO_BACKLINKS_SYNC_MAX || 5000) || 5000;
+      const perStatusMax = Math.max(0, Math.floor(maxBacklinksToSync / 2));
+      const perPage = Number(process.env.DATAFORSEO_BACKLINKS_SYNC_PAGE_SIZE || 500) || 500;
+
+      const [liveLinks, lostLinks] = await Promise.all([
+        fetchBacklinksListAllFromDataForSEO({
+          targetDomain,
+          statusType: "live",
+          perPage,
+          maxItems: perStatusMax,
+        }),
+        fetchBacklinksListAllFromDataForSEO({
+          targetDomain,
+          statusType: "lost",
+          perPage,
+          maxItems: perStatusMax,
+        }),
+      ]);
+
+      const createRows = [
+        ...liveLinks.map((l) => ({
+          clientId,
+          sourceUrl: l.sourceUrl,
+          targetUrl: l.targetUrl,
+          anchorText: l.anchorText ?? undefined,
+          domainRating: l.domainRating ?? undefined,
+          urlRating: l.urlRating ?? undefined,
+          traffic: l.traffic ?? undefined,
+          isFollow: l.isFollow,
+          isLost: false,
+          firstSeen: l.firstSeen ?? undefined,
+          lastSeen: l.lastSeen ?? undefined,
+        })),
+        ...lostLinks.map((l) => ({
+          clientId,
+          sourceUrl: l.sourceUrl,
+          targetUrl: l.targetUrl,
+          anchorText: l.anchorText ?? undefined,
+          domainRating: l.domainRating ?? undefined,
+          urlRating: l.urlRating ?? undefined,
+          traffic: l.traffic ?? undefined,
+          isFollow: l.isFollow,
+          isLost: true,
+          firstSeen: l.firstSeen ?? undefined,
+          lastSeen: l.lastSeen ?? undefined,
+        })),
+      ];
+
+      // IMPORTANT: Don't wipe previously-synced backlinks unless we successfully fetched new rows.
+      // This prevents the Backlinks panel from showing only manual rows when DataForSEO is flaky.
+      if (createRows.length > 0) {
+        await prisma.$transaction(async (tx) => {
+          await tx.backlink.deleteMany({
+            where: {
+              clientId,
+              OR: [{ firstSeen: { not: null } }, { lastSeen: { not: null } }],
+            },
+          });
+
+          // Insert in chunks to avoid oversized queries
+          for (const c of chunk(createRows, 1000)) {
+            const created = await tx.backlink.createMany({ data: c });
+            backlinksInserted += created.count;
+          }
+        });
+      }
+    } catch (backlinksErr) {
+      console.warn("[Backlinks Refresh] Failed to refresh backlink list:", backlinksErr);
+    }
+
+    return { items: savedItems.length, backlinksInserted, notFound: false as const };
+  });
+
+  // If no domain, treat as skipped (no-op) rather than throwing from cron
+  if ((result as any).notFound) {
+    return {
+      message: "Client not found or has no domain",
+      skipped: true,
+      items: 0,
+      backlinksInserted: 0,
+      lastRefreshedAt: null,
+      nextAllowedAt: null,
+    };
+  }
+
+  return {
+    message: "Backlinks refreshed successfully",
+    skipped: false,
+    items: (result as any).items ?? 0,
+    backlinksInserted: (result as any).backlinksInserted ?? 0,
+    lastRefreshedAt: new Date(),
+    nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
+  };
+}
+
+// Background job entrypoint: refresh a small batch of clients, rotating through the whole set over time.
+export async function autoSyncBacklinksForStaleClients(params?: { batchSize?: number }) {
+  if (backlinksAutoSyncInFlight) return;
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) return;
+
+  const batchSize = Math.min(25, Math.max(1, Number(params?.batchSize ?? 2)));
+
+  backlinksAutoSyncInFlight = true;
+  try {
+    // Client.domain is a required String in this schema; filter out empty strings only.
+    const where: any = { domain: { not: "" } };
+    if (backlinksAutoSyncLastClientId) {
+      where.id = { gt: backlinksAutoSyncLastClientId };
+    }
+
+    let clients = await prisma.client.findMany({
+      where,
+      orderBy: { id: "asc" },
+      take: batchSize,
+      select: { id: true, domain: true, name: true },
+    });
+
+    // If we hit the end, wrap around
+    if (clients.length === 0 && backlinksAutoSyncLastClientId) {
+      backlinksAutoSyncLastClientId = null;
+      clients = await prisma.client.findMany({
+        where: { domain: { not: "" } },
+        orderBy: { id: "asc" },
+        take: batchSize,
+        select: { id: true, domain: true, name: true },
+      });
+    }
+
+    for (const c of clients) {
+      try {
+        const res = await refreshBacklinksForClientInternal({ clientId: c.id, force: false });
+        console.log(`[Backlinks Auto-Sync] ${c.name || c.id}: ${res.skipped ? "skipped" : "refreshed"} (${res.backlinksInserted} backlinks, ${res.items} timeseries)`);
+      } catch (e: any) {
+        console.warn(`[Backlinks Auto-Sync] Failed for ${c.name || c.id}:`, e?.message || e);
+      } finally {
+        backlinksAutoSyncLastClientId = c.id;
+      }
+    }
+  } finally {
+    backlinksAutoSyncInFlight = false;
+  }
 }
 
 // Get SEO reports for a client
@@ -1179,6 +1531,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
             conversions: dbMetrics.conversions,
             conversionRate: dbMetrics.conversionRate,
             activeUsers: dbMetrics.activeUsers,
+            totalUsers: dbMetrics.totalUsers,
             eventCount: dbMetrics.eventCount,
             newUsers: dbMetrics.newUsers,
             keyEvents: dbMetrics.keyEvents,
@@ -1257,6 +1610,28 @@ router.get("/share/:token/dashboard", async (req, res) => {
       where: { clientId, isLost: true }
     });
 
+    // Keep share dashboard consistent with the main dashboard:
+    // "last 4 weeks" means 28 days and should match Backlinks tab filters.
+    const fourWeeksAgo = new Date();
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    fourWeeksAgo.setHours(0, 0, 0, 0);
+
+    const newBacklinksLast4Weeks = await prisma.backlink.count({
+      where: {
+        clientId,
+        isLost: false,
+        OR: [{ firstSeen: { gte: fourWeeksAgo } }, { firstSeen: null, createdAt: { gte: fourWeeksAgo } }],
+      },
+    });
+
+    const lostBacklinksLast4Weeks = await prisma.backlink.count({
+      where: {
+        clientId,
+        isLost: true,
+        OR: [{ lastSeen: { gte: fourWeeksAgo } }, { lastSeen: null, updatedAt: { gte: fourWeeksAgo } }],
+      },
+    });
+
     // Read traffic sources from database (fallback if GA4 not available)
     const trafficSources = await prisma.trafficSource.findMany({
       where: { clientId },
@@ -1333,7 +1708,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
       newUsers,
       keyEvents,
       // Backward-compatible names used by the main dashboard UI
-      totalUsers: activeUsers,
+      totalUsers: ga4Data?.totalUsers ?? activeUsers,
       firstTimeVisitors: newUsers,
       engagedVisitors: ga4Data?.engagedSessions ?? null,
       newUsersTrend: ga4Data?.newUsersTrend || null,
@@ -1355,7 +1730,9 @@ router.get("/share/:token/dashboard", async (req, res) => {
       backlinkStats: {
         total: backlinkStats._count.id,
         lost: lostBacklinks,
-        avgDomainRating: backlinkStats._avg.domainRating
+        avgDomainRating: backlinkStats._avg.domainRating,
+        newLast4Weeks: newBacklinksLast4Weeks,
+        lostLast4Weeks: lostBacklinksLast4Weeks,
       },
       topKeywords,
       ga4Events: ga4EventsData?.events || null
@@ -3009,155 +3386,11 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
 
     const { clientId } = req.params;
     const force = coerceBoolean(req.query.force);
-    const lastRefreshedAt = await getLatestBacklinksUpdatedAt(clientId);
-    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
-    if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
-      return res.json({
-        message: "Using cached backlinks data (refresh limited to every 48 hours).",
-        skipped: true,
-        lastRefreshedAt,
-        nextAllowedAt,
-      });
+    const out = await refreshBacklinksForClientInternal({ clientId, force });
+    if (out.message === "Client not found or has no domain") {
+      return res.status(404).json({ message: out.message });
     }
-
-    const result = await dedupeInFlight(`backlinks-refresh:${clientId}`, async () => {
-      const client = await prisma.client.findUnique({
-        where: { id: clientId },
-      });
-
-      if (!client || !client.domain) {
-        return { notFound: true as const };
-      }
-
-      const normalizeDomain = (domain: string) => {
-        return domain
-          .replace(/^https?:\/\//, "")
-          .replace(/^www\./, "")
-          .replace(/\/$/, "")
-          .toLowerCase();
-      };
-
-      const targetDomain = normalizeDomain(client.domain);
-    
-    // Get date range (last 30 days) for timeseries summary
-    const dateTo = new Date();
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - 30);
-
-    const summary = await fetchBacklinkTimeseriesSummaryFromDataForSEO(
-      targetDomain,
-      dateFrom.toISOString().split('T')[0],
-      dateTo.toISOString().split('T')[0],
-      "day"
-    );
-
-    // Delete existing timeseries data for this date range
-    await prisma.backlinkTimeseries.deleteMany({
-      where: {
-        clientId,
-        date: {
-          gte: dateFrom,
-          lte: dateTo,
-        },
-      },
-    });
-
-    // Save new timeseries data to database
-    const savedItems = await Promise.all(
-      summary.map((item) => {
-        if (!item.date) {
-          throw new Error("Missing date in backlink timeseries item");
-        }
-        const date = new Date(item.date);
-        return prisma.backlinkTimeseries.create({
-          data: {
-            clientId,
-            date,
-            newBacklinks: item.newBacklinks,
-            lostBacklinks: item.lostBacklinks,
-            newReferringDomains: item.newReferringDomains,
-            lostReferringDomains: item.lostReferringDomains,
-            newReferringMainDomains: item.newReferringMainDomains,
-            lostReferringMainDomains: item.lostReferringMainDomains,
-            rawData:
-              item.raw == null
-                ? null
-                : typeof item.raw === "string"
-                  ? item.raw
-                  : JSON.stringify(item.raw),
-          },
-        });
-      })
-    );
-
-      // Also refresh backlink list (live + lost) into DB so the Backlinks tab can show real rows.
-      // Keep manual backlinks (firstSeen=null) by only deleting non-manual ones.
-      let backlinksInserted = 0;
-      try {
-        await prisma.backlink.deleteMany({
-          where: {
-            clientId,
-            OR: [{ firstSeen: { not: null } }, { lastSeen: { not: null } }],
-          },
-        });
-
-        const [liveLinks, lostLinks] = await Promise.all([
-          fetchBacklinksListFromDataForSEO(targetDomain, "live", 200, 0),
-          fetchBacklinksListFromDataForSEO(targetDomain, "lost", 200, 0),
-        ]);
-
-        const createRows = [
-          ...liveLinks.map((l) => ({
-            clientId,
-            sourceUrl: l.sourceUrl,
-            targetUrl: l.targetUrl,
-            anchorText: l.anchorText ?? undefined,
-            domainRating: l.domainRating ?? undefined,
-            urlRating: l.urlRating ?? undefined,
-            traffic: l.traffic ?? undefined,
-            isFollow: l.isFollow,
-            isLost: false,
-            firstSeen: l.firstSeen ?? undefined,
-            lastSeen: l.lastSeen ?? undefined,
-          })),
-          ...lostLinks.map((l) => ({
-            clientId,
-            sourceUrl: l.sourceUrl,
-            targetUrl: l.targetUrl,
-            anchorText: l.anchorText ?? undefined,
-            domainRating: l.domainRating ?? undefined,
-            urlRating: l.urlRating ?? undefined,
-            traffic: l.traffic ?? undefined,
-            isFollow: l.isFollow,
-            isLost: true,
-            firstSeen: l.firstSeen ?? undefined,
-            lastSeen: l.lastSeen ?? undefined,
-          })),
-        ];
-
-        if (createRows.length > 0) {
-          const created = await prisma.backlink.createMany({ data: createRows });
-          backlinksInserted = created.count;
-        }
-      } catch (backlinksErr) {
-        console.warn("[Backlinks Refresh] Failed to refresh backlink list:", backlinksErr);
-      }
-
-      return { items: savedItems.length, backlinksInserted, notFound: false as const };
-    });
-
-    if (result.notFound) {
-      return res.status(404).json({ message: "Client not found or has no domain" });
-    }
-
-    return res.json({
-      message: "Backlinks refreshed successfully",
-      skipped: false,
-      items: result.items,
-      backlinksInserted: (result as any).backlinksInserted ?? 0,
-      lastRefreshedAt: new Date(),
-      nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
-    });
+    return res.json(out);
   } catch (error: any) {
     console.error("Refresh backlinks error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -3178,7 +3411,7 @@ router.post("/agency/dashboard/refresh", authenticateToken, async (req, res) => 
       // Get all clients
       const allClients = await prisma.client.findMany({
         where: {
-          domain: { not: null as any },
+          domain: { not: "" },
         },
         select: { id: true, domain: true },
         take: 10, // Limit to avoid too many API calls
@@ -3293,7 +3526,7 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
     const allowedSortFields = new Set(["domainRating", "firstSeen", "lastSeen", "traffic", "createdAt"]);
     const sortBy = allowedSortFields.has(sortByRaw) ? sortByRaw : "domainRating";
     const order: "asc" | "desc" = orderRaw === "asc" ? "asc" : "desc";
-    const limit = Math.min(500, Math.max(1, Number(limitRaw) || 200));
+    const limit = Math.min(10000, Math.max(1, Number(limitRaw) || 200));
     const days = Math.min(365, Math.max(1, Number(daysRaw) || 30));
 
     // Check if user has access to this client
@@ -3336,13 +3569,22 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
     const normalizedFilter = (filter || "").toLowerCase();
     if (normalizedFilter === "lost" || lost === "true") {
       whereClause.isLost = true;
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+      // "Lost (last N days)" means lastSeen within range; manual lost links may have null lastSeen.
+      whereClause.OR = [{ lastSeen: { gte: from } }, { lastSeen: null, updatedAt: { gte: from } }];
     } else if (normalizedFilter === "new") {
       whereClause.isLost = false;
       const from = new Date();
       from.setDate(from.getDate() - days);
-      whereClause.firstSeen = { gte: from };
+      // Include DataForSEO links (firstSeen) and manual links (createdAt)
+      whereClause.OR = [
+        { firstSeen: { gte: from } },
+        { firstSeen: null, createdAt: { gte: from } },
+      ];
     } else if (normalizedFilter === "all" || lost === "all") {
-      // no isLost constraint
+      // "All" tab should show total (current/live) backlinks.
+      whereClause.isLost = false;
     } else {
       // default to live links only (existing behavior)
       whereClause.isLost = false;
@@ -4006,6 +4248,157 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
   }
 });
 
+// Share: AI Search Visibility (read-only; uses cached/best-effort data)
+// Note: We intentionally do NOT trigger billable DataForSEO SERP refreshes for share links.
+router.get("/share/:token/ai-search-visibility", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const tokenData = verifyShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+
+    const clientId = tokenData.clientId;
+    const { period = "30", start, end } = req.query;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: {
+        id: true,
+        domain: true,
+        ga4RefreshToken: true,
+        ga4PropertyId: true,
+        ga4ConnectedAt: true,
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    // Handle custom date range or period
+    let startDate: Date;
+    let endDate: Date;
+    if (start && end) {
+      startDate = new Date(start as string);
+      endDate = new Date(end as string);
+      if (isNaN(startDate.getTime())) return res.status(400).json({ message: "Invalid start date" });
+      if (isNaN(endDate.getTime())) return res.status(400).json({ message: "Invalid end date" });
+      if (endDate > new Date()) endDate = new Date();
+      if (startDate > endDate) return res.status(400).json({ message: "Start date must be before end date" });
+    } else {
+      const days = parseInt(period as string);
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - (Number.isFinite(days) ? days : 30));
+      endDate = new Date();
+    }
+
+    const isGA4Connected = !!(client.ga4RefreshToken && client.ga4PropertyId && client.ga4ConnectedAt);
+
+    let chatgpt = { sessions: 0, users: 0, citedPages: 0, visibility: 0 };
+    let gemini = { sessions: 0, users: 0, citedPages: 0, visibility: 0 };
+
+    if (isGA4Connected) {
+      try {
+        const { fetchGA4AiSearchVisibility } = await import("../lib/ga4AiSearchVisibility.js");
+        const ga4 = await fetchGA4AiSearchVisibility(clientId, startDate, endDate);
+        const total = ga4.totalSessions || 0;
+        const chat = ga4.providers.chatgpt;
+        const gem = ga4.providers.gemini;
+        chatgpt = {
+          sessions: chat.sessions,
+          users: chat.users,
+          citedPages: chat.citedPages,
+          visibility: total > 0 ? Math.round((chat.sessions / total) * 100) : 0,
+        };
+        gemini = {
+          sessions: gem.sessions,
+          users: gem.users,
+          citedPages: gem.citedPages,
+          visibility: total > 0 ? Math.round((gem.sessions / total) * 100) : 0,
+        };
+      } catch (e) {
+        console.warn("[Share AI Search Visibility] GA4 fetch failed:", e);
+      }
+    }
+
+    // AI Overview / AI Mode from cached SERP item types
+    const tks = await prisma.targetKeyword.findMany({
+      where: { clientId },
+      select: { serpItemTypes: true },
+    });
+    const parsedTypes = tks
+      .map((tk) => {
+        const raw = tk.serpItemTypes;
+        if (!raw) return [];
+        try {
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? (arr as any[]).map(String) : [];
+        } catch {
+          return [];
+        }
+      })
+      .filter((arr) => Array.isArray(arr));
+
+    const totalKeywordsWithSerpTypes = parsedTypes.length;
+    const aiOverviewMentions = parsedTypes.filter((arr) =>
+      arr.some((t) => String(t).toLowerCase().includes("ai_overview"))
+    ).length;
+    const aiModeMentions = parsedTypes.filter((arr) =>
+      arr.some((t) => String(t).toLowerCase().includes("ai_mode") || String(t).toLowerCase().includes("ai mode"))
+    ).length;
+
+    const aiOverviewVisibility =
+      totalKeywordsWithSerpTypes > 0 ? Math.round((aiOverviewMentions / totalKeywordsWithSerpTypes) * 100) : 0;
+    const aiModeVisibility =
+      totalKeywordsWithSerpTypes > 0 ? Math.round((aiModeMentions / totalKeywordsWithSerpTypes) * 100) : 0;
+
+    // Cited pages from cache only (no forced refresh on share links)
+    let serpCache: any = null;
+    let cacheTableAvailable = true;
+    try {
+      serpCache = await prisma.aiSearchSerpCache.findUnique({ where: { clientId } });
+    } catch (e) {
+      cacheTableAvailable = false;
+      serpCache = null;
+    }
+
+    const aiOverviewCitedPages = serpCache?.aiOverviewCitedPages ?? 0;
+    const aiModeCitedPages = serpCache?.aiModeCitedPages ?? 0;
+
+    return res.json({
+      rows: [
+        { name: "ChatGPT", visibility: chatgpt.visibility, mentions: chatgpt.sessions, citedPages: chatgpt.citedPages },
+        { name: "AI Overview", visibility: aiOverviewVisibility, mentions: aiOverviewMentions, citedPages: aiOverviewCitedPages },
+        { name: "AI Mode", visibility: aiModeVisibility, mentions: aiModeMentions, citedPages: aiModeCitedPages },
+        { name: "Gemini", visibility: gemini.visibility, mentions: gemini.sessions, citedPages: gemini.citedPages },
+      ],
+      meta: {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        ga4Connected: isGA4Connected,
+        totalKeywordsWithSerpTypes,
+        serpCitedPages: {
+          aiOverview: aiOverviewCitedPages,
+          aiMode: aiModeCitedPages,
+        },
+        serpRefreshQueued: false,
+        serpCache:
+          cacheTableAvailable && serpCache
+            ? {
+                fetchedAt: serpCache.fetchedAt,
+                checkedKeywords: serpCache.checkedKeywords,
+                nextAllowedAt: new Date(new Date(serpCache.updatedAt).getTime() + DATAFORSEO_REFRESH_TTL_MS),
+              }
+            : null,
+      },
+    });
+  } catch (error: any) {
+    console.error("Shared AI Search visibility error:", error);
+    return res.status(500).json({ message: "Failed to fetch AI Search Visibility" });
+  }
+});
+
 // Get SEO dashboard summary for a client
 router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
   try {
@@ -4223,6 +4616,33 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       }
     });
 
+    // Tracked new backlinks (last 4 weeks)
+    const fourWeeksAgo = new Date(endDate);
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    fourWeeksAgo.setHours(0, 0, 0, 0);
+
+    const newBacklinksLast4Weeks = await prisma.backlink.count({
+      where: {
+        clientId,
+        isLost: false,
+        OR: [
+          { firstSeen: { gte: fourWeeksAgo } },
+          { firstSeen: null, createdAt: { gte: fourWeeksAgo } }, // manual backlinks
+        ],
+      },
+    });
+
+    const lostBacklinksLast4Weeks = await prisma.backlink.count({
+      where: {
+        clientId,
+        isLost: true,
+        OR: [
+          { lastSeen: { gte: fourWeeksAgo } },
+          { lastSeen: null, updatedAt: { gte: fourWeeksAgo } }, // manual backlinks marked lost
+        ],
+      },
+    });
+
     // Get top performing keywords
     const topKeywords = await prisma.keyword.findMany({
       where: { 
@@ -4285,7 +4705,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     const activeUsersTrend = ga4Data?.activeUsersTrend ?? [];
     
     // Keep backward compatibility (for other parts of the system)
-    const totalUsers = activeUsers; // Map activeUsers to totalUsers for compatibility
+    const totalUsers = ga4Data?.totalUsers ?? activeUsers;
     const firstTimeVisitors = newUsers; // Map newUsers to firstTimeVisitors for compatibility
     // Engaged Visitors is the same as Engaged Sessions from GA4
     const engagedVisitors = ga4Data?.engagedSessions ?? null;
@@ -4331,7 +4751,9 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       backlinkStats: {
         total: backlinkStats._count.id,
         lost: lostBacklinks,
-        avgDomainRating: backlinkStats._avg.domainRating
+        avgDomainRating: backlinkStats._avg.domainRating,
+        newLast4Weeks: newBacklinksLast4Weeks,
+        lostLast4Weeks: lostBacklinksLast4Weeks,
       },
       topKeywords,
       ga4Events: ga4EventsData?.events || null
@@ -4751,14 +5173,16 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
           where: { id: existing.id },
           data: {
             ...scheduleData,
-            recipients: scheduleData.recipients as any,
+            // ReportSchedule.recipients is a String column; store as JSON array string.
+            recipients: JSON.stringify(scheduleData.recipients),
             nextRunAt
           }
         })
       : await prisma.reportSchedule.create({
           data: {
             ...scheduleData,
-            recipients: scheduleData.recipients as any,
+            // ReportSchedule.recipients is a String column; store as JSON array string.
+            recipients: JSON.stringify(scheduleData.recipients),
             clientId,
             nextRunAt
           }

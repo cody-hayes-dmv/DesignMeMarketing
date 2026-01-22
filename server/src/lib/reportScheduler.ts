@@ -526,7 +526,8 @@ export async function processScheduledReports(): Promise<void> {
             data: {
               status: "sent",
               sentAt: new Date(),
-              recipients: recipients as any,
+              // SeoReport.recipients is a String column; store as JSON for consistency with ReportSchedule.recipients.
+              recipients: JSON.stringify(recipients),
               emailSubject
             }
           });

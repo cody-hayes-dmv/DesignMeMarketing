@@ -270,9 +270,10 @@ model Backlink {
   id           String    @id @default(cuid())
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-  sourceUrl    String
-  targetUrl    String
-  anchorText   String?
+  // DataForSEO can return very long URLs; VARCHAR(191) overflows in MySQL.
+  sourceUrl    String    @db.Text
+  targetUrl    String    @db.Text
+  anchorText   String?   @db.Text
   domainRating Float?
   urlRating    Float?
   traffic      Int?

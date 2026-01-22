@@ -56,6 +56,7 @@ server.on("listening", async () => {
 
   // Start report scheduler cron job (runs every hour)
   const { processScheduledReports, refreshAllGA4Data } = await import("./lib/reportScheduler.js");
+  const { autoSyncBacklinksForStaleClients } = await import("./routes/seo.js");
 
   // Run immediately on startup (for testing)
   processScheduledReports().catch(console.error);
@@ -72,6 +73,35 @@ server.on("listening", async () => {
 
   console.log("Report scheduler started (runs every hour)");
   console.log("GA4 auto-refresh scheduler started (runs Monday mornings)");
+
+  // DataForSEO Backlinks auto-sync: run periodically, respecting 48h throttle per client.
+  const backlinksAutoSyncEnabled =
+    String(process.env.ENABLE_DATAFORSEO_BACKLINKS_AUTO_SYNC ?? "true").toLowerCase() === "true";
+  const autoSyncIntervalMinutes = Math.min(
+    24 * 60,
+    Math.max(10, Number(process.env.DATAFORSEO_BACKLINKS_AUTO_SYNC_INTERVAL_MINUTES ?? 360))
+  );
+  const autoSyncBatchSize = Math.min(
+    25,
+    Math.max(1, Number(process.env.DATAFORSEO_BACKLINKS_AUTO_SYNC_BATCH_SIZE ?? 2))
+  );
+
+  if (backlinksAutoSyncEnabled) {
+    // Run once shortly after startup, then on interval
+    setTimeout(() => {
+      autoSyncBacklinksForStaleClients({ batchSize: autoSyncBatchSize }).catch(console.error);
+    }, 30 * 1000);
+
+    setInterval(() => {
+      autoSyncBacklinksForStaleClients({ batchSize: autoSyncBatchSize }).catch(console.error);
+    }, autoSyncIntervalMinutes * 60 * 1000);
+
+    console.log(
+      `Backlinks auto-sync started (every ${autoSyncIntervalMinutes} minutes, batch size ${autoSyncBatchSize}, respects 48h throttle)`
+    );
+  } else {
+    console.log("Backlinks auto-sync disabled (ENABLE_DATAFORSEO_BACKLINKS_AUTO_SYNC=false)");
+  }
 });
 
 server.on("error", (err: any) => {

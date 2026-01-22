@@ -268,6 +268,7 @@ const ClientDashboardPage: React.FC = () => {
   const [ga4DataRefreshKey, setGa4DataRefreshKey] = useState(0);
   const prevGa4ReadyRef = useRef<boolean>(false);
   const autoRefreshAttemptedRef = useRef<Record<string, boolean>>({});
+  const autoBacklinksListRefreshAttemptedRef = useRef<Record<string, boolean>>({});
   const autoDataForSeoAttemptedRef = useRef<{
     topPages: Record<string, boolean>;
     backlinks: Record<string, boolean>;
@@ -796,7 +797,7 @@ const ClientDashboardPage: React.FC = () => {
       // Also refresh the backlinks table if it's being viewed
       try {
         const listRes = await api.get(`/seo/backlinks/${clientId}`, {
-          params: { filter: backlinksFilter, days: 30, limit: 200, sortBy: "domainRating", order: "desc" },
+          params: { filter: backlinksFilter, days: 30, limit: 5000, sortBy: "domainRating", order: "desc" },
         });
         const list = Array.isArray(listRes.data) ? (listRes.data as BacklinkRow[]) : [];
         setBacklinks(list);
@@ -1253,19 +1254,30 @@ const ClientDashboardPage: React.FC = () => {
     const totalBacklinks = Number(dashboardSummary?.backlinkStats?.total ?? 0) || 0;
     const avgDomainRating = Number(dashboardSummary?.backlinkStats?.avgDomainRating ?? 0) || 0;
     const lostCount = Number(dashboardSummary?.backlinkStats?.lost ?? 0) || 0;
-    const newLast4Weeks = weeklyBacklinkTimeseries.reduce((sum, w) => sum + (Number(w.newBacklinks) || 0), 0) || 0;
-    return { totalBacklinks, avgDomainRating, lostCount, newLast4Weeks };
+    // These should match the Backlinks table tabs:
+    // - New tab: last 4 weeks new backlinks (unique rows)
+    // - Lost tab: last 4 weeks lost backlinks (unique rows)
+    const newLast4Weeks =
+      Number(dashboardSummary?.backlinkStats?.newLast4Weeks ?? 0) ||
+      weeklyBacklinkTimeseries.reduce((sum, w) => sum + (Number(w.newBacklinks) || 0), 0) ||
+      0;
+    const lostLast4Weeks =
+      Number(dashboardSummary?.backlinkStats?.lostLast4Weeks ?? 0) ||
+      weeklyBacklinkTimeseries.reduce((sum, w) => sum + (Number(w.lostBacklinks) || 0), 0) ||
+      0;
+    return { totalBacklinks, avgDomainRating, lostCount, newLast4Weeks, lostLast4Weeks };
   }, [dashboardSummary, weeklyBacklinkTimeseries]);
 
   const fetchBacklinksList = useCallback(async () => {
     if (!clientId) return;
     try {
       setBacklinksLoading(true);
+      const daysForList = backlinksFilter === "all" ? 365 : 28; // New/Lost tabs are "last 4 weeks"
       const res = await api.get(`/seo/backlinks/${clientId}`, {
         params: {
           filter: backlinksFilter,
-          days: 30,
-          limit: 200,
+          days: daysForList,
+          limit: 5000,
           sortBy: "domainRating",
           order: "desc",
         },
@@ -1273,6 +1285,35 @@ const ClientDashboardPage: React.FC = () => {
       const data = Array.isArray(res.data) ? (res.data as BacklinkRow[]) : [];
       setBacklinks(data);
       setBacklinksError(null);
+
+      // If the list contains only manual rows, try a one-time DataForSEO refresh (throttled server-side).
+      // This fixes the common case where timeseries exists but the backlinks table hasn't been populated yet.
+      if (
+        backlinksFilter === "all" &&
+        user?.role === "SUPER_ADMIN" &&
+        !autoBacklinksListRefreshAttemptedRef.current[clientId]
+      ) {
+        const hasNonManual = data.some((b) => Boolean(b.firstSeen) || Boolean(b.lastSeen));
+        if (!hasNonManual) {
+          autoBacklinksListRefreshAttemptedRef.current[clientId] = true;
+          try {
+            await api.post(`/seo/backlinks/${clientId}/refresh`);
+            const res2 = await api.get(`/seo/backlinks/${clientId}`, {
+              params: {
+                filter: backlinksFilter,
+                days: daysForList,
+                limit: 5000,
+                sortBy: "domainRating",
+                order: "desc",
+              },
+            });
+            const data2 = Array.isArray(res2.data) ? (res2.data as BacklinkRow[]) : [];
+            setBacklinks(data2);
+          } catch (refreshErr) {
+            console.warn("Auto-refresh backlinks list skipped/failed", refreshErr);
+          }
+        }
+      }
     } catch (error: any) {
       console.error("Failed to fetch backlinks", error);
       setBacklinks([]);
@@ -1280,7 +1321,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setBacklinksLoading(false);
     }
-  }, [clientId, backlinksFilter]);
+  }, [clientId, backlinksFilter, user?.role]);
 
   useEffect(() => {
     if (activeTab !== "backlinks") return;
@@ -3086,7 +3127,11 @@ const ClientDashboardPage: React.FC = () => {
                     <div key={item.key} className="space-y-1">
                       <div className="flex items-center justify-between text-xs text-gray-500">
                         <span>{item.label}</span>
-                        <span className="font-medium text-gray-600">
+                        <span
+                          className={`font-medium ${
+                            item.newBacklinks === 0 ? "text-gray-900" : "text-emerald-600"
+                          }`}
+                        >
                           {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
                         </span>
                       </div>
@@ -3097,7 +3142,7 @@ const ClientDashboardPage: React.FC = () => {
                             style={{ width: `${widthPercent}%` }}
                           />
                         </div>
-                        <span className="text-xs text-rose-500 whitespace-nowrap">
+                        <span className="text-xs text-gray-600 whitespace-nowrap">
                           {backlinkTimeseriesLoading ? "..." : `-${item.lostBacklinks} lost`}
                         </span>
                       </div>
@@ -3374,11 +3419,11 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <p className="text-sm font-medium text-gray-600">Lost Backlinks</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.lostCount}</p>
-                  <div className="mt-3 flex items-center space-x-2 text-sm text-red-600">
+                  <p className="text-sm font-medium text-gray-600">Lost Backlinks (last 4 weeks)</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.lostLast4Weeks}</p>
+                  <div className="mt-3 flex items-center space-x-2 text-sm text-gray-600">
                     <TrendingDown className="h-4 w-4" />
-                    <span>Tracked lost backlinks</span>
+                    <span>Currently lost backlinks: {backlinksKpis.lostCount}</span>
                   </div>
                 </div>
               </div>
@@ -3447,7 +3492,11 @@ const ClientDashboardPage: React.FC = () => {
                       ) : backlinks.length === 0 ? (
                         <tr>
                           <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
-                            No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO.
+                            {backlinksFilter === "all"
+                              ? "No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO."
+                              : backlinksFilter === "new"
+                              ? "No new backlinks found in the last 4 weeks."
+                              : "No lost backlinks found in the last 4 weeks."}
                           </td>
                         </tr>
                       ) : (
@@ -3471,7 +3520,9 @@ const ClientDashboardPage: React.FC = () => {
                           return (
                             <tr key={link.id} className="hover:bg-gray-50">
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{link.anchorText || "—"}</td>
+                              <td className="px-6 py-4 text-sm text-gray-500 whitespace-normal break-words max-w-[360px] align-top">
+                                {link.anchorText || "—"}
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {typeof link.domainRating === "number" ? link.domainRating : "—"}
                               </td>
@@ -4333,7 +4384,11 @@ const ClientDashboardPage: React.FC = () => {
                           <div key={item.key} className="space-y-1">
                             <div className="flex items-center justify-between text-xs text-gray-500">
                               <span>{item.label}</span>
-                              <span className="font-medium text-gray-600">
+                              <span
+                                className={`font-medium ${
+                                  item.newBacklinks === 0 ? "text-gray-900" : "text-emerald-600"
+                                }`}
+                              >
                                 {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
                               </span>
                             </div>
@@ -4344,7 +4399,7 @@ const ClientDashboardPage: React.FC = () => {
                                   style={{ width: `${widthPercent}%` }}
                                 />
                               </div>
-                              <span className="text-xs text-rose-500 whitespace-nowrap">
+                              <span className="text-xs text-gray-600 whitespace-nowrap">
                                 {backlinkTimeseriesLoading ? "..." : `-${item.lostBacklinks} lost`}
                               </span>
                             </div>

@@ -212,10 +212,11 @@ export async function fetchGA4TrafficData(
   pagesPerSession: number;
   conversions: number;
   conversionRate: number;
-  activeUsers: number; // Replaces totalUsers/Website Visitors
-  eventCount: number; // Replaces organicSessions/Organic Traffic
-  newUsers: number; // Replaces firstTimeVisitors/First Time Visitors
-  keyEvents: number; // Replaces engagedVisitors/Engaged Visitors (conversions)
+  activeUsers: number;
+  totalUsers: number; // Web Visitors (preferred)
+  eventCount: number;
+  newUsers: number;
+  keyEvents: number;
   engagedSessions: number; // Engaged Sessions from GA4 engagedSessions metric
   engagementRate: number; // Engagement rate as decimal (0.63 for 63%)
   newUsersTrend: TrendPoint[];
@@ -278,7 +279,7 @@ export async function fetchGA4TrafficData(
         metrics: [{ name: 'sessions' }],
       }, 'Sessions by channel'),
       
-      // Active Users, New Users, Event Count (removed conversions from here)
+      // Users + events
       safeRunReport({
         property: propertyId,
         dateRanges: [
@@ -289,6 +290,7 @@ export async function fetchGA4TrafficData(
         ],
         metrics: [
           { name: 'activeUsers' },
+          { name: 'totalUsers' },
           { name: 'newUsers' },
           { name: 'eventCount' },
         ],
@@ -424,7 +426,7 @@ export async function fetchGA4TrafficData(
         value: mv.value,
         valueType: mv.valueType,
       })),
-      note: 'Index 0: activeUsers, Index 1: newUsers, Index 2: eventCount',
+      note: 'Index 0: activeUsers, Index 1: totalUsers, Index 2: newUsers, Index 3: eventCount',
     });
   }
 
@@ -495,17 +497,21 @@ export async function fetchGA4TrafficData(
     }
   }
 
-  // Parse new metrics: Active Users, New Users, Event Count
+  // Parse users + events metrics: Active Users, Total Users, New Users, Event Count
   const activeUsers = parseInt(
     usersResponse?.rows?.[0]?.metricValues?.[0]?.value || '0',
     10
   );
-  const newUsers = parseInt(
+  const totalUsers = parseInt(
     usersResponse?.rows?.[0]?.metricValues?.[1]?.value || '0',
     10
   );
-  const eventCount = parseInt(
+  const newUsers = parseInt(
     usersResponse?.rows?.[0]?.metricValues?.[2]?.value || '0',
+    10
+  );
+  const eventCount = parseInt(
+    usersResponse?.rows?.[0]?.metricValues?.[3]?.value || '0',
     10
   );
   
@@ -549,24 +555,34 @@ export async function fetchGA4TrafficData(
   // Log parsed values for debugging
   console.log('[GA4] Parsed metrics:', {
     activeUsers,
+    totalUsers,
     newUsers,
     eventCount,
     keyEvents,
     totalSessions,
     organicSessions,
-    note: 'newUsers comes from usersResponse metricValues[1], keyEvents is calculated from keyEventsResponse or conversionsResponse',
+    note: 'totalUsers comes from usersResponse metricValues[1], newUsers from metricValues[2]',
   });
   
   // Additional validation logging for newUsers
   if (usersResponse?.rows?.[0]) {
-    const rawNewUsers = usersResponse.rows[0].metricValues?.[1]?.value;
+    const rawNewUsers = usersResponse.rows[0].metricValues?.[2]?.value;
     console.log('[GA4] New Users validation:', {
       rawValue: rawNewUsers,
       parsedValue: newUsers,
-      metricIndex: 1,
+      metricIndex: 2,
       allMetrics: usersResponse.rows[0].metricValues?.map((mv: any, idx: number) => ({
         index: idx,
-        name: idx === 0 ? 'activeUsers' : idx === 1 ? 'newUsers' : idx === 2 ? 'eventCount' : 'unknown',
+        name:
+          idx === 0
+            ? 'activeUsers'
+            : idx === 1
+              ? 'totalUsers'
+              : idx === 2
+                ? 'newUsers'
+                : idx === 3
+                  ? 'eventCount'
+                  : 'unknown',
         value: mv.value,
       })),
     });
@@ -637,10 +653,11 @@ export async function fetchGA4TrafficData(
     pagesPerSession,
     conversions,
     conversionRate,
-    activeUsers, // Replaces totalUsers
-    eventCount, // Replaces organicSessions for display
-    newUsers, // Replaces firstTimeVisitors
-    keyEvents, // Replaces engagedVisitors (conversions)
+    activeUsers,
+    totalUsers,
+    eventCount,
+    newUsers,
+    keyEvents,
     engagedSessions, // Engaged Sessions from GA4
     engagementRate, // Engagement rate as decimal
     newUsersTrend,
@@ -889,6 +906,7 @@ export async function saveGA4MetricsToDB(
     conversions: number;
     conversionRate: number;
     activeUsers: number;
+    totalUsers: number;
     eventCount: number;
     newUsers: number;
     keyEvents: number;
@@ -965,6 +983,38 @@ export async function saveGA4MetricsToDB(
         // engagementRate: trafficData.engagementRate ?? undefined,
       },
     });
+
+    // Some environments have newer GA4 columns (added via migrations) that are not represented in Prisma schema.
+    // Write them via raw SQL when present so "Web Visitors" can use GA4 totalUsers.
+    try {
+      const cols = await prisma.$queryRaw<Array<{ column_name: string }>>`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'ga4_metrics'
+          AND column_name IN ('totalUsers', 'engagedSessions')
+      `;
+      const hasTotalUsers = cols.some((c) => c.column_name === "totalUsers");
+      const hasEngagedSessions = cols.some((c) => c.column_name === "engagedSessions");
+
+      if (hasTotalUsers) {
+        await prisma.$executeRaw`
+          UPDATE ga4_metrics
+          SET totalUsers = ${trafficData.totalUsers}
+          WHERE clientId = ${clientId}
+        `;
+      }
+
+      if (hasEngagedSessions) {
+        await prisma.$executeRaw`
+          UPDATE ga4_metrics
+          SET engagedSessions = ${trafficData.engagedSessions}
+          WHERE clientId = ${clientId}
+        `;
+      }
+    } catch (writeExtraError) {
+      console.warn("[GA4] Failed to write extra GA4 columns (non-fatal):", writeExtraError);
+    }
 
     console.log(`[GA4] Saved metrics to database for client ${clientId} (${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]})`);
   } catch (error: any) {
@@ -1065,6 +1115,51 @@ export async function getGA4MetricsFromDB(
       return null;
     }
 
+    // If the DB has newer columns, read them from the same selected row.
+    // We keep this separate so environments without these columns don't crash.
+    let totalUsersFromDb: number | null = null;
+    let engagedSessionsFromDb: number | null = null;
+    try {
+      const cols = await prisma.$queryRaw<Array<{ column_name: string }>>`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'ga4_metrics'
+          AND column_name IN ('totalUsers', 'engagedSessions')
+      `;
+      const hasTotalUsers = cols.some((c) => c.column_name === "totalUsers");
+      const hasEngagedSessions = cols.some((c) => c.column_name === "engagedSessions");
+
+      if (hasTotalUsers) {
+        const rows = await prisma.$queryRaw<any[]>`
+          SELECT totalUsers
+          FROM ga4_metrics
+          WHERE clientId = ${clientId}
+            AND startDate <= ${endDate}
+            AND endDate >= ${startDate}
+          ORDER BY endDate DESC
+          LIMIT 1
+        `;
+        totalUsersFromDb = rows?.[0]?.totalUsers !== undefined ? Number(rows[0].totalUsers) : null;
+      }
+
+      if (hasEngagedSessions) {
+        const rows = await prisma.$queryRaw<any[]>`
+          SELECT engagedSessions
+          FROM ga4_metrics
+          WHERE clientId = ${clientId}
+            AND startDate <= ${endDate}
+            AND endDate >= ${startDate}
+          ORDER BY endDate DESC
+          LIMIT 1
+        `;
+        engagedSessionsFromDb = rows?.[0]?.engagedSessions !== undefined ? Number(rows[0].engagedSessions) : null;
+      }
+    } catch (readExtraError) {
+      // Non-fatal; we'll fall back to the legacy values.
+      console.warn("[GA4] Failed to read extra GA4 columns (non-fatal):", readExtraError);
+    }
+
     // Convert JSON fields back to arrays (MySQL returns JSON as objects, not strings)
     const newUsersTrend: TrendPoint[] = metric.newUsersTrend
       ? (Array.isArray(metric.newUsersTrend) ? metric.newUsersTrend : JSON.parse(String(metric.newUsersTrend))) as TrendPoint[]
@@ -1095,8 +1190,8 @@ export async function getGA4MetricsFromDB(
       events,
       visitorSources: null,
       // Fallbacks (DB may not have these columns yet)
-      totalUsers: Number(metric.activeUsers),
-      engagedSessions: Number(metric.keyEvents),
+      totalUsers: totalUsersFromDb !== null ? totalUsersFromDb : Number(metric.activeUsers),
+      engagedSessions: engagedSessionsFromDb !== null ? engagedSessionsFromDb : Number(metric.keyEvents),
       engagementRate: null,
     };
   } catch (error: any) {

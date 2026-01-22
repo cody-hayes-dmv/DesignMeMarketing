@@ -43,6 +43,13 @@ interface TopPageItem {
   paidTraffic: number;
 }
 
+type AiSearchVisibilityRow = {
+  name: "ChatGPT" | "AI Overview" | "AI Mode" | "Gemini";
+  visibility: number; // %
+  mentions: number;
+  citedPages: number;
+};
+
 interface TrendPoint {
   date: string;
   value: number;
@@ -114,6 +121,9 @@ const ShareDashboardPage: React.FC = () => {
   const [topEvents, setTopEvents] = useState<Array<{ name: string; count: number }>>([]);
   const [topEventsLoading, setTopEventsLoading] = useState(false);
   const [topEventsError, setTopEventsError] = useState<string | null>(null);
+  const [aiSearchRows, setAiSearchRows] = useState<AiSearchVisibilityRow[]>([]);
+  const [aiSearchLoading, setAiSearchLoading] = useState(false);
+  const [aiSearchError, setAiSearchError] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
   const [dateRange, setDateRange] = useState("30");
@@ -492,6 +502,30 @@ const ShareDashboardPage: React.FC = () => {
     fetchTopEvents();
   }, [fetchTopEvents]);
 
+  const fetchAiSearchVisibility = useCallback(async () => {
+    if (!token) return;
+    try {
+      setAiSearchLoading(true);
+      setAiSearchError(null);
+      const res = await api.get(`/seo/share/${encodeURIComponent(token)}/ai-search-visibility`, {
+        params: { period: dateRange },
+        timeout: 30000,
+      });
+      const rows = Array.isArray(res?.data?.rows) ? (res.data.rows as AiSearchVisibilityRow[]) : [];
+      setAiSearchRows(rows);
+    } catch (error: any) {
+      console.error("Failed to fetch AI Search visibility", error);
+      setAiSearchRows([]);
+      setAiSearchError(error?.response?.data?.message || "Unable to load AI Search Visibility");
+    } finally {
+      setAiSearchLoading(false);
+    }
+  }, [token, dateRange]);
+
+  useEffect(() => {
+    fetchAiSearchVisibility();
+  }, [fetchAiSearchVisibility]);
+
   const resolvedTopPages = useMemo<TopPageItem[]>(() => {
     // Match main dashboard: show actual data only (no sample fallback)
     return topPages;
@@ -867,48 +901,50 @@ const ShareDashboardPage: React.FC = () => {
 
               <div className="bg-white p-4 rounded-xl border border-gray-200">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-900">AI Search</h3>
+                  <h3 className="text-lg font-semibold text-gray-900">AI Search Visibility</h3>
                   <span className="text-xs text-gray-500">Subscription active</span>
                 </div>
 
-                {(() => {
-                  const aiSearchRows: Array<{
-                    name: string;
-                    visibility: number;
-                    mentions: number;
-                    citedPages: number;
-                    dotClass: string;
-                  }> = [
-                    { name: "ChatGPT", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-gray-900" },
-                    { name: "AI Overview", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-blue-600" },
-                    { name: "AI Mode", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-red-500" },
-                    { name: "Gemini", visibility: 0, mentions: 0, citedPages: 0, dotClass: "bg-green-600" },
-                  ];
+                {aiSearchError && <p className="mb-3 text-sm text-rose-600">{aiSearchError}</p>}
 
-                  return (
-                    <div className="rounded-lg border border-gray-200 overflow-hidden">
-                      <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-                        <div>AI Search</div>
-                        <div className="text-center">AI Visibility</div>
-                        <div className="text-center">Mentions</div>
-                        <div className="text-center">Cited Pages</div>
-                      </div>
-                      <div className="divide-y divide-gray-100">
-                        {aiSearchRows.map((row) => (
-                          <div key={row.name} className="grid grid-cols-4 px-3 py-2 text-sm">
+                <div className="rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="grid grid-cols-4 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                    <div>AI Search</div>
+                    <div className="text-center">AI Visibility</div>
+                    <div className="text-center">Mentions</div>
+                    <div className="text-center">Cited Pages</div>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {aiSearchLoading ? (
+                      <div className="px-3 py-4 text-sm text-gray-500">Loading AI Search visibility...</div>
+                    ) : (aiSearchRows?.length || 0) === 0 ? (
+                      <div className="px-3 py-4 text-sm text-gray-500">No AI Search visibility data available.</div>
+                    ) : (
+                      ([
+                        { name: "ChatGPT", dotClass: "bg-gray-900" },
+                        { name: "AI Overview", dotClass: "bg-blue-600" },
+                        { name: "AI Mode", dotClass: "bg-red-500" },
+                        { name: "Gemini", dotClass: "bg-green-600" },
+                      ] as const).map((meta) => {
+                        const row =
+                          aiSearchRows.find((r) => r.name === meta.name) ||
+                          ({ name: meta.name, visibility: 0, mentions: 0, citedPages: 0 } as AiSearchVisibilityRow);
+                        const visibilityDisplay = `${Number(row.visibility || 0)}%`;
+                        return (
+                          <div key={meta.name} className="grid grid-cols-4 px-3 py-2 text-sm">
                             <div className="flex items-center gap-2 text-gray-900">
-                              <span className={`h-2.5 w-2.5 rounded-full ${row.dotClass}`} />
-                              <span className="font-medium">{row.name}</span>
+                              <span className={`h-2.5 w-2.5 rounded-full ${meta.dotClass}`} />
+                              <span className="font-medium">{meta.name}</span>
                             </div>
-                            <div className="text-center text-gray-900">{row.visibility.toLocaleString()}</div>
-                            <div className="text-center text-gray-900">{row.mentions.toLocaleString()}</div>
-                            <div className="text-center text-gray-900">{row.citedPages.toLocaleString()}</div>
+                            <div className="text-center text-gray-900">{visibilityDisplay}</div>
+                            <div className="text-center text-gray-900">{Number(row.mentions || 0).toLocaleString()}</div>
+                            <div className="text-center text-gray-900">{Number(row.citedPages || 0).toLocaleString()}</div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1113,7 +1149,9 @@ const ShareDashboardPage: React.FC = () => {
                       <div key={item.key} className="space-y-1">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <span>{item.label}</span>
-                          <span className="font-medium text-gray-600">
+                          <span
+                            className={`font-medium ${item.newBacklinks > 0 ? "text-green-600" : "text-gray-900"}`}
+                          >
                             {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
                           </span>
                         </div>
@@ -1124,7 +1162,7 @@ const ShareDashboardPage: React.FC = () => {
                               style={{ width: `${widthPercent}%` }}
                             />
                           </div>
-                          <span className="text-xs text-rose-500 whitespace-nowrap">
+                          <span className="text-xs text-gray-600 whitespace-nowrap">
                             {backlinkTimeseriesLoading ? "..." : `-${item.lostBacklinks} lost`}
                           </span>
                         </div>
