@@ -33,7 +33,7 @@ import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
 import { endOfWeek, format, startOfWeek } from "date-fns";
 import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
 import { createNonOverlappingPieValueLabel } from "@/utils/recharts";
 import { useDispatch, useSelector } from "react-redux";
@@ -310,6 +310,7 @@ const ClientDashboardPage: React.FC = () => {
   }>({ topPages: {}, backlinks: {} });
   const [autoRefreshingGa4, setAutoRefreshingGa4] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const dashboardOuterScrollRef = useRef<HTMLDivElement | null>(null);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
   const modalDashboardContentRef = useRef<HTMLDivElement>(null);
   const [viewReportModalOpen, setViewReportModalOpen] = useState(false);
@@ -416,6 +417,44 @@ const ClientDashboardPage: React.FC = () => {
   const [inviteClientUsersEmails, setInviteClientUsersEmails] = useState<string[]>([]);
   const [inviteClientUsersViaEmail, setInviteClientUsersViaEmail] = useState(true);
   const [invitingClientUsers, setInvitingClientUsers] = useState(false);
+  const clientUserMoreMenuButtonRef = useRef<HTMLElement | null>(null);
+  const [clientUserMoreMenu, setClientUserMoreMenu] = useState<{
+    id: string;
+    rect: { top: number; left: number; right: number; bottom: number; width: number; height: number };
+  } | null>(null);
+
+  useEffect(() => {
+    if (!clientUserMoreMenu) return;
+
+    const getRect = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    };
+
+    const syncPosition = () => {
+      const el = clientUserMoreMenuButtonRef.current;
+      if (!el) return;
+      setClientUserMoreMenu((prev) => (prev ? { ...prev, rect: getRect(el) } : prev));
+    };
+
+    const onDocClick = () => setClientUserMoreMenu(null);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setClientUserMoreMenu(null);
+    };
+
+    // Capture scroll from any scrollable ancestor.
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
+
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
+    };
+  }, [clientUserMoreMenu]);
 
   const formatGa4ErrorMessage = useCallback((rawError: string | null): string => {
     if (!rawError) {
@@ -626,17 +665,50 @@ const ClientDashboardPage: React.FC = () => {
 
     const element = dashboardContentRef.current;
     const previousOverflow = document.body.style.overflow;
+    const outerScrollEl = dashboardOuterScrollRef.current;
+    const rightScrollEl = dashboardRightPanelScrollRef.current;
+
+    const prevOuterScrollTop = outerScrollEl?.scrollTop ?? 0;
+    const prevRightScrollTop = rightScrollEl?.scrollTop ?? 0;
+
+    const prevOuterStyle = outerScrollEl
+      ? { overflow: outerScrollEl.style.overflow, height: outerScrollEl.style.height, maxHeight: outerScrollEl.style.maxHeight }
+      : null;
+    const prevRightStyle = rightScrollEl
+      ? { overflow: rightScrollEl.style.overflow, height: rightScrollEl.style.height, maxHeight: rightScrollEl.style.maxHeight }
+      : null;
 
     try {
       setExportingPdf(true);
       document.body.style.overflow = "hidden";
       element.classList.add("pdf-exporting");
 
+      // Ensure we capture from the top and avoid clipped overflow containers.
+      if (outerScrollEl) outerScrollEl.scrollTop = 0;
+      if (rightScrollEl) rightScrollEl.scrollTop = 0;
+
+      if (outerScrollEl) {
+        outerScrollEl.style.overflow = "visible";
+        outerScrollEl.style.height = "auto";
+        outerScrollEl.style.maxHeight = "none";
+      }
+      if (rightScrollEl) {
+        rightScrollEl.style.overflow = "visible";
+        rightScrollEl.style.height = "auto";
+        rightScrollEl.style.maxHeight = "none";
+      }
+
+      // Allow layout to settle before snapshotting.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
-        scrollY: -window.scrollY,
-        scrollX: -window.scrollX,
+        logging: false,
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+        scrollX: 0,
+        scrollY: 0,
         backgroundColor: "#FFFFFF",
       });
 
@@ -670,6 +742,18 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       document.body.style.overflow = previousOverflow;
       element.classList.remove("pdf-exporting");
+      if (outerScrollEl && prevOuterStyle) {
+        outerScrollEl.style.overflow = prevOuterStyle.overflow;
+        outerScrollEl.style.height = prevOuterStyle.height;
+        outerScrollEl.style.maxHeight = prevOuterStyle.maxHeight;
+        outerScrollEl.scrollTop = prevOuterScrollTop;
+      }
+      if (rightScrollEl && prevRightStyle) {
+        rightScrollEl.style.overflow = prevRightStyle.overflow;
+        rightScrollEl.style.height = prevRightStyle.height;
+        rightScrollEl.style.maxHeight = prevRightStyle.maxHeight;
+        rightScrollEl.scrollTop = prevRightScrollTop;
+      }
       setExportingPdf(false);
     }
   }, [activeTab, client?.name]);
@@ -2596,7 +2680,7 @@ const ClientDashboardPage: React.FC = () => {
       </div>
 
       {(!reportOnly && activeTab === "dashboard") ? (
-        <div className="flex-1 min-h-0 px-8 py-8 overflow-y-auto lg:overflow-hidden">
+        <div ref={dashboardOuterScrollRef} className="flex-1 min-h-0 px-8 py-8 overflow-y-auto lg:overflow-hidden">
           {loading ? (
             <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">Loading client data...</div>
           ) : (
@@ -4268,24 +4352,25 @@ const ClientDashboardPage: React.FC = () => {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
                           {clientUsersLoading ? (
                             <tr>
-                              <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
                                 Loading users...
                               </td>
                             </tr>
                           ) : clientUsersError ? (
                             <tr>
-                              <td colSpan={5} className="px-6 py-8 text-center text-sm text-rose-600">
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600">
                                 {clientUsersError}
                               </td>
                             </tr>
                           ) : clientUsers.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
+                              <td colSpan={6} className="px-6 py-10 text-center text-sm text-gray-500">
                                 No users yet.
                               </td>
                             </tr>
@@ -4330,6 +4415,42 @@ const ClientDashboardPage: React.FC = () => {
                                     </span>
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{lastLogin}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                                    {u.role === "CLIENT" ? (
+                                      <div className="relative inline-block">
+                                        <button
+                                          type="button"
+                                          className="inline-flex items-center justify-center h-9 w-9 rounded-full hover:bg-gray-100 text-gray-500"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const el = e.currentTarget as unknown as HTMLElement;
+                                            clientUserMoreMenuButtonRef.current = el;
+                                            const r = el.getBoundingClientRect();
+                                            setClientUserMoreMenu((prev) =>
+                                              prev?.id === u.id
+                                                ? null
+                                                : {
+                                                    id: u.id,
+                                                    rect: {
+                                                      top: r.top,
+                                                      left: r.left,
+                                                      right: r.right,
+                                                      bottom: r.bottom,
+                                                      width: r.width,
+                                                      height: r.height,
+                                                    },
+                                                  }
+                                            );
+                                          }}
+                                          title="More"
+                                        >
+                                          <MoreVertical className="h-5 w-5" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-300">—</span>
+                                    )}
+                                  </td>
                                 </tr>
                               );
                             })
@@ -4338,6 +4459,90 @@ const ClientDashboardPage: React.FC = () => {
                       </table>
                     </div>
                   </div>
+
+                  {clientUserMoreMenu &&
+                    typeof window !== "undefined" &&
+                    createPortal(
+                      (() => {
+                        const menuWidth = 224; // 14rem (w-56)
+                        const menuMaxHeight = 320;
+                        const gap = 8;
+
+                        const rightEdge = Math.min(
+                          Math.max(clientUserMoreMenu.rect.right, menuWidth + gap),
+                          window.innerWidth - gap
+                        );
+                        const top = Math.min(
+                          clientUserMoreMenu.rect.bottom + gap,
+                          Math.max(gap, window.innerHeight - gap - menuMaxHeight)
+                        );
+
+                        return (
+                          <div
+                            className="fixed inset-0 z-[60]"
+                            onClick={() => setClientUserMoreMenu(null)}
+                          >
+                            <div
+                              className="absolute rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden"
+                              style={{
+                                top,
+                                left: rightEdge,
+                                transform: "translateX(-100%)",
+                                width: menuWidth,
+                                maxHeight: menuMaxHeight,
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                onClick={() => toast("Edit Profile coming soon.")}
+                              >
+                                Edit Profile
+                              </button>
+                              <button
+                                type="button"
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                onClick={() => toast("Edit Client Access coming soon.")}
+                              >
+                                Edit Client Access
+                              </button>
+                              <button
+                                type="button"
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                onClick={() => toast("Edit Permissions coming soon.")}
+                              >
+                                Edit Permissions
+                              </button>
+                              <div className="h-px bg-gray-100" />
+                              <button
+                                type="button"
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                onClick={() => toast("Send Invite coming soon.")}
+                              >
+                                Send Invite
+                              </button>
+                              <button
+                                type="button"
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                onClick={() => toast("Login as user coming soon.")}
+                              >
+                                Login as user
+                              </button>
+                              <div className="h-px bg-gray-100" />
+                              <button
+                                type="button"
+                                className="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                                onClick={() => toast("Remove user coming soon.")}
+                              >
+                                Remove user
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })(),
+                      document.body
+                    )}
 
                   {inviteClientUsersModalOpen &&
                     createPortal(

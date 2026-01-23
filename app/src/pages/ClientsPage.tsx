@@ -900,8 +900,8 @@ const ClientsPage = () => {
       {showCreateModal && (
         <div className="fixed inset-0 bg-gray-100/80 backdrop-blur-sm overflow-y-auto z-50">
           <div className="min-h-full px-4 py-8 flex items-start justify-center">
-            <div className="bg-white rounded-xl shadow-sm ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden">
-            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
+            <div className="bg-white rounded-xl shadow-sm ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200 shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">Create New Client</h2>
                 <p className="text-sm text-gray-500 mt-1">Account information</p>
@@ -919,8 +919,8 @@ const ClientsPage = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateClient} className="flex flex-col max-h-[90vh]">
-              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+            <form onSubmit={handleCreateClient} className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
                 {/* Business Information */}
                 <section>
                   <h3 className="text-sm font-semibold text-gray-900 mb-4">Business Information</h3>
@@ -960,11 +960,11 @@ const ClientsPage = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain</label>
                       <input
-                        type="url"
+                        type="text"
                         value={clientForm.domain}
                         onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="https://example.com"
+                        placeholder="example.com or https://example.com"
                         required
                       />
                     </div>
@@ -1272,7 +1272,7 @@ const ClientsPage = () => {
                 )}
               </div>
 
-              <div className="border-t border-gray-200 px-6 py-4 bg-white flex items-center justify-end gap-3">
+              <div className="border-t border-gray-200 px-6 py-4 bg-white flex items-center justify-end gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -1300,8 +1300,8 @@ const ClientsPage = () => {
       {showEditModal && (
         <div className="fixed inset-0 bg-gray-100/80 backdrop-blur-sm overflow-y-auto z-50">
           <div className="min-h-full px-4 py-8 flex items-start justify-center">
-            <div className="bg-white rounded-xl shadow-sm ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden">
-            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
+            <div className="bg-white rounded-xl shadow-sm ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200 shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">Edit Client</h2>
                 <p className="text-sm text-gray-500 mt-1">Account information</p>
@@ -1320,8 +1320,8 @@ const ClientsPage = () => {
               </button>
             </div>
 
-            <form onSubmit={handleUpdateClient} className="flex flex-col max-h-[90vh]">
-              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+            <form onSubmit={handleUpdateClient} className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
                 {/* Reuse the same fields as create */}
                 <section>
                   <h3 className="text-sm font-semibold text-gray-900 mb-4">Business Information</h3>
@@ -1359,10 +1359,11 @@ const ClientsPage = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain</label>
                       <input
-                        type="url"
+                        type="text"
                         value={clientForm.domain}
                         onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder="example.com or https://example.com"
                         required
                       />
                     </div>
@@ -1661,7 +1662,7 @@ const ClientsPage = () => {
                 )}
               </div>
 
-              <div className="border-t border-gray-200 px-6 py-4 bg-white flex items-center justify-end gap-3">
+              <div className="border-t border-gray-200 px-6 py-4 bg-white flex items-center justify-end gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
