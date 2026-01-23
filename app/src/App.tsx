@@ -24,6 +24,7 @@ import VendastaPage from "./pages/VendastaPage";
 import ClientDashboardPage from "./pages/ClientDashboardPage";
 import ShareDashboardPage from "./pages/ShareDashboardPage";
 import ClientReportIndexPage from "./pages/ClientReportIndexPage";
+import InvitePage from "./pages/InvitePage";
 
 function App() {
   const dispatch = useDispatch();
@@ -74,8 +75,8 @@ function App() {
     AGENCY: "/agency/dashboard",
     // Restore previous worker portal landing
     WORKER: "/worker/dashboard",
-    // Client should land on report only
-    CLIENT: "/client/report",
+    // Client-portal user: redirect handled dynamically (see getRedirectUrl)
+    USER: "/client/dashboard",
   };
 
   // Agency routes with DashboardLayout - accessible by AGENCY, ADMIN, and SUPER_ADMIN
@@ -103,17 +104,20 @@ function App() {
     { path: "/worker/settings", component: SettingsPage },
   ];
 
-  // Client routes: report-only
+  // Client portal routes (client users)
   const clientRoutes = [
+    { path: "/client/dashboard/:clientId", component: ClientDashboardPage },
+    // Back-compat: keep report portal paths if still used
     { path: "/client/report", component: ClientReportIndexPage },
     { path: "/client/report/:clientId", component: ClientDashboardPage },
   ];
 
-  const isClientRestrictedPath = (path: string) =>
-    !(path === "/client/report" || path.startsWith("/client/report/"));
-
   const getRedirectUrl = () => {
     if (!user) return "/login";
+    if (user.role === "USER") {
+      const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
+      return firstClientId ? `/client/dashboard/${firstClientId}` : "/login";
+    }
     return dashboardUrls[user.role as keyof typeof dashboardUrls] || "/login";
   };
 
@@ -146,6 +150,8 @@ function App() {
       <Routes>
       {/* Public share route - no auth required */}
       <Route path="/share/:token" element={<ShareDashboardPage />} />
+      {/* Public invite accept route - no auth required */}
+      <Route path="/invite" element={<InvitePage />} />
       {/* Backwards-compatible alias: redirect old portal entry to login */}
       <Route path="/portal" element={<Navigate to="/login" replace />} />
       {/* Auth routes - only redirect if user is authenticated and verified */}
@@ -197,7 +203,7 @@ function App() {
         />
       ))}
 
-      {/* Client routes */}
+      {/* Client portal routes (client users) */}
       {clientRoutes.map(({ path, component: Component }) => (
         <Route
           key={path}
@@ -212,10 +218,8 @@ function App() {
               </div>
             ) : !user || !user.verified ? (
               <Navigate to="/login" replace />
-            ) : user.role !== "CLIENT" ? (
+            ) : user.role !== "USER" ? (
               <Navigate to={getRedirectUrl()} replace />
-            ) : isClientRestrictedPath(path) ? (
-              <Navigate to={dashboardUrls.CLIENT} replace />
             ) : (
               <DashboardLayout>
                 <Component />

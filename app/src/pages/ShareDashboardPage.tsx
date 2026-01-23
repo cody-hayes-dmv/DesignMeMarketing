@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Download, TrendingUp, TrendingDown, Search, Users, Loader2, UserPlus, Activity } from "lucide-react";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
+import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import api from "@/lib/api";
 import { endOfWeek, format, startOfWeek } from "date-fns";
 import html2canvas from "html2canvas";
@@ -852,6 +853,15 @@ const ShareDashboardPage: React.FC = () => {
                 clientName={dashboardSummary.client.name}
                 title="Total Keywords Ranked"
                 subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
+                shareToken={token}
+              />
+            )}
+
+            {/* Target Keywords (shared, read-only) */}
+            {dashboardSummary?.client?.id && token && (
+              <TargetKeywordsOverview
+                clientId={dashboardSummary.client.id}
+                clientName={dashboardSummary.client.name}
                 shareToken={token}
               />
             )}

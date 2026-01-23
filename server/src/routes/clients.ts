@@ -3,8 +3,51 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { sendEmail } from '../lib/email.js';
 
 const router = express.Router();
+
+const inviteClientUsersSchema = z.object({
+    emails: z.array(z.string().email()).min(1),
+    sendEmail: z.boolean().optional().default(true),
+    clientRole: z.enum(['CLIENT', 'STAFF']).optional().default('CLIENT'),
+});
+
+async function canStaffAccessClient(user: { userId: string; role: string }, clientId: string) {
+    const client = await prisma.client.findUnique({
+        where: { id: clientId },
+        include: {
+            user: {
+                include: {
+                    memberships: {
+                        select: { agencyId: true },
+                    },
+                },
+            },
+        },
+    });
+
+    if (!client) return { client: null as any, hasAccess: false };
+
+    const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
+    const isOwner = client.userId === user.userId;
+
+    if (isAdmin || isOwner) return { client, hasAccess: true };
+
+    // Agency/Worker users: check if in same agency
+    if (user.role === 'AGENCY' || user.role === 'WORKER') {
+        const userMemberships = await prisma.userAgency.findMany({
+            where: { userId: user.userId },
+            select: { agencyId: true },
+        });
+        const userAgencyIds = userMemberships.map(m => m.agencyId);
+        const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+        const sameAgency = clientAgencyIds.some(id => userAgencyIds.includes(id));
+        return { client, hasAccess: sameAgency };
+    }
+
+    return { client, hasAccess: false };
+}
 
 const createClientSchema = z.object({
     name: z.string().min(1),
@@ -95,10 +138,17 @@ router.get('/', authenticateToken, async (req, res) => {
                 },
                 orderBy: { createdAt: 'desc' },
             });
-        } else if (req.user.role === 'CLIENT') {
-            // Client users see only their own client(s)
+        } else if (req.user.role === 'USER') {
+            // Client-portal users: only clients they are linked to via client_users
             clients = await prisma.client.findMany({
-                where: { userId: req.user.userId },
+                where: {
+                    clientUsers: {
+                        some: {
+                            userId: req.user.userId,
+                            status: 'ACTIVE',
+                        },
+                    },
+                },
                 include: {
                     user: {
                         select: { id: true, name: true, email: true },
@@ -185,9 +235,172 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 });
 
+// List client portal users for a client
+router.get('/:id/users', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+        const rows = await prisma.clientUser.findMany({
+            where: { clientId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        email: true,
+                        name: true,
+                        verified: true,
+                        invited: true,
+                        lastLoginAt: true,
+                        createdAt: true,
+                        updatedAt: true,
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        return res.json(
+            rows.map((r) => ({
+                id: r.id,
+                clientId: r.clientId,
+                userId: r.userId,
+                email: r.user.email,
+                name: r.user.name,
+                role: r.clientRole,
+                status: r.status,
+                invitedAt: r.invitedAt,
+                acceptedAt: r.acceptedAt,
+                lastLoginAt: r.user.lastLoginAt,
+            }))
+        );
+    } catch (error) {
+        console.error('List client users error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Invite one or more client portal users
+router.post('/:id/users/invite', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+        const { emails, sendEmail: shouldSendEmail, clientRole } = inviteClientUsersSchema.parse(req.body);
+
+        const results: Array<{ email: string; invited: boolean; userId?: string; token?: string }> = [];
+
+        for (const emailRaw of emails) {
+            const email = String(emailRaw).trim().toLowerCase();
+            if (!email) continue;
+
+            // Create or find user
+            const existing = await prisma.user.findUnique({ where: { email } });
+            const user =
+                existing ??
+                (await prisma.user.create({
+                    data: {
+                        email,
+                        role: 'USER',
+                        invited: true,
+                        verified: false,
+                    },
+                }));
+
+            // Upsert membership
+            await prisma.clientUser.upsert({
+                where: { clientId_userId: { clientId, userId: user.id } },
+                update: {
+                    clientRole,
+                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    invitedById: req.user.userId,
+                    invitedAt: new Date(),
+                },
+                create: {
+                    clientId,
+                    userId: user.id,
+                    clientRole,
+                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    invitedById: req.user.userId,
+                    invitedAt: new Date(),
+                },
+            });
+
+            // Create invite token (even if user exists; token will just lead them to portal signup/login)
+            const inviteToken = jwt.sign(
+                { email, clientId, kind: 'CLIENT_USER_INVITE' },
+                process.env.JWT_SECRET!,
+                { expiresIn: '7d' }
+            );
+
+            await prisma.token.create({
+                data: {
+                    type: 'INVITE',
+                    email,
+                    token: inviteToken,
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                    userId: user.id,
+                    metadata: JSON.stringify({
+                        kind: 'CLIENT_USER_INVITE',
+                        clientId,
+                        clientRole,
+                        invitedByUserId: req.user.userId,
+                    }),
+                },
+            });
+
+            if (shouldSendEmail) {
+                const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
+                await sendEmail({
+                    to: email,
+                    subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+                    html: `
+                      <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+                        <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                        <p>Hi there,</p>
+                        <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
+                        <p>
+                          <a href="${acceptUrl}" style="display:inline-block;padding:10px 16px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">
+                            Accept Invite
+                          </a>
+                        </p>
+                        <p style="color:#6b7280;font-size:12px;">This invitation expires in 7 days.</p>
+                      </div>
+                    `,
+                });
+            }
+
+            results.push({ email, invited: true, userId: user.id, token: shouldSendEmail ? undefined : inviteToken });
+        }
+
+        return res.status(201).json({ message: 'Invites created', results });
+    } catch (error: any) {
+        if (error?.name === 'ZodError') {
+            return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+        }
+        console.error('Invite client users error:', error);
+        return res.status(500).json({ message: 'Failed to invite users' });
+    }
+});
+
 // Create a client
 router.post('/', authenticateToken, async (req, res) => {
     try {
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
         const { name, domain, industry, targets, loginUrl, username, password, accountInfo } = createClientSchema.parse(req.body);
 
         // Normalize domain (strip protocol/www/path)
@@ -267,6 +480,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const { name, domain, status, industry, targets, loginUrl, username, password, accountInfo } = req.body.data || req.body;
 
     try {
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
         // Check if client exists and user has access
         const existing = await prisma.client.findUnique({
             where: { id: clientId },
@@ -362,6 +578,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const clientId = req.params.id;
 
     try {
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
         // Check if client exists and user has access
         const existing = await prisma.client.findUnique({
             where: { id: clientId },
@@ -685,7 +904,14 @@ router.get('/:id/ga4/status', authenticateToken, async (req, res) => {
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
         const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        if (!hasAccess) {
+            const cu = await prisma.clientUser.findFirst({
+                where: { clientId, userId: req.user.userId, status: 'ACTIVE' },
+                select: { id: true },
+            });
+            hasAccess = Boolean(cu);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
@@ -745,7 +971,14 @@ router.get('/:id/ga4/auth-url', authenticateToken, async (req, res) => {
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
         const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        if (!hasAccess) {
+            const cu = await prisma.clientUser.findFirst({
+                where: { clientId, userId: req.user.userId, status: 'ACTIVE' },
+                select: { id: true },
+            });
+            hasAccess = Boolean(cu);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
@@ -797,7 +1030,14 @@ router.get('/:id/ga4/properties', authenticateToken, async (req, res) => {
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
         const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        if (!hasAccess) {
+            const cu = await prisma.clientUser.findFirst({
+                where: { clientId, userId: req.user.userId, status: 'ACTIVE' },
+                select: { id: true },
+            });
+            hasAccess = Boolean(cu);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
@@ -854,7 +1094,14 @@ router.get('/:id/ga4/traffic', authenticateToken, async (req, res) => {
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
         const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        if (!hasAccess) {
+            const cu = await prisma.clientUser.findFirst({
+                where: { clientId, userId: req.user.userId, status: 'ACTIVE' },
+                select: { id: true },
+            });
+            hasAccess = Boolean(cu);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
@@ -946,7 +1193,14 @@ router.post('/:id/ga4/connect', authenticateToken, async (req, res) => {
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
         const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        if (!hasAccess) {
+            const cu = await prisma.clientUser.findFirst({
+                where: { clientId, userId: req.user.userId, status: 'ACTIVE' },
+                select: { id: true },
+            });
+            hasAccess = Boolean(cu);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
@@ -1039,7 +1293,14 @@ router.get('/:id/ga4/test', authenticateToken, async (req, res) => {
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
         const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        if (!hasAccess) {
+            const cu = await prisma.clientUser.findFirst({
+                where: { clientId, userId: req.user.userId, status: 'ACTIVE' },
+                select: { id: true },
+            });
+            hasAccess = Boolean(cu);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
@@ -1160,7 +1421,14 @@ router.post('/:id/ga4/disconnect', authenticateToken, async (req, res) => {
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
         const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-        const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+        if (!hasAccess) {
+            const cu = await prisma.clientUser.findFirst({
+                where: { clientId, userId: req.user.userId, status: 'ACTIVE' },
+                select: { id: true },
+            });
+            hasAccess = Boolean(cu);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });

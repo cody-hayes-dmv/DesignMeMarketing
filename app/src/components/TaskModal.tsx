@@ -198,7 +198,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         }
     }, [open, mode, task]);
 
-    const canComment = Boolean(user) && user?.role !== "CLIENT";
+    const canComment = Boolean(user) && user?.role !== "USER";
 
     const fetchComments = async (taskId: string) => {
         try {

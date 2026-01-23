@@ -12,7 +12,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { user } = useSelector((state: RootState) => state.auth);
-  const isClient = user?.role === "CLIENT";
+  const isClientPortal = location.pathname.startsWith("/client/");
 
   // Get page title based on current route
   const getPageTitle = () => {
@@ -49,8 +49,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     return "Dashboard";
   };
 
-  // Client portal is report-only: no sidebar/header chrome.
-  if (isClient) {
+  // Client portal: no sidebar/header chrome.
+  if (isClientPortal || user?.role === "USER") {
     return <div className="min-h-screen bg-gray-50">{children}</div>;
   }
 
@@ -61,13 +61,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
       <div
-        className={`flex-1 overflow-auto transition-all duration-300 ${sidebarCollapsed ? "ml-16" : "ml-64"
-          }`}
+        className={`flex-1 transition-all duration-300 flex flex-col ${sidebarCollapsed ? "ml-16" : "ml-64"}`}
       >
         <div className="bg-white border-b border-gray-200 px-8 py-4">
           <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
         </div>
-        {children}
+        <div className="flex-1 min-h-0 overflow-auto">
+          {children}
+        </div>
       </div>
     </div>
   );

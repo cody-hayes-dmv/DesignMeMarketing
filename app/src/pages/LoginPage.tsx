@@ -20,8 +20,8 @@ const LoginPage = () => {
   const loginAs = (searchParams.get("as") || "").toUpperCase();
   const loginSubtitle = useMemo(() => {
     switch (loginAs) {
-      case "CLIENT":
-        return "Client portal — report access only";
+      case "USER":
+        return "Client portal — invited access";
       case "WORKER":
         return "Worker portal — tasks and logins";
       case "AGENCY":

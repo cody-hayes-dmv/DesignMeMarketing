@@ -3,50 +3,11 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-const ROLE_ENUM_VALUES = ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER", "CLIENT"] as const;
-
 function getArg(name: string): string | undefined {
   const argv = process.argv.slice(2);
   const idx = argv.findIndex((a) => a === `--${name}`);
   if (idx === -1) return undefined;
   return argv[idx + 1];
-}
-
-async function ensureClientRoleEnum() {
-  // If your DB was created before the CLIENT enum value existed, MySQL will reject inserts with "Data truncated".
-  // This makes a minimal, targeted update to the enum columns.
-  type ColRow = { TABLE_NAME: string; COLUMN_NAME: string; COLUMN_TYPE: string };
-
-  const cols = (await prisma.$queryRaw<ColRow[]>`
-    SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND (
-        (TABLE_NAME = 'users' AND COLUMN_NAME = 'role')
-        OR (TABLE_NAME = 'tokens' AND COLUMN_NAME = 'role')
-      )
-  `) as ColRow[];
-
-  const desiredEnum = `ENUM(${ROLE_ENUM_VALUES.map((v) => `'${v}'`).join(",")})`;
-
-  for (const col of cols) {
-    const hasClient = String(col.COLUMN_TYPE || "").toUpperCase().includes("'CLIENT'");
-    const isEnum = String(col.COLUMN_TYPE || "").toLowerCase().startsWith("enum(");
-    if (!isEnum) continue;
-    if (hasClient) continue;
-
-    const table = col.TABLE_NAME;
-    const column = col.COLUMN_NAME;
-
-    // users.role is NOT NULL, tokens.role is nullable in schema
-    const nullable = table === "tokens";
-    const nullSql = nullable ? "NULL" : "NOT NULL";
-    const defaultSql = table === "users" ? "DEFAULT 'AGENCY'" : "";
-
-    const sql = `ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` ${desiredEnum} ${nullSql} ${defaultSql}`.trim();
-    await prisma.$executeRawUnsafe(sql);
-    console.log(`✅ Updated ${table}.${column} enum to include CLIENT`);
-  }
 }
 
 function usage() {
@@ -71,8 +32,6 @@ async function main() {
   const domain = (getArg("domain") || "clientdemo.example").trim().toLowerCase();
   const industry = getArg("industry") || "General";
   const agencyId = getArg("agencyId");
-
-  await ensureClientRoleEnum();
 
   if (!email || !domain || !clientName) {
     usage();
@@ -108,7 +67,7 @@ async function main() {
       name,
       email,
       passwordHash,
-      role: "CLIENT",
+      role: "USER",
       verified: true,
       invited: false,
     },
@@ -122,6 +81,17 @@ async function main() {
       targets: JSON.stringify(["United States"]),
       status: "ACTIVE",
       userId: user.id,
+    },
+  });
+
+  // Link this user to this client via client_users (client portal access)
+  await prisma.clientUser.create({
+    data: {
+      clientId: client.id,
+      userId: user.id,
+      clientRole: "CLIENT",
+      status: "ACTIVE",
+      acceptedAt: new Date(),
     },
   });
 

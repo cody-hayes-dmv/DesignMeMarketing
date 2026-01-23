@@ -1288,7 +1288,7 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    // Permission check - Admins, agency members, or the client owner (CLIENT role)
+    // Permission check - Admins, agency members, or linked client portal users
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
     const isOwner = client.userId === req.user.userId;
     const userMemberships = await prisma.userAgency.findMany({
@@ -1297,7 +1297,14 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -1432,7 +1439,14 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -2402,7 +2416,14 @@ router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -2523,7 +2544,14 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -3043,7 +3071,14 @@ router.delete("/keywords/:clientId/:keywordId", authenticateToken, async (req, r
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -3586,7 +3621,14 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -3648,10 +3690,7 @@ router.post("/backlinks/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
 
-    // Disallow CLIENT role mutations (report-only)
-    if (req.user.role === "CLIENT") {
-      return res.status(403).json({ message: "Access denied" });
-    }
+    // Client portal users can manage backlinks for their client.
 
     const body = z
       .object({
@@ -3691,7 +3730,14 @@ router.post("/backlinks/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -3731,9 +3777,7 @@ router.post("/backlinks/:clientId/import", authenticateToken, async (req, res) =
   try {
     const { clientId } = req.params;
 
-    if (req.user.role === "CLIENT") {
-      return res.status(403).json({ message: "Access denied" });
-    }
+    // Client portal users can manage backlinks for their client.
 
     const body = z
       .object({
@@ -3780,7 +3824,14 @@ router.post("/backlinks/:clientId/import", authenticateToken, async (req, res) =
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -3820,10 +3871,7 @@ router.delete("/backlinks/:clientId/:backlinkId", authenticateToken, async (req,
   try {
     const { clientId, backlinkId } = req.params;
 
-    // Disallow CLIENT role mutations (report-only)
-    if (req.user.role === "CLIENT") {
-      return res.status(403).json({ message: "Access denied" });
-    }
+    // Client portal users can manage backlinks for their client.
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -3850,7 +3898,14 @@ router.delete("/backlinks/:clientId/:backlinkId", authenticateToken, async (req,
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -3902,7 +3957,14 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -4461,7 +4523,14 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -4845,7 +4914,14 @@ router.get("/events/:clientId/top", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -4938,7 +5014,14 @@ router.get("/visitor-sources/:clientId", authenticateToken, async (req, res) => 
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -6348,7 +6431,14 @@ router.get("/ranked-keywords/:clientId", authenticateToken, async (req, res) => 
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -6442,7 +6532,14 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -6825,7 +6922,14 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -6904,7 +7008,14 @@ router.get("/top-pages/:clientId/keywords", authenticateToken, async (req, res) 
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -6970,7 +7081,14 @@ router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -7044,7 +7162,14 @@ router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => 
     });
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -7459,6 +7584,14 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
       const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
       hasAccess = clientAgencyIds.some(id => userAgencyIds.includes(id));
     }
+    // Client portal users: allow access via client_users membership
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -7536,6 +7669,77 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
   }
 });
 
+// Public: Shared Target Keywords by share token (no auth)
+router.get("/share/:token/target-keywords", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const tokenData = verifyShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+
+    const clientId = tokenData.clientId;
+
+    const normalizeKeywordKey = (value: unknown) => {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, " ")
+        .replace(/\s+/g, " ");
+    };
+
+    // tracked keywords for filtering + fallback rank
+    const trackedKeywords = await prisma.keyword.findMany({
+      where: { clientId },
+      select: {
+        keyword: true,
+        currentPosition: true,
+        previousPosition: true,
+        googleUrl: true,
+      },
+    });
+    const trackedKeywordSet = new Set(trackedKeywords.map((k) => normalizeKeywordKey(k.keyword)));
+    const trackedByKeyword = new Map(
+      trackedKeywords.map((k) => [
+        normalizeKeywordKey(k.keyword),
+        {
+          currentPosition: k.currentPosition ?? null,
+          previousPosition: k.previousPosition ?? null,
+          googleUrl: k.googleUrl ?? null,
+        },
+      ])
+    );
+
+    const allTargetKeywords = await prisma.targetKeyword.findMany({
+      where: { clientId },
+      orderBy: [{ searchVolume: "desc" }, { keyword: "asc" }],
+    });
+
+    const targetKeywords = allTargetKeywords.filter((tk) =>
+      trackedKeywordSet.has(normalizeKeywordKey(tk.keyword))
+    );
+
+    return res.json(
+      targetKeywords.map((tk) => ({
+        ...tk,
+        locationName: tk.locationName ? normalizeLocationName(tk.locationName) : tk.locationName,
+        googlePosition:
+          tk.googlePosition ??
+          trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.currentPosition ??
+          null,
+        previousPosition:
+          tk.previousPosition ??
+          trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.previousPosition ??
+          null,
+        googleUrl: tk.googleUrl ?? trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.googleUrl ?? null,
+      }))
+    );
+  } catch (error: any) {
+    console.error("Shared target keywords error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Create target keyword for a client
 router.post("/target-keywords/:clientId", authenticateToken, async (req, res) => {
   try {
@@ -7578,7 +7782,14 @@ router.post("/target-keywords/:clientId", authenticateToken, async (req, res) =>
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -7674,7 +7885,14 @@ router.patch("/target-keywords/:keywordId", authenticateToken, async (req, res) 
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = keyword.client.user.memberships.map(m => m.agencyId);
-    const hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId: keyword.clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -7755,7 +7973,14 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
       });
       if (!clientWithUser) return res.status(404).json({ message: "Client not found" });
       const isAdmin = req.user.role === "ADMIN";
-      const hasAccess = isAdmin || clientWithUser.user.memberships.some((m) => userAgencyIds.includes(m.agencyId));
+      let hasAccess = isAdmin || clientWithUser.user.memberships.some((m) => userAgencyIds.includes(m.agencyId));
+      if (!hasAccess) {
+        const cu = await prisma.clientUser.findFirst({
+          where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+          select: { id: true },
+        });
+        hasAccess = Boolean(cu);
+      }
       if (!hasAccess) return res.status(403).json({ message: "Access denied" });
 
       // Only refresh tracked target keywords (intersection of target_keywords + keywords)

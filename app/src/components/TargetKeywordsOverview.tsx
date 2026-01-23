@@ -59,6 +59,7 @@ interface TargetKeywordsOverviewProps {
   subtitle?: string;
   showHeader?: boolean;
   headerActions?: React.ReactNode;
+  shareToken?: string;
 }
 
 const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
@@ -69,8 +70,10 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   subtitle = "Keywords relevant to this client's website based on DataForSEO analysis.",
   showHeader = true,
   headerActions,
+  shareToken,
 }) => {
   const { user } = useSelector((state: RootState) => state.auth);
+  const isReadOnly = Boolean(shareToken);
   const [keywords, setKeywords] = useState<TargetKeyword[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +114,9 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     try {
       setLoading(true);
       setError(null);
-      const res = await api.get(`/seo/target-keywords/${clientId}`);
+      const res = shareToken
+        ? await api.get(`/seo/share/${encodeURIComponent(shareToken)}/target-keywords`)
+        : await api.get(`/seo/target-keywords/${clientId}`);
       setKeywords(res.data || []);
     } catch (error: any) {
       console.error("Failed to load target keywords", error);
@@ -120,7 +125,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, shareToken]);
 
   const persistStarredIds = useCallback(
     (next: Set<string>) => {
@@ -169,7 +174,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   }, [clientId, fetchKeywords]);
 
   const handleRefresh = useCallback(async () => {
-    if (!clientId || user?.role !== "SUPER_ADMIN") return;
+    if (!clientId || user?.role !== "SUPER_ADMIN" || isReadOnly) return;
     try {
       setRefreshing(true);
       await api.post(`/seo/target-keywords/${clientId}/refresh`);
@@ -180,7 +185,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     } finally {
       setRefreshing(false);
     }
-  }, [clientId, user?.role, fetchKeywords]);
+  }, [clientId, user?.role, fetchKeywords, isReadOnly]);
 
   const formatNumber = (num: number | null | undefined) => {
     if (num === null || num === undefined) return "—";
@@ -237,6 +242,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   };
 
   const handleStartEdit = (keywordId: string, field: "date" | "position", keyword: TargetKeyword) => {
+    if (isReadOnly) return;
     setEditingKeywordId(keywordId);
     setEditingField(field);
     if (field === "date") {
@@ -254,6 +260,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   };
 
   const handleSaveEdit = async (keywordId: string) => {
+    if (isReadOnly) return;
     try {
       const updateData: any = {};
       if (editingField === "date" && editDateValue) {
@@ -292,7 +299,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
           </div>
           <div className="flex items-center space-x-2">
             {headerActions}
-            {user?.role === "SUPER_ADMIN" && (
+            {user?.role === "SUPER_ADMIN" && !isReadOnly && (
               <button
                 type="button"
                 onClick={handleRefresh}
@@ -423,12 +430,12 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                           </div>
                         ) : (
                           <div 
-                            className="text-sm text-gray-600 flex items-center gap-2 group cursor-pointer hover:text-primary-600"
-                            onClick={() => handleStartEdit(keyword.id, "date", keyword)}
-                            title="Click to edit campaign start date"
+                            className={`text-sm text-gray-600 flex items-center gap-2 group ${isReadOnly ? "" : "cursor-pointer hover:text-primary-600"}`}
+                            onClick={() => !isReadOnly && handleStartEdit(keyword.id, "date", keyword)}
+                            title={isReadOnly ? undefined : "Click to edit campaign start date"}
                           >
                             <span>{keyword.createdAt ? format(new Date(keyword.createdAt), "MMM d, yyyy") : "—"}</span>
-                            <Edit2 className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            {!isReadOnly && <Edit2 className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />}
                           </div>
                         )}
                       </td>
@@ -461,12 +468,12 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                           </div>
                         ) : (
                           <div 
-                            className="text-sm text-gray-900 font-medium flex items-center gap-2 group cursor-pointer hover:text-primary-600"
-                            onClick={() => handleStartEdit(keyword.id, "position", keyword)}
-                            title="Click to edit Google ranking"
+                            className={`text-sm text-gray-900 font-medium flex items-center gap-2 group ${isReadOnly ? "" : "cursor-pointer hover:text-primary-600"}`}
+                            onClick={() => !isReadOnly && handleStartEdit(keyword.id, "position", keyword)}
+                            title={isReadOnly ? undefined : "Click to edit Google ranking"}
                           >
                             <span>{formatPosition(keyword.googlePosition)}</span>
-                            <Edit2 className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            {!isReadOnly && <Edit2 className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />}
                           </div>
                         )}
                       </td>

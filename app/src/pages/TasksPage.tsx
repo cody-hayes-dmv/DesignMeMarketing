@@ -54,7 +54,7 @@ const TasksPage = () => {
 
     // Only non-workers can create
     const canCreate = (user?.role as ROLE | undefined) !== "WORKER";
-    const canFilterByClient = (user?.role as ROLE | undefined) !== "CLIENT";
+    const canFilterByClient = (user?.role as ROLE | undefined) !== "USER";
 
     const handleCreateClick = () => {
         setSelectedTask(null);

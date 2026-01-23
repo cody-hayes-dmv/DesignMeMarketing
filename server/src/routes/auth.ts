@@ -98,6 +98,10 @@ router.post("/login", async (req, res) => {
             agency: true,
           },
         },
+        clientUsers: {
+          where: { status: "ACTIVE" },
+          select: { clientId: true, clientRole: true, status: true },
+        },
       },
     });
 
@@ -118,6 +122,12 @@ router.post("/login", async (req, res) => {
         .json({ message: "Please verify your email before logging in" });
     }
 
+    // Track last login time (useful for client user lists)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
     // Generate JWT
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
@@ -134,6 +144,13 @@ router.post("/login", async (req, res) => {
         role: user.role,
         verified: user.verified,
         invited: user.invited,
+        clientAccess: {
+          clients: user.clientUsers.map((c) => ({
+            clientId: c.clientId,
+            role: c.clientRole,
+            status: c.status,
+          })),
+        },
       },
     });
   } catch (error) {
@@ -153,6 +170,10 @@ router.get("/me", authenticateToken, async (req, res) => {
             agency: true,
           },
         },
+        clientUsers: {
+          where: { status: "ACTIVE" },
+          select: { clientId: true, clientRole: true, status: true },
+        },
       },
     });
 
@@ -167,10 +188,166 @@ router.get("/me", authenticateToken, async (req, res) => {
       role: user.role,
       verified: user.verified,
       invited: user.invited,
+      clientAccess: {
+        clients: user.clientUsers.map((c) => ({
+          clientId: c.clientId,
+          role: c.clientRole,
+          status: c.status,
+        })),
+      },
     });
   } catch (error) {
     console.error("Get user error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Invite lookup (used by accept-invite signup page)
+router.get("/invite", async (req, res) => {
+  try {
+    const token = String(req.query.token || "").trim();
+    if (!token) return res.status(400).json({ message: "Missing token" });
+
+    const record = await prisma.token.findUnique({
+      where: { token },
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      return res.status(400).json({ message: "Invalid or expired token" });
+    }
+
+    let metadata: any = null;
+    try {
+      metadata = record.metadata ? JSON.parse(record.metadata) : null;
+    } catch {
+      metadata = null;
+    }
+
+    if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || !metadata?.clientId) {
+      return res.status(400).json({ message: "Unsupported invite token" });
+    }
+
+    const client = await prisma.client.findUnique({
+      where: { id: String(metadata.clientId) },
+      select: { id: true, name: true },
+    });
+
+    if (!client) return res.status(404).json({ message: "Client not found" });
+
+    return res.json({
+      kind: "CLIENT_USER_INVITE",
+      email: record.email,
+      client: { id: client.id, name: client.name },
+    });
+  } catch (error) {
+    console.error("Invite lookup error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+const acceptInviteSchema = z.object({
+  token: z.string().min(1),
+  name: z.string().min(1),
+  password: z.string().min(6),
+});
+
+// Accept invite + set password (client user signup)
+router.post("/invite/accept", async (req, res) => {
+  try {
+    const { token, name, password } = acceptInviteSchema.parse(req.body);
+
+    const record = await prisma.token.findUnique({
+      where: { token },
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      return res.status(400).json({ message: "Invalid or expired token" });
+    }
+
+    let metadata: any = null;
+    try {
+      metadata = record.metadata ? JSON.parse(record.metadata) : null;
+    } catch {
+      metadata = null;
+    }
+
+    if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || !metadata?.clientId) {
+      return res.status(400).json({ message: "Unsupported invite token" });
+    }
+
+    const clientId = String(metadata.clientId);
+
+    // Create or update user
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await prisma.user.upsert({
+      where: { email: record.email },
+      update: {
+        name,
+        passwordHash,
+        verified: true,
+        invited: false,
+        role: "USER",
+        lastLoginAt: new Date(),
+      },
+      create: {
+        email: record.email,
+        name,
+        passwordHash,
+        verified: true,
+        invited: false,
+        role: "USER",
+        lastLoginAt: new Date(),
+      },
+    });
+
+    // Ensure membership exists
+    await prisma.clientUser.upsert({
+      where: { clientId_userId: { clientId, userId: user.id } },
+      update: {
+        status: "ACTIVE",
+        acceptedAt: new Date(),
+      },
+      create: {
+        clientId,
+        userId: user.id,
+        clientRole: "CLIENT",
+        status: "ACTIVE",
+        acceptedAt: new Date(),
+      },
+    });
+
+    // Mark token as used
+    await prisma.token.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    });
+
+    // Issue login JWT
+    const jwtToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      process.env.JWT_SECRET!,
+      { expiresIn: "7d" }
+    );
+
+    return res.json({
+      token: jwtToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        verified: user.verified,
+        invited: user.invited,
+        clientAccess: { clients: [{ clientId, role: "CLIENT", status: "ACTIVE" }] },
+      },
+      redirect: { clientId },
+    });
+  } catch (error: any) {
+    if (error?.name === "ZodError") {
+      return res.status(400).json({ message: "Invalid input", errors: error.errors });
+    }
+    console.error("Accept invite error:", error);
+    return res.status(500).json({ message: "Failed to accept invite" });
   }
 });
 

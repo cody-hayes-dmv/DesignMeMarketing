@@ -78,6 +78,14 @@ async function getTaskForAccess(taskId: string) {
     where: { id: taskId },
     include: {
       ...taskInclude,
+      // Include client users so client-portal users can be authorized via membership
+      client: {
+        include: {
+          clientUsers: {
+            select: { userId: true, status: true },
+          },
+        },
+      },
       agency: {
         include: {
           members: { select: { userId: true } },
@@ -90,7 +98,10 @@ async function getTaskForAccess(taskId: string) {
 function canAccessTask(user: any, task: any) {
   const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
   const inAgency = Boolean(task?.agency?.members?.some((m: any) => m.userId === user.userId));
-  return isAdmin || inAgency;
+  const inClient = Boolean(
+    task?.client?.clientUsers?.some((m: any) => m.userId === user.userId && m.status === "ACTIVE")
+  );
+  return isAdmin || inAgency || inClient;
 }
 
 // Get tasks
@@ -164,6 +175,13 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
       const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
       hasAccess = clientAgencyIds.some((id) => userAgencyIds.includes(id));
     }
+    if (!hasAccess) {
+      const clientUser = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(clientUser);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -224,7 +242,7 @@ router.get("/:id/comments", authenticateToken, async (req, res) => {
 // IMPORTANT: Must be before "/:id"
 router.post("/:id/comments", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "CLIENT") {
+    if (req.user.role === "USER") {
       return res.status(403).json({ message: "Access denied" });
     }
 
@@ -260,7 +278,7 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
 // IMPORTANT: Must be before "/:id"
 router.delete("/:id/comments/:commentId", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "CLIENT") {
+    if (req.user.role === "USER") {
       return res.status(403).json({ message: "Access denied" });
     }
 
@@ -335,12 +353,29 @@ router.post("/", authenticateToken, async (req, res) => {
       where: { userId: req.user.userId },
     });
 
-    if (!membership && !(req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN")) {
-      return res.status(400).json({ message: "You must belong to an agency to create tasks" });
-    }
+    let agencyId: string | undefined =
+      membership?.agencyId || (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN" ? (await prisma.agency.findFirst())?.id : undefined);
 
-    const agencyId =
-      membership?.agencyId || (await prisma.agency.findFirst())?.id;
+    // Client-portal users: allow creating tasks only when linked to the client.
+    if (!agencyId && req.user.role === "USER") {
+      if (!parsed.clientId) {
+        return res.status(400).json({ message: "clientId is required for client users" });
+      }
+      const clientUser = await prisma.clientUser.findFirst({
+        where: { clientId: parsed.clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (!clientUser) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Attach task to the owning user's first agency (so it appears in work logs/admin views)
+      const ownerMembership = await prisma.userAgency.findFirst({
+        where: { userId: (await prisma.client.findUnique({ where: { id: parsed.clientId }, select: { userId: true } }))?.userId || "" },
+        select: { agencyId: true },
+      });
+      agencyId = ownerMembership?.agencyId;
+    }
 
     if (!agencyId) {
       return res.status(400).json({ message: "No agency found" });
@@ -377,16 +412,11 @@ router.put("/:id", authenticateToken, async (req, res) => {
     const { id } = req.params;
     const updates = updateTaskSchema.parse(req.body);
 
-    const task = await prisma.task.findUnique({
-      where: { id },
-      include: { agency: { include: { members: true } } },
-    });
+    const task = await getTaskForAccess(id);
 
     if (!task) return res.status(404).json({ message: "Task not found" });
 
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const inAgency = task.agency.members.some((m) => m.userId === req.user.userId);
-    if (!isAdmin && !inAgency) return res.status(403).json({ message: "Access denied" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
     // Handle proof field - ensure it's properly formatted
     const updateData: any = { ...updates };
@@ -441,15 +471,10 @@ router.delete("/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const task = await prisma.task.findUnique({
-      where: { id },
-      include: { agency: { include: { members: true } } },
-    });
+    const task = await getTaskForAccess(id);
     if (!task) return res.status(404).json({ message: "Task not found" });
 
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const inAgency = task.agency.members.some((m) => m.userId === req.user.userId);
-    if (!isAdmin && !inAgency) return res.status(403).json({ message: "Access denied" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
     await prisma.task.delete({ where: { id } });
     res.status(204).send();

@@ -17,12 +17,15 @@ model User {
   role           Role         @default(AGENCY)
   verified       Boolean      @default(false)
   invited        Boolean      @default(false)
+  lastLoginAt    DateTime?
   clients        Client[]
   assignedTaksks Task[]       @relation("TaskAssignee")
   createdTass    Task[]       @relation("TaskCreator")
   taskComments   TaskComment[]
   tokens         Token[]
   memberships    UserAgency[]
+  clientUsers    ClientUser[]
+  invitedClientUsers ClientUser[] @relation("ClientUserInvitedBy")
 
   @@map("users")
 }
@@ -109,7 +112,9 @@ model Token {
   expiresAt DateTime
   userId    String?
   agencyId  String?
-  role      Role?
+  // Keep this as string to avoid coupling invite flows to Role enum.
+  // (We use metadata for most invite payload anyway.)
+  role      String?
   metadata  String?   @db.LongText
   agency    Agency?   @relation(fields: [agencyId], references: [id])
   user      User?     @relation(fields: [userId], references: [id])
@@ -154,10 +159,34 @@ model Client {
   Task                  Task[]
   topPages              TopPage[]
   trafficSources        TrafficSource[]
+  clientUsers           ClientUser[]
 
   @@index([name, domain])
   @@index([userId], map: "clients_userId_fkey")
   @@map("clients")
+}
+
+model ClientUser {
+  id           String          @id @default(cuid())
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  clientId     String
+  userId       String
+  invitedById  String?
+  clientRole   ClientUserRole  @default(CLIENT)
+  status       ClientUserStatus @default(PENDING)
+  invitedAt    DateTime        @default(now())
+  acceptedAt   DateTime?
+
+  client       Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy    User?           @relation("ClientUserInvitedBy", fields: [invitedById], references: [id])
+
+  @@unique([clientId, userId])
+  @@index([clientId])
+  @@index([userId])
+  @@index([invitedById])
+  @@map("client_users")
 }
 
 model SeoReport {
@@ -441,6 +470,9 @@ model Ga4Metrics {
   startDate          DateTime
   endDate            DateTime
   activeUsers        Int
+  // Legacy fields kept for backward compatibility with existing DB rows.
+  totalUsers         Int?
+  engagedSessions    Int?
   eventCount         Int
   newUsers           Int
   keyEvents          Int
@@ -470,7 +502,17 @@ enum Role {
   ADMIN
   AGENCY
   WORKER
+  USER
+}
+
+enum ClientUserRole {
   CLIENT
+  STAFF
+}
+
+enum ClientUserStatus {
+  PENDING
+  ACTIVE
 }
 
 enum AgencyRole {

@@ -9,6 +9,9 @@ export interface User {
   role: ROLE;
   verified: boolean;
   invited: boolean;
+  clientAccess?: {
+    clients: Array<{ clientId: string; role: string; status: string }>;
+  };
 }
 
 interface AuthState {

@@ -27,6 +27,7 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
+  MoreVertical,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -216,12 +217,44 @@ const ClientDashboardPage: React.FC = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const isClientPortal = location.pathname.startsWith("/client/");
-  const reportOnly = user?.role === "CLIENT" || isClientPortal || Boolean((location.state as any)?.reportOnly);
+  const clientPortalMode = isClientPortal && user?.role === "USER";
+  // When in client portal, we show only the Dashboard view for the invited client.
+  const reportOnly = Boolean((location.state as any)?.reportOnly);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "report" | "backlinks" | "worklog">(
-    (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" })?.tab || (reportOnly ? "report" : "dashboard")
-  );
+  type ClientDashboardTopTab = "dashboard" | "report" | "users";
+  type ClientDashboardSection = "seo" | "ppc" | "backlinks" | "worklog";
+
+  const initialNav = (() => {
+    if (clientPortalMode) {
+      return { tab: "dashboard" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+    }
+    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" } | null)?.tab;
+    if (requested === "report") return { tab: "report" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+    if (requested === "users") return { tab: "users" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+    if (requested === "backlinks") return { tab: "dashboard" as ClientDashboardTopTab, section: "backlinks" as ClientDashboardSection };
+    if (requested === "worklog") return { tab: "dashboard" as ClientDashboardTopTab, section: "worklog" as ClientDashboardSection };
+    return { tab: (reportOnly ? "report" : "dashboard") as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+  })();
+
+  const [activeTab, setActiveTab] = useState<ClientDashboardTopTab>(initialNav.tab);
+  const [dashboardSection, setDashboardSection] = useState<ClientDashboardSection>(initialNav.section);
+
+  // Client portal guard: if a client user hits a clientId they don't have access to,
+  // redirect them to their first allowed client dashboard (or login).
+  useEffect(() => {
+    if (!clientPortalMode) return;
+    if (!clientId) return;
+    const clients = (user as any)?.clientAccess?.clients as Array<{ clientId: string }> | undefined;
+    if (!Array.isArray(clients) || clients.length === 0) {
+      navigate("/login", { replace: true });
+      return;
+    }
+    const allowed = clients.some((c) => c?.clientId === clientId);
+    if (!allowed) {
+      navigate(`/client/dashboard/${encodeURIComponent(clients[0].clientId)}`, { replace: true });
+    }
+  }, [clientId, clientPortalMode, navigate, user]);
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
@@ -365,6 +398,25 @@ const ClientDashboardPage: React.FC = () => {
     taskTitle: string | null;
   }>({ isOpen: false, taskId: null, taskTitle: null });
 
+  // Client portal users (Users tab)
+  type ClientUserRow = {
+    id: string;
+    userId: string;
+    name: string | null;
+    email: string;
+    role: "CLIENT" | "STAFF";
+    status: "PENDING" | "ACTIVE";
+    lastLoginAt: string | null;
+  };
+  const [clientUsers, setClientUsers] = useState<ClientUserRow[]>([]);
+  const [clientUsersLoading, setClientUsersLoading] = useState(false);
+  const [clientUsersError, setClientUsersError] = useState<string | null>(null);
+  const [inviteClientUsersModalOpen, setInviteClientUsersModalOpen] = useState(false);
+  const [inviteClientUsersEmailInput, setInviteClientUsersEmailInput] = useState("");
+  const [inviteClientUsersEmails, setInviteClientUsersEmails] = useState<string[]>([]);
+  const [inviteClientUsersViaEmail, setInviteClientUsersViaEmail] = useState(true);
+  const [invitingClientUsers, setInvitingClientUsers] = useState(false);
+
   const formatGa4ErrorMessage = useCallback((rawError: string | null): string => {
     if (!rawError) {
       return "GA4 connection failed. Please try again.";
@@ -434,10 +486,10 @@ const ClientDashboardPage: React.FC = () => {
   }, [clientId]);
 
   useEffect(() => {
-    if (activeTab === "worklog") {
+    if (activeTab === "dashboard" && dashboardSection === "worklog") {
       fetchWorkLog();
     }
-  }, [activeTab, fetchWorkLog]);
+  }, [activeTab, dashboardSection, fetchWorkLog]);
 
   const taskStatusLabel = (s: TaskStatus) => {
     switch (s) {
@@ -838,7 +890,7 @@ const ClientDashboardPage: React.FC = () => {
       await fetchBacklinksForChart();
 
       // Also refresh the backlinks table if it's being viewed
-      if (activeTab === "backlinks") {
+      if (activeTab === "dashboard" && dashboardSection === "backlinks") {
         try {
           const daysForList = backlinksFilter === "all" ? 365 : 28;
           const listRes = await api.get(`/seo/backlinks/${clientId}`, {
@@ -856,7 +908,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingBacklinks(false);
     }
-  }, [activeTab, backlinksFilter, clientId, fetchBacklinksForChart]);
+  }, [activeTab, backlinksFilter, clientId, dashboardSection, fetchBacklinksForChart]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;
@@ -1033,11 +1085,44 @@ const ClientDashboardPage: React.FC = () => {
 
   // Set active tab from location state when component mounts or location changes
   useEffect(() => {
-    const state = location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" };
-    if (state?.tab) {
-      setActiveTab(state.tab);
+    if (clientPortalMode) {
+      setActiveTab("dashboard");
+      setDashboardSection("seo");
+      return;
     }
-  }, [location.state]);
+    const state = location.state as {
+      tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users";
+      section?: ClientDashboardSection;
+    };
+    if (!state?.tab && !state?.section) return;
+
+    if (state?.tab === "report") {
+      setActiveTab("report");
+      return;
+    }
+
+    if (state?.tab === "users") {
+      setActiveTab("users");
+      return;
+    }
+
+    if (state?.tab === "backlinks") {
+      setActiveTab("dashboard");
+      setDashboardSection("backlinks");
+      return;
+    }
+
+    if (state?.tab === "worklog") {
+      setActiveTab("dashboard");
+      setDashboardSection("worklog");
+      return;
+    }
+
+    if (state?.tab === "dashboard") {
+      setActiveTab("dashboard");
+      if (state.section) setDashboardSection(state.section);
+    }
+  }, [clientPortalMode, location.state]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -1341,9 +1426,9 @@ const ClientDashboardPage: React.FC = () => {
   }, [clientId, backlinksFilter, user?.role]);
 
   useEffect(() => {
-    if (activeTab !== "backlinks") return;
+    if (activeTab !== "dashboard" || dashboardSection !== "backlinks") return;
     void fetchBacklinksList();
-  }, [activeTab, fetchBacklinksList]);
+  }, [activeTab, dashboardSection, fetchBacklinksList]);
 
   const openAddBacklink = useCallback(() => {
     if (reportOnly) return;
@@ -2155,14 +2240,131 @@ const ClientDashboardPage: React.FC = () => {
     navigate("/login", { replace: true });
   };
 
+  const handleBackToClients = useCallback(() => {
+    // If user entered this page directly, history "back" may not go anywhere useful.
+    // React Router stores an index on window.history.state.idx.
+    const idx = Number((window.history as any)?.state?.idx ?? 0);
+    if (Number.isFinite(idx) && idx > 0) {
+      navigate(-1);
+      return;
+    }
+    navigate("/agency/clients", { replace: true });
+  }, [navigate]);
+
+  // NOTE: DashboardLayout wraps pages in an `overflow-auto` container.
+  // For the Client Dashboard "Dashboard" tab we want the scroll to live *inside* the tab
+  // (so the page chrome stays put). For other tabs we let the layout scroll normally.
+  const dashboardOwnsScroll = !reportOnly && activeTab === "dashboard";
+  const ga4ConnectedBannerRef = useRef<HTMLDivElement | null>(null);
+  const [ga4ConnectedBannerHeight, setGa4ConnectedBannerHeight] = useState<number | null>(null);
+  const dashboardRightPanelScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const handleInviteUserClick = useCallback(() => {
+    setInviteClientUsersModalOpen(true);
+    setInviteClientUsersEmailInput("");
+    setInviteClientUsersEmails([]);
+    setInviteClientUsersViaEmail(true);
+  }, []);
+
+  const fetchClientUsers = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setClientUsersLoading(true);
+      setClientUsersError(null);
+      const res = await api.get(`/clients/${clientId}/users`);
+      const rows = Array.isArray(res.data) ? (res.data as ClientUserRow[]) : [];
+      setClientUsers(rows);
+    } catch (e: any) {
+      console.error("Failed to fetch client users", e);
+      setClientUsers([]);
+      setClientUsersError(e?.response?.data?.message || "Failed to load users.");
+    } finally {
+      setClientUsersLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (activeTab !== "users") return;
+    void fetchClientUsers();
+  }, [activeTab, fetchClientUsers]);
+
+  const addInviteEmail = useCallback(() => {
+    const email = inviteClientUsersEmailInput.trim().toLowerCase();
+    if (!email) return;
+    // Basic check; backend validates too
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      toast.error("Enter a valid email.");
+      return;
+    }
+    setInviteClientUsersEmails((prev) => (prev.includes(email) ? prev : [...prev, email]));
+    setInviteClientUsersEmailInput("");
+  }, [inviteClientUsersEmailInput]);
+
+  const submitInviteClientUsers = useCallback(async () => {
+    if (!clientId) return;
+    const emails = Array.from(new Set([inviteClientUsersEmailInput.trim().toLowerCase(), ...inviteClientUsersEmails].filter(Boolean)));
+    if (emails.length === 0) {
+      toast.error("Add at least 1 email.");
+      return;
+    }
+
+    try {
+      setInvitingClientUsers(true);
+      await api.post(`/clients/${clientId}/users/invite`, {
+        emails,
+        sendEmail: inviteClientUsersViaEmail,
+        clientRole: "CLIENT",
+      });
+      toast.success(`Invited ${emails.length} user${emails.length === 1 ? "" : "s"}.`);
+      setInviteClientUsersModalOpen(false);
+      setInviteClientUsersEmailInput("");
+      setInviteClientUsersEmails([]);
+      await fetchClientUsers();
+    } catch (e: any) {
+      console.error("Failed to invite client users", e);
+      toast.error(e?.response?.data?.message || "Failed to invite users.");
+    } finally {
+      setInvitingClientUsers(false);
+    }
+  }, [clientId, fetchClientUsers, inviteClientUsersEmailInput, inviteClientUsersEmails, inviteClientUsersViaEmail]);
+
+  useEffect(() => {
+    const el = ga4ConnectedBannerRef.current;
+    if (!el) {
+      setGa4ConnectedBannerHeight(null);
+      return;
+    }
+
+    // Measure and keep in sync (banner height can change with responsive layout)
+    const update = () => {
+      const next = el.getBoundingClientRect().height;
+      setGa4ConnectedBannerHeight(Number.isFinite(next) && next > 0 ? next : null);
+    };
+
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ga4Connected]);
+
+  // When switching Dashboard left-nav sections, ensure the user sees the section header/actions
+  // (e.g. Backlinks Import/Add, Work Log +) by resetting the right panel scroll to the top.
+  useEffect(() => {
+    if (reportOnly || activeTab !== "dashboard") return;
+    const el = dashboardRightPanelScrollRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+  }, [activeTab, dashboardSection, reportOnly]);
+
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex items-center justify-between">
+    <div className={dashboardOwnsScroll ? "h-full min-h-0 flex flex-col overflow-hidden" : "h-full min-h-0 flex flex-col"}>
+      <div className="px-8 pt-8 space-y-8 shrink-0">
+        <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center space-x-3">
-            {!reportOnly ? (
+            {!reportOnly && !clientPortalMode ? (
               <button
-                onClick={() => navigate(-1)}
+                onClick={handleBackToClients}
                 className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -2202,310 +2404,391 @@ const ClientDashboardPage: React.FC = () => {
           )}
         </div>
 
-        {!reportOnly && <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2">
-            <select
-              value={dateRange}
-              onChange={(e) => {
-                const newValue = e.target.value;
-                setDateRange(newValue);
-                if (newValue === "custom") {
-                  setShowCustomDatePicker(true);
-                  // Set default dates: last 30 days
-                  const endDate = new Date();
-                  const startDate = new Date();
-                  startDate.setDate(startDate.getDate() - 30);
-                  setCustomEndDate(endDate.toISOString().split('T')[0]);
-                  setCustomStartDate(startDate.toISOString().split('T')[0]);
-                } else {
-                  setShowCustomDatePicker(false);
-                }
-              }}
-              className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            >
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-              <option value="365">Last year</option>
-              <option value="custom">Custom</option>
-            </select>
-            {showCustomDatePicker && (
-              <div className="flex items-center space-x-2">
-                <input
-                  type="date"
-                  value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
-                  max={customEndDate || new Date().toISOString().split('T')[0]}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-                <span className="text-gray-500">to</span>
-                <input
-                  type="date"
-                  value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
-                  min={customStartDate || undefined}
-                  max={new Date().toISOString().split('T')[0]}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (customStartDate && customEndDate) {
-                      try {
-                        setFetchingSummary(true);
-                        const res = await api.get(buildDashboardUrl(clientId!));
-                        const payload = res.data || {};
-                        setDashboardSummary(formatDashboardSummary(payload));
-                      } catch (error: any) {
-                        console.error("Failed to fetch dashboard summary", error);
-                        setDashboardSummary(null);
-                      } finally {
-                        setFetchingSummary(false);
-                      }
-                    } else {
-                      toast.error("Please select both start and end dates");
-                    }
-                  }}
-                  className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors text-sm"
-                >
-                  Apply
-                </button>
-              </div>
-            )}
-          </div>
-          {user?.role === "SUPER_ADMIN" && (
-            <button
-              type="button"
-              onClick={handleRefreshDashboard}
-              disabled={refreshingDashboard}
-              data-pdf-hide="true"
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              title="Refresh dashboard data from DataForSEO and GA4"
-            >
-              {refreshingDashboard ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Refreshing...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4" />
-                  <span>Refresh</span>
-                </>
-              )}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleExportPdf}
-            disabled={exportingPdf}
-            className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {exportingPdf ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Exporting...</span>
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                <span>Export</span>
-              </>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={handleShare}
-            disabled={sharing}
-            className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {sharing ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Generating...</span>
-              </>
-            ) : (
-              <>
-            <Share2 className="h-4 w-4" />
-            <span>Share</span>
-              </>
-            )}
-          </button>
-        </div>}
+        {/* Actions moved next to tabs (see below) */}
       </div>
 
       {!reportOnly && (
         <div className="border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8">
-            {[
-              { id: "dashboard", label: "Dashboard", icon: Users },
-              { id: "report", label: "Report", icon: FileText },
-              { id: "backlinks", label: "Backlinks", icon: Search },
-              { id: "worklog", label: "Work Log", icon: Clock },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                className={`py-2 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 ${
-                  activeTab === tab.id
-                    ? "border-primary-500 text-primary-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
-              >
-                <tab.icon className="h-4 w-4" />
-                <span>{tab.label}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
-      )}
+          <div className="flex items-end justify-between gap-6">
+            <nav className="-mb-px flex space-x-8">
+              {(clientPortalMode
+                ? [{ id: "dashboard", label: "Dashboard", icon: Users }]
+                : [
+                    { id: "dashboard", label: "Dashboard", icon: Users },
+                    { id: "report", label: "Report", icon: FileText },
+                    { id: "users", label: "Users", icon: UserPlus },
+                  ]
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 ${
+                    activeTab === tab.id
+                      ? "border-primary-500 text-primary-600"
+                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  }`}
+                >
+                  <tab.icon className="h-4 w-4" />
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </nav>
 
-      {loading ? (
-        <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">Loading client data...</div>
-      ) : (
-        <>
-          {!reportOnly && activeTab === "dashboard" && (
-            <div ref={dashboardContentRef} className="space-y-8">
-              {/* GA4 connection UI (hidden in PDF export) */}
-              <div data-pdf-hide="true">
-                {/* GA4 Connection Status - Show loading skeleton while checking */}
-                {ga4StatusLoading ? (
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 animate-pulse">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="h-6 bg-gray-200 rounded w-48 mb-3"></div>
-                        <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
-                        <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
-                        <div className="h-10 bg-gray-200 rounded w-32"></div>
-                      </div>
-                      <div className="h-5 w-5 bg-gray-200 rounded"></div>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* GA4 Connection Error Banner - Show when connection is invalid */}
-                    {ga4ConnectionError && (
-                      <div className="bg-red-50 border border-red-200 rounded-xl p-6">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-red-900 mb-2 flex items-center gap-2">
-                              <AlertTriangle className="h-5 w-5" />
-                              GA4 Connection Invalid
-                            </h3>
-                            <p className="text-sm text-red-800 mb-4">
-                              {ga4ConnectionError} GA4 data has been cleared to prevent displaying stale information.
-                            </p>
-                            <button
-                              onClick={handleConnectGA4}
-                              disabled={ga4Connecting}
-                              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                              {ga4Connecting ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  <span>Connecting...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <RefreshCw className="h-4 w-4" />
-                                  <span>Reconnect GA4</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => setGa4ConnectionError(null)}
-                            className="text-red-600 hover:text-red-800"
-                            title="Dismiss warning"
-                          >
-                            <X className="h-5 w-5" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* One-time GA4 auto-refresh indicator */}
-                    {autoRefreshingGa4 && (
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                        <div className="flex items-center gap-3 text-emerald-900">
-                          <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
-                          <div className="text-sm">
-                            <span className="font-medium">Refreshing GA4 data…</span>{" "}
-                            <span className="text-emerald-800">Just a moment while we pull the latest numbers.</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* GA4 Connection Banner */}
-                    {/* Show banner when GA4 is not connected (false = confirmed not connected) */}
-                    {ga4Connected === false && !ga4ConnectionError && (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-yellow-900 mb-2">
-                              Connect Google Analytics 4
-                            </h3>
-                            <p className="text-sm text-yellow-800 mb-4">
-                              To view real traffic and analytics data, please connect your Google Analytics 4 account. 
-                              Without GA4 connection, traffic metrics cannot be displayed.
-                            </p>
-                            <button
-                              onClick={handleConnectGA4}
-                              disabled={ga4Connecting}
-                              className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                              {ga4Connecting ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  <span>Connecting...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Search className="h-4 w-4" />
-                                  <span>Connect GA4</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => setGa4Connected(null)}
-                            className="text-yellow-600 hover:text-yellow-800 ml-4"
-                          >
-                            <X className="h-5 w-5" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {/* GA4 Connected Banner with Disconnect button */}
-                    {ga4Connected === true && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                        <TrendingUp className="h-4 w-4 text-emerald-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-emerald-900">
-                          GA4 is connected
-                        </p>
-                        <p className="text-xs text-emerald-800">
-                          You can disconnect and connect a different GA4 property at any time.
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={handleDisconnectGA4}
-                      disabled={ga4Connecting}
-                      className="bg-white border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            <div className="pb-2 flex flex-col items-end gap-2">
+              {activeTab === "dashboard" ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={dateRange}
+                      onChange={(e) => {
+                        const newValue = e.target.value;
+                        setDateRange(newValue);
+                        if (newValue === "custom") {
+                          setShowCustomDatePicker(true);
+                          // Set default dates: last 30 days
+                          const endDate = new Date();
+                          const startDate = new Date();
+                          startDate.setDate(startDate.getDate() - 30);
+                          setCustomEndDate(endDate.toISOString().split("T")[0]);
+                          setCustomStartDate(startDate.toISOString().split("T")[0]);
+                        } else {
+                          setShowCustomDatePicker(false);
+                        }
+                      }}
+                      className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
-                      {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
+                      <option value="7">Last 7 days</option>
+                      <option value="30">Last 30 days</option>
+                      <option value="90">Last 90 days</option>
+                      <option value="365">Last year</option>
+                      <option value="custom">Custom</option>
+                    </select>
+
+                    {user?.role === "SUPER_ADMIN" && (
+                      <button
+                        type="button"
+                        onClick={handleRefreshDashboard}
+                        disabled={refreshingDashboard}
+                        data-pdf-hide="true"
+                        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        title="Refresh dashboard data from DataForSEO and GA4"
+                      >
+                        {refreshingDashboard ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Refreshing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-4 w-4" />
+                            <span>Refresh</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleExportPdf}
+                      disabled={exportingPdf}
+                      className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {exportingPdf ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Exporting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="h-4 w-4" />
+                          <span>Export</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleShare}
+                      disabled={sharing}
+                      className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {sharing ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Generating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Share2 className="h-4 w-4" />
+                          <span>Share</span>
+                        </>
+                      )}
                     </button>
                   </div>
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+                  {showCustomDatePicker && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        max={customEndDate || new Date().toISOString().split("T")[0]}
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      <span className="text-gray-500">to</span>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        min={customStartDate || undefined}
+                        max={new Date().toISOString().split("T")[0]}
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (customStartDate && customEndDate) {
+                            try {
+                              setFetchingSummary(true);
+                              const res = await api.get(buildDashboardUrl(clientId!));
+                              const payload = res.data || {};
+                              setDashboardSummary(formatDashboardSummary(payload));
+                            } catch (error: any) {
+                              console.error("Failed to fetch dashboard summary", error);
+                              setDashboardSummary(null);
+                            } finally {
+                              setFetchingSummary(false);
+                            }
+                          } else {
+                            toast.error("Please select both start and end dates");
+                          }
+                        }}
+                        className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors text-sm"
+                      >
+                        {fetchingSummary ? "Applying..." : "Apply"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : activeTab === "report" ? (
+                <button
+                  type="button"
+                  onClick={handleCreateReportClick}
+                  className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
+                  title="Create report"
+                >
+                  Create Report
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleInviteUserClick}
+                  className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
+                  title="Invite user"
+                >
+                  Invite User
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
+
+      {(!reportOnly && activeTab === "dashboard") ? (
+        <div className="flex-1 min-h-0 px-8 py-8 overflow-y-auto lg:overflow-hidden">
+          {loading ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">Loading client data...</div>
+          ) : (
+            <>
+              <div
+                ref={dashboardContentRef}
+                className="flex flex-col gap-6 lg:flex-row lg:items-start h-full min-h-0 lg:h-full"
+              >
+                <aside className="w-full lg:w-64 shrink-0" data-pdf-hide="true">
+                  <div
+                    className="bg-white border border-gray-200 rounded-xl p-2 lg:sticky lg:top-4"
+                    style={
+                      dashboardSection === "seo" && ga4ConnectedBannerHeight
+                        ? { height: ga4ConnectedBannerHeight }
+                        : undefined
+                    }
+                  >
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-2">
+                      {(
+                        [
+                          { id: "seo", label: "SEO Overview", icon: Search },
+                          { id: "ppc", label: "PPC", icon: TrendingUp },
+                          { id: "backlinks", label: "Backlinks", icon: Search },
+                          { id: "worklog", label: "Work Log", icon: Clock },
+                        ] as const
+                      ).map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setDashboardSection(item.id)}
+                          className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center gap-2 border transition-colors ${
+                            dashboardSection === item.id
+                              ? "bg-primary-50 text-primary-700 border-primary-200"
+                              : "bg-white text-gray-700 border-transparent hover:bg-gray-50"
+                          }`}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          <span className="truncate">{item.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </aside>
+
+                {/* Right panel scrolls on desktop; sidebar stays fixed */}
+                <div
+                  ref={dashboardRightPanelScrollRef}
+                  className="min-w-0 flex-1 min-h-0 lg:h-full lg:overflow-y-auto lg:pr-2"
+                >
+                {dashboardSection === "seo" && (
+                  <div className="space-y-8">
+                    {/* GA4 connection UI (hidden in PDF export) */}
+                    <div data-pdf-hide="true">
+                      {/* GA4 Connection Status - Show loading skeleton while checking */}
+                      {ga4StatusLoading ? (
+                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 animate-pulse">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="h-6 bg-gray-200 rounded w-48 mb-3"></div>
+                              <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
+                              <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
+                              <div className="h-10 bg-gray-200 rounded w-32"></div>
+                            </div>
+                            <div className="h-5 w-5 bg-gray-200 rounded"></div>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* GA4 Connection Error Banner - Show when connection is invalid */}
+                          {ga4ConnectionError && (
+                            <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <h3 className="text-lg font-semibold text-red-900 mb-2 flex items-center gap-2">
+                                    <AlertTriangle className="h-5 w-5" />
+                                    GA4 Connection Invalid
+                                  </h3>
+                                  <p className="text-sm text-red-800 mb-4">
+                                    {ga4ConnectionError} GA4 data has been cleared to prevent displaying stale information.
+                                  </p>
+                                  <button
+                                    onClick={handleConnectGA4}
+                                    disabled={ga4Connecting}
+                                    className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                                  >
+                                    {ga4Connecting ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Connecting...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <RefreshCw className="h-4 w-4" />
+                                        <span>Reconnect GA4</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                                <button
+                                  onClick={() => setGa4ConnectionError(null)}
+                                  className="text-red-600 hover:text-red-800"
+                                  title="Dismiss warning"
+                                >
+                                  <X className="h-5 w-5" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* One-time GA4 auto-refresh indicator */}
+                          {autoRefreshingGa4 && (
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                              <div className="flex items-center gap-3 text-emerald-900">
+                                <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+                                <div className="text-sm">
+                                  <span className="font-medium">Refreshing GA4 data…</span>{" "}
+                                  <span className="text-emerald-800">Just a moment while we pull the latest numbers.</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* GA4 Connection Banner */}
+                          {/* Show banner when GA4 is not connected (false = confirmed not connected) */}
+                          {ga4Connected === false && !ga4ConnectionError && (
+                            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <h3 className="text-lg font-semibold text-yellow-900 mb-2">
+                                    Connect Google Analytics 4
+                                  </h3>
+                                  <p className="text-sm text-yellow-800 mb-4">
+                                    To view real traffic and analytics data, please connect your Google Analytics 4 account.
+                                    Without GA4 connection, traffic metrics cannot be displayed.
+                                  </p>
+                                  <button
+                                    onClick={handleConnectGA4}
+                                    disabled={ga4Connecting}
+                                    className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                                  >
+                                    {ga4Connecting ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Connecting...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Search className="h-4 w-4" />
+                                        <span>Connect GA4</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                                <button
+                                  onClick={() => setGa4Connected(null)}
+                                  className="text-yellow-600 hover:text-yellow-800 ml-4"
+                                >
+                                  <X className="h-5 w-5" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {/* GA4 Connected Banner with Disconnect button */}
+                          {ga4Connected === true && (
+                            <div
+                              ref={ga4ConnectedBannerRef}
+                              className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center justify-between"
+                            >
+                              <div className="flex items-center space-x-3">
+                                <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                                  <TrendingUp className="h-4 w-4 text-emerald-600" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-emerald-900">GA4 is connected</p>
+                                  <p className="text-xs text-emerald-800">
+                                    You can disconnect and connect a different GA4 property at any time.
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={handleDisconnectGA4}
+                                disabled={ga4Connecting}
+                                className="bg-white border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
@@ -3098,36 +3381,37 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
               </div>
 
-          <div className="bg-white rounded-xl border border-gray-200">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
-                <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
-              </div>
-              {user?.role === "SUPER_ADMIN" && (
-              <button
-                type="button"
-                  onClick={handleRefreshBacklinks}
-                  disabled={refreshingBacklinks}
-                  data-pdf-hide="true"
-                  className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
-                  title="Refresh backlinks from DataForSEO"
-                >
-                  {refreshingBacklinks ? (
-                    <>
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      <span>Refreshing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-3 w-3" />
-                <span>Refresh</span>
-                    </>
-                  )}
-              </button>
-              )}
-            </div>
-            <div className="p-6 space-y-4">
+                    <div className="bg-white rounded-xl border border-gray-200">
+                      <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
+                          <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
+                        </div>
+                        {user?.role === "SUPER_ADMIN" && (
+                          <button
+                            type="button"
+                            onClick={handleRefreshBacklinks}
+                            disabled={refreshingBacklinks}
+                            data-pdf-hide="true"
+                            className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                            title="Refresh backlinks from DataForSEO"
+                          >
+                            {refreshingBacklinks ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                <span>Refreshing...</span>
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="h-3 w-3" />
+                                <span>Refresh</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="p-6 space-y-4">
               {backlinksForChartLoading ? (
                 <p className="text-sm text-gray-500">Loading backlink trends...</p>
               ) : backlinksForChartError ? (
@@ -3168,30 +3452,999 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                   );
                 });
-              })()}
-            </div>
-          </div>
-            </div>
-          )}
+                      })()}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-          {(reportOnly || activeTab === "report") && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold text-gray-900">Reports</h2>
-                {!reportOnly && (
-                  <button
-                    onClick={handleCreateReportClick}
-                    className="flex items-center justify-center px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                    title="Create report"
-                  >
-                    Create Report
-                  </button>
+                {dashboardSection === "ppc" && (
+                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                    <h2 className="text-xl font-semibold text-gray-900">PPC</h2>
+                    <p className="mt-2 text-sm text-gray-600">
+                      PPC dashboard is coming soon. In the meantime, you can track SEO, Backlinks, and Work Log from the sidebar.
+                    </p>
+                  </div>
+                )}
+
+                {dashboardSection === "backlinks" && (
+                  <div className="space-y-6">
+                    <div className="sticky top-0 z-10 bg-gray-50 pb-3">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-semibold text-gray-900">Backlinks Overview</h2>
+                        {!reportOnly && (
+                          <div className="flex items-center space-x-3">
+                            <button
+                              type="button"
+                              onClick={() => setImportBacklinksModalOpen(true)}
+                              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
+                            >
+                              <Upload className="h-4 w-4" />
+                              <span>Import Backlink</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={openAddBacklink}
+                              className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+                            >
+                              <Plus className="h-4 w-4" />
+                              <span>Add Backlink</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="bg-white p-6 rounded-xl border border-gray-200">
+                        <p className="text-sm font-medium text-gray-600">Total Backlinks</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.totalBacklinks}</p>
+                        <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
+                          <TrendingUp className="h-4 w-4" />
+                          <span>+{backlinksKpis.newLast4Weeks} new (last 4 weeks)</span>
+                        </div>
+                      </div>
+                      <div className="bg-white p-6 rounded-xl border border-gray-200">
+                        <p className="text-sm font-medium text-gray-600">Average Domain Rating</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-2">
+                          {backlinksKpis.avgDomainRating ? backlinksKpis.avgDomainRating.toFixed(0) : "—"}
+                        </p>
+                        <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
+                          <TrendingUp className="h-4 w-4" />
+                          <span>Calculated from tracked backlinks</span>
+                        </div>
+                      </div>
+                      <div className="bg-white p-6 rounded-xl border border-gray-200">
+                        <p className="text-sm font-medium text-gray-600">Lost Backlinks (last 4 weeks)</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.lostLast4Weeks}</p>
+                        <div className="mt-3 flex items-center space-x-2 text-sm text-gray-600">
+                          <TrendingDown className="h-4 w-4" />
+                          <span>Currently lost backlinks: {backlinksKpis.lostCount}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl border border-gray-200">
+                      <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">Backlinks</h3>
+                          <p className="text-sm text-gray-500 mt-1">Monitor follow vs nofollow backlinks and their quality.</p>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setBacklinksFilter("all")}
+                            className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
+                              backlinksFilter === "all"
+                                ? "border-primary-200 text-primary-700 bg-primary-50"
+                                : "border-gray-200 text-gray-700"
+                            }`}
+                          >
+                            All
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBacklinksFilter("new")}
+                            className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
+                              backlinksFilter === "new"
+                                ? "border-primary-200 text-primary-700 bg-primary-50"
+                                : "border-gray-200 text-gray-700"
+                            }`}
+                          >
+                            New
+                          </button>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Anchor Text</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain Rating</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Publish Date</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                              <th className="px-6 py-3"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {backlinksLoading ? (
+                              <tr>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                  Loading backlinks...
+                                </td>
+                              </tr>
+                            ) : backlinksError ? (
+                              <tr>
+                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
+                                  {backlinksError}
+                                </td>
+                              </tr>
+                            ) : backlinks.length === 0 ? (
+                              <tr>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                  {backlinksFilter === "all"
+                                    ? "No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO."
+                                    : "No new backlinks found in the last 4 weeks."}
+                                </td>
+                              </tr>
+                            ) : (
+                              backlinksPagination.rows.map((link) => {
+                                const source = (() => {
+                                  try {
+                                    return new URL(link.sourceUrl).hostname || link.sourceUrl;
+                                  } catch {
+                                    return link.sourceUrl;
+                                  }
+                                })();
+                                const publishRaw = link.firstSeen || link.createdAt;
+                                const publishDate = (() => {
+                                  try {
+                                    return new Date(publishRaw).toISOString().slice(0, 10);
+                                  } catch {
+                                    return "";
+                                  }
+                                })();
+                                const isManual = !link.firstSeen && !link.lastSeen;
+                                return (
+                                  <tr key={link.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-500 whitespace-normal break-words max-w-[360px] align-top">
+                                      {link.anchorText || "—"}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                      {typeof link.domainRating === "number" ? link.domainRating : "—"}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{publishDate || "—"}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                      <span
+                                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                          isManual ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"
+                                        }`}
+                                      >
+                                        {isManual ? "Manual" : link.isLost ? "Lost" : "Natural"}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                      <div className="inline-flex items-center gap-3">
+                                        <button
+                                          type="button"
+                                          className="text-primary-600 hover:text-primary-800"
+                                          onClick={() => window.open(link.sourceUrl, "_blank", "noopener,noreferrer")}
+                                        >
+                                          View
+                                        </button>
+                                        {!reportOnly && (
+                                          <button
+                                            type="button"
+                                            className="text-red-600 hover:text-red-800 inline-flex items-center gap-1"
+                                            onClick={() => requestRemoveBacklink(link)}
+                                          >
+                                            Remove
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {!backlinksLoading && !backlinksError && backlinks.length > 0 && (
+                        <div className="border-t border-gray-200 px-6 py-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                              <span>Rows per page</span>
+                              <select
+                                value={backlinksPageSize}
+                                onChange={(e) =>
+                                  setBacklinksPageSize(Number(e.target.value) as (typeof BACKLINKS_PAGE_SIZES)[number])
+                                }
+                                className="rounded-lg border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              >
+                                {BACKLINKS_PAGE_SIZES.map((size) => (
+                                  <option key={size} value={size}>
+                                    {size}
+                                  </option>
+                                ))}
+                              </select>
+                              <span className="text-xs text-gray-500">
+                                Showing {backlinksPagination.from}–{backlinksPagination.to} of {backlinksPagination.totalRows}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setBacklinksPage((p) => Math.max(1, p - 1))}
+                                disabled={backlinksPagination.page <= 1}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                                Prev
+                              </button>
+                              <span className="text-sm text-gray-600">
+                                Page {backlinksPagination.page} of {backlinksPagination.totalPages}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setBacklinksPage((p) => Math.min(backlinksPagination.totalPages, p + 1))}
+                                disabled={backlinksPagination.page >= backlinksPagination.totalPages}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Next
+                                <ChevronRight className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {dashboardSection === "worklog" && (
+                  <div className="space-y-6">
+                    <div className="sticky top-0 z-10 bg-gray-50 pb-3">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-semibold text-gray-900">Work Log</h2>
+                        {!reportOnly && (
+                          <button
+                            type="button"
+                            onClick={openWorkLogCreate}
+                            className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center"
+                            title="Add entry"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {workLogLoading ? (
+                              <tr>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                                  Loading work log...
+                                </td>
+                              </tr>
+                            ) : workLogError ? (
+                              <tr>
+                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={5}>
+                                  {workLogError}
+                                </td>
+                              </tr>
+                            ) : workLogTasks.length === 0 ? (
+                              <tr>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                                  No work logged yet.
+                                </td>
+                              </tr>
+                            ) : (
+                              workLogTasks.map((task) => {
+                                const dateRaw = task.updatedAt || task.createdAt;
+                                const date = (() => {
+                                  try {
+                                    return new Date(dateRaw).toISOString().slice(0, 10);
+                                  } catch {
+                                    return "";
+                                  }
+                                })();
+                                const workType = (task.category || "General").trim() || "General";
+                                const description = (task.description || task.title || "").trim();
+                                return (
+                                  <tr key={task.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{date}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{description}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                      <span
+                                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${taskStatusClass(task.status)}`}
+                                      >
+                                        {taskStatusLabel(task.status)}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                                      <button
+                                        type="button"
+                                        className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
+                                        title="View entry"
+                                        onClick={() => openWorkLogView(task.id)}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </button>
+                                      {!reportOnly && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
+                                            title="Edit entry"
+                                            onClick={() => openWorkLogEdit(task.id)}
+                                          >
+                                            <Edit className="h-4 w-4" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
+                                            title="Delete entry"
+                                            onClick={() => handleDeleteWorkLog(task.id, task.title)}
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        </>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
+              </div>
 
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
+              {/* Dashboard modals (must render while on Dashboard tab) */}
+              {workLogModalOpen && createPortal(
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                  <div
+                    className="absolute inset-0 bg-black/50"
+                    onClick={() => setWorkLogModalOpen(false)}
+                  />
+                  <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-200">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {workLogModalMode === "create"
+                          ? "Add Work Log Entry"
+                          : workLogModalMode === "edit"
+                          ? "Edit Work Log Entry"
+                          : "Work Log Entry"}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setWorkLogModalOpen(false)}
+                        className="p-2 text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+
+                    <div className="px-6 py-5 space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                        <input
+                          type="text"
+                          value={workLogForm.title}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, title: e.target.value })}
+                          disabled={workLogModalMode === "view"}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          placeholder="e.g. Optimized homepage title tags"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                        <input
+                          type="text"
+                          value={workLogForm.category}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
+                          disabled={workLogModalMode === "view"}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          placeholder="e.g. Technical, Content, Link Building"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea
+                          value={workLogForm.description}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
+                          disabled={workLogModalMode === "view"}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          rows={4}
+                          placeholder="Details about the work performed..."
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                        <select
+                          value={workLogForm.status}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
+                          disabled={workLogModalMode === "view"}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                        >
+                          <option value="TODO">Pending</option>
+                          <option value="IN_PROGRESS">In Progress</option>
+                          <option value="REVIEW">In Review</option>
+                          <option value="DONE">Completed</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                      {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.title)}
+                          className="mr-auto px-4 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setWorkLogModalOpen(false)}
+                        className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                      >
+                        Close
+                      </button>
+                      {workLogModalMode !== "view" && (
+                        <button
+                          type="button"
+                          onClick={handleSaveWorkLog}
+                          className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                        >
+                          Save
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
+
+              {/* Add Backlink Modal */}
+              {!reportOnly &&
+                addBacklinkModalOpen &&
+                createPortal(
+                  <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-lg rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                        <h3 className="text-lg font-semibold text-gray-900">Add Backlink</h3>
+                        <button
+                          type="button"
+                          onClick={() => setAddBacklinkModalOpen(false)}
+                          className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      <div className="px-6 py-4 space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Source URL</label>
+                          <input
+                            type="text"
+                            value={addBacklinkForm.sourceUrl}
+                            onChange={(e) => setAddBacklinkForm((p) => ({ ...p, sourceUrl: e.target.value }))}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            placeholder="https://example.com/page"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Target URL</label>
+                          <input
+                            type="text"
+                            value={addBacklinkForm.targetUrl}
+                            onChange={(e) => setAddBacklinkForm((p) => ({ ...p, targetUrl: e.target.value }))}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            placeholder="https://your-site.com/"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Anchor Text (optional)</label>
+                          <input
+                            type="text"
+                            value={addBacklinkForm.anchorText}
+                            onChange={(e) => setAddBacklinkForm((p) => ({ ...p, anchorText: e.target.value }))}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            placeholder="e.g. best seo services"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Domain Rating (optional)</label>
+                            <input
+                              type="number"
+                              value={addBacklinkForm.domainRating}
+                              onChange={(e) => setAddBacklinkForm((p) => ({ ...p, domainRating: e.target.value }))}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                              placeholder="e.g. 65"
+                            />
+                          </div>
+                          <div className="flex items-end">
+                            <label className="flex items-center gap-2 text-sm text-gray-700">
+                              <input
+                                type="checkbox"
+                                checked={addBacklinkForm.isFollow}
+                                onChange={(e) => setAddBacklinkForm((p) => ({ ...p, isFollow: e.target.checked }))}
+                              />
+                              Follow link
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setAddBacklinkModalOpen(false)}
+                          className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={addingBacklink}
+                          onClick={() => void submitAddBacklink()}
+                          className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                        >
+                          {addingBacklink ? "Saving..." : "Add"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )}
+
+              {/* Import Backlinks Modal */}
+              {!reportOnly &&
+                importBacklinksModalOpen &&
+                createPortal(
+                  <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">Import Backlinks</h3>
+                          <p className="text-sm text-gray-500 mt-1">Paste source URLs (one per line). Target URL defaults to this client.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setImportBacklinksModalOpen(false)}
+                          className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      <div className="px-6 py-4 space-y-3">
+                        <textarea
+                          value={importBacklinksText}
+                          onChange={(e) => setImportBacklinksText(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                          rows={10}
+                          placeholder={"https://example.com/page-1\nhttps://example.com/page-2"}
+                        />
+                        <p className="text-xs text-gray-500">
+                          Tip: after importing, you can click the top “Refresh” button (Super Admin) to pull live/lost backlink data from DataForSEO.
+                        </p>
+                      </div>
+
+                      <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setImportBacklinksModalOpen(false)}
+                          className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={importingBacklinks}
+                          onClick={() => void submitImportBacklinks()}
+                          className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                        >
+                          {importingBacklinks ? "Importing..." : "Import"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )}
+
+              <ConfirmDialog
+                isOpen={workLogDeleteConfirm.isOpen}
+                onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null })}
+                onConfirm={() => void confirmDeleteWorkLog()}
+                title="Delete work log entry"
+                message={`Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`}
+                confirmText="Delete"
+                cancelText="Cancel"
+                variant="danger"
+              />
+
+              <ConfirmDialog
+                isOpen={backlinkDeleteConfirm.isOpen}
+                onClose={() => setBacklinkDeleteConfirm({ isOpen: false, backlinkId: null, label: null, isLost: false })}
+                onConfirm={() => void confirmRemoveBacklink()}
+                title="Remove backlink"
+                message={`Remove backlink from "${backlinkDeleteConfirm.label || "this source"}"? This will delete the backlink row from this client.`}
+                confirmText="Remove"
+                cancelText="Cancel"
+                variant="danger"
+              />
+
+              {/* GA4 Property Selection Modal */}
+              {showGA4Modal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Select GA4 Property</h3>
+                      <button
+                        onClick={() => {
+                          setShowGA4Modal(false);
+                          setGa4PropertyId("");
+                          setGa4Properties([]);
+                        }}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Select a Google Analytics 4 property to connect. These are all the properties accessible with your Google account.
+                    </p>
+                    
+                    {loadingProperties ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                        <span className="ml-2 text-gray-600">Loading properties...</span>
+                      </div>
+                    ) : ga4Properties.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <p>No GA4 properties found.</p>
+                        <p className="text-sm mt-2">Please make sure you have access to at least one GA4 property.</p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Search Bar */}
+                        <div className="mb-4">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                            <input
+                              type="text"
+                              placeholder="Search by property name, account, or property ID..."
+                              value={ga4PropertySearch}
+                              onChange={(e) => setGa4PropertySearch(e.target.value)}
+                              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                          </div>
+                        </div>
+                        
+                        {(() => {
+                          // Filter and sort properties
+                          const filtered = ga4Properties.filter((property) => {
+                            if (!ga4PropertySearch.trim()) return true;
+                            const searchLower = ga4PropertySearch.toLowerCase();
+                            return (
+                              property.propertyName.toLowerCase().includes(searchLower) ||
+                              property.accountName.toLowerCase().includes(searchLower) ||
+                              property.propertyId.includes(searchLower) ||
+                              property.displayName.toLowerCase().includes(searchLower)
+                            );
+                          });
+                          
+                          // Sort alphabetically by property name
+                          const sorted = filtered.sort((a, b) => 
+                            a.propertyName.localeCompare(b.propertyName)
+                          );
+
+                          if (sorted.length === 0 && ga4PropertySearch.trim()) {
+                            return (
+                              <div className="text-center py-8 text-gray-500 border border-gray-200 rounded-lg">
+                                <p>No properties found matching "{ga4PropertySearch}"</p>
+                                <p className="text-sm mt-2">Try a different search term</p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
+                              <div className="divide-y divide-gray-200">
+                                {sorted.map((property) => (
+                                  <button
+                                    key={property.propertyId}
+                                    onClick={() => handleSubmitPropertyId(property.propertyId)}
+                                    disabled={ga4Connecting}
+                                    className="w-full text-left p-4 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex-1">
+                                        <div className="font-medium text-gray-900">{property.propertyName}</div>
+                                        <div className="text-sm text-gray-500 mt-1">
+                                          Account: {property.accountName}
+                                        </div>
+                                        <div className="text-xs text-gray-400 mt-1">
+                                          Property ID: {property.propertyId}
+                                        </div>
+                                      </div>
+                                      {ga4Connecting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                                      ) : (
+                                        <div className="text-primary-600">
+                                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                          </svg>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        
+                        <div className="flex items-center justify-end">
+                          <button
+                            onClick={() => {
+                              setShowGA4Modal(false);
+                              setGa4PropertyId("");
+                              setGa4Properties([]);
+                              setGa4PropertySearch("");
+                            }}
+                            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+          </>
+          )}
+        </div>
+      ) : (
+        <div className="px-8 py-8">
+          {loading ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">Loading client data...</div>
+          ) : (
+            <>
+              {!reportOnly && activeTab === "users" && (
+                <div className="space-y-6">
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-gray-500">
+                          Showing {clientUsers.length} of {clientUsers.length} Rows
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="p-2 rounded-full hover:bg-gray-100 text-gray-500"
+                        title="More"
+                        onClick={() => toast("More actions coming soon.")}
+                      >
+                        <MoreVertical className="h-5 w-5" />
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {clientUsersLoading ? (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
+                                Loading users...
+                              </td>
+                            </tr>
+                          ) : clientUsersError ? (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-8 text-center text-sm text-rose-600">
+                                {clientUsersError}
+                              </td>
+                            </tr>
+                          ) : clientUsers.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
+                                No users yet.
+                              </td>
+                            </tr>
+                          ) : (
+                            clientUsers.map((u) => {
+                              const initials = (u.name || u.email || "?")
+                                .split(" ")
+                                .map((p) => p.trim()[0] || "")
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase();
+                              const lastLogin = u.lastLoginAt
+                                ? new Date(u.lastLoginAt).toLocaleString()
+                                : "Never";
+                              return (
+                                <tr key={u.id} className="hover:bg-gray-50">
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                    <div className="flex items-center gap-3">
+                                      <div className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                                        {initials}
+                                      </div>
+                                      <div className="text-sm font-medium text-gray-900">
+                                        {u.name || u.email}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{u.email}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-900 text-white">
+                                      {u.role}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                    <span
+                                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                        u.status === "ACTIVE"
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-amber-100 text-amber-700"
+                                      }`}
+                                    >
+                                      {u.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{lastLogin}</td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {inviteClientUsersModalOpen &&
+                    createPortal(
+                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div
+                          className="absolute inset-0 bg-black/50"
+                          onClick={() => !invitingClientUsers && setInviteClientUsersModalOpen(false)}
+                        />
+                        <div className="relative w-full max-w-4xl rounded-2xl bg-white shadow-2xl border border-gray-200">
+                          <div className="px-8 py-6 border-b border-gray-200 text-center">
+                            <h2 className="text-3xl font-bold text-gray-900">Add Client User(s)</h2>
+                            <p className="mt-3 text-sm text-gray-600">
+                              Fill in the email of the users you would like to create. You can choose to send invitation emails now, or send them manually later to complete the signup process.
+                            </p>
+                          </div>
+
+                          <div className="px-8 py-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                                <input
+                                  type="email"
+                                  value={inviteClientUsersEmailInput}
+                                  onChange={(e) => setInviteClientUsersEmailInput(e.target.value)}
+                                  placeholder="Type User's Email"
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Clients</label>
+                                <input
+                                  type="text"
+                                  value={client?.name || "Client"}
+                                  disabled
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="mt-6 flex items-center justify-between">
+                              <button
+                                type="button"
+                                onClick={() => addInviteEmail()}
+                                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-2"
+                              >
+                                <Plus className="h-4 w-4" />
+                                Add Client User
+                              </button>
+
+                              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                                <input
+                                  type="checkbox"
+                                  checked={inviteClientUsersViaEmail}
+                                  onChange={(e) => setInviteClientUsersViaEmail(e.target.checked)}
+                                />
+                                Invite users via email
+                              </label>
+                            </div>
+
+                            {inviteClientUsersEmails.length > 0 && (
+                              <div className="mt-4">
+                                <p className="text-xs text-gray-500 mb-2">Queued emails:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {inviteClientUsersEmails.map((e) => (
+                                    <span key={e} className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
+                                      {e}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="mt-10 flex items-center justify-between">
+                              <button
+                                type="button"
+                                disabled={invitingClientUsers}
+                                onClick={() => setInviteClientUsersModalOpen(false)}
+                                className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={invitingClientUsers}
+                                onClick={() => void submitInviteClientUsers()}
+                                className="px-10 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                              >
+                                {invitingClientUsers ? "Sending..." : "Next"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+                </div>
+              )}
+
+              {(reportOnly || activeTab === "report") && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-xl font-semibold text-gray-900">Reports</h2>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
@@ -3277,8 +4530,8 @@ const ClientDashboardPage: React.FC = () => {
                   </table>
                 </div>
               </div>
-            </div>
-          )}
+              </div>
+            )}
 
           {/* Client-specific Create Report & Schedule Modal */}
           {showClientReportModal && (
@@ -3394,346 +4647,6 @@ const ClientDashboardPage: React.FC = () => {
             </div>
           )}
 
-          {activeTab === "backlinks" && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Backlinks Overview</h2>
-                {!reportOnly && (
-                  <div className="flex items-center space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => setImportBacklinksModalOpen(true)}
-                      className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-                    >
-                      <Upload className="h-4 w-4" />
-                      <span>Import Backlink</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openAddBacklink}
-                      className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
-                    >
-                      <Plus className="h-4 w-4" />
-                      <span>Add Backlink</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <p className="text-sm font-medium text-gray-600">Total Backlinks</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.totalBacklinks}</p>
-                  <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
-                    <TrendingUp className="h-4 w-4" />
-                    <span>+{backlinksKpis.newLast4Weeks} new (last 4 weeks)</span>
-                  </div>
-                </div>
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <p className="text-sm font-medium text-gray-600">Average Domain Rating</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.avgDomainRating ? backlinksKpis.avgDomainRating.toFixed(0) : "—"}</p>
-                  <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
-                    <TrendingUp className="h-4 w-4" />
-                    <span>Calculated from tracked backlinks</span>
-                  </div>
-                </div>
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <p className="text-sm font-medium text-gray-600">Lost Backlinks (last 4 weeks)</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.lostLast4Weeks}</p>
-                  <div className="mt-3 flex items-center space-x-2 text-sm text-gray-600">
-                    <TrendingDown className="h-4 w-4" />
-                    <span>Currently lost backlinks: {backlinksKpis.lostCount}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200">
-                <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Backlinks</h3>
-                    <p className="text-sm text-gray-500 mt-1">Monitor follow vs nofollow backlinks and their quality.</p>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={() => setBacklinksFilter("all")}
-                      className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
-                        backlinksFilter === "all" ? "border-primary-200 text-primary-700 bg-primary-50" : "border-gray-200 text-gray-700"
-                      }`}
-                    >
-                      All
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBacklinksFilter("new")}
-                      className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
-                        backlinksFilter === "new" ? "border-primary-200 text-primary-700 bg-primary-50" : "border-gray-200 text-gray-700"
-                      }`}
-                    >
-                      New
-                    </button>
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Anchor Text</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain Rating</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Publish Date</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                        <th className="px-6 py-3"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {backlinksLoading ? (
-                        <tr>
-                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
-                            Loading backlinks...
-                          </td>
-                        </tr>
-                      ) : backlinksError ? (
-                        <tr>
-                          <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
-                            {backlinksError}
-                          </td>
-                        </tr>
-                      ) : backlinks.length === 0 ? (
-                        <tr>
-                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
-                            {backlinksFilter === "all"
-                              ? "No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO."
-                              : "No new backlinks found in the last 4 weeks."}
-                          </td>
-                        </tr>
-                      ) : (
-                        backlinksPagination.rows.map((link) => {
-                          const source = (() => {
-                            try {
-                              return new URL(link.sourceUrl).hostname || link.sourceUrl;
-                            } catch {
-                              return link.sourceUrl;
-                            }
-                          })();
-                          const publishRaw = link.firstSeen || link.createdAt;
-                          const publishDate = (() => {
-                            try {
-                              return new Date(publishRaw).toISOString().slice(0, 10);
-                            } catch {
-                              return "";
-                            }
-                          })();
-                          const isManual = !link.firstSeen && !link.lastSeen;
-                          return (
-                            <tr key={link.id} className="hover:bg-gray-50">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source}</td>
-                              <td className="px-6 py-4 text-sm text-gray-500 whitespace-normal break-words max-w-[360px] align-top">
-                                {link.anchorText || "—"}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                {typeof link.domainRating === "number" ? link.domainRating : "—"}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{publishDate || "—"}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                <span
-                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                    isManual ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"
-                                  }`}
-                                >
-                                  {isManual ? "Manual" : link.isLost ? "Lost" : "Natural"}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <div className="inline-flex items-center gap-3">
-                                  <button
-                                    type="button"
-                                    className="text-primary-600 hover:text-primary-800"
-                                    onClick={() => window.open(link.sourceUrl, "_blank", "noopener,noreferrer")}
-                                  >
-                                    View
-                                  </button>
-                                  {!reportOnly && (
-                                    <button
-                                      type="button"
-                                      className="text-red-600 hover:text-red-800 inline-flex items-center gap-1"
-                                      onClick={() => requestRemoveBacklink(link)}
-                                    >
-                                      Remove
-                                    </button>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {!backlinksLoading && !backlinksError && backlinks.length > 0 && (
-                  <div className="border-t border-gray-200 px-6 py-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
-                        <span>Rows per page</span>
-                        <select
-                          value={backlinksPageSize}
-                          onChange={(e) =>
-                            setBacklinksPageSize(Number(e.target.value) as (typeof BACKLINKS_PAGE_SIZES)[number])
-                          }
-                          className="rounded-lg border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        >
-                          {BACKLINKS_PAGE_SIZES.map((size) => (
-                            <option key={size} value={size}>
-                              {size}
-                            </option>
-                          ))}
-                        </select>
-                        <span className="text-xs text-gray-500">
-                          Showing {backlinksPagination.from}–{backlinksPagination.to} of {backlinksPagination.totalRows}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setBacklinksPage((p) => Math.max(1, p - 1))}
-                          disabled={backlinksPagination.page <= 1}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                          Prev
-                        </button>
-                        <span className="text-sm text-gray-600">
-                          Page {backlinksPagination.page} of {backlinksPagination.totalPages}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setBacklinksPage((p) => Math.min(backlinksPagination.totalPages, p + 1))}
-                          disabled={backlinksPagination.page >= backlinksPagination.totalPages}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          Next
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === "worklog" && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Work Log</h2>
-                {!reportOnly && (
-                  <button
-                    type="button"
-                    onClick={openWorkLogCreate}
-                    className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center"
-                    title="Add entry"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {workLogLoading ? (
-                        <tr>
-                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
-                            Loading work log...
-                          </td>
-                        </tr>
-                      ) : workLogError ? (
-                        <tr>
-                          <td className="px-6 py-6 text-sm text-rose-600" colSpan={5}>
-                            {workLogError}
-                          </td>
-                        </tr>
-                      ) : workLogTasks.length === 0 ? (
-                        <tr>
-                          <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
-                            No work logged yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        workLogTasks.map((task) => {
-                          const dateRaw = task.updatedAt || task.createdAt;
-                          const date = (() => {
-                            try {
-                              return new Date(dateRaw).toISOString().slice(0, 10);
-                            } catch {
-                              return "";
-                            }
-                          })();
-                          const workType = (task.category || "General").trim() || "General";
-                          const description = (task.description || task.title || "").trim();
-                          return (
-                            <tr key={task.id} className="hover:bg-gray-50">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{date}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{description}</td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${taskStatusClass(task.status)}`}>
-                                  {taskStatusLabel(task.status)}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                                <button
-                                  type="button"
-                                  className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
-                                  title="View entry"
-                                  onClick={() => openWorkLogView(task.id)}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </button>
-                                {!reportOnly && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
-                                      title="Edit entry"
-                                      onClick={() => openWorkLogEdit(task.id)}
-                                    >
-                                      <Edit className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
-                                      title="Delete entry"
-                                      onClick={() => handleDeleteWorkLog(task.id, task.title)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
           {workLogModalOpen && createPortal(
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div
@@ -3842,8 +4755,6 @@ const ClientDashboardPage: React.FC = () => {
             </div>,
             document.body
           )}
-        </>
-      )}
 
       {/* Add Backlink Modal */}
       {!reportOnly &&
@@ -4701,6 +5612,10 @@ const ClientDashboardPage: React.FC = () => {
               </>
             )}
           </div>
+        </div>
+      )}
+            </>
+          )}
         </div>
       )}
     </div>
