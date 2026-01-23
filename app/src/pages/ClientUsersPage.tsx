@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { ChevronDown, MoreVertical, Plus, X } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, MoreVertical, Plus, Users, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { checkAuth } from "@/store/slices/authSlice";
@@ -35,6 +35,36 @@ const ClientUsersPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+
+  // Edit Profile modal state
+  const [editClientUserProfileOpen, setEditClientUserProfileOpen] = useState(false);
+  const [editClientUserProfileUser, setEditClientUserProfileUser] = useState<{
+    userId: string;
+    email: string;
+    name: string | null;
+  } | null>(null);
+  const [editClientUserProfileClientId, setEditClientUserProfileClientId] = useState<string | null>(null);
+  const [editClientUserFirstName, setEditClientUserFirstName] = useState("");
+  const [editClientUserLastName, setEditClientUserLastName] = useState("");
+  const [editClientUserPassword, setEditClientUserPassword] = useState("");
+  const [editClientUserPasswordVisible, setEditClientUserPasswordVisible] = useState(false);
+  const [editClientUserEmailCredentials, setEditClientUserEmailCredentials] = useState<"YES" | "NO">("NO");
+  const [savingClientUserProfile, setSavingClientUserProfile] = useState(false);
+
+  // Edit Client Access modal state
+  const [editClientAccessOpen, setEditClientAccessOpen] = useState(false);
+  const [editClientAccessUser, setEditClientAccessUser] = useState<{
+    userId: string;
+    email: string;
+    name: string | null;
+  } | null>(null);
+  const [editClientAccessSearch, setEditClientAccessSearch] = useState("");
+  const [editClientAccessClients, setEditClientAccessClients] = useState<Array<{ id: string; name: string; domain?: string }>>(
+    []
+  );
+  const [editClientAccessSelected, setEditClientAccessSelected] = useState<Set<string>>(new Set());
+  const [editClientAccessLoading, setEditClientAccessLoading] = useState(false);
+  const [editClientAccessSaving, setEditClientAccessSaving] = useState(false);
 
   const fetchAllUsers = useCallback(async () => {
     try {
@@ -109,25 +139,31 @@ const ClientUsersPage: React.FC = () => {
   useEffect(() => {
     if (!inviteClientsMenu) return;
 
-    const onDocMouseDown = (e: MouseEvent) => {
-      const el = inviteClientsMenuButtonRef.current;
-      if (el && (e.target instanceof Node) && el.contains(e.target)) return;
-      setInviteClientsMenu(null);
+    const getRect = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
     };
+
+    const syncPosition = () => {
+      const el = inviteClientsMenuButtonRef.current;
+      if (!el) return;
+      setInviteClientsMenu((prev) => (prev ? { ...prev, rect: getRect(el) } : prev));
+    };
+
+    const onDocClick = () => setInviteClientsMenu(null);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setInviteClientsMenu(null);
     };
-    const onScrollOrResize = () => setInviteClientsMenu(null);
 
-    document.addEventListener("mousedown", onDocMouseDown);
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
     return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
     };
   }, [inviteClientsMenu]);
 
@@ -187,25 +223,31 @@ const ClientUsersPage: React.FC = () => {
   useEffect(() => {
     if (!clientUserMoreMenu) return;
 
-    const onDocMouseDown = (e: MouseEvent) => {
-      const el = clientUserMoreMenuButtonRef.current;
-      if (el && e.target instanceof Node && el.contains(e.target)) return;
-      setClientUserMoreMenu(null);
+    const getRect = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
     };
+
+    const syncPosition = () => {
+      const el = clientUserMoreMenuButtonRef.current;
+      if (!el) return;
+      setClientUserMoreMenu((prev) => (prev ? { ...prev, rect: getRect(el) } : prev));
+    };
+
+    const onDocClick = () => setClientUserMoreMenu(null);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setClientUserMoreMenu(null);
     };
-    const onScrollOrResize = () => setClientUserMoreMenu(null);
 
-    document.addEventListener("mousedown", onDocMouseDown);
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
     return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
     };
   }, [clientUserMoreMenu]);
 
@@ -259,6 +301,138 @@ const ClientUsersPage: React.FC = () => {
       toast.error(e?.response?.data?.message || "Failed to remove user.");
     }
   }, [fetchAllUsers, removeClientUserConfirm]);
+
+  const openEditClientUserProfile = useCallback((u: ClientUserRow) => {
+    const rawName = String(u.name || "").trim();
+    const fallback = u.email.split("@")[0] || "";
+    const base = rawName || fallback;
+    const parts = base.split(/\s+/g).filter(Boolean);
+    const first = parts[0] || "";
+    const last = parts.slice(1).join(" ");
+
+    setEditClientUserProfileClientId(u.clientId);
+    setEditClientUserProfileUser({ userId: u.userId, email: u.email, name: u.name });
+    setEditClientUserFirstName(first);
+    setEditClientUserLastName(last);
+    setEditClientUserPassword("");
+    setEditClientUserPasswordVisible(false);
+    setEditClientUserEmailCredentials("NO");
+    setEditClientUserProfileOpen(true);
+  }, []);
+
+  const generateRandomPassword = useCallback(() => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+    const len = 12;
+    let out = "";
+    for (let i = 0; i < len; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
+    setEditClientUserPassword(out);
+    setEditClientUserPasswordVisible(true);
+  }, []);
+
+  const saveClientUserProfile = useCallback(async () => {
+    if (!editClientUserProfileClientId) return;
+    if (!editClientUserProfileUser?.userId) return;
+    if (!editClientUserFirstName.trim()) {
+      toast.error("First name is required.");
+      return;
+    }
+    const wantsEmailCredentials = editClientUserEmailCredentials === "YES";
+    if (wantsEmailCredentials && editClientUserPassword.trim().length < 6) {
+      toast.error("Enter a password (min 6) to email credentials.");
+      return;
+    }
+
+    try {
+      setSavingClientUserProfile(true);
+      await api.put(
+        `/clients/${encodeURIComponent(editClientUserProfileClientId)}/users/${encodeURIComponent(
+          editClientUserProfileUser.userId
+        )}/profile`,
+        {
+          firstName: editClientUserFirstName.trim(),
+          lastName: editClientUserLastName.trim(),
+          password: editClientUserPassword.trim() ? editClientUserPassword.trim() : undefined,
+          emailCredentials: wantsEmailCredentials,
+        }
+      );
+      toast.success("User updated.");
+      setEditClientUserProfileOpen(false);
+      setEditClientUserProfileUser(null);
+      setEditClientUserProfileClientId(null);
+      await fetchAllUsers();
+    } catch (e: any) {
+      console.error("Failed to update client user profile", e);
+      toast.error(e?.response?.data?.message || "Failed to update user.");
+    } finally {
+      setSavingClientUserProfile(false);
+    }
+  }, [
+    editClientUserEmailCredentials,
+    editClientUserFirstName,
+    editClientUserLastName,
+    editClientUserPassword,
+    editClientUserProfileClientId,
+    editClientUserProfileUser?.userId,
+    fetchAllUsers,
+  ]);
+
+  const openEditClientAccess = useCallback(async (u: ClientUserRow) => {
+    try {
+      setEditClientAccessOpen(true);
+      setEditClientAccessUser({ userId: u.userId, email: u.email, name: u.name });
+      setEditClientAccessSearch("");
+      setEditClientAccessLoading(true);
+
+      const [clientsRes, accessRes] = await Promise.all([
+        api.get("/clients"),
+        api.get(`/clients/users/${encodeURIComponent(u.userId)}/access`),
+      ]);
+
+      const all = Array.isArray(clientsRes.data) ? clientsRes.data : [];
+      setEditClientAccessClients(
+        all.map((c: any) => ({
+          id: String(c.id),
+          name: String(c.name || c.domain || c.id),
+          domain: String(c.domain || ""),
+        }))
+      );
+
+      const selectedIds = new Set<string>();
+      const accessClients = accessRes.data?.clients as Array<{ clientId: string }> | undefined;
+      if (Array.isArray(accessClients)) {
+        for (const r of accessClients) {
+          if (r?.clientId) selectedIds.add(String(r.clientId));
+        }
+      }
+      setEditClientAccessSelected(selectedIds);
+    } catch (e: any) {
+      console.error("Failed to load client access", e);
+      toast.error(e?.response?.data?.message || "Failed to load client access.");
+      setEditClientAccessOpen(false);
+      setEditClientAccessUser(null);
+    } finally {
+      setEditClientAccessLoading(false);
+    }
+  }, []);
+
+  const saveEditClientAccess = useCallback(async () => {
+    if (!editClientAccessUser?.userId) return;
+    try {
+      setEditClientAccessSaving(true);
+      await api.put(`/clients/users/${encodeURIComponent(editClientAccessUser.userId)}/access`, {
+        clientIds: Array.from(editClientAccessSelected),
+      });
+      toast.success("Client access updated.");
+      setEditClientAccessOpen(false);
+      setEditClientAccessUser(null);
+      await fetchAllUsers();
+    } catch (e: any) {
+      console.error("Failed to update client access", e);
+      toast.error(e?.response?.data?.message || "Failed to update client access.");
+    } finally {
+      setEditClientAccessSaving(false);
+    }
+  }, [editClientAccessSelected, editClientAccessUser?.userId, fetchAllUsers]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -442,7 +616,7 @@ const ClientUsersPage: React.FC = () => {
             );
 
             return (
-              <div className="fixed inset-0 z-[60]" onClick={() => setClientUserMoreMenu(null)}>
+              <div className="fixed inset-0 z-[999]" onClick={() => setClientUserMoreMenu(null)}>
                 <div
                   className="absolute rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden"
                   style={{
@@ -458,13 +632,9 @@ const ClientUsersPage: React.FC = () => {
                     type="button"
                     className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                     onClick={() => {
-                      if (!u) {
-                        toast.error("Unable to load user.");
-                        setClientUserMoreMenu(null);
-                        return;
-                      }
+                      if (u) openEditClientUserProfile(u);
+                      else toast.error("Unable to load user.");
                       setClientUserMoreMenu(null);
-                      navigate(`/agency/clients/${encodeURIComponent(u.clientId)}`, { state: { tab: "users" } });
                     }}
                   >
                     Edit Profile
@@ -473,14 +643,9 @@ const ClientUsersPage: React.FC = () => {
                     type="button"
                     className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                     onClick={() => {
-                      if (!u) {
-                        toast.error("Unable to load user.");
-                        setClientUserMoreMenu(null);
-                        return;
-                      }
+                      if (u) void openEditClientAccess(u);
+                      else toast.error("Unable to load user.");
                       setClientUserMoreMenu(null);
-                      navigate(`/agency/clients/${encodeURIComponent(u.clientId)}`, { state: { tab: "users" } });
-                      toast("Open the client dashboard Users tab to manage access.");
                     }}
                   >
                     Edit Client Access
@@ -549,20 +714,265 @@ const ClientUsersPage: React.FC = () => {
         )}
 
       <ConfirmDialog
-        open={removeClientUserConfirm.open}
+        isOpen={removeClientUserConfirm.open}
         title="Remove user?"
         message={`Are you sure you want to remove ${removeClientUserConfirm.label} from this client?`}
         confirmText="Remove"
         cancelText="Cancel"
         onClose={() => setRemoveClientUserConfirm({ open: false, clientId: "", userId: "", label: "" })}
         onConfirm={() => void removeClientUser()}
-        type="danger"
+        variant="danger"
       />
+
+      {editClientUserProfileOpen &&
+        editClientUserProfileUser &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => !savingClientUserProfile && setEditClientUserProfileOpen(false)}
+            />
+            <div className="relative w-full max-w-3xl rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+              <button
+                type="button"
+                className="absolute top-4 right-4 h-10 w-10 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 inline-flex items-center justify-center"
+                onClick={() => !savingClientUserProfile && setEditClientUserProfileOpen(false)}
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+
+              <div className="px-10 py-10">
+                <h2 className="text-3xl font-bold text-gray-900 text-center">What are the login details for this user?</h2>
+                <p className="mt-3 text-sm text-gray-600 text-center">
+                  Fill in the contact details for this user and optionally upload a picture
+                </p>
+
+                <div className="mt-8 border-t border-gray-200 pt-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
+                      <input
+                        type="text"
+                        value={editClientUserFirstName}
+                        onChange={(e) => setEditClientUserFirstName(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
+                      <input
+                        type="text"
+                        value={editClientUserLastName}
+                        onChange={(e) => setEditClientUserLastName(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                      <input
+                        type="email"
+                        value={editClientUserProfileUser.email}
+                        disabled
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-gray-700">Password</label>
+                        <button
+                          type="button"
+                          className="text-sm text-primary-600 hover:text-primary-700"
+                          onClick={() => generateRandomPassword()}
+                        >
+                          Generate
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={editClientUserPasswordVisible ? "text" : "password"}
+                          value={editClientUserPassword}
+                          onChange={(e) => setEditClientUserPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm pr-10"
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          onClick={() => setEditClientUserPasswordVisible((v) => !v)}
+                          aria-label="Toggle password visibility"
+                        >
+                          {editClientUserPasswordVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Email Login Credentials</label>
+                      <select
+                        value={editClientUserEmailCredentials}
+                        onChange={(e) => setEditClientUserEmailCredentials(e.target.value as any)}
+                        disabled={!editClientUserPassword.trim()}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white disabled:bg-gray-50"
+                      >
+                        <option value="NO">No</option>
+                        <option value="YES">Yes</option>
+                      </select>
+                      {!editClientUserPassword.trim() && (
+                        <p className="mt-1 text-xs text-gray-500">Enter a password to enable this option.</p>
+                      )}
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Photo</label>
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
+                          <Users className="h-5 w-5" />
+                        </div>
+                        <button
+                          type="button"
+                          className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          onClick={() => toast("Photo upload coming soon.")}
+                        >
+                          Upload New Picture
+                        </button>
+                        <button
+                          type="button"
+                          className="text-sm text-rose-600 hover:text-rose-700"
+                          onClick={() => toast("Photo delete coming soon.")}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-12">
+                    <button
+                      type="button"
+                      disabled={savingClientUserProfile}
+                      onClick={() => void saveClientUserProfile()}
+                      className="px-10 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                    >
+                      {savingClientUserProfile ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {editClientAccessOpen &&
+        editClientAccessUser &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => !editClientAccessSaving && setEditClientAccessOpen(false)}
+            />
+            <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+              <button
+                type="button"
+                className="absolute top-4 right-4 h-10 w-10 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 inline-flex items-center justify-center"
+                onClick={() => !editClientAccessSaving && setEditClientAccessOpen(false)}
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+
+              <div className="px-10 py-10">
+                <h2 className="text-3xl font-bold text-gray-900 text-center">Which clients should this user have access to?</h2>
+                <p className="mt-3 text-sm text-gray-600 text-center">
+                  Choose to restrict this user to specific clients in order to control what they have access to
+                </p>
+
+                <div className="mt-8 border-t border-gray-200 pt-8">
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-200 bg-white">
+                      <input
+                        type="text"
+                        value={editClientAccessSearch}
+                        onChange={(e) => setEditClientAccessSearch(e.target.value)}
+                        placeholder="Search..."
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+
+                    <div className="max-h-[360px] overflow-y-auto">
+                      {editClientAccessLoading ? (
+                        <div className="px-6 py-10 text-center text-sm text-gray-500">Loading clients...</div>
+                      ) : (
+                        editClientAccessClients
+                          .filter((c) => {
+                            const q = editClientAccessSearch.trim().toLowerCase();
+                            if (!q) return true;
+                            return c.name.toLowerCase().includes(q) || String(c.domain || "").toLowerCase().includes(q);
+                          })
+                          .map((c) => {
+                            const checked = editClientAccessSelected.has(c.id);
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                                onClick={() =>
+                                  setEditClientAccessSelected((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(c.id)) next.delete(c.id);
+                                    else next.add(c.id);
+                                    return next;
+                                  })
+                                }
+                              >
+                                <div className="flex items-center gap-4">
+                                  <div
+                                    className={`h-8 w-8 rounded-full flex items-center justify-center border ${
+                                      checked ? "bg-primary-600 border-primary-600" : "bg-white border-gray-300"
+                                    }`}
+                                  >
+                                    {checked && <span className="text-white text-sm font-bold">✓</span>}
+                                  </div>
+                                  <div className="text-left">
+                                    <div className="text-sm font-medium text-gray-900">{c.name}</div>
+                                  </div>
+                                </div>
+                                <div className="text-sm text-gray-400 truncate max-w-[50%]">
+                                  {c.domain ? `https://${c.domain}/` : ""}
+                                </div>
+                              </button>
+                            );
+                          })
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-10">
+                  <button
+                    type="button"
+                    disabled={editClientAccessSaving}
+                    onClick={() => void saveEditClientAccess()}
+                    className="px-10 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                  >
+                    {editClientAccessSaving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {inviteOpen &&
         typeof window !== "undefined" &&
         createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={() => setInviteOpen(false)} />
             <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
               <div className="shrink-0 px-8 py-6 border-b border-gray-200 flex items-center justify-between">
@@ -730,7 +1140,7 @@ const ClientUsersPage: React.FC = () => {
             const selected = new Set(activeRow?.clientIds || []);
 
             return (
-              <div className="fixed inset-0 z-[60]" onClick={() => setInviteClientsMenu(null)}>
+              <div className="fixed inset-0 z-[1150]" onClick={() => setInviteClientsMenu(null)}>
                 <div
                   className="absolute rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden"
                   style={{ top, left, width: menuWidth, maxHeight: menuMaxHeight }}
