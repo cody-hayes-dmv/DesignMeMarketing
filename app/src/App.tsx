@@ -25,6 +25,7 @@ import ClientDashboardPage from "./pages/ClientDashboardPage";
 import ShareDashboardPage from "./pages/ShareDashboardPage";
 import ClientReportIndexPage from "./pages/ClientReportIndexPage";
 import InvitePage from "./pages/InvitePage";
+import ClientUsersPage from "./pages/ClientUsersPage";
 
 function App() {
   const dispatch = useDispatch();
@@ -88,6 +89,7 @@ function App() {
     { path: "/agency/keywords", component: KeywordsPage },
     { path: "/agency/rankings", component: RankingsPage },
     { path: "/agency/reports", component: ReportsPage },
+    { path: "/agency/users", component: ClientUsersPage },
     { path: "/agency/team", component: TeamPage },
     { path: "/agency/workers", component: WorkersPage },
     { path: "/agency/clients/:clientId", component: ClientDashboardPage },

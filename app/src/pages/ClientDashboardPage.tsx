@@ -28,6 +28,7 @@ import {
   ChevronRight,
   AlertTriangle,
   MoreVertical,
+  EyeOff,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -39,6 +40,7 @@ import { createNonOverlappingPieValueLabel } from "@/utils/recharts";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { logout } from "@/store/slices/authSlice";
+import { checkAuth } from "@/store/slices/authSlice";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -220,6 +222,8 @@ const ClientDashboardPage: React.FC = () => {
   const clientPortalMode = isClientPortal && user?.role === "USER";
   // When in client portal, we show only the Dashboard view for the invited client.
   const reportOnly = Boolean((location.state as any)?.reportOnly);
+  // Client portal: list of accessible clients (for the client switcher)
+  const [clientPortalClients, setClientPortalClients] = useState<Array<{ id: string; name: string }>>([]);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [loading, setLoading] = useState(false);
   type ClientDashboardTopTab = "dashboard" | "report" | "users";
@@ -255,6 +259,20 @@ const ClientDashboardPage: React.FC = () => {
       navigate(`/client/dashboard/${encodeURIComponent(clients[0].clientId)}`, { replace: true });
     }
   }, [clientId, clientPortalMode, navigate, user]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!clientPortalMode) return;
+      try {
+        const res = await api.get("/clients");
+        const rows = Array.isArray(res.data) ? res.data : [];
+        setClientPortalClients(rows.map((c: any) => ({ id: String(c.id), name: String(c.name || c.domain || c.id) })));
+      } catch {
+        setClientPortalClients([]);
+      }
+    };
+    void run();
+  }, [clientPortalMode]);
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
@@ -399,6 +417,7 @@ const ClientDashboardPage: React.FC = () => {
     taskTitle: string | null;
   }>({ isOpen: false, taskId: null, taskTitle: null });
 
+
   // Client portal users (Users tab)
   type ClientUserRow = {
     id: string;
@@ -413,10 +432,77 @@ const ClientDashboardPage: React.FC = () => {
   const [clientUsersLoading, setClientUsersLoading] = useState(false);
   const [clientUsersError, setClientUsersError] = useState<string | null>(null);
   const [inviteClientUsersModalOpen, setInviteClientUsersModalOpen] = useState(false);
-  const [inviteClientUsersEmailInput, setInviteClientUsersEmailInput] = useState("");
-  const [inviteClientUsersEmails, setInviteClientUsersEmails] = useState<string[]>([]);
+  type InviteClientUserRow = { id: string; email: string; clientIds: string[] };
+  const [inviteClientUsersRows, setInviteClientUsersRows] = useState<InviteClientUserRow[]>([]);
+  const [inviteClientUsersAllClients, setInviteClientUsersAllClients] = useState<Array<{ id: string; name: string }>>([]);
+  const [inviteClientUsersAllClientsLoading, setInviteClientUsersAllClientsLoading] = useState(false);
+  const [inviteClientUsersAllClientsError, setInviteClientUsersAllClientsError] = useState<string | null>(null);
   const [inviteClientUsersViaEmail, setInviteClientUsersViaEmail] = useState(true);
   const [invitingClientUsers, setInvitingClientUsers] = useState(false);
+  const inviteClientUsersClientsMenuButtonRef = useRef<HTMLElement | null>(null);
+  const [inviteClientUsersClientsMenu, setInviteClientUsersClientsMenu] = useState<{
+    rowId: string;
+    rect: { top: number; left: number; right: number; bottom: number; width: number; height: number };
+  } | null>(null);
+
+  const [editClientUserProfileOpen, setEditClientUserProfileOpen] = useState(false);
+  const [editClientUserProfileUser, setEditClientUserProfileUser] = useState<{
+    userId: string;
+    email: string;
+    name: string | null;
+  } | null>(null);
+  const [editClientUserFirstName, setEditClientUserFirstName] = useState("");
+  const [editClientUserLastName, setEditClientUserLastName] = useState("");
+  const [editClientUserPassword, setEditClientUserPassword] = useState("");
+  const [editClientUserPasswordVisible, setEditClientUserPasswordVisible] = useState(false);
+  const [editClientUserEmailCredentials, setEditClientUserEmailCredentials] = useState<"YES" | "NO">("NO");
+  const [savingClientUserProfile, setSavingClientUserProfile] = useState(false);
+
+  const [editClientAccessOpen, setEditClientAccessOpen] = useState(false);
+  const [editClientAccessUser, setEditClientAccessUser] = useState<{ userId: string; email: string; name: string | null } | null>(null);
+  const [editClientAccessSearch, setEditClientAccessSearch] = useState("");
+  const [editClientAccessClients, setEditClientAccessClients] = useState<Array<{ id: string; name: string; domain?: string }>>([]);
+  const [editClientAccessSelected, setEditClientAccessSelected] = useState<Set<string>>(new Set());
+  const [editClientAccessLoading, setEditClientAccessLoading] = useState(false);
+  const [editClientAccessSaving, setEditClientAccessSaving] = useState(false);
+
+  const [removeClientUserConfirm, setRemoveClientUserConfirm] = useState<{ open: boolean; userId: string | null; label: string | null }>({
+    open: false,
+    userId: null,
+    label: null,
+  });
+
+  useEffect(() => {
+    if (!inviteClientUsersClientsMenu) return;
+
+    const getRect = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    };
+
+    const syncPosition = () => {
+      const el = inviteClientUsersClientsMenuButtonRef.current;
+      if (!el) return;
+      setInviteClientUsersClientsMenu((prev) => (prev ? { ...prev, rect: getRect(el) } : prev));
+    };
+
+    const onDocClick = () => setInviteClientUsersClientsMenu(null);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setInviteClientUsersClientsMenu(null);
+    };
+
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
+
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
+    };
+  }, [inviteClientUsersClientsMenu]);
   const clientUserMoreMenuButtonRef = useRef<HTMLElement | null>(null);
   const [clientUserMoreMenu, setClientUserMoreMenu] = useState<{
     id: string;
@@ -2345,10 +2431,43 @@ const ClientDashboardPage: React.FC = () => {
 
   const handleInviteUserClick = useCallback(() => {
     setInviteClientUsersModalOpen(true);
-    setInviteClientUsersEmailInput("");
-    setInviteClientUsersEmails([]);
+    setInviteClientUsersRows((prev) => {
+      // Initialize with one blank row (preselect current client if available)
+      if (prev.length > 0) return prev;
+      return [
+        {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          email: "",
+          clientIds: clientId ? [clientId] : [],
+        },
+      ];
+    });
     setInviteClientUsersViaEmail(true);
-  }, []);
+  }, [clientId]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!inviteClientUsersModalOpen) return;
+      try {
+        setInviteClientUsersAllClientsLoading(true);
+        setInviteClientUsersAllClientsError(null);
+        const res = await api.get("/clients");
+        const rows = Array.isArray(res.data) ? res.data : [];
+        setInviteClientUsersAllClients(
+          rows
+            .map((c: any) => ({ id: String(c.id), name: String(c.name || c.domain || c.id) }))
+            .filter((c: any) => c.id)
+        );
+      } catch (e: any) {
+        console.error("Failed to load clients for invite modal", e);
+        setInviteClientUsersAllClients([]);
+        setInviteClientUsersAllClientsError(e?.response?.data?.message || "Failed to load clients.");
+      } finally {
+        setInviteClientUsersAllClientsLoading(false);
+      }
+    };
+    void run();
+  }, [inviteClientUsersModalOpen]);
 
   const fetchClientUsers = useCallback(async () => {
     if (!clientId) return;
@@ -2372,37 +2491,41 @@ const ClientDashboardPage: React.FC = () => {
     void fetchClientUsers();
   }, [activeTab, fetchClientUsers]);
 
-  const addInviteEmail = useCallback(() => {
-    const email = inviteClientUsersEmailInput.trim().toLowerCase();
-    if (!email) return;
-    // Basic check; backend validates too
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-      toast.error("Enter a valid email.");
-      return;
-    }
-    setInviteClientUsersEmails((prev) => (prev.includes(email) ? prev : [...prev, email]));
-    setInviteClientUsersEmailInput("");
-  }, [inviteClientUsersEmailInput]);
-
   const submitInviteClientUsers = useCallback(async () => {
-    if (!clientId) return;
-    const emails = Array.from(new Set([inviteClientUsersEmailInput.trim().toLowerCase(), ...inviteClientUsersEmails].filter(Boolean)));
-    if (emails.length === 0) {
+    const normalizedInvites = inviteClientUsersRows
+      .map((r) => ({
+        email: String(r.email || "").trim().toLowerCase(),
+        clientIds: Array.from(new Set((r.clientIds || []).map((c) => String(c)).filter(Boolean))),
+      }))
+      .filter((r) => r.email);
+
+    if (normalizedInvites.length === 0) {
       toast.error("Add at least 1 email.");
       return;
     }
 
+    for (const r of normalizedInvites) {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email)) {
+        toast.error(`Invalid email: ${r.email}`);
+        return;
+      }
+      if (r.clientIds.length === 0) {
+        toast.error(`Select at least 1 client for: ${r.email}`);
+        return;
+      }
+    }
+
     try {
       setInvitingClientUsers(true);
-      await api.post(`/clients/${clientId}/users/invite`, {
-        emails,
+      await api.post(`/clients/users/invite`, {
+        invites: normalizedInvites,
         sendEmail: inviteClientUsersViaEmail,
         clientRole: "CLIENT",
       });
-      toast.success(`Invited ${emails.length} user${emails.length === 1 ? "" : "s"}.`);
+      toast.success(`Invited ${normalizedInvites.length} user${normalizedInvites.length === 1 ? "" : "s"}.`);
       setInviteClientUsersModalOpen(false);
-      setInviteClientUsersEmailInput("");
-      setInviteClientUsersEmails([]);
+      setInviteClientUsersRows([]);
+      // Refresh users for the current client (table view)
       await fetchClientUsers();
     } catch (e: any) {
       console.error("Failed to invite client users", e);
@@ -2410,7 +2533,180 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setInvitingClientUsers(false);
     }
-  }, [clientId, fetchClientUsers, inviteClientUsersEmailInput, inviteClientUsersEmails, inviteClientUsersViaEmail]);
+  }, [fetchClientUsers, inviteClientUsersRows, inviteClientUsersViaEmail]);
+
+  const openEditClientUserProfile = useCallback((u: ClientUserRow) => {
+    const rawName = String(u.name || "").trim();
+    const fallback = u.email.split("@")[0] || "";
+    const base = rawName || fallback;
+    const parts = base.split(/\s+/g).filter(Boolean);
+    const first = parts[0] || "";
+    const last = parts.slice(1).join(" ");
+
+    setEditClientUserProfileUser({ userId: u.userId, email: u.email, name: u.name });
+    setEditClientUserFirstName(first);
+    setEditClientUserLastName(last);
+    setEditClientUserPassword("");
+    setEditClientUserPasswordVisible(false);
+    setEditClientUserEmailCredentials("NO");
+    setEditClientUserProfileOpen(true);
+  }, []);
+
+  const generateRandomPassword = useCallback(() => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+    const len = 12;
+    let out = "";
+    for (let i = 0; i < len; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
+    setEditClientUserPassword(out);
+    setEditClientUserPasswordVisible(true);
+  }, []);
+
+  const saveClientUserProfile = useCallback(async () => {
+    if (!clientId) return;
+    if (!editClientUserProfileUser?.userId) return;
+    if (!editClientUserFirstName.trim()) {
+      toast.error("First name is required.");
+      return;
+    }
+    const wantsEmailCredentials = editClientUserEmailCredentials === "YES";
+    if (wantsEmailCredentials && editClientUserPassword.trim().length < 6) {
+      toast.error("Enter a password (min 6) to email credentials.");
+      return;
+    }
+
+    try {
+      setSavingClientUserProfile(true);
+      await api.put(`/clients/${clientId}/users/${editClientUserProfileUser.userId}/profile`, {
+        firstName: editClientUserFirstName.trim(),
+        lastName: editClientUserLastName.trim(),
+        password: editClientUserPassword.trim() ? editClientUserPassword.trim() : undefined,
+        emailCredentials: wantsEmailCredentials,
+      });
+      toast.success("User updated.");
+      setEditClientUserProfileOpen(false);
+      setEditClientUserProfileUser(null);
+      await fetchClientUsers();
+    } catch (e: any) {
+      console.error("Failed to update client user profile", e);
+      toast.error(e?.response?.data?.message || "Failed to update user.");
+    } finally {
+      setSavingClientUserProfile(false);
+    }
+  }, [
+    clientId,
+    editClientUserEmailCredentials,
+    editClientUserFirstName,
+    editClientUserLastName,
+    editClientUserPassword,
+    editClientUserProfileUser?.userId,
+    fetchClientUsers,
+  ]);
+
+  const openEditClientAccess = useCallback(
+    async (u: ClientUserRow) => {
+      try {
+        setEditClientAccessOpen(true);
+        setEditClientAccessUser({ userId: u.userId, email: u.email, name: u.name });
+        setEditClientAccessSearch("");
+        setEditClientAccessLoading(true);
+
+        const [clientsRes, accessRes] = await Promise.all([
+          api.get("/clients"),
+          api.get(`/clients/users/${encodeURIComponent(u.userId)}/access`),
+        ]);
+
+        const all = Array.isArray(clientsRes.data) ? clientsRes.data : [];
+        setEditClientAccessClients(all.map((c: any) => ({ id: String(c.id), name: String(c.name || c.domain || c.id), domain: String(c.domain || "") })));
+
+        const selectedIds = new Set<string>();
+        const accessClients = accessRes.data?.clients as Array<{ clientId: string }> | undefined;
+        if (Array.isArray(accessClients)) {
+          for (const r of accessClients) {
+            if (r?.clientId) selectedIds.add(String(r.clientId));
+          }
+        }
+        setEditClientAccessSelected(selectedIds);
+      } catch (e: any) {
+        console.error("Failed to load client access", e);
+        toast.error(e?.response?.data?.message || "Failed to load client access.");
+        setEditClientAccessOpen(false);
+        setEditClientAccessUser(null);
+      } finally {
+        setEditClientAccessLoading(false);
+      }
+    },
+    []
+  );
+
+  const saveEditClientAccess = useCallback(async () => {
+    if (!editClientAccessUser?.userId) return;
+    try {
+      setEditClientAccessSaving(true);
+      await api.put(`/clients/users/${encodeURIComponent(editClientAccessUser.userId)}/access`, {
+        clientIds: Array.from(editClientAccessSelected),
+      });
+      toast.success("Client access updated.");
+      setEditClientAccessOpen(false);
+      setEditClientAccessUser(null);
+      await fetchClientUsers();
+    } catch (e: any) {
+      console.error("Failed to update client access", e);
+      toast.error(e?.response?.data?.message || "Failed to update client access.");
+    } finally {
+      setEditClientAccessSaving(false);
+    }
+  }, [editClientAccessSelected, editClientAccessUser?.userId, fetchClientUsers]);
+
+  const resendInviteForClientUser = useCallback(
+    async (u: ClientUserRow) => {
+      if (!clientId) return;
+      try {
+        await api.post(`/clients/${clientId}/users/${u.userId}/invite`);
+        toast.success("Invite sent.");
+      } catch (e: any) {
+        console.error("Failed to send invite", e);
+        toast.error(e?.response?.data?.message || "Failed to send invite.");
+      }
+    },
+    [clientId]
+  );
+
+  const loginAsClientUser = useCallback(
+    async (u: ClientUserRow) => {
+      if (!clientId) return;
+      try {
+        const res = await api.post(`/clients/${clientId}/users/${u.userId}/impersonate`);
+        const token = res.data?.token as string | undefined;
+        const redirectClientId = res.data?.redirect?.clientId as string | undefined;
+        if (!token) {
+          toast.error("Impersonation failed.");
+          return;
+        }
+        localStorage.setItem("token", token);
+        await dispatch(checkAuth() as any);
+        navigate(`/client/dashboard/${encodeURIComponent(redirectClientId || clientId)}`, { replace: true });
+      } catch (e: any) {
+        console.error("Failed to impersonate user", e);
+        toast.error(e?.response?.data?.message || "Failed to login as user.");
+      }
+    },
+    [clientId, dispatch, navigate]
+  );
+
+  const removeClientUser = useCallback(async () => {
+    if (!clientId) return;
+    const userId = removeClientUserConfirm.userId;
+    if (!userId) return;
+    try {
+      await api.delete(`/clients/${clientId}/users/${userId}`);
+      toast.success("User removed.");
+      setRemoveClientUserConfirm({ open: false, userId: null, label: null });
+      await fetchClientUsers();
+    } catch (e: any) {
+      console.error("Failed to remove user", e);
+      toast.error(e?.response?.data?.message || "Failed to remove user.");
+    }
+  }, [clientId, fetchClientUsers, removeClientUserConfirm.userId]);
 
   useEffect(() => {
     const el = ga4ConnectedBannerRef.current;
@@ -2465,6 +2761,26 @@ const ClientDashboardPage: React.FC = () => {
               </button>
             )}
           </div>
+          {clientPortalMode && clientPortalClients.length > 0 && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-sm text-gray-500">Clients</span>
+              <select
+                value={clientId || ""}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  if (!nextId) return;
+                  navigate(`/client/dashboard/${encodeURIComponent(nextId)}`, { replace: true });
+                }}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                {clientPortalClients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <h1 className="text-3xl font-bold text-gray-900 mt-2">{client?.name || "Client Dashboard"}</h1>
           {client && (
             <div className="mt-2 text-gray-500 text-sm space-y-1">
@@ -4467,6 +4783,7 @@ const ClientDashboardPage: React.FC = () => {
                         const menuWidth = 224; // 14rem (w-56)
                         const menuMaxHeight = 320;
                         const gap = 8;
+                        const u = clientUsers.find((x) => x.id === clientUserMoreMenu.id) || null;
 
                         const rightEdge = Math.min(
                           Math.max(clientUserMoreMenu.rect.right, menuWidth + gap),
@@ -4496,14 +4813,22 @@ const ClientDashboardPage: React.FC = () => {
                               <button
                                 type="button"
                                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                onClick={() => toast("Edit Profile coming soon.")}
+                                onClick={() => {
+                                  if (u) openEditClientUserProfile(u);
+                                  else toast.error("Unable to load user.");
+                                  setClientUserMoreMenu(null);
+                                }}
                               >
                                 Edit Profile
                               </button>
                               <button
                                 type="button"
                                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                onClick={() => toast("Edit Client Access coming soon.")}
+                                onClick={() => {
+                                  if (u) void openEditClientAccess(u);
+                                  else toast.error("Unable to load user.");
+                                  setClientUserMoreMenu(null);
+                                }}
                               >
                                 Edit Client Access
                               </button>
@@ -4515,17 +4840,27 @@ const ClientDashboardPage: React.FC = () => {
                                 Edit Permissions
                               </button>
                               <div className="h-px bg-gray-100" />
+                              {u?.status === "PENDING" && (
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                  onClick={() => {
+                                    if (u) void resendInviteForClientUser(u);
+                                    else toast.error("Unable to load user.");
+                                    setClientUserMoreMenu(null);
+                                  }}
+                                >
+                                  Send Invite
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                onClick={() => toast("Send Invite coming soon.")}
-                              >
-                                Send Invite
-                              </button>
-                              <button
-                                type="button"
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                onClick={() => toast("Login as user coming soon.")}
+                                onClick={() => {
+                                  if (u) void loginAsClientUser(u);
+                                  else toast.error("Unable to load user.");
+                                  setClientUserMoreMenu(null);
+                                }}
                               >
                                 Login as user
                               </button>
@@ -4533,7 +4868,19 @@ const ClientDashboardPage: React.FC = () => {
                               <button
                                 type="button"
                                 className="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                                onClick={() => toast("Remove user coming soon.")}
+                                onClick={() => {
+                                  if (!u) {
+                                    toast.error("Unable to load user.");
+                                    setClientUserMoreMenu(null);
+                                    return;
+                                  }
+                                  setRemoveClientUserConfirm({
+                                    open: true,
+                                    userId: u.userId,
+                                    label: u.name || u.email,
+                                  });
+                                  setClientUserMoreMenu(null);
+                                }}
                               >
                                 Remove user
                               </button>
@@ -4560,32 +4907,102 @@ const ClientDashboardPage: React.FC = () => {
                           </div>
 
                           <div className="px-8 py-8">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                                <input
-                                  type="email"
-                                  value={inviteClientUsersEmailInput}
-                                  onChange={(e) => setInviteClientUsersEmailInput(e.target.value)}
-                                  placeholder="Type User's Email"
-                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                                />
+                            {inviteClientUsersAllClientsError && (
+                              <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                                {inviteClientUsersAllClientsError}
                               </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Clients</label>
-                                <input
-                                  type="text"
-                                  value={client?.name || "Client"}
-                                  disabled
-                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
-                                />
-                              </div>
+                            )}
+
+                            <div className="space-y-4">
+                              {inviteClientUsersRows.map((row) => (
+                                <div key={row.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-start">
+                                  <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                                    <input
+                                      type="email"
+                                      value={row.email}
+                                      onChange={(e) =>
+                                        setInviteClientUsersRows((prev) =>
+                                          prev.map((r) => (r.id === row.id ? { ...r, email: e.target.value } : r))
+                                        )
+                                      }
+                                      placeholder="Type User's Email"
+                                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Clients</label>
+                                    <button
+                                      type="button"
+                                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white flex items-center justify-between gap-2 hover:bg-gray-50 disabled:opacity-60"
+                                      disabled={inviteClientUsersAllClientsLoading}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const el = e.currentTarget as unknown as HTMLElement;
+                                        inviteClientUsersClientsMenuButtonRef.current = el;
+                                        const r = el.getBoundingClientRect();
+                                        setInviteClientUsersClientsMenu((prev) =>
+                                          prev?.rowId === row.id
+                                            ? null
+                                            : {
+                                                rowId: row.id,
+                                                rect: {
+                                                  top: r.top,
+                                                  left: r.left,
+                                                  right: r.right,
+                                                  bottom: r.bottom,
+                                                  width: r.width,
+                                                  height: r.height,
+                                                },
+                                              }
+                                        );
+                                      }}
+                                    >
+                                      <span className="truncate text-left">
+                                        {row.clientIds.length === 0
+                                          ? "Select..."
+                                          : row.clientIds.length === 1
+                                            ? (inviteClientUsersAllClients.find((c) => c.id === row.clientIds[0])?.name ||
+                                                "1 client selected")
+                                            : `${row.clientIds.length} clients selected`}
+                                      </span>
+                                      <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
+                                    </button>
+                                  </div>
+
+                                  <div className="pt-7">
+                                    <button
+                                      type="button"
+                                      className="h-10 w-10 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+                                      title="Remove"
+                                      onClick={() =>
+                                        setInviteClientUsersRows((prev) =>
+                                          prev.length <= 1 ? prev : prev.filter((r) => r.id !== row.id)
+                                        )
+                                      }
+                                      disabled={invitingClientUsers || inviteClientUsersRows.length <= 1}
+                                    >
+                                      <X className="h-5 w-5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
 
                             <div className="mt-6 flex items-center justify-between">
                               <button
                                 type="button"
-                                onClick={() => addInviteEmail()}
+                                onClick={() =>
+                                  setInviteClientUsersRows((prev) => [
+                                    ...prev,
+                                    {
+                                      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                                      email: "",
+                                      clientIds: clientId ? [clientId] : [],
+                                    },
+                                  ])
+                                }
                                 className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-2"
                               >
                                 <Plus className="h-4 w-4" />
@@ -4601,19 +5018,6 @@ const ClientDashboardPage: React.FC = () => {
                                 Invite users via email
                               </label>
                             </div>
-
-                            {inviteClientUsersEmails.length > 0 && (
-                              <div className="mt-4">
-                                <p className="text-xs text-gray-500 mb-2">Queued emails:</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {inviteClientUsersEmails.map((e) => (
-                                    <span key={e} className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
-                                      {e}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
 
                             <div className="mt-10 flex items-center justify-between">
                               <button
@@ -4638,6 +5042,366 @@ const ClientDashboardPage: React.FC = () => {
                       </div>,
                       document.body
                     )}
+
+                  {inviteClientUsersClientsMenu &&
+                    typeof window !== "undefined" &&
+                    createPortal(
+                      (() => {
+                        const menuWidth = Math.max(260, Math.min(420, inviteClientUsersClientsMenu.rect.width));
+                        const menuMaxHeight = 360;
+                        const gap = 8;
+                        const left = Math.min(
+                          Math.max(inviteClientUsersClientsMenu.rect.left, gap),
+                          window.innerWidth - gap - menuWidth
+                        );
+                        const top = Math.min(
+                          inviteClientUsersClientsMenu.rect.bottom + gap,
+                          Math.max(gap, window.innerHeight - gap - menuMaxHeight)
+                        );
+
+                        const rowId = inviteClientUsersClientsMenu.rowId;
+                        const active = inviteClientUsersRows.find((r) => r.id === rowId);
+                        const selected = new Set(active?.clientIds || []);
+
+                        const toggle = (clientId: string) => {
+                          setInviteClientUsersRows((prev) =>
+                            prev.map((r) => {
+                              if (r.id !== rowId) return r;
+                              const next = new Set(r.clientIds || []);
+                              if (next.has(clientId)) next.delete(clientId);
+                              else next.add(clientId);
+                              return { ...r, clientIds: Array.from(next) };
+                            })
+                          );
+                        };
+
+                        return (
+                          <div className="fixed inset-0 z-[70]" onClick={() => setInviteClientUsersClientsMenu(null)}>
+                            <div
+                              className="absolute rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden"
+                              style={{ top, left, width: menuWidth, maxHeight: menuMaxHeight }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                                <div className="text-sm font-semibold text-gray-900">Select Clients</div>
+                                <button
+                                  type="button"
+                                  className="h-8 w-8 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+                                  onClick={() => setInviteClientUsersClientsMenu(null)}
+                                  aria-label="Close"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                              <div className="max-h-[300px] overflow-y-auto">
+                                {inviteClientUsersAllClients.map((c) => (
+                                  <label
+                                    key={c.id}
+                                    className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selected.has(c.id)}
+                                      onChange={() => toggle(c.id)}
+                                    />
+                                    <span className="truncate">{c.name}</span>
+                                  </label>
+                                ))}
+                                {inviteClientUsersAllClients.length === 0 && (
+                                  <div className="px-4 py-6 text-sm text-gray-500">No clients found.</div>
+                                )}
+                              </div>
+                              <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+                                <button
+                                  type="button"
+                                  className="text-sm text-gray-600 hover:text-gray-900"
+                                  onClick={() =>
+                                    setInviteClientUsersRows((prev) =>
+                                      prev.map((r) => (r.id === rowId ? { ...r, clientIds: [] } : r))
+                                    )
+                                  }
+                                >
+                                  Clear
+                                </button>
+                                <button
+                                  type="button"
+                                  className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm hover:bg-primary-700"
+                                  onClick={() => setInviteClientUsersClientsMenu(null)}
+                                >
+                                  Done
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })(),
+                      document.body
+                    )}
+
+                  {editClientUserProfileOpen &&
+                    editClientUserProfileUser &&
+                    createPortal(
+                      <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+                        <div
+                          className="absolute inset-0 bg-black/50"
+                          onClick={() => !savingClientUserProfile && setEditClientUserProfileOpen(false)}
+                        />
+                        <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+                          <button
+                            type="button"
+                            className="absolute top-4 right-4 h-10 w-10 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 inline-flex items-center justify-center"
+                            onClick={() => !savingClientUserProfile && setEditClientUserProfileOpen(false)}
+                            aria-label="Close"
+                          >
+                            <X className="h-5 w-5" />
+                          </button>
+
+                          <div className="px-10 py-10">
+                            <h2 className="text-3xl font-bold text-gray-900 text-center">
+                              What are the login details for this user?
+                            </h2>
+                            <p className="mt-3 text-sm text-gray-600 text-center">
+                              Fill in the contact details for this user and optionally upload a picture
+                            </p>
+
+                            <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-6">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
+                                <input
+                                  type="text"
+                                  value={editClientUserFirstName}
+                                  onChange={(e) => setEditClientUserFirstName(e.target.value)}
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
+                                <input
+                                  type="text"
+                                  value={editClientUserLastName}
+                                  onChange={(e) => setEditClientUserLastName(e.target.value)}
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                                <input
+                                  type="email"
+                                  value={editClientUserProfileUser.email}
+                                  disabled
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                                />
+                              </div>
+
+                              <div>
+                                <div className="flex items-center justify-between mb-2">
+                                  <label className="block text-sm font-medium text-gray-700">Password</label>
+                                  <button
+                                    type="button"
+                                    className="text-sm text-primary-600 hover:text-primary-700"
+                                    onClick={() => generateRandomPassword()}
+                                  >
+                                    Generate
+                                  </button>
+                                </div>
+                                <div className="relative">
+                                  <input
+                                    type={editClientUserPasswordVisible ? "text" : "password"}
+                                    value={editClientUserPassword}
+                                    onChange={(e) => setEditClientUserPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm pr-10"
+                                  />
+                                  <button
+                                    type="button"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                                    onClick={() => setEditClientUserPasswordVisible((v) => !v)}
+                                    aria-label="Toggle password visibility"
+                                  >
+                                    {editClientUserPasswordVisible ? (
+                                      <EyeOff className="h-4 w-4" />
+                                    ) : (
+                                      <Eye className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Email Login Credentials</label>
+                                <select
+                                  value={editClientUserEmailCredentials}
+                                  onChange={(e) => setEditClientUserEmailCredentials(e.target.value as any)}
+                                  disabled={!editClientUserPassword.trim()}
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white disabled:bg-gray-50"
+                                >
+                                  <option value="NO">No</option>
+                                  <option value="YES">Yes</option>
+                                </select>
+                                {!editClientUserPassword.trim() && (
+                                  <p className="mt-1 text-xs text-gray-500">Enter a password to enable this option.</p>
+                                )}
+                              </div>
+
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Photo</label>
+                                <div className="flex items-center gap-3">
+                                  <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
+                                    <Users className="h-5 w-5" />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                    onClick={() => toast("Photo upload coming soon.")}
+                                  >
+                                    Upload New Picture
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="text-sm text-rose-600 hover:text-rose-700"
+                                    onClick={() => toast("Photo delete coming soon.")}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-12">
+                              <button
+                                type="button"
+                                disabled={savingClientUserProfile}
+                                onClick={() => void saveClientUserProfile()}
+                                className="px-10 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                              >
+                                {savingClientUserProfile ? "Saving..." : "Save"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+
+                  {editClientAccessOpen &&
+                    editClientAccessUser &&
+                    createPortal(
+                      <div className="fixed inset-0 z-[85] flex items-center justify-center p-4">
+                        <div
+                          className="absolute inset-0 bg-black/50"
+                          onClick={() => !editClientAccessSaving && setEditClientAccessOpen(false)}
+                        />
+                        <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+                          <button
+                            type="button"
+                            className="absolute top-4 right-4 h-10 w-10 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 inline-flex items-center justify-center"
+                            onClick={() => !editClientAccessSaving && setEditClientAccessOpen(false)}
+                            aria-label="Close"
+                          >
+                            <X className="h-5 w-5" />
+                          </button>
+
+                          <div className="px-10 py-10">
+                            <h2 className="text-3xl font-bold text-gray-900 text-center">
+                              Which clients should this user have access to?
+                            </h2>
+                            <p className="mt-3 text-sm text-gray-600 text-center">
+                              Choose to restrict this user to specific clients in order to control what they have access to
+                            </p>
+
+                            <div className="mt-8 border-t border-gray-200 pt-8">
+                              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                <div className="px-4 py-3 border-b border-gray-200 bg-white">
+                                  <input
+                                    type="text"
+                                    value={editClientAccessSearch}
+                                    onChange={(e) => setEditClientAccessSearch(e.target.value)}
+                                    placeholder="Search..."
+                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                                  />
+                                </div>
+
+                                <div className="max-h-[360px] overflow-y-auto">
+                                  {editClientAccessLoading ? (
+                                    <div className="px-6 py-10 text-center text-sm text-gray-500">Loading clients...</div>
+                                  ) : (
+                                    editClientAccessClients
+                                      .filter((c) => {
+                                        const q = editClientAccessSearch.trim().toLowerCase();
+                                        if (!q) return true;
+                                        return (
+                                          c.name.toLowerCase().includes(q) ||
+                                          String(c.domain || "").toLowerCase().includes(q)
+                                        );
+                                      })
+                                      .map((c) => {
+                                        const checked = editClientAccessSelected.has(c.id);
+                                        return (
+                                          <button
+                                            key={c.id}
+                                            type="button"
+                                            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                                            onClick={() =>
+                                              setEditClientAccessSelected((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(c.id)) next.delete(c.id);
+                                                else next.add(c.id);
+                                                return next;
+                                              })
+                                            }
+                                          >
+                                            <div className="flex items-center gap-4">
+                                              <div
+                                                className={`h-8 w-8 rounded-full flex items-center justify-center border ${
+                                                  checked ? "bg-primary-600 border-primary-600" : "bg-white border-gray-300"
+                                                }`}
+                                              >
+                                                {checked && <span className="text-white text-sm font-bold">✓</span>}
+                                              </div>
+                                              <div className="text-left">
+                                                <div className="text-sm font-medium text-gray-900">{c.name}</div>
+                                              </div>
+                                            </div>
+                                            <div className="text-sm text-gray-400 truncate max-w-[50%]">
+                                              {c.domain ? `https://${c.domain}/` : ""}
+                                            </div>
+                                          </button>
+                                        );
+                                      })
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-10">
+                              <button
+                                type="button"
+                                disabled={editClientAccessSaving}
+                                onClick={() => void saveEditClientAccess()}
+                                className="px-10 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                              >
+                                {editClientAccessSaving ? "Saving..." : "Save"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+
+                  {removeClientUserConfirm.open && (
+                    <ConfirmDialog
+                      isOpen={removeClientUserConfirm.open}
+                      title="Remove user"
+                      message={`Remove ${removeClientUserConfirm.label || "this user"} from this client?`}
+                      confirmText="Remove"
+                      cancelText="Cancel"
+                      onConfirm={() => void removeClientUser()}
+                      onClose={() => setRemoveClientUserConfirm({ open: false, userId: null, label: null })}
+                      variant="danger"
+                    />
+                  )}
                 </div>
               )}
 

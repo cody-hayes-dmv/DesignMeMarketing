@@ -223,21 +223,28 @@ router.get("/invite", async (req, res) => {
       metadata = null;
     }
 
-    if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || !metadata?.clientId) {
+    const clientIds: string[] = Array.isArray(metadata?.clientIds)
+      ? metadata.clientIds.map((c: any) => String(c))
+      : metadata?.clientId
+        ? [String(metadata.clientId)]
+        : [];
+
+    if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || clientIds.length === 0) {
       return res.status(400).json({ message: "Unsupported invite token" });
     }
 
-    const client = await prisma.client.findUnique({
-      where: { id: String(metadata.clientId) },
+    const clients = await prisma.client.findMany({
+      where: { id: { in: clientIds } },
       select: { id: true, name: true },
+      orderBy: { name: "asc" },
     });
 
-    if (!client) return res.status(404).json({ message: "Client not found" });
+    if (clients.length === 0) return res.status(404).json({ message: "Client not found" });
 
     return res.json({
       kind: "CLIENT_USER_INVITE",
       email: record.email,
-      client: { id: client.id, name: client.name },
+      clients,
     });
   } catch (error) {
     console.error("Invite lookup error:", error);
@@ -271,50 +278,75 @@ router.post("/invite/accept", async (req, res) => {
       metadata = null;
     }
 
-    if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || !metadata?.clientId) {
+    const clientIds: string[] = Array.isArray(metadata?.clientIds)
+      ? metadata.clientIds.map((c: any) => String(c))
+      : metadata?.clientId
+        ? [String(metadata.clientId)]
+        : [];
+
+    if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || clientIds.length === 0) {
       return res.status(400).json({ message: "Unsupported invite token" });
     }
 
-    const clientId = String(metadata.clientId);
+    // Create or update user (do NOT overwrite password for already-verified users)
+    const existingUser = await prisma.user.findUnique({ where: { email: record.email } });
+    let user;
 
-    // Create or update user
-    const passwordHash = await bcrypt.hash(password, 12);
-    const user = await prisma.user.upsert({
-      where: { email: record.email },
-      update: {
-        name,
-        passwordHash,
-        verified: true,
-        invited: false,
-        role: "USER",
-        lastLoginAt: new Date(),
-      },
-      create: {
-        email: record.email,
-        name,
-        passwordHash,
-        verified: true,
-        invited: false,
-        role: "USER",
-        lastLoginAt: new Date(),
-      },
-    });
+    if (existingUser?.verified) {
+      user = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          // Preserve existing name unless it's missing
+          name: existingUser.name || name,
+          invited: false,
+          role: "USER",
+          lastLoginAt: new Date(),
+        },
+      });
+    } else {
+      const passwordHash = await bcrypt.hash(password, 12);
+      user = await prisma.user.upsert({
+        where: { email: record.email },
+        update: {
+          name,
+          passwordHash,
+          verified: true,
+          invited: false,
+          role: "USER",
+          lastLoginAt: new Date(),
+        },
+        create: {
+          email: record.email,
+          name,
+          passwordHash,
+          verified: true,
+          invited: false,
+          role: "USER",
+          lastLoginAt: new Date(),
+        },
+      });
+    }
 
-    // Ensure membership exists
-    await prisma.clientUser.upsert({
-      where: { clientId_userId: { clientId, userId: user.id } },
-      update: {
-        status: "ACTIVE",
-        acceptedAt: new Date(),
-      },
-      create: {
-        clientId,
-        userId: user.id,
-        clientRole: "CLIENT",
-        status: "ACTIVE",
-        acceptedAt: new Date(),
-      },
-    });
+    const resolvedClientRole = String(metadata?.clientRole || "CLIENT");
+    const acceptedAt = new Date();
+
+    // Ensure memberships exist for all invited clients
+    for (const clientId of clientIds) {
+      await prisma.clientUser.upsert({
+        where: { clientId_userId: { clientId, userId: user.id } },
+        update: {
+          status: "ACTIVE",
+          acceptedAt,
+        },
+        create: {
+          clientId,
+          userId: user.id,
+          clientRole: resolvedClientRole === "STAFF" ? "STAFF" : "CLIENT",
+          status: "ACTIVE",
+          acceptedAt,
+        },
+      });
+    }
 
     // Mark token as used
     await prisma.token.update({
@@ -338,9 +370,9 @@ router.post("/invite/accept", async (req, res) => {
         role: user.role,
         verified: user.verified,
         invited: user.invited,
-        clientAccess: { clients: [{ clientId, role: "CLIENT", status: "ACTIVE" }] },
+        clientAccess: { clients: clientIds.map((clientId) => ({ clientId, role: resolvedClientRole === "STAFF" ? "STAFF" : "CLIENT", status: "ACTIVE" })) },
       },
-      redirect: { clientId },
+      redirect: { clientId: clientIds[0] },
     });
   } catch (error: any) {
     if (error?.name === "ZodError") {

@@ -9,7 +9,7 @@ type InviteInfo =
   | {
       kind: "CLIENT_USER_INVITE";
       email: string;
-      client: { id: string; name: string };
+      clients: Array<{ id: string; name: string }>;
     }
   | null;
 
@@ -111,7 +111,7 @@ const InvitePage = () => {
           <>
             <h1 className="text-3xl font-bold text-gray-900 text-center">Add Client User(s)</h1>
             <p className="mt-3 text-sm text-gray-600 text-center">
-              Complete your account activation to access <span className="font-semibold">{invite?.client.name}</span>.
+              Complete your account activation to access your invited client dashboards.
             </p>
 
             <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -126,13 +126,20 @@ const InvitePage = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Client</label>
-                <input
-                  type="text"
-                  value={invite?.client.name || ""}
-                  disabled
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Clients ({invite?.clients?.length || 0})
+                </label>
+                <div className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50">
+                  {invite?.clients?.length ? (
+                    <ul className="list-disc pl-5 space-y-1">
+                      {invite.clients.map((c) => (
+                        <li key={c.id}>{c.name}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-gray-500">No clients</span>
+                  )}
+                </div>
               </div>
             </div>
 

@@ -1,0 +1,799 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import api from "@/lib/api";
+import toast from "react-hot-toast";
+import { ChevronDown, MoreVertical, Plus, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useDispatch } from "react-redux";
+import { checkAuth } from "@/store/slices/authSlice";
+import ConfirmDialog from "@/components/ConfirmDialog";
+
+type ClientUserRow = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  clientDomain: string;
+  userId: string;
+  email: string;
+  name: string | null;
+  role: "CLIENT" | "STAFF";
+  status: "PENDING" | "ACTIVE";
+  lastLoginAt: string | null;
+};
+
+type ClientOption = {
+  id: string;
+  name: string;
+  domain?: string | null;
+};
+
+const ClientUsersPage: React.FC = () => {
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+
+  const [rows, setRows] = useState<ClientUserRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  const fetchAllUsers = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await api.get("/clients/users");
+      setRows(Array.isArray(res.data) ? (res.data as ClientUserRow[]) : []);
+    } catch (e: any) {
+      console.error("Failed to load client users", e);
+      setRows([]);
+      setError(e?.response?.data?.message || "Failed to load users.");
+      toast.error(e?.response?.data?.message || "Failed to load users.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchAllUsers();
+  }, [fetchAllUsers]);
+
+  // Invite modal state (multi-client invites)
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [inviteSendEmail, setInviteSendEmail] = useState(true);
+  const [inviteRows, setInviteRows] = useState<Array<{ id: string; email: string; clientIds: string[] }>>([
+    { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, email: "", clientIds: [] },
+  ]);
+
+  const [allClients, setAllClients] = useState<ClientOption[]>([]);
+  const [allClientsLoading, setAllClientsLoading] = useState(false);
+  const [allClientsError, setAllClientsError] = useState<string | null>(null);
+
+  const inviteClientsMenuButtonRef = useRef<HTMLElement | null>(null);
+  const [inviteClientsMenu, setInviteClientsMenu] = useState<{
+    rowId: string;
+    rect: { top: number; left: number; right: number; bottom: number; width: number; height: number };
+  } | null>(null);
+
+  const openInviteModal = useCallback(() => {
+    setInviteRows([{ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, email: "", clientIds: [] }]);
+    setInviteSendEmail(true);
+    setInviteClientsMenu(null);
+    setInviteOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (!inviteOpen) return;
+    const run = async () => {
+      try {
+        setAllClientsLoading(true);
+        setAllClientsError(null);
+        const res = await api.get("/clients");
+        const arr = Array.isArray(res.data) ? (res.data as any[]) : [];
+        setAllClients(
+          arr
+            .map((c) => ({ id: String(c.id), name: String(c.name || ""), domain: c.domain ? String(c.domain) : null }))
+            .filter((c) => c.id && c.name)
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
+      } catch (e: any) {
+        console.error("Failed to load clients for invite", e);
+        setAllClients([]);
+        setAllClientsError(e?.response?.data?.message || "Failed to load clients.");
+      } finally {
+        setAllClientsLoading(false);
+      }
+    };
+    void run();
+  }, [inviteOpen]);
+
+  useEffect(() => {
+    if (!inviteClientsMenu) return;
+
+    const onDocMouseDown = (e: MouseEvent) => {
+      const el = inviteClientsMenuButtonRef.current;
+      if (el && (e.target instanceof Node) && el.contains(e.target)) return;
+      setInviteClientsMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setInviteClientsMenu(null);
+    };
+    const onScrollOrResize = () => setInviteClientsMenu(null);
+
+    document.addEventListener("mousedown", onDocMouseDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [inviteClientsMenu]);
+
+  const submitInvites = useCallback(async () => {
+    const cleaned = inviteRows
+      .map((r) => ({ ...r, email: r.email.trim(), clientIds: Array.from(new Set(r.clientIds)) }))
+      .filter((r) => r.email || r.clientIds.length > 0);
+
+    if (cleaned.length === 0) {
+      toast.error("Add at least one invite row.");
+      return;
+    }
+    for (const r of cleaned) {
+      if (!r.email) {
+        toast.error("Please enter an email for each row.");
+        return;
+      }
+      if (r.clientIds.length === 0) {
+        toast.error("Please select at least one client for each row.");
+        return;
+      }
+    }
+
+    try {
+      setInviting(true);
+      await api.post("/clients/users/invite", {
+        invites: cleaned.map((r) => ({ email: r.email, clientIds: r.clientIds })),
+        sendEmail: inviteSendEmail,
+        clientRole: "CLIENT",
+      });
+      toast.success("Invite(s) created successfully.");
+      setInviteOpen(false);
+      setInviteClientsMenu(null);
+      await fetchAllUsers();
+    } catch (e: any) {
+      console.error("Failed to invite users", e);
+      toast.error(e?.response?.data?.message || "Failed to send invites.");
+    } finally {
+      setInviting(false);
+    }
+  }, [fetchAllUsers, inviteRows, inviteSendEmail]);
+
+  // Row "More" menu
+  const clientUserMoreMenuButtonRef = useRef<HTMLElement | null>(null);
+  const [clientUserMoreMenu, setClientUserMoreMenu] = useState<{
+    id: string; // client_users row id
+    rect: { top: number; left: number; right: number; bottom: number; width: number; height: number };
+  } | null>(null);
+
+  const [removeClientUserConfirm, setRemoveClientUserConfirm] = useState<{
+    open: boolean;
+    clientId: string;
+    userId: string;
+    label: string;
+  }>({ open: false, clientId: "", userId: "", label: "" });
+
+  useEffect(() => {
+    if (!clientUserMoreMenu) return;
+
+    const onDocMouseDown = (e: MouseEvent) => {
+      const el = clientUserMoreMenuButtonRef.current;
+      if (el && e.target instanceof Node && el.contains(e.target)) return;
+      setClientUserMoreMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setClientUserMoreMenu(null);
+    };
+    const onScrollOrResize = () => setClientUserMoreMenu(null);
+
+    document.addEventListener("mousedown", onDocMouseDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [clientUserMoreMenu]);
+
+  const resendInviteForClientUser = useCallback(
+    async (u: ClientUserRow) => {
+      try {
+        await api.post(`/clients/${encodeURIComponent(u.clientId)}/users/${encodeURIComponent(u.userId)}/invite`);
+        toast.success("Invite sent.");
+        await fetchAllUsers();
+      } catch (e: any) {
+        console.error("Failed to resend invite", e);
+        toast.error(e?.response?.data?.message || "Failed to send invite.");
+      }
+    },
+    [fetchAllUsers]
+  );
+
+  const loginAsClientUser = useCallback(
+    async (u: ClientUserRow) => {
+      try {
+        const res = await api.post(
+          `/clients/${encodeURIComponent(u.clientId)}/users/${encodeURIComponent(u.userId)}/impersonate`
+        );
+        const token = res?.data?.token as string | undefined;
+        if (!token) {
+          toast.error("Unable to impersonate user.");
+          return;
+        }
+        localStorage.setItem("token", token);
+        await dispatch(checkAuth() as any);
+        navigate(`/client/dashboard/${encodeURIComponent(u.clientId)}`);
+        toast.success("Logged in as user.");
+      } catch (e: any) {
+        console.error("Failed to impersonate user", e);
+        toast.error(e?.response?.data?.message || "Failed to login as user.");
+      }
+    },
+    [dispatch, navigate]
+  );
+
+  const removeClientUser = useCallback(async () => {
+    const { clientId, userId } = removeClientUserConfirm;
+    if (!clientId || !userId) return;
+    try {
+      await api.delete(`/clients/${encodeURIComponent(clientId)}/users/${encodeURIComponent(userId)}`);
+      toast.success("User removed.");
+      setRemoveClientUserConfirm({ open: false, clientId: "", userId: "", label: "" });
+      await fetchAllUsers();
+    } catch (e: any) {
+      console.error("Failed to remove user", e);
+      toast.error(e?.response?.data?.message || "Failed to remove user.");
+    }
+  }, [fetchAllUsers, removeClientUserConfirm]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const hay = [
+        r.name || "",
+        r.email,
+        r.clientName,
+        r.clientDomain,
+        r.role,
+        r.status,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [rows, search]);
+
+  return (
+    <div className="p-8">
+      <div className="flex items-start justify-between gap-6 mb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Users</h1>
+          <p className="text-gray-600 mt-2">All client portal users across your clients.</p>
+        </div>
+        <div className="w-full max-w-xl flex items-center justify-end gap-3">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search..."
+            className="w-full max-w-sm border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            onClick={openInviteModal}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+          >
+            <Plus className="h-4 w-4" />
+            Invite User
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <p className="text-xs text-gray-500">
+            Showing {filtered.length} of {rows.length} Rows
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
+                    Loading users...
+                  </td>
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-rose-600">
+                    {error}
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
+                    No users found.
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((u) => {
+                  const initials = (u.name || u.email || "?")
+                    .split(" ")
+                    .map((p) => p.trim()[0] || "")
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase();
+                  const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "Never";
+                  return (
+                    <tr key={u.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                            {initials}
+                          </div>
+                          <div className="text-sm font-medium text-gray-900">{u.name || u.email}</div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{u.email}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                        <div className="font-medium text-gray-900">{u.clientName}</div>
+                        <div className="text-xs text-gray-500">{u.clientDomain}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-900 text-white">
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            u.status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          {u.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{lastLogin}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="relative inline-block">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center h-9 w-9 rounded-full hover:bg-gray-100 text-gray-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const el = e.currentTarget as unknown as HTMLElement;
+                              clientUserMoreMenuButtonRef.current = el;
+                              const r = el.getBoundingClientRect();
+                              setClientUserMoreMenu((prev) =>
+                                prev?.id === u.id
+                                  ? null
+                                  : {
+                                      id: u.id,
+                                      rect: {
+                                        top: r.top,
+                                        left: r.left,
+                                        right: r.right,
+                                        bottom: r.bottom,
+                                        width: r.width,
+                                        height: r.height,
+                                      },
+                                    }
+                              );
+                            }}
+                            title="More"
+                          >
+                            <MoreVertical className="h-5 w-5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {clientUserMoreMenu &&
+        typeof window !== "undefined" &&
+        createPortal(
+          (() => {
+            const menuWidth = 224; // w-56
+            const menuMaxHeight = 320;
+            const gap = 8;
+
+            const u = rows.find((x) => x.id === clientUserMoreMenu.id) || null;
+
+            const rightEdge = Math.min(
+              Math.max(clientUserMoreMenu.rect.right, menuWidth + gap),
+              window.innerWidth - gap
+            );
+            const top = Math.min(
+              clientUserMoreMenu.rect.bottom + gap,
+              Math.max(gap, window.innerHeight - gap - menuMaxHeight)
+            );
+
+            return (
+              <div className="fixed inset-0 z-[60]" onClick={() => setClientUserMoreMenu(null)}>
+                <div
+                  className="absolute rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden"
+                  style={{
+                    top,
+                    left: rightEdge,
+                    transform: "translateX(-100%)",
+                    width: menuWidth,
+                    maxHeight: menuMaxHeight,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    onClick={() => {
+                      if (!u) {
+                        toast.error("Unable to load user.");
+                        setClientUserMoreMenu(null);
+                        return;
+                      }
+                      setClientUserMoreMenu(null);
+                      navigate(`/agency/clients/${encodeURIComponent(u.clientId)}`, { state: { tab: "users" } });
+                    }}
+                  >
+                    Edit Profile
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    onClick={() => {
+                      if (!u) {
+                        toast.error("Unable to load user.");
+                        setClientUserMoreMenu(null);
+                        return;
+                      }
+                      setClientUserMoreMenu(null);
+                      navigate(`/agency/clients/${encodeURIComponent(u.clientId)}`, { state: { tab: "users" } });
+                      toast("Open the client dashboard Users tab to manage access.");
+                    }}
+                  >
+                    Edit Client Access
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    onClick={() => {
+                      toast("Edit Permissions coming soon.");
+                      setClientUserMoreMenu(null);
+                    }}
+                  >
+                    Edit Permissions
+                  </button>
+                  <div className="h-px bg-gray-100" />
+                  {u?.status === "PENDING" && (
+                    <button
+                      type="button"
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      onClick={() => {
+                        if (u) void resendInviteForClientUser(u);
+                        else toast.error("Unable to load user.");
+                        setClientUserMoreMenu(null);
+                      }}
+                    >
+                      Send Invite
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    onClick={() => {
+                      if (u) void loginAsClientUser(u);
+                      else toast.error("Unable to load user.");
+                      setClientUserMoreMenu(null);
+                    }}
+                  >
+                    Login as user
+                  </button>
+                  <div className="h-px bg-gray-100" />
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                    onClick={() => {
+                      if (!u) {
+                        toast.error("Unable to load user.");
+                        setClientUserMoreMenu(null);
+                        return;
+                      }
+                      setRemoveClientUserConfirm({
+                        open: true,
+                        clientId: u.clientId,
+                        userId: u.userId,
+                        label: u.name || u.email,
+                      });
+                      setClientUserMoreMenu(null);
+                    }}
+                  >
+                    Remove user
+                  </button>
+                </div>
+              </div>
+            );
+          })(),
+          document.body
+        )}
+
+      <ConfirmDialog
+        open={removeClientUserConfirm.open}
+        title="Remove user?"
+        message={`Are you sure you want to remove ${removeClientUserConfirm.label} from this client?`}
+        confirmText="Remove"
+        cancelText="Cancel"
+        onClose={() => setRemoveClientUserConfirm({ open: false, clientId: "", userId: "", label: "" })}
+        onConfirm={() => void removeClientUser()}
+        type="danger"
+      />
+
+      {inviteOpen &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setInviteOpen(false)} />
+            <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="shrink-0 px-8 py-6 border-b border-gray-200 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Invite User</h2>
+                  <p className="text-sm text-gray-500 mt-1">Invite users to one or more client dashboards.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInviteOpen(false)}
+                  className="h-10 w-10 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+                  title="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+                {allClientsError && (
+                  <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {allClientsError}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  {inviteRows.map((row) => (
+                    <div key={row.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-start">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                        <input
+                          type="email"
+                          value={row.email}
+                          onChange={(e) =>
+                            setInviteRows((prev) =>
+                              prev.map((r) => (r.id === row.id ? { ...r, email: e.target.value } : r))
+                            )
+                          }
+                          placeholder="Type user's email"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Clients</label>
+                        <button
+                          type="button"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white flex items-center justify-between gap-2 hover:bg-gray-50 disabled:opacity-60"
+                          disabled={allClientsLoading}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const el = e.currentTarget as unknown as HTMLElement;
+                            inviteClientsMenuButtonRef.current = el;
+                            const r = el.getBoundingClientRect();
+                            setInviteClientsMenu((prev) =>
+                              prev?.rowId === row.id
+                                ? null
+                                : {
+                                    rowId: row.id,
+                                    rect: {
+                                      top: r.top,
+                                      left: r.left,
+                                      right: r.right,
+                                      bottom: r.bottom,
+                                      width: r.width,
+                                      height: r.height,
+                                    },
+                                  }
+                            );
+                          }}
+                        >
+                          <span className="truncate text-left">
+                            {row.clientIds.length === 0
+                              ? "Select..."
+                              : row.clientIds.length === 1
+                                ? allClients.find((c) => c.id === row.clientIds[0])?.name || "1 client selected"
+                                : `${row.clientIds.length} clients selected`}
+                          </span>
+                          <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
+                        </button>
+                      </div>
+
+                      <div className="pt-7">
+                        <button
+                          type="button"
+                          className="h-10 w-10 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+                          title="Remove"
+                          onClick={() =>
+                            setInviteRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.id !== row.id)))
+                          }
+                          disabled={inviting || inviteRows.length <= 1}
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setInviteRows((prev) => [
+                        ...prev,
+                        { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, email: "", clientIds: [] },
+                      ])
+                    }
+                    className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Client User
+                  </button>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={inviteSendEmail}
+                      onChange={(e) => setInviteSendEmail(e.target.checked)}
+                    />
+                    Invite users via email
+                  </label>
+                </div>
+              </div>
+
+              <div className="shrink-0 px-8 py-6 border-t border-gray-200 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setInviteOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  disabled={inviting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submitInvites()}
+                  className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                  disabled={inviting}
+                >
+                  {inviting ? "Sending..." : "Send Invite"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {inviteClientsMenu &&
+        typeof window !== "undefined" &&
+        createPortal(
+          (() => {
+            const menuWidth = Math.max(320, inviteClientsMenu.rect.width);
+            const menuMaxHeight = 320;
+            const gap = 8;
+
+            const left = Math.min(
+              Math.max(inviteClientsMenu.rect.left, gap),
+              window.innerWidth - gap - menuWidth
+            );
+            const top = Math.min(
+              inviteClientsMenu.rect.bottom + gap,
+              Math.max(gap, window.innerHeight - gap - menuMaxHeight)
+            );
+
+            const activeRow = inviteRows.find((r) => r.id === inviteClientsMenu.rowId) || null;
+            const selected = new Set(activeRow?.clientIds || []);
+
+            return (
+              <div className="fixed inset-0 z-[60]" onClick={() => setInviteClientsMenu(null)}>
+                <div
+                  className="absolute rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden"
+                  style={{ top, left, width: menuWidth, maxHeight: menuMaxHeight }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="max-h-[320px] overflow-y-auto">
+                    {allClientsLoading ? (
+                      <div className="px-4 py-3 text-sm text-gray-500">Loading clients...</div>
+                    ) : allClients.length === 0 ? (
+                      <div className="px-4 py-3 text-sm text-gray-500">No clients found.</div>
+                    ) : (
+                      allClients.map((c) => {
+                        const isOn = selected.has(c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-start gap-3"
+                            onClick={() => {
+                              setInviteRows((prev) =>
+                                prev.map((r) => {
+                                  if (r.id !== inviteClientsMenu.rowId) return r;
+                                  const next = new Set(r.clientIds);
+                                  if (next.has(c.id)) next.delete(c.id);
+                                  else next.add(c.id);
+                                  return { ...r, clientIds: Array.from(next) };
+                                })
+                              );
+                            }}
+                          >
+                            <span
+                              className={`mt-0.5 h-4 w-4 rounded border flex items-center justify-center ${
+                                isOn ? "bg-primary-600 border-primary-600" : "bg-white border-gray-300"
+                              }`}
+                            >
+                              {isOn ? <span className="h-2 w-2 bg-white rounded-sm" /> : null}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium text-gray-900">{c.name}</span>
+                              {c.domain ? <span className="block truncate text-xs text-gray-500">{c.domain}</span> : null}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="h-px bg-gray-100" />
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    onClick={() => setInviteClientsMenu(null)}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            );
+          })(),
+          document.body
+        )}
+    </div>
+  );
+};
+
+export default ClientUsersPage;
+

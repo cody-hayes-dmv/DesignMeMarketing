@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { sendEmail } from '../lib/email.js';
@@ -11,6 +12,34 @@ const inviteClientUsersSchema = z.object({
     emails: z.array(z.string().email()).min(1),
     sendEmail: z.boolean().optional().default(true),
     clientRole: z.enum(['CLIENT', 'STAFF']).optional().default('CLIENT'),
+});
+
+const inviteClientUsersMultiSchema = z.object({
+    invites: z
+        .array(
+            z.object({
+                email: z.string().email(),
+                clientIds: z.array(z.string().min(1)).min(1),
+            })
+        )
+        .min(1),
+    sendEmail: z.boolean().optional().default(true),
+    clientRole: z.enum(['CLIENT', 'STAFF']).optional().default('CLIENT'),
+});
+
+const updateClientUserProfileSchema = z.object({
+    firstName: z.string().optional(),
+    lastName: z.string().optional(),
+    password: z.string().min(6).optional(),
+    // New UI: Yes/No toggles
+    sendInviteLink: z.boolean().optional(),
+    emailCredentials: z.boolean().optional(),
+    // Back-compat with older UI
+    emailMode: z.enum(['NONE', 'INVITE', 'CREDENTIALS']).optional(),
+});
+
+const updateClientUserAccessSchema = z.object({
+    clientIds: z.array(z.string().min(1)).optional().default([]),
 });
 
 async function canStaffAccessClient(user: { userId: string; role: string }, clientId: string) {
@@ -235,6 +264,173 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 });
 
+// List all client portal users across accessible clients (sorted by last login)
+router.get('/users', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        // Determine which clients the requester can manage
+        let clientIds: string[] | null = null; // null => all
+        const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
+        if (!isAdmin) {
+            if (req.user.role === 'AGENCY' || req.user.role === 'WORKER') {
+                const memberships = await prisma.userAgency.findMany({
+                    where: { userId: req.user.userId },
+                    select: { agencyId: true },
+                });
+                const agencyIds = memberships.map((m) => m.agencyId);
+                const clients = await prisma.client.findMany({
+                    where: {
+                        OR: [
+                            { userId: req.user.userId },
+                            {
+                                user: {
+                                    memberships: {
+                                        some: { agencyId: { in: agencyIds } },
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                    select: { id: true },
+                });
+                clientIds = clients.map((c) => c.id);
+            } else {
+                const clients = await prisma.client.findMany({
+                    where: { userId: req.user.userId },
+                    select: { id: true },
+                });
+                clientIds = clients.map((c) => c.id);
+            }
+        }
+
+        const rows = await prisma.clientUser.findMany({
+            where: clientIds ? { clientId: { in: clientIds } } : undefined,
+            include: {
+                client: { select: { id: true, name: true, domain: true } },
+                user: { select: { id: true, email: true, name: true, lastLoginAt: true } },
+            },
+            orderBy: [{ user: { lastLoginAt: 'desc' } }, { invitedAt: 'desc' }],
+        });
+
+        return res.json(
+            rows.map((r) => ({
+                id: r.id,
+                clientId: r.clientId,
+                clientName: r.client.name,
+                clientDomain: r.client.domain,
+                userId: r.userId,
+                email: r.user.email,
+                name: r.user.name,
+                role: r.clientRole,
+                status: r.status,
+                lastLoginAt: r.user.lastLoginAt,
+            }))
+        );
+    } catch (error) {
+        console.error('List all client users error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Get client access list for a user (for Edit Client Access modal)
+router.get('/users/:userId/access', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const userId = String(req.params.userId || '');
+        if (!userId) return res.status(400).json({ message: 'Missing userId' });
+
+        const memberships = await prisma.clientUser.findMany({
+            where: { userId },
+            include: { client: { select: { id: true, name: true, domain: true } } },
+            orderBy: { invitedAt: 'desc' },
+        });
+
+        // Only return rows for clients the requester can manage.
+        const allowed: any[] = [];
+        for (const m of memberships) {
+            const { hasAccess } = await canStaffAccessClient(req.user, m.clientId);
+            if (!hasAccess) continue;
+            allowed.push({
+                clientId: m.clientId,
+                name: m.client.name,
+                domain: m.client.domain,
+                role: m.clientRole,
+                status: m.status,
+            });
+        }
+
+        return res.json({ userId, clients: allowed });
+    } catch (error) {
+        console.error('Get client user access error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Update client access list for a user (add/remove memberships across clients)
+router.put('/users/:userId/access', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const userId = String(req.params.userId || '');
+        if (!userId) return res.status(400).json({ message: 'Missing userId' });
+
+        const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, verified: true } });
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const { clientIds } = updateClientUserAccessSchema.parse(req.body || {});
+        const desired = new Set(clientIds.map((c) => String(c)));
+
+        // Add / keep selected
+        for (const clientId of desired) {
+            const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+            if (!client) return res.status(404).json({ message: 'Client not found' });
+            if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+            await prisma.clientUser.upsert({
+                where: { clientId_userId: { clientId, userId } },
+                update: {
+                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    invitedById: req.user.userId,
+                    invitedAt: new Date(),
+                },
+                create: {
+                    clientId,
+                    userId,
+                    clientRole: 'CLIENT',
+                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    invitedById: req.user.userId,
+                    invitedAt: new Date(),
+                },
+            });
+        }
+
+        // Remove unselected (only where requester has access)
+        const existing = await prisma.clientUser.findMany({ where: { userId }, select: { clientId: true } });
+        for (const m of existing) {
+            if (desired.has(m.clientId)) continue;
+            const { hasAccess } = await canStaffAccessClient(req.user, m.clientId);
+            if (!hasAccess) continue;
+            await prisma.clientUser.delete({ where: { clientId_userId: { clientId: m.clientId, userId } } });
+        }
+
+        return res.json({ message: 'Access updated' });
+    } catch (error: any) {
+        if (error?.name === 'ZodError') {
+            return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+        }
+        console.error('Update client user access error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 // List client portal users for a client
 router.get('/:id/users', authenticateToken, async (req, res) => {
     try {
@@ -286,7 +482,389 @@ router.get('/:id/users', authenticateToken, async (req, res) => {
     }
 });
 
+// Update a client portal user's profile (name/password) for a given client
+router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => {
+    try {
+        const clientId = String(req.params.id || '');
+        const userId = String(req.params.userId || '');
+        if (!clientId || !userId) return res.status(400).json({ message: 'Missing clientId or userId' });
+
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+        // Ensure this user is linked to this client
+        const membership = await prisma.clientUser.findUnique({
+            where: { clientId_userId: { clientId, userId } },
+            include: { user: { select: { id: true, email: true, name: true, verified: true } } },
+        });
+
+        if (!membership) return res.status(404).json({ message: 'Client user not found' });
+
+        const { firstName, lastName, password, emailMode, sendInviteLink, emailCredentials } = updateClientUserProfileSchema.parse(req.body || {});
+
+        const resolvedSendInvite = Boolean(sendInviteLink) || emailMode === 'INVITE';
+        const resolvedEmailCreds = Boolean(emailCredentials) || emailMode === 'CREDENTIALS';
+
+        const nextName = `${String(firstName || '').trim()} ${String(lastName || '').trim()}`.trim();
+        const updateUserData: any = {};
+        if (nextName) updateUserData.name = nextName;
+        if (password) updateUserData.passwordHash = await bcrypt.hash(password, 12);
+
+        if (Object.keys(updateUserData).length > 0) {
+            await prisma.user.update({
+                where: { id: userId },
+                data: updateUserData,
+            });
+        }
+
+        // Optional email actions
+        if (resolvedSendInvite) {
+            const inviteToken = jwt.sign(
+                { email: membership.user.email, clientId, kind: 'CLIENT_USER_INVITE' },
+                process.env.JWT_SECRET!,
+                { expiresIn: '7d' }
+            );
+
+            await prisma.token.create({
+                data: {
+                    type: 'INVITE',
+                    email: membership.user.email,
+                    token: inviteToken,
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                    userId,
+                    metadata: JSON.stringify({
+                        kind: 'CLIENT_USER_INVITE',
+                        clientId,
+                        clientRole: membership.clientRole,
+                        invitedByUserId: req.user.userId,
+                    }),
+                },
+            });
+
+            const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
+            await sendEmail({
+                to: membership.user.email,
+                subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+                html: `
+                  <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+                    <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                    <p>Hi there,</p>
+                    <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
+                    <p>
+                      <a href="${acceptUrl}" style="display:inline-block;padding:10px 16px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">
+                        Accept Invite
+                      </a>
+                    </p>
+                    <p style="color:#6b7280;font-size:12px;">This invitation expires in 7 days.</p>
+                  </div>
+                `,
+            });
+        }
+
+        if (resolvedEmailCreds) {
+            if (!password) {
+                return res.status(400).json({ message: 'Password is required to email credentials.' });
+            }
+            await sendEmail({
+                to: membership.user.email,
+                subject: 'Your Client Dashboard login details',
+                html: `
+                  <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+                    <h2>Your Client Dashboard login details</h2>
+                    <p>Hi ${nextName || membership.user.name || ''},</p>
+                    <p>Here are your login credentials:</p>
+                    <p><b>Email:</b> ${membership.user.email}</p>
+                    <p><b>Password:</b> ${password}</p>
+                    <p style="color:#6b7280;font-size:12px;">For security, please change your password after logging in.</p>
+                  </div>
+                `,
+            });
+        }
+
+        return res.json({ message: 'Profile updated' });
+    } catch (error: any) {
+        if (error?.name === 'ZodError') {
+            return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+        }
+        console.error('Update client user profile error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Resend invite email to a client user (for current client)
+router.post('/:id/users/:userId/invite', authenticateToken, async (req, res) => {
+    try {
+        const clientId = String(req.params.id || '');
+        const userId = String(req.params.userId || '');
+        if (!clientId || !userId) return res.status(400).json({ message: 'Missing clientId or userId' });
+
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+        const membership = await prisma.clientUser.findUnique({
+            where: { clientId_userId: { clientId, userId } },
+            include: { user: { select: { email: true } } },
+        });
+        if (!membership) return res.status(404).json({ message: 'Client user not found' });
+
+        const inviteToken = jwt.sign(
+            { email: membership.user.email, clientId, kind: 'CLIENT_USER_INVITE' },
+            process.env.JWT_SECRET!,
+            { expiresIn: '7d' }
+        );
+
+        await prisma.token.create({
+            data: {
+                type: 'INVITE',
+                email: membership.user.email,
+                token: inviteToken,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                userId,
+                metadata: JSON.stringify({
+                    kind: 'CLIENT_USER_INVITE',
+                    clientId,
+                    clientRole: membership.clientRole,
+                    invitedByUserId: req.user.userId,
+                }),
+            },
+        });
+
+        const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
+        await sendEmail({
+            to: membership.user.email,
+            subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+            html: `
+              <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+                <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                <p>Hi there,</p>
+                <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
+                <p>
+                  <a href="${acceptUrl}" style="display:inline-block;padding:10px 16px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">
+                    Accept Invite
+                  </a>
+                </p>
+                <p style="color:#6b7280;font-size:12px;">This invitation expires in 7 days.</p>
+              </div>
+            `,
+        });
+
+        return res.json({ message: 'Invite sent' });
+    } catch (error) {
+        console.error('Resend invite error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Remove a client user from a client (delete membership)
+router.delete('/:id/users/:userId', authenticateToken, async (req, res) => {
+    try {
+        const clientId = String(req.params.id || '');
+        const userId = String(req.params.userId || '');
+        if (!clientId || !userId) return res.status(400).json({ message: 'Missing clientId or userId' });
+
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+        await prisma.clientUser.delete({
+            where: { clientId_userId: { clientId, userId } },
+        });
+
+        return res.json({ message: 'User removed' });
+    } catch (error: any) {
+        if (error?.code === 'P2025') {
+            return res.status(404).json({ message: 'Client user not found' });
+        }
+        console.error('Remove client user error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Impersonate a client user for a given client (Login as user)
+router.post('/:id/users/:userId/impersonate', authenticateToken, async (req, res) => {
+    try {
+        const clientId = String(req.params.id || '');
+        const userId = String(req.params.userId || '');
+        if (!clientId || !userId) return res.status(400).json({ message: 'Missing clientId or userId' });
+
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+
+        const membership = await prisma.clientUser.findUnique({
+            where: { clientId_userId: { clientId, userId } },
+            include: { user: { select: { id: true, email: true, role: true, verified: true } } },
+        });
+        if (!membership) return res.status(404).json({ message: 'Client user not found' });
+        if (membership.user.role !== 'USER') return res.status(400).json({ message: 'Can only impersonate client portal users.' });
+
+        const jwtToken = jwt.sign(
+            { userId: membership.user.id, email: membership.user.email, role: membership.user.role },
+            process.env.JWT_SECRET!,
+            { expiresIn: '7d' }
+        );
+
+        return res.json({ token: jwtToken, redirect: { clientId } });
+    } catch (error) {
+        console.error('Impersonate error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 // Invite one or more client portal users
+// Multi-client invite: invite user(s) to multiple clients with a single signup token
+// IMPORTANT: must be defined before `/:id/users/invite` so it doesn't get captured by `:id = "users"`.
+router.post('/users/invite', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const { invites, sendEmail: shouldSendEmail, clientRole } = inviteClientUsersMultiSchema.parse(req.body);
+
+        const uniqueClientIds = Array.from(
+            new Set(invites.flatMap((i) => (Array.isArray(i.clientIds) ? i.clientIds : [])).map((id) => String(id)))
+        ).filter(Boolean);
+
+        if (uniqueClientIds.length === 0) {
+            return res.status(400).json({ message: 'Select at least 1 client.' });
+        }
+
+        // Validate staff access to all selected clients
+        for (const cid of uniqueClientIds) {
+            const { client, hasAccess } = await canStaffAccessClient(req.user, cid);
+            if (!client) return res.status(404).json({ message: 'Client not found' });
+            if (!hasAccess) return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const clients = await prisma.client.findMany({
+            where: { id: { in: uniqueClientIds } },
+            select: { id: true, name: true },
+        });
+
+        const clientNameById = new Map(clients.map((c) => [c.id, c.name]));
+
+        const results: Array<{ email: string; invited: boolean; userId?: string; token?: string }> = [];
+
+        for (const inv of invites) {
+            const email = String(inv.email || '').trim().toLowerCase();
+            const clientIds = Array.from(new Set((inv.clientIds || []).map((c) => String(c).trim()).filter(Boolean)));
+            if (!email || clientIds.length === 0) continue;
+
+            // Create or find user
+            const existing = await prisma.user.findUnique({ where: { email } });
+            const user =
+                existing ??
+                (await prisma.user.create({
+                    data: {
+                        email,
+                        role: 'USER',
+                        invited: true,
+                        verified: false,
+                    },
+                }));
+
+            // Upsert memberships for all selected clients
+            for (const clientId of clientIds) {
+                await prisma.clientUser.upsert({
+                    where: { clientId_userId: { clientId, userId: user.id } },
+                    update: {
+                        clientRole,
+                        status: user.verified ? 'ACTIVE' : 'PENDING',
+                        invitedById: req.user.userId,
+                        invitedAt: new Date(),
+                    },
+                    create: {
+                        clientId,
+                        userId: user.id,
+                        clientRole,
+                        status: user.verified ? 'ACTIVE' : 'PENDING',
+                        invitedById: req.user.userId,
+                        invitedAt: new Date(),
+                    },
+                });
+            }
+
+            // Create invite token that includes all clientIds
+            const inviteToken = jwt.sign(
+                { email, clientIds, kind: 'CLIENT_USER_INVITE' },
+                process.env.JWT_SECRET!,
+                { expiresIn: '7d' }
+            );
+
+            await prisma.token.create({
+                data: {
+                    type: 'INVITE',
+                    email,
+                    token: inviteToken,
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                    userId: user.id,
+                    metadata: JSON.stringify({
+                        kind: 'CLIENT_USER_INVITE',
+                        clientIds,
+                        clientRole,
+                        invitedByUserId: req.user.userId,
+                    }),
+                },
+            });
+
+            if (shouldSendEmail) {
+                const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
+                const listHtml = clientIds
+                    .map((cid) => `<li>${clientNameById.get(cid) || cid}</li>`)
+                    .join('');
+                await sendEmail({
+                    to: email,
+                    subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+                    html: `
+                      <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+                        <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                        <p>Hi there,</p>
+                        <p>You will be granted access to these client dashboards:</p>
+                        <ul>${listHtml}</ul>
+                        <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
+                        <p>
+                          <a href="${acceptUrl}" style="display:inline-block;padding:10px 16px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;">
+                            Accept Invite
+                          </a>
+                        </p>
+                        <p style="color:#6b7280;font-size:12px;">This invitation expires in 7 days.</p>
+                      </div>
+                    `,
+                });
+            }
+
+            results.push({ email, invited: true, userId: user.id, token: shouldSendEmail ? undefined : inviteToken });
+        }
+
+        return res.status(201).json({ message: 'Invites created', results });
+    } catch (error: any) {
+        if (error?.name === 'ZodError') {
+            return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+        }
+        console.error('Invite multi client users error:', error);
+        return res.status(500).json({ message: 'Failed to invite users' });
+    }
+});
+
 router.post('/:id/users/invite', authenticateToken, async (req, res) => {
     try {
         const clientId = req.params.id;
