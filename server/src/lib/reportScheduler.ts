@@ -1,6 +1,127 @@
 import { prisma } from './prisma.js';
 import { sendEmail } from './email.js';
 import PDFDocument from 'pdfkit';
+import jwt from "jsonwebtoken";
+
+type ReportTargetKeywordRow = {
+  id: string;
+  keyword: string;
+  locationName: string | null;
+  createdAt: Date | string | null;
+  googlePosition: number | null;
+  previousPosition: number | null;
+  serpItemTypes: unknown;
+  googleUrl: string | null;
+};
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function normalizeLocationName(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/\s+/g, " ");
+}
+
+function normalizeKeywordKey(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === "string");
+    } catch {
+      // ignore
+    }
+    if (value.includes(",")) return value.split(",").map((s) => s.trim()).filter(Boolean);
+    if (value.trim()) return [value.trim()];
+  }
+  return [];
+}
+
+function safeNumber(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const s = value.trim();
+  if (!s) return false;
+  return /^https?:\/\//i.test(s);
+}
+
+export async function getReportTargetKeywords(clientId: string): Promise<ReportTargetKeywordRow[]> {
+  // Match the dashboard behavior:
+  // - only show TargetKeywords that are also tracked keywords
+  // - fall back to tracked keyword rank/url if target keyword rank/url is missing
+  const trackedKeywords = await prisma.keyword.findMany({
+    where: { clientId },
+    select: { keyword: true, currentPosition: true, previousPosition: true, googleUrl: true },
+  });
+  const trackedKeywordSet = new Set(trackedKeywords.map((k) => normalizeKeywordKey(k.keyword)));
+  const trackedByKeyword = new Map(
+    trackedKeywords.map((k) => [
+      normalizeKeywordKey(k.keyword),
+      {
+        currentPosition: k.currentPosition ?? null,
+        previousPosition: k.previousPosition ?? null,
+        googleUrl: k.googleUrl ?? null,
+      },
+    ])
+  );
+
+  const allTargetKeywords = await prisma.targetKeyword.findMany({
+    where: { clientId },
+    orderBy: [{ searchVolume: "desc" }, { keyword: "asc" }],
+  });
+
+  const filtered = allTargetKeywords
+    .filter((tk) => trackedKeywordSet.has(normalizeKeywordKey(tk.keyword)))
+    .slice(0, 50);
+
+  return filtered.map((tk) => {
+    const tracked = trackedByKeyword.get(normalizeKeywordKey(tk.keyword));
+    return {
+      id: tk.id,
+      keyword: tk.keyword,
+      locationName: tk.locationName ? normalizeLocationName(tk.locationName) : tk.locationName,
+      createdAt: tk.createdAt,
+      googlePosition: (tk as any).googlePosition ?? tracked?.currentPosition ?? null,
+      previousPosition: (tk as any).previousPosition ?? tracked?.previousPosition ?? null,
+      serpItemTypes: (tk as any).serpItemTypes,
+      googleUrl: (tk as any).googleUrl ?? tracked?.googleUrl ?? null,
+    };
+  });
+}
+
+export function buildShareDashboardUrl(clientId: string): string | null {
+  const frontendUrlRaw = process.env.FRONTEND_URL || "";
+  const frontendUrl = frontendUrlRaw.replace(/\/+$/, "");
+  if (!frontendUrl) return null;
+
+  const secret = process.env.JWT_SECRET || "change_me_secret";
+  const token = jwt.sign(
+    { type: "client_share", clientId, issuedBy: "report_scheduler" },
+    secret,
+    { expiresIn: "7d" }
+  );
+  return `${frontendUrl}/share/${encodeURIComponent(token)}`;
+}
 
 /**
  * Calculate next run time for a schedule
@@ -47,9 +168,17 @@ export function calculateNextRunTime(
 /**
  * Generate email HTML for a report
  */
-export function generateReportEmailHTML(report: any, client: any): string {
+export function generateReportEmailHTML(
+  report: any,
+  client: any,
+  opts?: { targetKeywords?: ReportTargetKeywordRow[]; shareUrl?: string | null }
+): string {
   const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
   const reportDate = new Date(report.reportDate).toLocaleDateString();
+  const safeClientName = escapeHtml(client?.name);
+  const safeDomain = client?.domain ? escapeHtml(client.domain) : "";
+  const shareUrl = opts?.shareUrl || null;
+  const targetKeywords = opts?.targetKeywords || [];
 
   return `
     <!DOCTYPE html>
@@ -57,88 +186,98 @@ export function generateReportEmailHTML(report: any, client: any): string {
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>SEO Report - ${client.name}</title>
+      <title>SEO Report - ${safeClientName}</title>
     </head>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-        <h1 style="color: white; margin: 0;">SEO Analytics Report</h1>
-        <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">${periodLabel} Report for ${client.name}</p>
+    <body style="font-family: Arial, sans-serif; line-height: 1.35; color: #111827; max-width: 900px; margin: 0 auto; padding: 24px;">
+      <div style="text-align:center;">
+        <h1 style="margin: 0; font-size: 24px;">SEO Analytics Report</h1>
+        <p style="margin: 6px 0 0 0; font-size: 14px; color: #374151;">${escapeHtml(periodLabel)} report for ${safeClientName}</p>
       </div>
-      
-      <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px;">
-        <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-          <h2 style="margin-top: 0; color: #1f2937;">Report Date: ${reportDate}</h2>
-          
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px;">
-              <p style="margin: 0; font-size: 12px; color: #6b7280; text-transform: uppercase;">Total Sessions</p>
-              <p style="margin: 5px 0 0 0; font-size: 24px; font-weight: bold; color: #1f2937;">${report.totalSessions.toLocaleString()}</p>
-            </div>
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px;">
-              <p style="margin: 0; font-size: 12px; color: #6b7280; text-transform: uppercase;">Organic Sessions</p>
-              <p style="margin: 5px 0 0 0; font-size: 24px; font-weight: bold; color: #10b981;">${report.organicSessions.toLocaleString()}</p>
-            </div>
-            ${report.activeUsers ? `
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px;">
-              <p style="margin: 0; font-size: 12px; color: #6b7280; text-transform: uppercase;">Active Users</p>
-              <p style="margin: 5px 0 0 0; font-size: 24px; font-weight: bold; color: #1f2937;">${report.activeUsers.toLocaleString()}</p>
-            </div>
-            ` : ''}
-            ${report.newUsers ? `
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px;">
-              <p style="margin: 0; font-size: 12px; color: #6b7280; text-transform: uppercase;">New Users</p>
-              <p style="margin: 5px 0 0 0; font-size: 24px; font-weight: bold; color: #8b5cf6;">${report.newUsers.toLocaleString()}</p>
-            </div>
-            ` : ''}
-            ${report.eventCount ? `
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px;">
-              <p style="margin: 0; font-size: 12px; color: #6b7280; text-transform: uppercase;">Event Count</p>
-              <p style="margin: 5px 0 0 0; font-size: 24px; font-weight: bold; color: #10b981;">${report.eventCount.toLocaleString()}</p>
-            </div>
-            ` : ''}
-            ${report.keyEvents ? `
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px;">
-              <p style="margin: 0; font-size: 12px; color: #6b7280; text-transform: uppercase;">Key Events</p>
-              <p style="margin: 5px 0 0 0; font-size: 24px; font-weight: bold; color: #f59e0b;">${report.keyEvents.toLocaleString()}</p>
-            </div>
-            ` : ''}
-          </div>
 
-          <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-            <h3 style="margin-top: 0; color: #1f2937;">SEO Performance</h3>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-              <div>
-                <p style="margin: 0; font-size: 12px; color: #6b7280;">Average Position</p>
-                <p style="margin: 5px 0 0 0; font-size: 20px; font-weight: bold; color: #1f2937;">${report.averagePosition.toFixed(1)}</p>
-              </div>
-              <div>
-                <p style="margin: 0; font-size: 12px; color: #6b7280;">Total Clicks</p>
-                <p style="margin: 5px 0 0 0; font-size: 20px; font-weight: bold; color: #1f2937;">${report.totalClicks.toLocaleString()}</p>
-              </div>
-              <div>
-                <p style="margin: 0; font-size: 12px; color: #6b7280;">Total Impressions</p>
-                <p style="margin: 5px 0 0 0; font-size: 20px; font-weight: bold; color: #1f2937;">${report.totalImpressions.toLocaleString()}</p>
-              </div>
-              <div>
-                <p style="margin: 0; font-size: 12px; color: #6b7280;">Average CTR</p>
-                <p style="margin: 5px 0 0 0; font-size: 20px; font-weight: bold; color: #1f2937;">${(report.averageCtr * 100).toFixed(2)}%</p>
-              </div>
-            </div>
-          </div>
-
-          ${report.conversions > 0 ? `
-          <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-            <h3 style="margin-top: 0; color: #1f2937;">Conversions</h3>
-            <p style="margin: 0; font-size: 18px; font-weight: bold; color: #10b981;">${report.conversions.toLocaleString()} conversions</p>
-            ${report.conversionRate > 0 ? `<p style="margin: 5px 0 0 0; color: #6b7280;">Conversion Rate: ${(report.conversionRate * 100).toFixed(2)}%</p>` : ''}
-          </div>
-          ` : ''}
-        </div>
-
-        <p style="text-align: center; color: #6b7280; font-size: 12px; margin-top: 30px;">
-          This is an automated report generated by SEO Dashboard.
-        </p>
+      <div style="margin-top: 16px; font-size: 13px;">
+        <p style="margin: 0;"><strong>Client:</strong> ${safeClientName}</p>
+        ${safeDomain ? `<p style="margin: 0;"><strong>Domain:</strong> ${safeDomain}</p>` : ""}
+        <p style="margin: 0;"><strong>Report date:</strong> ${escapeHtml(reportDate)}</p>
       </div>
+
+      <h2 style="margin: 18px 0 6px 0; font-size: 15px; text-decoration: underline;">Traffic Overview</h2>
+      <div style="font-size: 13px;">
+        <div>Total Sessions: ${Number(report.totalSessions || 0).toLocaleString()}</div>
+        <div>Organic Sessions: ${Number(report.organicSessions || 0).toLocaleString()}</div>
+        ${report.activeUsers != null ? `<div>Active Users: ${Number(report.activeUsers || 0).toLocaleString()}</div>` : ""}
+        ${report.newUsers != null ? `<div>New Users: ${Number(report.newUsers || 0).toLocaleString()}</div>` : ""}
+        ${report.eventCount != null ? `<div>Event Count: ${Number(report.eventCount || 0).toLocaleString()}</div>` : ""}
+        ${report.keyEvents != null ? `<div>Key Events: ${Number(report.keyEvents || 0).toLocaleString()}</div>` : ""}
+      </div>
+
+      <h2 style="margin: 18px 0 6px 0; font-size: 15px; text-decoration: underline;">SEO Performance</h2>
+      <div style="font-size: 13px;">
+        <div>Average Position: ${report.averagePosition != null ? Number(report.averagePosition).toFixed(1) : "0.0"}</div>
+        <div>Total Clicks: ${Number(report.totalClicks || 0).toLocaleString()}</div>
+        <div>Total Impressions: ${Number(report.totalImpressions || 0).toLocaleString()}</div>
+        <div>Average CTR: ${report.averageCtr != null ? (Number(report.averageCtr) * 100).toFixed(2) : "0.00"}%</div>
+      </div>
+
+      <h2 style="margin: 18px 0 8px 0; font-size: 15px; text-decoration: underline;">Target Keywords</h2>
+      ${
+        targetKeywords.length === 0
+          ? `<div style="font-size: 13px; color: #4b5563;">No target keywords available.</div>`
+          : `
+            <div style="overflow-x:auto;">
+              <table style="border-collapse: collapse; width: 100%; font-size: 12px;">
+                <thead>
+                  <tr>
+                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Keyword</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Location</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Date Added</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google Change</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google SERP Features</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google URL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${targetKeywords
+                    .map((k) => {
+                      const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+                      const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+                      const diff = current != null && prev != null ? prev - current : null; // positive means improved
+                      const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+                      const dateAdded = k.createdAt ? new Date(k.createdAt as any).toLocaleDateString() : "—";
+                      const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+                      const urlCell = k.googleUrl
+                        ? `<a href="${escapeHtml(k.googleUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(k.googleUrl)}</a>`
+                        : "—";
+                      return `
+                        <tr>
+                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(k.keyword)}</td>
+                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(k.locationName || "United States")}</td>
+                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(dateAdded)}</td>
+                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${current != null ? escapeHtml(current) : "—"}</td>
+                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(diffText)}</td>
+                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(serp)}</td>
+                          <td style="border: 1px solid #e5e7eb; padding: 6px; word-break: break-all;">${urlCell}</td>
+                        </tr>
+                      `;
+                    })
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          `
+      }
+
+      ${
+        shareUrl
+          ? `<div style="margin-top: 18px; font-size: 13px;">
+              <strong>Live dashboard:</strong> <a href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(shareUrl)}</a>
+            </div>`
+          : ""
+      }
+
+      <p style="text-align: center; color: #6b7280; font-size: 12px; margin-top: 22px;">
+        This is an automated report generated by SEO Dashboard.
+      </p>
     </body>
     </html>
   `;
@@ -148,7 +287,11 @@ export function generateReportEmailHTML(report: any, client: any): string {
  * Generate a PDF buffer for a report
  * (keeps it simple: text-only summary matching the email content)
  */
-export async function generateReportPDFBuffer(report: any, client: any): Promise<Buffer> {
+export async function generateReportPDFBuffer(
+  report: any,
+  client: any,
+  opts?: { targetKeywords?: ReportTargetKeywordRow[]; shareUrl?: string | null }
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40 });
     const chunks: Buffer[] = [];
@@ -161,6 +304,9 @@ export async function generateReportPDFBuffer(report: any, client: any): Promise
 
     const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
     const reportDate = new Date(report.reportDate).toLocaleDateString();
+    const shareUrl = opts?.shareUrl || null;
+    const targetKeywords = opts?.targetKeywords || [];
+    const defaultMargin = 40;
 
     doc.fontSize(20).text(`SEO Analytics Report`, { align: 'center' });
     doc.moveDown(0.5);
@@ -174,7 +320,7 @@ export async function generateReportPDFBuffer(report: any, client: any): Promise
     doc.text(`Report date: ${reportDate}`);
 
     doc.moveDown();
-    doc.fontSize(14).text('Traffic Overview', { underline: true });
+    doc.fontSize(14).text('Traffic Overview');
     doc.moveDown(0.5);
     doc.fontSize(12);
     doc.text(`Total Sessions: ${report.totalSessions?.toLocaleString?.() ?? report.totalSessions ?? 0}`);
@@ -185,7 +331,7 @@ export async function generateReportPDFBuffer(report: any, client: any): Promise
     if (report.keyEvents != null) doc.text(`Key Events: ${report.keyEvents}`);
 
     doc.moveDown();
-    doc.fontSize(14).text('SEO Performance', { underline: true });
+    doc.fontSize(14).text('SEO Performance');
     doc.moveDown(0.5);
     doc.fontSize(12);
     if (report.averagePosition != null) {
@@ -199,12 +345,161 @@ export async function generateReportPDFBuffer(report: any, client: any): Promise
 
     if (report.conversions != null && report.conversions > 0) {
       doc.moveDown();
-      doc.fontSize(14).text('Conversions', { underline: true });
+      doc.fontSize(14).text('Conversions');
       doc.moveDown(0.5);
       doc.fontSize(12);
       doc.text(`Conversions: ${report.conversions}`);
       if (report.conversionRate != null) {
         doc.text(`Conversion Rate: ${(Number(report.conversionRate) * 100).toFixed(2)}%`);
+      }
+    }
+
+    // NOTE: PDFKit link annotations can throw "unsupported number: NaN" on some environments.
+    // To keep email sending reliable, render URLs as plain text in the PDF (no clickable links).
+    if (isHttpUrl(shareUrl)) {
+      doc.moveDown();
+      // Avoid underline for long URLs (PDFKit underline path can NaN on some systems)
+      doc.fillColor("#1d4ed8").fontSize(11).text(`Live dashboard: ${shareUrl}`);
+      doc.fillColor("#000000");
+    }
+
+    if (targetKeywords.length > 0) {
+      // Put the table on a separate landscape page for readability.
+      doc.addPage({ layout: "landscape" });
+      doc.fontSize(16).fillColor("#000000").text("Target Keywords");
+      doc.moveDown(0.5);
+
+      const pageLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
+      const pageRight =
+        safeNumber((doc as any)?.page?.width, 0) - safeNumber((doc as any)?.page?.margins?.right, defaultMargin);
+      const usableWidth = Math.max(1, pageRight - pageLeft);
+
+      const col = {
+        keyword: 200,
+        location: 140,
+        date: 90,
+        google: 60,
+        change: 80,
+        serp: 140,
+        url: Math.max(usableWidth - (200 + 140 + 90 + 60 + 80 + 140), 120),
+      };
+
+      const headers: Array<{ key: keyof typeof col; label: string }> = [
+        { key: "keyword", label: "Keyword" },
+        { key: "location", label: "Location" },
+        { key: "date", label: "Date Added" },
+        { key: "google", label: "Google" },
+        { key: "change", label: "Change" },
+        { key: "serp", label: "SERP Features" },
+        { key: "url", label: "Google URL" },
+      ];
+
+      const rowPaddingY = 4;
+      const rowPaddingX = 4;
+      const headerBg = "#f3f4f6";
+      const borderColor = "#d1d5db";
+
+      const drawHeader = (y: number) => {
+        let x = pageLeft;
+        const h = 18;
+        doc.save();
+        doc.rect(pageLeft, y, usableWidth, h).fill(headerBg);
+        doc.restore();
+        doc.fontSize(10).fillColor("#111827");
+        headers.forEach((hcol) => {
+          doc
+            .strokeColor(borderColor)
+            .rect(x, y, col[hcol.key], h)
+            .stroke();
+          doc.text(hcol.label, x + rowPaddingX, y + 5, { width: col[hcol.key] - rowPaddingX * 2 });
+          x += col[hcol.key];
+        });
+        doc.fillColor("#000000");
+        return y + h;
+      };
+
+      const formatDate = (value: any) => {
+        if (!value) return "—";
+        try {
+          return new Date(value).toLocaleDateString();
+        } catch {
+          return "—";
+        }
+      };
+
+      let y = doc.y;
+      y = drawHeader(y);
+      doc.fontSize(9);
+
+      for (const k of targetKeywords) {
+        const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+        const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+        const diff = current != null && prev != null ? prev - current : null; // positive means improved
+        const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+        const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+        const cells = {
+          keyword: String(k.keyword || ""),
+          location: String(k.locationName || "United States"),
+          date: formatDate(k.createdAt),
+          google: current != null ? String(current) : "—",
+          change: diffText,
+          serp,
+          url: k.googleUrl ? String(k.googleUrl) : "—",
+        };
+
+        // Measure row height based on wrapped text.
+        let maxH = 0;
+        (Object.keys(col) as Array<keyof typeof col>).forEach((key) => {
+          const text = (cells as any)[key] as string;
+          const h = doc.heightOfString(text, { width: col[key] - rowPaddingX * 2 });
+          maxH = Math.max(maxH, h);
+        });
+        const rowH = Math.max(14, maxH) + rowPaddingY * 2;
+
+        // Pagination
+        const pageHeight = safeNumber((doc as any)?.page?.height, 0);
+        const marginBottom = safeNumber((doc as any)?.page?.margins?.bottom, defaultMargin);
+        const bottomLimit = Math.max(1, pageHeight - marginBottom - 24);
+        if (y + rowH > bottomLimit) {
+          doc.addPage({ layout: "landscape" });
+          doc.fontSize(16).fillColor("#000000").text("Target Keywords");
+          doc.moveDown(0.5);
+          y = drawHeader(doc.y);
+          doc.fontSize(9);
+        }
+
+        let x = pageLeft;
+        (Object.keys(col) as Array<keyof typeof col>).forEach((key) => {
+          const colW = Math.max(1, safeNumber(col[key], 120));
+          const textW = Math.max(1, colW - rowPaddingX * 2);
+          const xSafe = safeNumber(x, pageLeft);
+          const ySafe = safeNumber(y, doc.y);
+          const rowHSafe = Math.max(1, safeNumber(rowH, 14));
+
+          doc.strokeColor(borderColor).rect(xSafe, ySafe, colW, rowHSafe).stroke();
+          if (key === "url" && isHttpUrl(k.googleUrl)) {
+            doc
+              .fillColor("#1d4ed8")
+              .text(cells.url, xSafe + rowPaddingX, ySafe + rowPaddingY, {
+                width: textW,
+              })
+              .fillColor("#000000");
+          } else {
+            doc.text((cells as any)[key], xSafe + rowPaddingX, ySafe + rowPaddingY, {
+              width: textW,
+            });
+          }
+          x += colW;
+        });
+
+        y += rowH;
+      }
+
+      if (isHttpUrl(shareUrl)) {
+        doc.moveDown(1.5);
+        // Avoid underline for long URLs (PDFKit underline path can NaN on some systems)
+        doc.fillColor("#1d4ed8").fontSize(11).text(`Live dashboard: ${shareUrl}`);
+        doc.fillColor("#000000");
       }
     }
 
@@ -494,9 +789,29 @@ export async function processScheduledReports(): Promise<void> {
         if (recipients && recipients.length > 0) {
           console.log(`[Report Scheduler] Sending emails to: ${recipients.join(", ")}`);
           
-          const emailHtml = generateReportEmailHTML(report, schedule.client);
+          const shareUrl = (() => {
+            try {
+              return buildShareDashboardUrl(schedule.clientId);
+            } catch (err: any) {
+              console.warn(
+                `[Report Scheduler] Failed to build share URL for client ${schedule.clientId}:`,
+                err?.message || err
+              );
+              return null;
+            }
+          })();
+
+          const targetKeywords = await getReportTargetKeywords(schedule.clientId).catch((err) => {
+            console.warn(
+              `[Report Scheduler] Failed to fetch target keywords for client ${schedule.clientId}:`,
+              err?.message || err
+            );
+            return [] as ReportTargetKeywordRow[];
+          });
+
+          const emailHtml = generateReportEmailHTML(report, schedule.client, { targetKeywords, shareUrl });
           const emailSubject = schedule.emailSubject || `SEO Report - ${schedule.client.name} - ${schedule.frequency.charAt(0).toUpperCase() + schedule.frequency.slice(1)}`;
-          const pdfBuffer = await generateReportPDFBuffer(report, schedule.client);
+          const pdfBuffer = await generateReportPDFBuffer(report, schedule.client, { targetKeywords, shareUrl });
 
           const emailPromises = recipients.map((email: string) =>
             sendEmail({

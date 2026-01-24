@@ -117,13 +117,20 @@ const RankedKeywordsLegend = () => {
 
 const RankedKeywordsTooltip = ({ active, label, payload }: any) => {
   if (!active || !payload || payload.length === 0) return null;
-  const total = payload.reduce((sum: number, p: any) => sum + (Number(p?.value) || 0), 0);
+  const orderIndex = new Map<string, number>(SERIES.map((s, idx) => [s.key as string, idx]));
+  const sortedPayload = [...payload].sort((a: any, b: any) => {
+    const ai = orderIndex.get(String(a?.dataKey)) ?? 999;
+    const bi = orderIndex.get(String(b?.dataKey)) ?? 999;
+    return ai - bi;
+  });
+
+  const total = sortedPayload.reduce((sum: number, p: any) => sum + (Number(p?.value) || 0), 0);
   return (
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow">
       <p className="text-xs font-medium text-gray-700">{label}</p>
       <p className="mt-1 text-sm font-semibold text-gray-900">Total: {total.toLocaleString()}</p>
       <div className="mt-2 space-y-1">
-        {payload.map((p: any) => (
+        {sortedPayload.map((p: any) => (
           <div key={p.dataKey} className="flex items-center justify-between gap-4 text-xs">
             <div className="flex items-center gap-2 min-w-0">
               <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.color }} />

@@ -26,6 +26,14 @@ interface BacklinkTimeseriesItem {
   lostReferringDomains: number;
 }
 
+type BacklinkRow = {
+  id: string;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 interface VisitorSourceItem {
   source: string;
   users: number;
@@ -109,9 +117,12 @@ const ShareDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [fetchingSummary, setFetchingSummary] = useState(false);
-  const [backlinkTimeseries, setBacklinkTimeseries] = useState<BacklinkTimeseriesItem[]>([]);
-  const [backlinkTimeseriesLoading, setBacklinkTimeseriesLoading] = useState(false);
-  const [backlinkTimeseriesError, setBacklinkTimeseriesError] = useState<string | null>(null);
+  const [backlinksForChart, setBacklinksForChart] = useState<{ newRows: BacklinkRow[]; lostRows: BacklinkRow[] }>({
+    newRows: [],
+    lostRows: [],
+  });
+  const [backlinksForChartLoading, setBacklinksForChartLoading] = useState(false);
+  const [backlinksForChartError, setBacklinksForChartError] = useState<string | null>(null);
   const [topPages, setTopPages] = useState<TopPageItem[]>([]);
   const [topPagesLoading, setTopPagesLoading] = useState(false);
   const [topPagesError, setTopPagesError] = useState<string | null>(null);
@@ -266,43 +277,44 @@ const ShareDashboardPage: React.FC = () => {
     fetchSummary();
   }, [token, dateRange]);
 
-  const fetchBacklinkTimeseries = useCallback(async () => {
+  const fetchBacklinksForChart = useCallback(async () => {
     if (!token) return;
 
-    try {
-      setBacklinkTimeseriesLoading(true);
-      const res = await api.get(`/seo/share/${encodeURIComponent(token)}/backlinks/timeseries`, {
-        // Weekly UI uses last 4 weeks of daily data (28 days).
-        params: { range: 28, group: "day" },
-      });
-      const data = Array.isArray(res.data) ? res.data : [];
-      const normalized = data
-        .map((item: any) => ({
-          date: item.date,
-          newBacklinks: Number(item.newBacklinks ?? item.new_backlinks ?? 0),
-          lostBacklinks: Number(item.lostBacklinks ?? item.lost_backlinks ?? 0),
-          newReferringDomains: Number(item.newReferringDomains ?? item.new_referring_domains ?? 0),
-          lostReferringDomains: Number(item.lostReferringDomains ?? item.lost_referring_domains ?? 0),
-        }))
-        .filter((item) => item.date);
+    const paramsBase = {
+      days: 28, // last 4 weeks
+      limit: 5000,
+      sortBy: "domainRating",
+      order: "desc",
+    } as const;
 
-      // Match main dashboard: newest dates first (not sorted by volume)
-      normalized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setBacklinkTimeseries(normalized);
-      setBacklinkTimeseriesError(null);
+    const fetchBoth = async () => {
+      const [newRes, lostRes] = await Promise.all([
+        api.get(`/seo/share/${encodeURIComponent(token)}/backlinks`, { params: { ...paramsBase, filter: "new" } }),
+        api.get(`/seo/share/${encodeURIComponent(token)}/backlinks`, { params: { ...paramsBase, filter: "lost" } }),
+      ]);
+      const newRows = Array.isArray(newRes.data) ? (newRes.data as BacklinkRow[]) : [];
+      const lostRows = Array.isArray(lostRes.data) ? (lostRes.data as BacklinkRow[]) : [];
+      return { newRows, lostRows };
+    };
+
+    try {
+      setBacklinksForChartLoading(true);
+      const { newRows, lostRows } = await fetchBoth();
+      setBacklinksForChart({ newRows, lostRows });
+      setBacklinksForChartError(null);
     } catch (error: any) {
-      console.error("Failed to fetch backlink timeseries", error);
-      setBacklinkTimeseries([]);
-      const errorMsg = error?.response?.data?.message || "Unable to load backlink timeseries";
-      setBacklinkTimeseriesError(errorMsg);
+      console.error("Failed to fetch backlinks chart rows (share)", error);
+      setBacklinksForChart({ newRows: [], lostRows: [] });
+      const errorMsg = error?.response?.data?.message || "Unable to load backlink trends";
+      setBacklinksForChartError(errorMsg);
     } finally {
-      setBacklinkTimeseriesLoading(false);
+      setBacklinksForChartLoading(false);
     }
-  }, [token, dateRange]);
+  }, [token]);
 
   useEffect(() => {
-    fetchBacklinkTimeseries();
-  }, [fetchBacklinkTimeseries]);
+    void fetchBacklinksForChart();
+  }, [fetchBacklinksForChart]);
 
   const weeklyBacklinkTimeseries = useMemo(() => {
     const weeks = 4;
@@ -329,20 +341,31 @@ const ShareDashboardPage: React.FC = () => {
       byKey.set(key, bucket);
     }
 
-    for (const item of backlinkTimeseries) {
-      const dt = new Date(item.date);
+    for (const row of backlinksForChart.newRows) {
+      const raw = row.firstSeen || row.createdAt;
+      const dt = new Date(raw);
       if (!Number.isFinite(dt.getTime())) continue;
       const ws = startOfWeek(dt, { weekStartsOn });
       const key = format(ws, "yyyy-MM-dd");
       const bucket = byKey.get(key);
       if (!bucket) continue;
-      bucket.newBacklinks += Number(item.newBacklinks) || 0;
-      bucket.lostBacklinks += Number(item.lostBacklinks) || 0;
+      bucket.newBacklinks += 1;
+    }
+
+    for (const row of backlinksForChart.lostRows) {
+      const raw = row.lastSeen || row.updatedAt || row.createdAt;
+      const dt = new Date(raw);
+      if (!Number.isFinite(dt.getTime())) continue;
+      const ws = startOfWeek(dt, { weekStartsOn });
+      const key = format(ws, "yyyy-MM-dd");
+      const bucket = byKey.get(key);
+      if (!bucket) continue;
+      bucket.lostBacklinks += 1;
     }
 
     buckets.sort((a, b) => (a.key < b.key ? 1 : -1));
     return buckets;
-  }, [backlinkTimeseries]);
+  }, [backlinksForChart.lostRows, backlinksForChart.newRows]);
 
   useEffect(() => {
     if (!token) return;
@@ -1144,11 +1167,11 @@ const ShareDashboardPage: React.FC = () => {
                 </div>
               </div>
               <div className="p-6 space-y-4">
-                {backlinkTimeseriesLoading ? (
+                {backlinksForChartLoading ? (
                   <p className="text-sm text-gray-500">Loading backlink trends...</p>
-                ) : backlinkTimeseriesError ? (
-                  <p className="text-sm text-red-600">{backlinkTimeseriesError}</p>
-                ) : backlinkTimeseries.length === 0 ? (
+                ) : backlinksForChartError ? (
+                  <p className="text-sm text-red-600">{backlinksForChartError}</p>
+                ) : backlinksForChart.newRows.length === 0 && backlinksForChart.lostRows.length === 0 ? (
                   <p className="text-sm text-gray-500">No backlink data available yet.</p>
                 ) : (() => {
                   const maxNewBacklinks =
@@ -1163,9 +1186,11 @@ const ShareDashboardPage: React.FC = () => {
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <span>{item.label}</span>
                           <span
-                            className={`font-medium ${item.newBacklinks > 0 ? "text-green-600" : "text-gray-900"}`}
+                            className={`font-medium ${
+                              item.newBacklinks === 0 ? "text-gray-900" : "text-emerald-600"
+                            }`}
                           >
-                            {backlinkTimeseriesLoading ? "..." : `${item.newBacklinks} new`}
+                            {`${item.newBacklinks} new`}
                           </span>
                         </div>
                         <div className="flex items-center space-x-3">
@@ -1176,7 +1201,7 @@ const ShareDashboardPage: React.FC = () => {
                             />
                           </div>
                           <span className="text-xs text-gray-600 whitespace-nowrap">
-                            {backlinkTimeseriesLoading ? "..." : `-${item.lostBacklinks} lost`}
+                            {`-${item.lostBacklinks} lost`}
                           </span>
                         </div>
                       </div>

@@ -76,7 +76,11 @@ export async function fetchGA4VisitorSources(
 
     return sources;
   } catch (error: any) {
-    console.error('[GA4] Failed to fetch visitor sources:', error);
+    // Avoid noisy logs for expected GA4 disconnects (token revoked, not connected, etc.)
+    const msg = String(error?.message || "");
+    if (!msg.includes("GA4")) {
+      console.warn("[GA4] Failed to fetch visitor sources:", msg);
+    }
     return [];
   }
 }

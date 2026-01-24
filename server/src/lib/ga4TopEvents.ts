@@ -76,7 +76,11 @@ export async function fetchGA4TopEvents(
 
     return events;
   } catch (error: any) {
-    console.error('[GA4] Failed to fetch top events:', error);
+    // Avoid noisy logs for expected GA4 disconnects (token revoked, not connected, etc.)
+    const msg = String(error?.message || "");
+    if (!msg.includes("GA4")) {
+      console.warn("[GA4] Failed to fetch top events:", msg);
+    }
     return [];
   }
 }
@@ -145,7 +149,10 @@ export async function fetchGA4TopKeyEvents(
 
     return events;
   } catch (error: any) {
-    console.error("[GA4] Failed to fetch top key events:", error);
+    const msg = String(error?.message || "");
+    if (!msg.includes("GA4")) {
+      console.warn("[GA4] Failed to fetch top key events:", msg);
+    }
     return [];
   }
 }

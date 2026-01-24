@@ -51,6 +51,17 @@ interface TrafficSourceSlice {
   color: string;
 }
 
+type ReportTargetKeywordRow = {
+  id: string;
+  keyword: string;
+  locationName: string | null;
+  createdAt: string;
+  googlePosition: number | null;
+  previousPosition: number | null;
+  serpItemTypes: unknown;
+  googleUrl: string | null;
+};
+
 const BACKLINKS_PAGE_SIZES = [25, 50, 100, 250] as const;
 
 interface ClientReport {
@@ -333,6 +344,17 @@ const ClientDashboardPage: React.FC = () => {
   const modalDashboardContentRef = useRef<HTMLDivElement>(null);
   const [viewReportModalOpen, setViewReportModalOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ClientReport | null>(null);
+  const [reportDeleteConfirm, setReportDeleteConfirm] = useState<{
+    isOpen: boolean;
+    reportId: string | null;
+    label: string | null;
+  }>({ isOpen: false, reportId: null, label: null });
+
+  const [reportPreviewTargetKeywords, setReportPreviewTargetKeywords] = useState<ReportTargetKeywordRow[]>([]);
+  const [reportPreviewTargetKeywordsLoading, setReportPreviewTargetKeywordsLoading] = useState(false);
+  const [reportPreviewTargetKeywordsError, setReportPreviewTargetKeywordsError] = useState<string | null>(null);
+  const [reportPreviewShareUrl, setReportPreviewShareUrl] = useState<string | null>(null);
+  const [reportPreviewShareLoading, setReportPreviewShareLoading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [serverReport, setServerReport] = useState<any | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -2065,6 +2087,62 @@ const ClientDashboardPage: React.FC = () => {
     setViewReportModalOpen(true);
   };
 
+  const toStringArray = useCallback((value: unknown): string[] => {
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === "string");
+      } catch {
+        // ignore
+      }
+      if (value.includes(",")) return value.split(",").map((s) => s.trim()).filter(Boolean);
+      if (value.trim()) return [value.trim()];
+    }
+    return [];
+  }, []);
+
+  useEffect(() => {
+    if (!viewReportModalOpen || !clientId) return;
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        setReportPreviewTargetKeywordsLoading(true);
+        setReportPreviewTargetKeywordsError(null);
+        setReportPreviewShareLoading(true);
+
+        const [tkRes, shareRes] = await Promise.all([
+          api.get(`/seo/target-keywords/${clientId}`),
+          api.post(`/seo/share-link/${clientId}`),
+        ]);
+
+        if (cancelled) return;
+
+        const tkRows = Array.isArray(tkRes.data) ? (tkRes.data as ReportTargetKeywordRow[]) : [];
+        setReportPreviewTargetKeywords(tkRows.slice(0, 50));
+
+        const token = shareRes?.data?.token;
+        const url = token ? `${window.location.origin}/share/${encodeURIComponent(token)}` : null;
+        setReportPreviewShareUrl(url);
+      } catch (e: any) {
+        if (cancelled) return;
+        setReportPreviewTargetKeywords([]);
+        setReportPreviewShareUrl(null);
+        setReportPreviewTargetKeywordsError(e?.response?.data?.message || "Failed to load report details.");
+      } finally {
+        if (cancelled) return;
+        setReportPreviewTargetKeywordsLoading(false);
+        setReportPreviewShareLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, viewReportModalOpen]);
+
   const handleSendReport = useCallback(async () => {
     if (!singleReportForClient) {
       toast.error("No report to send for this client");
@@ -2097,16 +2175,23 @@ const ClientDashboardPage: React.FC = () => {
       toast.error("No report to delete for this client");
       return;
     }
+    setReportDeleteConfirm({
+      isOpen: true,
+      reportId: singleReportForClient.id,
+      label: singleReportForClient.name,
+    });
+  }, [singleReportForClient]);
 
-    if (!window.confirm("Are you sure you want to delete this report? This action cannot be undone.")) {
+  const confirmDeleteReport = useCallback(async () => {
+    if (!reportDeleteConfirm.reportId) {
+      setReportDeleteConfirm({ isOpen: false, reportId: null, label: null });
       return;
     }
 
     try {
       setReportLoading(true);
-      await api.delete(`/seo/reports/${singleReportForClient.id}`);
+      await api.delete(`/seo/reports/${reportDeleteConfirm.reportId}`);
       toast.success("Report deleted successfully");
-      // Reload from server so UI reflects DB (no mock data)
       await loadReport();
     } catch (error: any) {
       console.error("Failed to delete report", error);
@@ -2114,8 +2199,9 @@ const ClientDashboardPage: React.FC = () => {
       toast.error(msg);
     } finally {
       setReportLoading(false);
+      setReportDeleteConfirm({ isOpen: false, reportId: null, label: null });
     }
-  }, [singleReportForClient, loadReport]);
+  }, [loadReport, reportDeleteConfirm.reportId]);
 
   const handleCloseViewModal = () => {
     setViewReportModalOpen(false);
@@ -5896,6 +5982,17 @@ const ClientDashboardPage: React.FC = () => {
         variant="danger"
       />
 
+      <ConfirmDialog
+        isOpen={reportDeleteConfirm.isOpen}
+        onClose={() => setReportDeleteConfirm({ isOpen: false, reportId: null, label: null })}
+        onConfirm={() => void confirmDeleteReport()}
+        title="Delete report"
+        message={`Are you sure you want to delete "${reportDeleteConfirm.label || "this report"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
       {/* View Report Modal */}
       {viewReportModalOpen && selectedReport && createPortal(
         <div className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-50 z-50 m-0 p-0">
@@ -5916,9 +6013,137 @@ const ClientDashboardPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Modal Content - Dashboard View */}
+            {/* Modal Content - Report Preview */}
             <div className="flex-1 overflow-y-auto p-6">
               <div ref={modalDashboardContentRef} className="space-y-8">
+                {/* Report preview (matches emailed PDF/text format) */}
+                <div className="bg-white border border-gray-200 rounded-xl p-8 max-w-4xl mx-auto">
+                  <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-900">SEO Analytics Report</h1>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {(serverReport?.period ? String(serverReport.period) : String(selectedReport.type)).charAt(0).toUpperCase() +
+                        (serverReport?.period ? String(serverReport.period) : String(selectedReport.type)).slice(1).toLowerCase()}{" "}
+                      report for {client?.name || "Client"}
+                    </p>
+                  </div>
+
+                  <div className="mt-6 text-sm text-gray-800 space-y-0.5">
+                    <div>
+                      <span className="font-semibold">Client:</span> {client?.name || "—"}
+                    </div>
+                    <div>
+                      <span className="font-semibold">Domain:</span> {client?.domain || "—"}
+                    </div>
+                    <div>
+                      <span className="font-semibold">Report date:</span>{" "}
+                      {serverReport?.reportDate ? new Date(serverReport.reportDate).toLocaleDateString() : selectedReport.lastGenerated}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <h2 className="text-sm font-bold text-gray-900 underline">Traffic Overview</h2>
+                    <div className="mt-2 text-sm text-gray-900 space-y-0.5">
+                      <div>Total Sessions: {Number(serverReport?.totalSessions ?? 0).toLocaleString()}</div>
+                      <div>Organic Sessions: {Number(serverReport?.organicSessions ?? 0).toLocaleString()}</div>
+                      {serverReport?.activeUsers != null && <div>Active Users: {Number(serverReport.activeUsers ?? 0).toLocaleString()}</div>}
+                      {serverReport?.newUsers != null && <div>New Users: {Number(serverReport.newUsers ?? 0).toLocaleString()}</div>}
+                      {serverReport?.eventCount != null && <div>Event Count: {Number(serverReport.eventCount ?? 0).toLocaleString()}</div>}
+                      {serverReport?.keyEvents != null && <div>Key Events: {Number(serverReport.keyEvents ?? 0).toLocaleString()}</div>}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <h2 className="text-sm font-bold text-gray-900 underline">SEO Performance</h2>
+                    <div className="mt-2 text-sm text-gray-900 space-y-0.5">
+                      <div>
+                        Average Position:{" "}
+                        {serverReport?.averagePosition != null ? Number(serverReport.averagePosition).toFixed(1) : "0.0"}
+                      </div>
+                      <div>Total Clicks: {Number(serverReport?.totalClicks ?? 0).toLocaleString()}</div>
+                      <div>Total Impressions: {Number(serverReport?.totalImpressions ?? 0).toLocaleString()}</div>
+                      <div>
+                        Average CTR: {serverReport?.averageCtr != null ? (Number(serverReport.averageCtr) * 100).toFixed(2) : "0.00"}%
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8">
+                    <h2 className="text-sm font-bold text-gray-900 underline">Target Keywords</h2>
+                    {reportPreviewTargetKeywordsError && (
+                      <div className="mt-3 text-sm text-rose-600">{reportPreviewTargetKeywordsError}</div>
+                    )}
+                    {reportPreviewTargetKeywordsLoading ? (
+                      <div className="mt-3 text-sm text-gray-500">Loading target keywords…</div>
+                    ) : reportPreviewTargetKeywords.length === 0 ? (
+                      <div className="mt-3 text-sm text-gray-500">No target keywords available.</div>
+                    ) : (
+                      <div className="mt-3 overflow-x-auto border border-gray-200 rounded-lg">
+                        <table className="min-w-full text-xs">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Keyword</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Location</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Date Added</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google Change</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google SERP Features</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google URL</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {reportPreviewTargetKeywords.map((k) => {
+                              const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+                              const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+                              const diff = current != null && prev != null ? prev - current : null;
+                              const diffText =
+                                diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+                              const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+                              return (
+                                <tr key={k.id} className="bg-white">
+                                  <td className="px-3 py-2 whitespace-nowrap text-gray-900">{k.keyword}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">{k.locationName || "United States"}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">
+                                    {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-gray-900">{current ?? "—"}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-gray-900">{diffText}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">{serp}</td>
+                                  <td className="px-3 py-2 text-gray-700 break-all">
+                                    {k.googleUrl ? (
+                                      <a className="text-blue-600 underline" href={k.googleUrl} target="_blank" rel="noreferrer">
+                                        {k.googleUrl}
+                                      </a>
+                                    ) : (
+                                      "—"
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-8">
+                    <h2 className="text-sm font-bold text-gray-900 underline">Live Dashboard</h2>
+                    {reportPreviewShareLoading ? (
+                      <div className="mt-3 text-sm text-gray-500">Generating share link…</div>
+                    ) : reportPreviewShareUrl ? (
+                      <div className="mt-3 text-sm">
+                        <a className="text-blue-600 underline break-all" href={reportPreviewShareUrl} target="_blank" rel="noreferrer">
+                          {reportPreviewShareUrl}
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="mt-3 text-sm text-gray-500">Share link unavailable.</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Hide the old dashboard-style preview */}
+                <div className="hidden">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
@@ -6347,6 +6572,7 @@ const ClientDashboardPage: React.FC = () => {
                       });
                     })()}
                   </div>
+                </div>
                 </div>
               </div>
             </div>

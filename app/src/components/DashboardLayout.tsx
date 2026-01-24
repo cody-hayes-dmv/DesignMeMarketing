@@ -56,18 +56,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
       <div
-        className={`flex-1 transition-all duration-300 flex flex-col ${sidebarCollapsed ? "ml-16" : "ml-64"}`}
+        // Sidebar is `fixed` (out of flow). Use padding-left instead of margin-left
+        // so we don't create horizontal overflow (especially on smaller screens).
+        className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}
       >
         <div className="bg-white border-b border-gray-200 px-8 py-4">
           <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
         </div>
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           {children}
         </div>
       </div>

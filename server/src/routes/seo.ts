@@ -1270,6 +1270,24 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
     const periodQuery = typeof req.query.period === "string" ? req.query.period : undefined;
     const requestedPeriod = periodQuery && ["weekly", "biweekly", "monthly"].includes(periodQuery) ? periodQuery : "monthly";
 
+    const parseRecipientsField = (value: unknown): string[] => {
+      if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+      if (value == null) return [];
+      const raw = String(value).trim();
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+        }
+      } catch {
+        // ignore JSON parse errors
+      }
+      // Fallback: comma-separated
+      if (raw.includes(",")) return raw.split(",").map((s) => s.trim()).filter(Boolean);
+      return [raw];
+    };
+
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -1358,6 +1376,8 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
     }
 
     // Format the response with all database fields
+    const recipientsParsed = parseRecipientsField(report.recipients);
+    const scheduleRecipientsParsed = parseRecipientsField(report.schedule?.recipients);
     res.json({
       id: report.id,
       reportDate: report.reportDate,
@@ -1389,7 +1409,7 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       newUsers: report.newUsers,
       keyEvents: report.keyEvents,
       // Email and sharing
-      recipients: report.recipients,
+      recipients: recipientsParsed,
       emailSubject: report.emailSubject,
       sentAt: report.sentAt,
       // Timestamps
@@ -1398,9 +1418,7 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       // Schedule info
       scheduleId: report.scheduleId,
       hasActiveSchedule: report.schedule?.isActive || false,
-      scheduleRecipients: Array.isArray(report.schedule?.recipients as any)
-        ? (report.schedule!.recipients as any)
-        : [],
+      scheduleRecipients: scheduleRecipientsParsed,
       scheduleEmailSubject: report.schedule?.emailSubject || null,
     });
   } catch (error) {
@@ -1853,7 +1871,12 @@ router.get("/share/:token/backlinks", async (req, res) => {
     }
 
     const clientId = tokenData.clientId;
-    const { lost = "false", limit = "50" } = req.query;
+    const lost = typeof req.query.lost === "string" ? req.query.lost : "false";
+    const filter = typeof req.query.filter === "string" ? req.query.filter : undefined; // all|new|lost
+    const sortByRaw = typeof req.query.sortBy === "string" ? req.query.sortBy : "domainRating";
+    const orderRaw = typeof req.query.order === "string" ? req.query.order : "desc";
+    const limitRaw = typeof req.query.limit === "string" ? req.query.limit : "50";
+    const daysRaw = typeof req.query.days === "string" ? req.query.days : "30";
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -1864,15 +1887,46 @@ router.get("/share/:token/backlinks", async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
+    const allowedSortFields = new Set(["domainRating", "firstSeen", "lastSeen", "traffic", "createdAt"]);
+    const sortBy = allowedSortFields.has(sortByRaw) ? sortByRaw : "domainRating";
+    const order: "asc" | "desc" = orderRaw === "asc" ? "asc" : "desc";
+    const limit = Math.min(10000, Math.max(1, Number(limitRaw) || 50));
+    const days = Math.min(365, Math.max(1, Number(daysRaw) || 30));
+
+    const whereClause: any = { clientId };
+
+    // Backwards compat: ?lost=true/false
+    // New: ?filter=all|new|lost&days=N
+    const normalizedFilter = (filter || "").toLowerCase();
+    if (normalizedFilter === "lost" || lost === "true") {
+      whereClause.isLost = true;
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+      // "Lost (last N days)" means lastSeen within range; manual lost links may have null lastSeen.
+      whereClause.OR = [{ lastSeen: { gte: from } }, { lastSeen: null, updatedAt: { gte: from } }];
+    } else if (normalizedFilter === "new") {
+      whereClause.isLost = false;
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+      // Include DataForSEO links (firstSeen) and manual links (createdAt)
+      whereClause.OR = [
+        { firstSeen: { gte: from } },
+        { firstSeen: null, createdAt: { gte: from } },
+      ];
+    } else if (normalizedFilter === "all" || lost === "all") {
+      // "All" tab should show total (current/live) backlinks.
+      whereClause.isLost = false;
+    } else {
+      // default to live links only
+      whereClause.isLost = false;
+    }
+
     const backlinks = await prisma.backlink.findMany({
-      where: {
-        clientId,
-        isLost: lost === "true"
-      },
+      where: whereClause,
       orderBy: {
-        domainRating: "desc"
+        [sortBy]: order
       },
-      take: Number(limit) || 50,
+      take: limit,
     });
 
     res.json(backlinks);
@@ -4969,7 +5023,7 @@ router.get("/events/:clientId/top", authenticateToken, async (req, res) => {
           : await fetchGA4TopEvents(clientId, startDate, endDate, eventsLimit);
       res.json(events);
     } catch (fetchError: any) {
-      console.error("Error fetching top events:", fetchError);
+      console.warn("Error fetching top events:", fetchError?.message || fetchError);
       // If it's a GA4 connection issue, return empty array instead of error
       if (fetchError.message?.includes("Client not found") || fetchError.message?.includes("GA4")) {
         return res.json([]);
@@ -5081,7 +5135,7 @@ router.get("/visitor-sources/:clientId", authenticateToken, async (req, res) => 
       const sources = await fetchGA4VisitorSources(clientId, startDate, endDate, sourcesLimit);
       res.json(sources);
     } catch (fetchError: any) {
-      console.error("Error fetching visitor sources:", fetchError);
+      console.warn("Error fetching visitor sources:", fetchError?.message || fetchError);
       // If it's a GA4 connection issue, return empty array instead of error
       if (fetchError.message?.includes("Client not found") || fetchError.message?.includes("GA4")) {
         return res.json([]);
@@ -5609,6 +5663,12 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
               }
             }
           }
+        },
+        schedule: {
+          select: {
+            recipients: true,
+            emailSubject: true,
+          }
         }
       }
     });
@@ -5631,32 +5691,64 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const recipientsList: string[] = Array.isArray(recipients)
-      ? recipients
-      : (() => {
-          if (!report.recipients) return [];
-          try {
-            const parsed = JSON.parse(String(report.recipients));
-            return Array.isArray(parsed) ? parsed : [];
-          } catch {
-            return [];
-          }
-        })();
+    const parseRecipientsField = (value: unknown): string[] => {
+      if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+      if (value == null) return [];
+      const raw = String(value).trim();
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+        }
+      } catch {
+        // ignore
+      }
+      if (raw.includes(",")) return raw.split(",").map((s) => s.trim()).filter(Boolean);
+      return [raw];
+    };
+
+    const recipientsList: string[] =
+      Array.isArray(recipients) && recipients.length > 0
+        ? parseRecipientsField(recipients)
+        : (() => {
+            const fromReport = parseRecipientsField(report.recipients);
+            if (fromReport.length > 0) return fromReport;
+            return parseRecipientsField(report.schedule?.recipients);
+          })();
     if (!recipientsList || recipientsList.length === 0) {
       return res.status(400).json({ message: "No recipients specified" });
     }
 
     // Generate email HTML and PDF
-    const { generateReportEmailHTML, generateReportPDFBuffer } = await import("../lib/reportScheduler.js");
-    const emailHtml = generateReportEmailHTML(report, report.client);
-    const pdfBuffer = await generateReportPDFBuffer(report, report.client);
+    const {
+      generateReportEmailHTML,
+      generateReportPDFBuffer,
+      getReportTargetKeywords,
+      buildShareDashboardUrl,
+    } = await import("../lib/reportScheduler.js");
+
+    const shareUrl = (() => {
+      try {
+        return buildShareDashboardUrl(report.clientId);
+      } catch {
+        return null;
+      }
+    })();
+    const targetKeywords = await getReportTargetKeywords(report.clientId).catch(() => []);
+
+    const emailHtml = generateReportEmailHTML(report, report.client, { targetKeywords, shareUrl });
+    const pdfBuffer = await generateReportPDFBuffer(report, report.client, { targetKeywords, shareUrl });
 
     // Send emails with PDF attachment
     const { sendEmail } = await import("../lib/email.js");
     const emailPromises = recipientsList.map((email: string) =>
       sendEmail({
         to: email,
-        subject: emailSubject || `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`,
+        subject:
+          emailSubject ||
+          report.schedule?.emailSubject ||
+          `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`,
         html: emailHtml,
         attachments: [
           {
@@ -5677,7 +5769,10 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
         status: "sent",
         sentAt: new Date(),
         recipients: JSON.stringify(recipientsList),
-        emailSubject: emailSubject || `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`
+        emailSubject:
+          emailSubject ||
+          report.schedule?.emailSubject ||
+          `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`
       }
     });
 

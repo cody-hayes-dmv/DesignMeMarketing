@@ -3,6 +3,31 @@ import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { GoogleAuth } from 'google-auth-library';
 import { prisma } from './prisma.js';
 
+const GA4_REVOKED_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const ga4RevokedClientCache = new Map<string, number>();
+
+function isGa4InvalidGrant(error: any): boolean {
+  const msg = String(error?.message || "");
+  const respErr = String(error?.response?.data?.error || "");
+  const respDesc = String(error?.response?.data?.error_description || "");
+  return (
+    msg.includes("invalid_grant") ||
+    respErr === "invalid_grant" ||
+    respDesc.toLowerCase().includes("expired") ||
+    respDesc.toLowerCase().includes("revoked")
+  );
+}
+
+function isGa4RevokedCached(clientId: string): boolean {
+  const ts = ga4RevokedClientCache.get(clientId);
+  if (!ts) return false;
+  if (Date.now() - ts > GA4_REVOKED_TOKEN_TTL_MS) {
+    ga4RevokedClientCache.delete(clientId);
+    return false;
+  }
+  return true;
+}
+
 /**
  * Get OAuth2 client for GA4
  */
@@ -124,12 +149,17 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
  * Get analytics client with valid access token
  */
 export async function getAnalyticsClient(clientId: string) {
+  if (isGa4RevokedCached(clientId)) {
+    throw new Error('GA4 token expired or revoked. Please reconnect GA4.');
+  }
+
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     select: {
       ga4AccessToken: true,
       ga4RefreshToken: true,
       ga4PropertyId: true,
+      ga4ConnectedAt: true,
     },
   });
 
@@ -152,9 +182,40 @@ export async function getAnalyticsClient(clientId: string) {
       where: { id: clientId },
       data: { ga4AccessToken: accessToken },
     });
-  } catch (error) {
-    console.error('Failed to refresh GA4 token:', error);
-    throw new Error('GA4 token expired or revoked. Please reconnect GA4.');
+  } catch (error: any) {
+    const invalidGrant = isGa4InvalidGrant(error);
+    const errMsg = String(error?.message || "unknown_error");
+    const respErr = String(error?.response?.data?.error || "");
+    const respDesc = String(error?.response?.data?.error_description || "");
+
+    if (invalidGrant) {
+      ga4RevokedClientCache.set(clientId, Date.now());
+      console.warn(
+        `[GA4] Refresh token invalid_grant for clientId=${clientId}. Marking GA4 disconnected. (${respErr || errMsg}${respDesc ? `: ${respDesc}` : ""})`
+      );
+      // Disconnect the client so future requests don't keep trying.
+      try {
+        await prisma.client.update({
+          where: { id: clientId },
+          data: {
+            ga4AccessToken: null,
+            ga4RefreshToken: null,
+            ga4ConnectedAt: null,
+          },
+        });
+      } catch (disconnectErr: any) {
+        console.warn(
+          `[GA4] Failed to mark clientId=${clientId} disconnected:`,
+          disconnectErr?.message || disconnectErr
+        );
+      }
+      throw new Error('GA4 token expired or revoked. Please reconnect GA4.');
+    }
+
+    console.warn(
+      `[GA4] Failed to refresh token for clientId=${clientId}: ${respErr || errMsg}${respDesc ? `: ${respDesc}` : ""}`
+    );
+    throw new Error('GA4 token refresh failed. Please reconnect GA4.');
   }
 
   const oauth2Client = getOAuth2Client();
@@ -1333,9 +1394,39 @@ async function getAnalyticsAdminClient(clientId: string) {
         where: { id: clientId },
         data: { ga4AccessToken: accessToken },
       });
-    } catch (error) {
-      console.error('Failed to refresh GA4 token:', error);
-      throw new Error('GA4 token expired. Please reconnect GA4.');
+    } catch (error: any) {
+      const invalidGrant = isGa4InvalidGrant(error);
+      const errMsg = String(error?.message || "unknown_error");
+      const respErr = String(error?.response?.data?.error || "");
+      const respDesc = String(error?.response?.data?.error_description || "");
+
+      if (invalidGrant) {
+        ga4RevokedClientCache.set(clientId, Date.now());
+        console.warn(
+          `[GA4] Admin refresh token invalid_grant for clientId=${clientId}. Marking GA4 disconnected. (${respErr || errMsg}${respDesc ? `: ${respDesc}` : ""})`
+        );
+        try {
+          await prisma.client.update({
+            where: { id: clientId },
+            data: {
+              ga4AccessToken: null,
+              ga4RefreshToken: null,
+              ga4ConnectedAt: null,
+            },
+          });
+        } catch (disconnectErr: any) {
+          console.warn(
+            `[GA4] Failed to mark clientId=${clientId} disconnected (admin path):`,
+            disconnectErr?.message || disconnectErr
+          );
+        }
+        throw new Error('GA4 token expired or revoked. Please reconnect GA4.');
+      }
+
+      console.warn(
+        `[GA4] Admin token refresh failed for clientId=${clientId}: ${respErr || errMsg}${respDesc ? `: ${respDesc}` : ""}`
+      );
+      throw new Error('GA4 token refresh failed. Please reconnect GA4.');
     }
   }
 
