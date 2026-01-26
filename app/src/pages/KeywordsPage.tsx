@@ -56,6 +56,14 @@ const formatNumber = (value: number | null | undefined) => {
   return value.toString();
 };
 
+function parseBulkKeywords(input: string): string[] {
+  const raw = input
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return [...new Set(raw)];
+}
+
 const KeywordsPage: React.FC = () => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [activeTab, setActiveTab] = useState<TabId>("tracked");
@@ -79,6 +87,7 @@ const KeywordsPage: React.FC = () => {
 
   const [newKeywordValue, setNewKeywordValue] = useState("");
   const [addingKeyword, setAddingKeyword] = useState(false);
+  const [addingProgress, setAddingProgress] = useState<{ current: number; total: number } | null>(null);
   const [addKeywordMessage, setAddKeywordMessage] = useState<string | null>(null);
 
   type LocationOption = {
@@ -288,8 +297,15 @@ const KeywordsPage: React.FC = () => {
   const handleAddTrackedKeyword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedClientId) return;
-    if (!newKeywordValue.trim()) {
+    const trimmed = newKeywordValue.trim();
+    if (!trimmed) {
       setAddKeywordMessage("Keyword is required.");
+      return;
+    }
+
+    const keywords = parseBulkKeywords(trimmed);
+    if (keywords.length === 0) {
+      setAddKeywordMessage("No valid keywords. Separate with commas or new lines.");
       return;
     }
 
@@ -300,44 +316,83 @@ const KeywordsPage: React.FC = () => {
       const selectedLocationName = (trackLocationSelected?.location_name || "").trim();
       const useSelected = !!selectedLocationName && selectedLocationName.toLowerCase() === typedLocation.toLowerCase();
       const locationNameToSend = typedLocation || selectedLocationName || DEFAULT_TRACK_LOCATION.location_name;
+      const locationCode = useSelected ? trackLocationSelected?.location_code : undefined;
 
-      // Auto-fetch data from DataForSEO when adding keyword
-      await api.post(
-        `/seo/keywords/${selectedClientId}`,
-        {
-          keyword: newKeywordValue.trim(),
-          fetchFromDataForSEO: true, // Auto-fetch ranking data
-          languageCode: DEFAULT_LANGUAGE,
-          // Only send a code if the user actually selected this exact option.
-          locationCode: useSelected ? trackLocationSelected?.location_code : undefined,
-          // Always send the visible text so typed "Arkansas,UnitedStates" works too.
-          location_name: locationNameToSend,
-          include_clickstream_data: true,
-          include_serp_info: true,
-        },
-        { timeout: 60000 }
-      );
+      if (keywords.length === 1) {
+        // Single keyword: fetch DataForSEO and add
+        await api.post(
+          `/seo/keywords/${selectedClientId}`,
+          {
+            keyword: keywords[0],
+            fetchFromDataForSEO: true,
+            languageCode: DEFAULT_LANGUAGE,
+            locationCode,
+            location_name: locationNameToSend,
+            include_clickstream_data: true,
+            include_serp_info: true,
+          },
+          { timeout: 60000 }
+        );
+        toast.success("Keyword added and data fetched successfully!");
+        setAddKeywordMessage("Keyword added successfully. Ranking data will be fetched automatically.");
+      } else {
+        // Multiple keywords: add each via single-keyword API with DataForSEO so metrics populate
+        let created = 0;
+        let skipped = 0;
+        let failed = 0;
+        setAddingProgress({ current: 0, total: keywords.length });
+        for (let i = 0; i < keywords.length; i++) {
+          setAddingProgress({ current: i + 1, total: keywords.length });
+          try {
+            await api.post(
+              `/seo/keywords/${selectedClientId}`,
+              {
+                keyword: keywords[i],
+                fetchFromDataForSEO: true,
+                languageCode: DEFAULT_LANGUAGE,
+                locationCode,
+                location_name: locationNameToSend,
+                include_clickstream_data: true,
+                include_serp_info: true,
+              },
+              { timeout: 60000 }
+            );
+            created++;
+          } catch (err: any) {
+            if (err?.response?.status === 400 && /already exists/i.test(String(err?.response?.data?.message ?? ""))) {
+              skipped++;
+            } else {
+              failed++;
+            }
+          }
+          if (i < keywords.length - 1) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+        }
+        setAddingProgress(null);
+        const parts: string[] = [];
+        if (created > 0) parts.push(`${created} added`);
+        if (skipped > 0) parts.push(`${skipped} skipped (already tracked)`);
+        if (failed > 0) parts.push(`${failed} failed`);
+        const msg = parts.join(". ") || "Done.";
+        toast.success(msg);
+        setAddKeywordMessage(created > 0 ? `${msg} SEARCH VOLUME, KEYWORD DIFFICULTY, CPC, etc. fetched from DataForSEO.` : msg);
+      }
 
-      // Note: server upserts Target Keywords during /seo/keywords create,
-      // so we don't call /target-keywords here (prevents "already exists" toast after re-adding).
-
-      toast.success("Keyword added and data fetched successfully!");
-      setAddKeywordMessage("Keyword added successfully. Ranking data will be fetched automatically.");
       setNewKeywordValue("");
-
       const res = await api.get(`/seo/keywords/${selectedClientId}`);
       const keywordList: Keyword[] = Array.isArray(res.data) ? res.data : [];
       setTrackedKeywords(keywordList);
     } catch (error: any) {
-      console.error("Failed to add keyword", error);
-      let errorMsg = error?.response?.data?.message || "Failed to add keyword.";
+      console.error("Failed to add keyword(s)", error);
+      let errorMsg = error?.response?.data?.message || "Failed to add keyword(s).";
       if (error?.code === "ECONNABORTED" || String(error?.message || "").toLowerCase().includes("timeout")) {
-        errorMsg = "Request timed out while fetching keyword data. Please try again (this can take ~30-60 seconds).";
+        errorMsg = "Request timed out. Please try again.";
       }
       setAddKeywordMessage(errorMsg);
-      // Toast is already shown by API interceptor
     } finally {
       setAddingKeyword(false);
+      setAddingProgress(null);
     }
   };
 
@@ -789,18 +844,18 @@ const KeywordsPage: React.FC = () => {
               <div className="flex items-start gap-3">
                 <div className="flex-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Seed Keyword
+                    Keywords
                   </label>
-                  <div className="mt-1 flex items-center gap-3">
-                    <input
-                      type="text"
+                  <div className="mt-1 flex flex-col sm:flex-row gap-3">
+                    <textarea
                       value={newKeywordValue}
                       onChange={(e) => setNewKeywordValue(e.target.value)}
-                      placeholder="e.g. best running shoes"
-                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                      placeholder="e.g. best running shoes — or paste many (comma or new line separated)"
+                      rows={3}
+                      className="flex-1 min-w-0 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 resize-y"
                       required
                     />
-                    <div ref={locationBoxRef} className="relative w-72">
+                    <div ref={locationBoxRef} className="relative w-full sm:w-72 flex-shrink-0">
                       <label className="sr-only">Location</label>
                       <input
                         type="text"
@@ -854,7 +909,9 @@ const KeywordsPage: React.FC = () => {
                       {addingKeyword ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          Tracking…
+                          {addingProgress
+                            ? `Adding ${addingProgress.current}/${addingProgress.total}…`
+                            : "Tracking…"}
                         </>
                       ) : (
                         <>
@@ -865,7 +922,8 @@ const KeywordsPage: React.FC = () => {
                     </button>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
-                    Data will be automatically fetched from DataForSEO when you track this keyword.
+                    SEARCH VOLUME, KEYWORD DIFFICULTY, CPC, COMPETITIVE DENSITY and CURRENT POSITION are fetched from
+                    DataForSEO for each keyword (single or multiple, comma/new line separated).
                   </p>
                 </div>
               </div>

@@ -2865,6 +2865,153 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
   }
 });
 
+const BULK_KEYWORDS_LIMIT = 500;
+
+function parseBulkKeywords(input: string): string[] {
+  const raw = input
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return [...new Set(raw)];
+}
+
+// Bulk-create keywords for a client (comma/newline-separated). No DataForSEO fetch by default.
+router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const body = z
+      .object({
+        keywords: z.array(z.string().min(1)).optional(),
+        keyword: z.string().optional(),
+        locationCode: z.number().int().optional(),
+        languageCode: z.string().optional().default("en"),
+        locationName: z.string().min(1).optional(),
+        location_name: z.string().min(1).optional(),
+      })
+      .parse(req.body);
+
+    const locationNameRaw = body.locationName ?? body.location_name;
+    const resolvedLocationName = normalizeLocationName(locationNameRaw || "United States");
+    const resolvedLocationCode =
+      body.locationCode ?? (await resolveLocationCodeFromName(resolvedLocationName)) ?? 2840;
+
+    let keywords: string[];
+    if (Array.isArray(body.keywords) && body.keywords.length > 0) {
+      keywords = [...new Set(body.keywords.map((k) => k.trim()).filter((k) => k.length > 0))];
+    } else if (typeof body.keyword === "string" && body.keyword.trim()) {
+      keywords = parseBulkKeywords(body.keyword);
+    } else {
+      return res.status(400).json({ message: "Provide 'keywords' (array) or 'keyword' (comma/newline-separated)." });
+    }
+
+    if (keywords.length === 0) {
+      return res.status(400).json({ message: "No valid keywords to add. Use comma or new line to separate keywords." });
+    }
+    if (keywords.length > BULK_KEYWORDS_LIMIT) {
+      return res
+        .status(400)
+        .json({ message: `Maximum ${BULK_KEYWORDS_LIMIT} keywords per bulk add. You sent ${keywords.length}.` });
+    }
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess) {
+      const cu = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(cu);
+    }
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    let created = 0;
+    let skipped = 0;
+    const failed: { keyword: string; error: string }[] = [];
+
+    for (const kw of keywords) {
+      const existing = await prisma.keyword.findUnique({
+        where: {
+          clientId_keyword: { clientId, keyword: kw },
+        },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        const createData: any = {
+          keyword: kw,
+          searchVolume: 0,
+          clientId,
+          ...(resolvedLocationName ? { locationName: resolvedLocationName } : {}),
+        };
+        await prisma.keyword.create({ data: createData });
+
+        try {
+          await prisma.targetKeyword.upsert({
+            where: {
+              clientId_keyword: { clientId, keyword: kw },
+            },
+            update: {
+              locationCode: resolvedLocationCode,
+              locationName: resolvedLocationName,
+              languageCode: body.languageCode,
+            },
+            create: {
+              keyword: kw,
+              clientId,
+              locationCode: resolvedLocationCode,
+              locationName: resolvedLocationName,
+              languageCode: body.languageCode,
+            },
+          });
+        } catch (tkErr: any) {
+          console.warn("Bulk add: target keyword upsert failed for", kw, tkErr?.message);
+        }
+
+        created++;
+      } catch (err: any) {
+        failed.push({ keyword: kw, error: err?.message || "Unknown error" });
+      }
+    }
+
+    res.json({ created, skipped, failed, total: keywords.length });
+  } catch (error: any) {
+    if (error.name === "ZodError") {
+      return res.status(400).json({ message: "Invalid input", errors: error.errors });
+    }
+    console.error("Bulk keywords error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Refresh keyword data from DataForSEO (SUPER_ADMIN only)
 router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (req, res) => {
   try {
