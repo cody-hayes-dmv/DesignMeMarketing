@@ -2031,12 +2031,12 @@ const ClientDashboardPage: React.FC = () => {
   }, [fetchTrafficSources]);
 
   // Load single report from server (enforced one report per client)
-  const loadReport = useCallback(async () => {
+  const loadReport = useCallback(async (ensureFresh: boolean = true) => {
     if (!clientId) return;
     try {
       setReportLoading(true);
       setReportError(null);
-      const res = await api.get(`/seo/reports/${clientId}`, { params: { period: "monthly", ensureFresh: true } });
+      const res = await api.get(`/seo/reports/${clientId}`, { params: { period: "monthly", ensureFresh } });
       setServerReport(res.data || null);
     } catch (error: any) {
       console.error("Failed to load report", error);
@@ -2272,11 +2272,23 @@ const ClientDashboardPage: React.FC = () => {
       setReportLoading(true);
       await api.delete(`/seo/reports/${reportDeleteConfirm.reportId}`);
       toast.success("Report deleted successfully");
-      await loadReport();
+      // Reload without ensureFresh to prevent auto-generating a new report immediately
+      await loadReport(false);
     } catch (error: any) {
       console.error("Failed to delete report", error);
-      const msg = error?.response?.data?.message || "Failed to delete report";
-      toast.error(msg);
+      const errorMsg = error?.response?.data?.message || "Failed to delete report";
+      const statusCode = error?.response?.status;
+      
+      // Provide more specific error messages
+      if (statusCode === 403) {
+        toast.error("Access denied. You don't have permission to delete this report.");
+      } else if (statusCode === 404) {
+        toast.error("Report not found. It may have already been deleted.");
+        // Still reload to refresh the UI
+        await loadReport(false);
+      } else {
+        toast.error(errorMsg);
+      }
     } finally {
       setReportLoading(false);
       setReportDeleteConfirm({ isOpen: false, reportId: null, label: null });
@@ -4867,7 +4879,7 @@ const ClientDashboardPage: React.FC = () => {
                                 : "border-gray-200 text-gray-700"
                             }`}
                           >
-                            New
+                            New (Last 30 days)
                           </button>
                         </div>
                       </div>

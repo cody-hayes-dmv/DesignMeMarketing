@@ -51,13 +51,53 @@ export const inviteAgency = createAsyncThunk(
 
 export const createAgency = createAsyncThunk(
   "agency/createAgency",
-  async ({ name, subdomain }: { name: string; subdomain?: string }) => {
+  async ({ 
+    name, 
+    subdomain, 
+    email, 
+    password, 
+    username 
+  }: { 
+    name: string; 
+    subdomain?: string;
+    email?: string;
+    password?: string;
+    username?: string;
+  }) => {
     try {
-      const response = await api.post("/agencies", { name, subdomain });
+      const response = await api.post("/agencies", { name, subdomain, email, password, username });
       return response.data;
     } catch (error: any) {
       throw new Error(
         error.response?.data?.message || "Failed to create agency"
+      );
+    }
+  }
+);
+
+export const deleteAgency = createAsyncThunk(
+  "agency/deleteAgency",
+  async (agencyId: string) => {
+    try {
+      await api.delete(`/agencies/${agencyId}`);
+      return agencyId;
+    } catch (error: any) {
+      throw new Error(
+        error.response?.data?.message || "Failed to delete agency"
+      );
+    }
+  }
+);
+
+export const assignClientToAgency = createAsyncThunk(
+  "agency/assignClientToAgency",
+  async ({ agencyId, clientId }: { agencyId: string; clientId: string }) => {
+    try {
+      const response = await api.post(`/agencies/${agencyId}/assign-client/${clientId}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(
+        error.response?.data?.message || "Failed to assign client to agency"
       );
     }
   }
@@ -105,6 +145,29 @@ const agencySlice = createSlice({
       .addCase(createAgency.rejected, (state, action) => {
         state.loading = false;
         state.error = action.error.message || "Failed to create agency";
+      })
+      .addCase(deleteAgency.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(deleteAgency.fulfilled, (state, action) => {
+        state.loading = false;
+        state.agencies = state.agencies.filter(agency => agency.id !== action.payload);
+      })
+      .addCase(deleteAgency.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || "Failed to delete agency";
+      })
+      .addCase(assignClientToAgency.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(assignClientToAgency.fulfilled, (state) => {
+        state.loading = false;
+      })
+      .addCase(assignClientToAgency.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || "Failed to assign client to agency";
       });
   },
 });

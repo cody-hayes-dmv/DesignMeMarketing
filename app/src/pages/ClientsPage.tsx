@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store";
 import { fetchClients, createClient, updateClient, deleteClient, Client } from "../store/slices/clientSlice";
+import { fetchAgencies, assignClientToAgency } from "../store/slices/agencySlice";
 import {
   Plus,
   Globe,
@@ -148,6 +149,7 @@ const ClientsPage = () => {
   const { clients } = useSelector(
     (state: RootState) => state.client
   );
+  const { agencies } = useSelector((state: RootState) => state.agency);
   const { user } = useSelector((state: RootState) => state.auth);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -159,13 +161,18 @@ const ClientsPage = () => {
   const [clientForm, setClientForm] = useState<ClientFormState>(EMPTY_CLIENT_FORM);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState("");
+  const [showAssignAgencyModal, setShowAssignAgencyModal] = useState(false);
+  const [selectedClientForAgency, setSelectedClientForAgency] = useState<Client | null>(null);
   const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const cardMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [openCardMenuId, setOpenCardMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(fetchClients() as any);
-  }, [dispatch]);
+    if (user?.role === "SUPER_ADMIN") {
+      dispatch(fetchAgencies() as any);
+    }
+  }, [dispatch, user?.role]);
 
   const canSeeSeoRoadmapFields = user?.role === "SUPER_ADMIN" || user?.role === "WORKER";
 
@@ -291,6 +298,24 @@ const ClientsPage = () => {
     } catch (error: any) {
       console.error("Share link error", error);
       // Toast is handled by interceptor; provide extra context here if desired
+    }
+  };
+
+  const handleAssignToAgency = (client: Client) => {
+    setSelectedClientForAgency(client);
+    setShowAssignAgencyModal(true);
+  };
+
+  const confirmAssignToAgency = async (agencyId: string) => {
+    if (!selectedClientForAgency) return;
+    try {
+      await dispatch(assignClientToAgency({ agencyId, clientId: selectedClientForAgency.id }) as any);
+      toast.success("Client assigned to agency successfully!");
+      setShowAssignAgencyModal(false);
+      setSelectedClientForAgency(null);
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Failed to assign client to agency:", error);
     }
   };
 
@@ -695,6 +720,15 @@ const ClientsPage = () => {
                         >
                           <Share2 className="h-4 w-4" />
                         </button>
+                        {user?.role === "SUPER_ADMIN" && (
+                          <button
+                            className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                            onClick={() => handleAssignToAgency(client)}
+                            title="Assign to Agency"
+                          >
+                            <Users className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
                           onClick={() => handleEditClick(client)}
@@ -1148,22 +1182,13 @@ const ClientsPage = () => {
 
                 {/* Services */}
                 <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Services</h3>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile Services</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Primary Services List</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Services List</label>
                       <textarea
                         value={clientForm.primaryServicesList}
                         onChange={(e) => setClientForm({ ...clientForm, primaryServicesList: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={3}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Secondary Services List</label>
-                      <textarea
-                        value={clientForm.secondaryServicesList}
-                        onChange={(e) => setClientForm({ ...clientForm, secondaryServicesList: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         rows={3}
                       />
@@ -1541,22 +1566,13 @@ const ClientsPage = () => {
                 </section>
 
                 <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Services</h3>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile Services</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Primary Services List</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Services List</label>
                       <textarea
                         value={clientForm.primaryServicesList}
                         onChange={(e) => setClientForm({ ...clientForm, primaryServicesList: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={3}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Secondary Services List</label>
-                      <textarea
-                        value={clientForm.secondaryServicesList}
-                        onChange={(e) => setClientForm({ ...clientForm, secondaryServicesList: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         rows={3}
                       />
@@ -1756,6 +1772,60 @@ const ClientsPage = () => {
         cancelText="Cancel"
         variant="danger"
       />
+
+      {/* Assign to Agency Modal */}
+      {showAssignAgencyModal && selectedClientForAgency && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-gray-900">
+                Assign Client to Agency
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAssignAgencyModal(false);
+                  setSelectedClientForAgency(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Select an agency to assign "{selectedClientForAgency.name}" to:
+              </p>
+              <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+                {agencies.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500">
+                    No agencies available. Create an agency first.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-200">
+                    {agencies.map((agency) => (
+                      <button
+                        key={agency.id}
+                        onClick={() => confirmAssignToAgency(agency.id)}
+                        className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="font-medium text-gray-900">{agency.name}</div>
+                        {agency.subdomain && (
+                          <div className="text-sm text-gray-500">
+                            {agency.subdomain}.yourseodashboard.com
+                          </div>
+                        )}
+                        <div className="text-xs text-gray-400 mt-1">
+                          {agency.memberCount} member{agency.memberCount !== 1 ? 's' : ''}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

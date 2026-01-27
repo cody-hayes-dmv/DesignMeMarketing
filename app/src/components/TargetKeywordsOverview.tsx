@@ -156,15 +156,24 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   );
 
   const sortedKeywords = useMemo(() => {
-    // Keep existing server order as the secondary ordering (stable).
-    const indexMap = new Map<string, number>();
-    keywords.forEach((k, idx) => indexMap.set(k.id, idx));
-
+    // Sort by: starred keywords first, then by ranking (googlePosition), with #1 at top
+    // Keywords without rankings go to the bottom of their group
     return [...keywords].sort((a, b) => {
       const aStar = starredKeywordIds.has(a.id);
       const bStar = starredKeywordIds.has(b.id);
+      
+      // Starred keywords come first (regardless of ranking)
       if (aStar !== bStar) return aStar ? -1 : 1;
-      return (indexMap.get(a.id) ?? 0) - (indexMap.get(b.id) ?? 0);
+      
+      // Within starred/unstarred groups, sort by ranking
+      const aPos = a.googlePosition ?? Infinity; // null/undefined = no ranking = bottom
+      const bPos = b.googlePosition ?? Infinity;
+      
+      // Lower position number = better ranking (1st is better than 2nd)
+      if (aPos !== bPos) return aPos - bPos;
+      
+      // If same position (or both null), maintain original order
+      return 0;
     });
   }, [keywords, starredKeywordIds]);
 

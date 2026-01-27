@@ -336,39 +336,64 @@ const KeywordsPage: React.FC = () => {
         toast.success("Keyword added and data fetched successfully!");
         setAddKeywordMessage("Keyword added successfully. Ranking data will be fetched automatically.");
       } else {
-        // Multiple keywords: add each via single-keyword API with DataForSEO so metrics populate
+        // Multiple keywords: process in larger parallel batches for maximum speed while fetching all DataForSEO data
         let created = 0;
         let skipped = 0;
         let failed = 0;
         setAddingProgress({ current: 0, total: keywords.length });
-        for (let i = 0; i < keywords.length; i++) {
-          setAddingProgress({ current: i + 1, total: keywords.length });
-          try {
-            await api.post(
-              `/seo/keywords/${selectedClientId}`,
-              {
-                keyword: keywords[i],
-                fetchFromDataForSEO: true,
-                languageCode: DEFAULT_LANGUAGE,
-                locationCode,
-                location_name: locationNameToSend,
-                include_clickstream_data: true,
-                include_serp_info: true,
-              },
-              { timeout: 60000 }
-            );
-            created++;
-          } catch (err: any) {
-            if (err?.response?.status === 400 && /already exists/i.test(String(err?.response?.data?.message ?? ""))) {
+        
+        // Process keywords in batches of 10 for maximum parallel execution
+        const BATCH_SIZE = 10;
+        for (let i = 0; i < keywords.length; i += BATCH_SIZE) {
+          const batch = keywords.slice(i, i + BATCH_SIZE);
+          
+          // Process batch in parallel
+          const batchPromises = batch.map(async (keyword) => {
+            try {
+              await api.post(
+                `/seo/keywords/${selectedClientId}`,
+                {
+                  keyword: keyword,
+                  fetchFromDataForSEO: true,
+                  languageCode: DEFAULT_LANGUAGE,
+                  locationCode,
+                  location_name: locationNameToSend,
+                  include_clickstream_data: true,
+                  include_serp_info: true,
+                },
+                { timeout: 60000 }
+              );
+              return { success: true, keyword };
+            } catch (err: any) {
+              if (err?.response?.status === 400 && /already exists/i.test(String(err?.response?.data?.message ?? ""))) {
+                return { success: false, skipped: true, keyword };
+              } else {
+                return { success: false, failed: true, keyword };
+              }
+            }
+          });
+          
+          const batchResults = await Promise.all(batchPromises);
+          
+          // Count results
+          batchResults.forEach((result) => {
+            if (result.success) {
+              created++;
+            } else if (result.skipped) {
               skipped++;
-            } else {
+            } else if (result.failed) {
               failed++;
             }
-          }
-          if (i < keywords.length - 1) {
-            await new Promise((r) => setTimeout(r, 1500));
+          });
+          
+          setAddingProgress({ current: Math.min(i + BATCH_SIZE, keywords.length), total: keywords.length });
+          
+          // Minimal delay between batches (reduced from 500ms to 100ms) to avoid overwhelming the API
+          if (i + BATCH_SIZE < keywords.length) {
+            await new Promise((r) => setTimeout(r, 100));
           }
         }
+        
         setAddingProgress(null);
         const parts: string[] = [];
         if (created > 0) parts.push(`${created} added`);
@@ -376,7 +401,7 @@ const KeywordsPage: React.FC = () => {
         if (failed > 0) parts.push(`${failed} failed`);
         const msg = parts.join(". ") || "Done.";
         toast.success(msg);
-        setAddKeywordMessage(created > 0 ? `${msg} SEARCH VOLUME, KEYWORD DIFFICULTY, CPC, etc. fetched from DataForSEO.` : msg);
+        setAddKeywordMessage(created > 0 ? `${msg} SEARCH VOLUME, KEYWORD DIFFICULTY, CPC, COMPETITIVE DENSITY, and CURRENT POSITION fetched from DataForSEO.` : msg);
       }
 
       setNewKeywordValue("");

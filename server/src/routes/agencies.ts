@@ -47,6 +47,9 @@ router.get('/', authenticateToken, async (req, res) => {
 const createAgencySchema = z.object({
   name: z.string().min(1),
   subdomain: z.string().optional(),
+  email: z.string().email().optional(),
+  password: z.string().min(6).optional(),
+  username: z.string().min(1).optional(),
 });
 
 router.post('/', authenticateToken, async (req, res) => {
@@ -55,7 +58,7 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can create agencies directly.' });
     }
 
-    const { name, subdomain } = createAgencySchema.parse(req.body);
+    const { name, subdomain, email, password, username } = createAgencySchema.parse(req.body);
 
     // Check if agency with this name already exists
     const existingAgency = await prisma.agency.findFirst({
@@ -77,6 +80,17 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
+    // Check if email already exists (if provided)
+    if (email) {
+      const existingUser = await prisma.user.findUnique({
+        where: { email },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({ message: 'User with this email already exists' });
+      }
+    }
+
     // Create agency
     const agency = await prisma.agency.create({
       data: {
@@ -89,6 +103,32 @@ router.post('/', authenticateToken, async (req, res) => {
         },
       },
     });
+
+    // If email and password provided, create agency owner user
+    if (email && password) {
+      const bcrypt = await import('bcryptjs');
+      const passwordHash = await bcrypt.default.hash(password, 12);
+      
+      const agencyUser = await prisma.user.create({
+        data: {
+          email,
+          name: username || name,
+          passwordHash,
+          role: 'AGENCY',
+          verified: true,
+          invited: false,
+        },
+      });
+
+      // Link user to agency as OWNER
+      await prisma.userAgency.create({
+        data: {
+          userId: agencyUser.id,
+          agencyId: agency.id,
+          agencyRole: 'OWNER',
+        },
+      });
+    }
 
     const formattedAgency = {
       id: agency.id,
@@ -458,6 +498,139 @@ router.get('/:agencyId/clients', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get agency clients error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Delete agency (Super Admin only)
+router.delete('/:agencyId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can delete agencies.' });
+    }
+
+    const { agencyId } = req.params;
+
+    const agency = await prisma.agency.findUnique({
+      where: { id: agencyId },
+      include: {
+        members: {
+          include: {
+            user: {
+              include: {
+                clients: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+
+    // Check if agency has clients (through user memberships)
+    const hasClients = agency.members.some(m => m.user.clients.length > 0);
+    if (hasClients) {
+      return res.status(400).json({ 
+        message: 'Cannot delete agency with assigned clients. Please reassign clients first.' 
+      });
+    }
+
+    // Delete agency (cascade will handle UserAgency relationships)
+    await prisma.agency.delete({
+      where: { id: agencyId },
+    });
+
+    res.json({ message: 'Agency deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete agency error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
+  }
+});
+
+// Assign client to agency (Super Admin only)
+router.post('/:agencyId/assign-client/:clientId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can assign clients to agencies.' });
+    }
+
+    const { agencyId, clientId } = req.params;
+
+    // Verify agency exists
+    const agency = await prisma.agency.findUnique({
+      where: { id: agencyId },
+      include: {
+        members: {
+          include: {
+            user: true,
+          },
+        },
+      },
+    });
+
+    if (!agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+
+    // Verify client exists
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: true,
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    // Find or create an agency owner user
+    let agencyOwner = agency.members.find(m => m.agencyRole === 'OWNER')?.user;
+    
+    if (!agencyOwner) {
+      // Create a default agency owner user if none exists
+      const bcrypt = await import('bcryptjs');
+      const defaultPassword = await bcrypt.default.hash('changeme123', 12);
+      const defaultEmail = `${agency.name.toLowerCase().replace(/\s+/g, '')}@agency.local`;
+      
+      agencyOwner = await prisma.user.create({
+        data: {
+          email: defaultEmail,
+          name: `${agency.name} Owner`,
+          passwordHash: defaultPassword,
+          role: 'AGENCY',
+          verified: true,
+          invited: false,
+        },
+      });
+
+      await prisma.userAgency.create({
+        data: {
+          userId: agencyOwner.id,
+          agencyId: agency.id,
+          agencyRole: 'OWNER',
+        },
+      });
+    }
+
+    // Update client's userId to the agency owner
+    await prisma.client.update({
+      where: { id: clientId },
+      data: {
+        userId: agencyOwner.id,
+      },
+    });
+
+    res.json({ 
+      message: 'Client assigned to agency successfully',
+      clientId,
+      agencyId,
+    });
+  } catch (error: any) {
+    console.error('Assign client to agency error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
   }
 });
 

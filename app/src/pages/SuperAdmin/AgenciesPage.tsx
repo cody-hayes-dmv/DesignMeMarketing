@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { RootState } from "@/store";
-import { fetchAgencies, createAgency } from "@/store/slices/agencySlice";
+import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -58,11 +58,26 @@ const AgenciesPage = () => {
         isOpen: false,
         clientId: null,
     });
+    const [deleteAgencyConfirm, setDeleteAgencyConfirm] = useState<{ isOpen: boolean; agencyId: string | null; agencyName: string | null }>({
+        isOpen: false,
+        agencyId: null,
+        agencyName: null,
+    });
+    const [assignClientModal, setAssignClientModal] = useState<{ isOpen: boolean; clientId: string | null; clientName: string | null }>({
+        isOpen: false,
+        clientId: null,
+        clientName: null,
+    });
+    const [allClients, setAllClients] = useState<Array<{ id: string; name: string; domain: string }>>([]);
+    const [loadingAllClients, setLoadingAllClients] = useState(false);
     const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const navigate = useNavigate();
     const [createForm, setCreateForm] = useState({
         name: "",
         subdomain: "",
+        email: "",
+        password: "",
+        username: "",
     });
 
     useEffect(() => {
@@ -75,14 +90,63 @@ const AgenciesPage = () => {
             await dispatch(createAgency({
                 name: createForm.name,
                 subdomain: createForm.subdomain || undefined,
+                email: createForm.email || undefined,
+                password: createForm.password || undefined,
+                username: createForm.username || undefined,
             }) as any);
-            setCreateForm({ name: "", subdomain: "" });
+            setCreateForm({ name: "", subdomain: "", email: "", password: "", username: "" });
             setShowCreateModal(false);
             toast.success("Agency created successfully!");
             dispatch(fetchAgencies() as any);
         } catch (error: any) {
             console.error("Failed to create agency:", error);
             // Toast is already shown by API interceptor
+        }
+    };
+
+    const handleDeleteAgency = (agencyId: string, agencyName: string) => {
+        setDeleteAgencyConfirm({ isOpen: true, agencyId, agencyName });
+    };
+
+    const confirmDeleteAgency = async () => {
+        if (!deleteAgencyConfirm.agencyId) return;
+        try {
+            await dispatch(deleteAgency(deleteAgencyConfirm.agencyId) as any);
+            toast.success("Agency deleted successfully!");
+            setDeleteAgencyConfirm({ isOpen: false, agencyId: null, agencyName: null });
+            dispatch(fetchAgencies() as any);
+        } catch (error: any) {
+            console.error("Failed to delete agency:", error);
+            setDeleteAgencyConfirm({ isOpen: false, agencyId: null, agencyName: null });
+        }
+    };
+
+    const handleAssignClientToAgency = async (agencyId: string, clientId: string) => {
+        try {
+            await dispatch(assignClientToAgency({ agencyId, clientId }) as any);
+            toast.success("Client assigned to agency successfully!");
+            if (expandedAgencyId === agencyId) {
+                await refreshAgencyClientsCache(agencyId);
+            }
+            if (selectedAgencyId === agencyId) {
+                handleViewClients(agencyId, selectedAgencyName);
+            }
+            setAssignClientModal({ isOpen: false, clientId: null, clientName: null });
+        } catch (error: any) {
+            console.error("Failed to assign client:", error);
+        }
+    };
+
+    const loadAllClients = async () => {
+        setLoadingAllClients(true);
+        try {
+            const response = await api.get("/clients");
+            setAllClients(response.data || []);
+        } catch (error: any) {
+            console.error("Failed to fetch clients:", error);
+            toast.error(error.response?.data?.message || "Failed to fetch clients");
+        } finally {
+            setLoadingAllClients(false);
         }
     };
 
@@ -381,6 +445,16 @@ const AgenciesPage = () => {
                                                 >
                                                     <BuildingIcon className="h-4 w-4" />
                                                 </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDeleteAgency(agency.id, agency.name);
+                                                    }}
+                                                    className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                                    title="Delete Agency"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>
@@ -594,6 +668,55 @@ const AgenciesPage = () => {
                                 />
                                 <p className="mt-1 text-xs text-gray-500">
                                     Will be accessible at subdomain.yourseodashboard.com
+                                </p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Email (Optional - for agency login)
+                                </label>
+                                <input
+                                    type="email"
+                                    value={createForm.email}
+                                    onChange={(e) =>
+                                        setCreateForm({ ...createForm, email: e.target.value })
+                                    }
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    placeholder="agency@example.com"
+                                />
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Email address for agency owner login
+                                </p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Username (Optional)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={createForm.username}
+                                    onChange={(e) =>
+                                        setCreateForm({ ...createForm, username: e.target.value })
+                                    }
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    placeholder="Agency Owner Name"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Password (Optional - min 6 characters)
+                                </label>
+                                    <input
+                                        type="password"
+                                        value={createForm.password}
+                                        onChange={(e) =>
+                                            setCreateForm({ ...createForm, password: e.target.value })
+                                        }
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                        placeholder="Password"
+                                        minLength={6}
+                                    />
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Password for agency owner login (required if email is provided)
                                 </p>
                             </div>
                             <div className="flex space-x-4 pt-4">
@@ -942,6 +1065,81 @@ const AgenciesPage = () => {
                     requireConfirmText="DELETE"
                     variant="danger"
                 />
+            )}
+
+            {/* Delete Agency Confirmation Dialog */}
+            {deleteAgencyConfirm.isOpen && (
+                <ConfirmDialog
+                    isOpen={deleteAgencyConfirm.isOpen}
+                    onClose={() => setDeleteAgencyConfirm({ isOpen: false, agencyId: null, agencyName: null })}
+                    onConfirm={confirmDeleteAgency}
+                    title="Delete Agency"
+                    message={`Are you sure you want to delete "${deleteAgencyConfirm.agencyName}"? This action cannot be undone. All members and tasks will be removed.`}
+                    confirmText="Delete"
+                    requireConfirmText="DELETE"
+                    variant="danger"
+                />
+            )}
+
+            {/* Assign Client to Agency Modal */}
+            {assignClientModal.isOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-xl font-bold text-gray-900">
+                                Assign Client to Agency
+                            </h2>
+                            <button
+                                onClick={() => {
+                                    setAssignClientModal({ isOpen: false, clientId: null, clientName: null });
+                                    setAllClients([]);
+                                }}
+                                className="text-gray-400 hover:text-gray-600"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        {loadingAllClients ? (
+                            <div className="text-center py-8 text-gray-500">
+                                Loading clients...
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <p className="text-sm text-gray-600">
+                                    Select an agency to assign "{assignClientModal.clientName}" to:
+                                </p>
+                                <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+                                    {agencies.length === 0 ? (
+                                        <div className="p-4 text-center text-gray-500">
+                                            No agencies available
+                                        </div>
+                                    ) : (
+                                        <div className="divide-y divide-gray-200">
+                                            {agencies.map((agency) => (
+                                                <button
+                                                    key={agency.id}
+                                                    onClick={() => {
+                                                        if (assignClientModal.clientId) {
+                                                            handleAssignClientToAgency(agency.id, assignClientModal.clientId);
+                                                        }
+                                                    }}
+                                                    className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                                                >
+                                                    <div className="font-medium text-gray-900">{agency.name}</div>
+                                                    {agency.subdomain && (
+                                                        <div className="text-sm text-gray-500">
+                                                            {agency.subdomain}.yourseodashboard.com
+                                                        </div>
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     )
