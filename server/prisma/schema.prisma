@@ -145,6 +145,12 @@ model Client {
   ga4PropertyId         String?
   ga4AccountEmail       String?
   ga4ConnectedAt        DateTime?
+  // Google Ads (PPC) integration fields
+  googleAdsAccessToken  String?                 @db.Text
+  googleAdsRefreshToken String?                 @db.Text
+  googleAdsCustomerId   String?
+  googleAdsAccountEmail String?
+  googleAdsConnectedAt  DateTime?
   userId                String
   aiSearchSerpCache     AiSearchSerpCache?
   backlinkTimeseries    BacklinkTimeseries[]

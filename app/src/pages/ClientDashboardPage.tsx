@@ -364,6 +364,29 @@ const ClientDashboardPage: React.FC = () => {
   const [ga4Connecting, setGa4Connecting] = useState(false);
   const [ga4StatusLoading, setGa4StatusLoading] = useState(true); // Track GA4 status check loading
   const [ga4ConnectionError, setGa4ConnectionError] = useState<string | null>(null);
+  // Google Ads (PPC) connection state
+  const [googleAdsConnected, setGoogleAdsConnected] = useState<boolean | null>(null);
+  const [googleAdsAccountEmail, setGoogleAdsAccountEmail] = useState<string | null>(null);
+  const [googleAdsConnecting, setGoogleAdsConnecting] = useState(false);
+  const [googleAdsStatusLoading, setGoogleAdsStatusLoading] = useState(true);
+  const [googleAdsConnectionError, setGoogleAdsConnectionError] = useState<string | null>(null);
+  const [showGoogleAdsModal, setShowGoogleAdsModal] = useState(false);
+  const [googleAdsCustomerId, setGoogleAdsCustomerId] = useState("");
+  const [googleAdsCustomers, setGoogleAdsCustomers] = useState<Array<{
+    customerId: string;
+    customerName: string;
+    currencyCode: string;
+    timeZone: string;
+  }>>([]);
+  const [loadingGoogleAdsCustomers, setLoadingGoogleAdsCustomers] = useState(false);
+  // PPC dashboard state
+  const [ppcSubSection, setPpcSubSection] = useState<"campaigns" | "ad-groups" | "keywords" | "conversions">("campaigns");
+  const [ppcData, setPpcData] = useState<any>(null);
+  const [ppcLoading, setPpcLoading] = useState(false);
+  const [ppcError, setPpcError] = useState<string | null>(null);
+  const [ppcDateRange, setPpcDateRange] = useState("30");
+  const [ppcCustomStartDate, setPpcCustomStartDate] = useState<string>("");
+  const [ppcCustomEndDate, setPpcCustomEndDate] = useState<string>("");
   const [showGA4Modal, setShowGA4Modal] = useState(false);
   const [ga4PropertyId, setGa4PropertyId] = useState("");
   const [ga4Properties, setGa4Properties] = useState<Array<{
@@ -1274,6 +1297,63 @@ const ClientDashboardPage: React.FC = () => {
     };
     checkGA4Status();
   }, [clientId]); // Removed dateRange dependency - GA4 status doesn't change with date range
+
+  // Check Google Ads connection status and handle OAuth callback
+  useEffect(() => {
+    if (!clientId) return;
+    
+    // Check for OAuth callback parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const googleAdsTokensReceived = urlParams.get('google_ads_tokens_received');
+    const googleAdsConnected = urlParams.get('google_ads_connected');
+    const googleAdsError = urlParams.get('google_ads_error');
+    
+    if (googleAdsTokensReceived === 'true') {
+      toast.success('OAuth successful! Please select your Google Ads account.');
+      window.history.replaceState({}, '', window.location.pathname);
+      setShowGoogleAdsModal(true);
+      setGoogleAdsConnecting(false);
+    } else if (googleAdsConnected === 'true') {
+      toast.success('Google Ads connected successfully!');
+      window.history.replaceState({}, '', window.location.pathname);
+      setGoogleAdsConnected(true);
+      setShowGoogleAdsModal(false);
+      setGoogleAdsConnecting(false);
+    } else if (googleAdsError) {
+      console.error("Google Ads OAuth error:", googleAdsError);
+      toast.error(`Google Ads connection failed: ${googleAdsError}`);
+      window.history.replaceState({}, '', window.location.pathname);
+      setGoogleAdsConnecting(false);
+    }
+    
+    // Always check Google Ads status on mount
+    const checkGoogleAdsStatus = async () => {
+      try {
+        setGoogleAdsStatusLoading(true);
+        const res = await api.get(`/clients/${clientId}/google-ads/status`);
+        const isConnected = res.data?.connected || false;
+        const accountEmail = res.data?.accountEmail || null;
+        setGoogleAdsConnected(isConnected);
+        setGoogleAdsAccountEmail(accountEmail);
+        
+        // If tokens exist but not connected (customer ID missing), show modal
+        if (!isConnected && !googleAdsTokensReceived && !googleAdsConnected && !googleAdsError) {
+          // Check if we have tokens but no customer ID
+          const hasTokens = res.data?.hasTokens || false;
+          if (hasTokens) {
+            setShowGoogleAdsModal(true);
+          }
+        }
+      } catch (error: any) {
+        console.error("Failed to check Google Ads status:", error);
+        setGoogleAdsConnected(false);
+        setGoogleAdsAccountEmail(null);
+      } finally {
+        setGoogleAdsStatusLoading(false);
+      }
+    };
+    checkGoogleAdsStatus();
+  }, [clientId]);
 
   // Set active tab from location state when component mounts or location changes
   useEffect(() => {
@@ -2397,6 +2477,229 @@ const ClientDashboardPage: React.FC = () => {
       setGa4Connecting(false);
     }
   };
+
+  // Google Ads (PPC) connection handlers
+  const handleConnectGoogleAds = async () => {
+    if (!clientId) return;
+    try {
+      setGoogleAdsConnecting(true);
+      const res = await api.get(`/clients/${clientId}/google-ads/auth`);
+      const authUrl = res.data?.authUrl;
+      if (authUrl) {
+        const width = 500;
+        const height = 600;
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+        
+        const popup = window.open(
+          authUrl,
+          'google-ads-oauth',
+          `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes,resizable=yes`
+        );
+
+        if (!popup) {
+          toast.error('Please allow popups to connect Google Ads');
+          setGoogleAdsConnecting(false);
+          return;
+        }
+
+        const messageListener = (event: MessageEvent) => {
+          try {
+            const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+            const backendOrigin = new URL(backendUrl).origin;
+            if (event.origin !== window.location.origin && event.origin !== backendOrigin) {
+              return;
+            }
+          } catch (e) {
+            if (event.origin !== window.location.origin) {
+              return;
+            }
+          }
+
+          if (event.data.type === 'GOOGLE_ADS_OAUTH_SUCCESS') {
+            cleanupPopup();
+            closePopupSafely();
+            toast.success('OAuth successful! Loading your Google Ads accounts...');
+            setGoogleAdsConnecting(false);
+            setGoogleAdsConnectionError(null);
+            handleFetchGoogleAdsCustomers();
+          } else if (event.data.type === 'GOOGLE_ADS_OAUTH_ERROR') {
+            cleanupPopup();
+            closePopupSafely();
+            toast.error(`Google Ads connection failed: ${event.data.error || 'Unknown error'}`);
+            setGoogleAdsConnecting(false);
+          }
+        };
+        let manualCloseTimeout: number | null = null;
+
+        const closePopupSafely = () => {
+          try {
+            popup.close();
+          } catch (err) {
+            // Ignore COOP restrictions when closing
+          }
+        };
+
+        const cleanupPopup = () => {
+          if (messageListener) {
+            window.removeEventListener('message', messageListener);
+          }
+          if (manualCloseTimeout) {
+            clearTimeout(manualCloseTimeout);
+          }
+        };
+
+        window.addEventListener('message', messageListener);
+
+        // Handle manual popup close
+        const checkClosed = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkClosed);
+            cleanupPopup();
+            setGoogleAdsConnecting(false);
+          }
+        }, 500);
+
+        // Cleanup after 10 minutes
+        manualCloseTimeout = window.setTimeout(() => {
+          clearInterval(checkClosed);
+          cleanupPopup();
+          if (!popup.closed) {
+            closePopupSafely();
+          }
+          setGoogleAdsConnecting(false);
+        }, 10 * 60 * 1000);
+      }
+    } catch (error: any) {
+      console.error("Failed to connect Google Ads:", error);
+      toast.error(error.response?.data?.message || "Failed to connect Google Ads");
+      setGoogleAdsConnecting(false);
+    }
+  };
+
+  const handleFetchGoogleAdsCustomers = async () => {
+    if (!clientId) return;
+    try {
+      setLoadingGoogleAdsCustomers(true);
+      const res = await api.get(`/clients/${clientId}/google-ads/customers`);
+      const customers = res.data?.customers || [];
+      
+      if (customers.length === 0) {
+        toast.error("No Google Ads accounts found. Please make sure you have access to at least one Google Ads account.");
+        return;
+      }
+      
+      setGoogleAdsCustomers(customers);
+      setShowGoogleAdsModal(true);
+    } catch (error: any) {
+      console.error("Failed to fetch Google Ads customers:", error);
+      toast.error(error.response?.data?.message || "Failed to fetch Google Ads customers");
+    } finally {
+      setLoadingGoogleAdsCustomers(false);
+    }
+  };
+
+  const handleSubmitGoogleAdsCustomerId = async (selectedCustomerId?: string) => {
+    const customerIdToUse = selectedCustomerId || googleAdsCustomerId.trim();
+    if (!clientId || !customerIdToUse) {
+      toast.error("Please select a Google Ads account");
+      return;
+    }
+    try {
+      setGoogleAdsConnecting(true);
+      await api.post(`/clients/${clientId}/google-ads/connect`, {
+        customerId: customerIdToUse,
+      });
+      toast.success("Google Ads connected successfully!");
+      setShowGoogleAdsModal(false);
+      setGoogleAdsCustomerId("");
+      setGoogleAdsCustomers([]);
+      setGoogleAdsConnected(true);
+      // Refresh PPC data if on PPC section
+      if (dashboardSection === "ppc") {
+        await loadPpcData();
+      }
+    } catch (error: any) {
+      console.error("Failed to connect Google Ads account:", error);
+      toast.error(error.response?.data?.message || "Failed to connect Google Ads account");
+    } finally {
+      setGoogleAdsConnecting(false);
+    }
+  };
+
+  const handleDisconnectGoogleAds = async () => {
+    if (!clientId) return;
+    try {
+      setGoogleAdsConnecting(true);
+      await api.post(`/clients/${clientId}/google-ads/disconnect`);
+      toast.success("Google Ads disconnected successfully");
+      setGoogleAdsConnected(false);
+      setGoogleAdsAccountEmail(null);
+      setGoogleAdsConnectionError(null);
+      setPpcData(null);
+    } catch (error: any) {
+      console.error("Failed to disconnect Google Ads:", error);
+      toast.error(error.response?.data?.message || "Failed to disconnect Google Ads");
+    } finally {
+      setGoogleAdsConnecting(false);
+    }
+  };
+
+  // Load PPC data based on current subsection
+  const loadPpcData = async () => {
+    if (!clientId || !googleAdsConnected) return;
+    try {
+      setPpcLoading(true);
+      setPpcError(null);
+      
+      // Calculate date range
+      let startDate: Date;
+      let endDate: Date = new Date();
+      
+      if (ppcDateRange === "custom" && ppcCustomStartDate && ppcCustomEndDate) {
+        startDate = new Date(ppcCustomStartDate);
+        endDate = new Date(ppcCustomEndDate);
+      } else {
+        const days = parseInt(ppcDateRange, 10) || 30;
+        startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+      }
+      
+      let endpoint = '';
+      const params: any = {
+        start: startDate.toISOString().split('T')[0],
+        end: endDate.toISOString().split('T')[0],
+      };
+      
+      if (ppcSubSection === 'campaigns') {
+        endpoint = `/clients/${clientId}/google-ads/campaigns`;
+      } else if (ppcSubSection === 'ad-groups') {
+        endpoint = `/clients/${clientId}/google-ads/ad-groups`;
+      } else if (ppcSubSection === 'keywords') {
+        endpoint = `/clients/${clientId}/google-ads/keywords`;
+      } else if (ppcSubSection === 'conversions') {
+        endpoint = `/clients/${clientId}/google-ads/conversions`;
+      }
+      
+      if (endpoint) {
+        const res = await api.get(endpoint, { params });
+        setPpcData(res.data);
+      }
+    } catch (error: any) {
+      console.error("Failed to load PPC data:", error);
+      setPpcError(error.response?.data?.message || "Failed to load PPC data");
+    } finally {
+      setPpcLoading(false);
+    }
+  };
+
+  // Load PPC data when subsection changes
+  useEffect(() => {
+    if (dashboardSection === "ppc" && googleAdsConnected && clientId) {
+      loadPpcData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId]);
 
   // Web Visitors (same as Active Users / Total Users)
   const websiteVisitorsDisplay = useMemo(() => {
@@ -3945,11 +4248,538 @@ const ClientDashboardPage: React.FC = () => {
                 )}
 
                 {dashboardSection === "ppc" && (
-                  <div className="bg-white border border-gray-200 rounded-xl p-6">
-                    <h2 className="text-xl font-semibold text-gray-900">PPC</h2>
-                    <p className="mt-2 text-sm text-gray-600">
-                      PPC dashboard is coming soon. In the meantime, you can track SEO, Backlinks, and Work Log from the sidebar.
-                    </p>
+                  <div className="space-y-6">
+                    {/* Google Ads Connection Banner */}
+                    {googleAdsStatusLoading ? (
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 animate-pulse">
+                        <div className="h-6 bg-gray-200 rounded w-48 mb-3"></div>
+                        <div className="h-4 bg-gray-200 rounded w-full"></div>
+                      </div>
+                    ) : googleAdsConnected === false ? (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h3 className="text-lg font-semibold text-yellow-900 mb-2">
+                              Connect Google Ads
+                            </h3>
+                            <p className="text-sm text-yellow-800 mb-4">
+                              To view PPC campaign data, please connect your Google Ads account.
+                            </p>
+                            <button
+                              onClick={handleConnectGoogleAds}
+                              disabled={googleAdsConnecting}
+                              className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {googleAdsConnecting ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span>Connecting...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <TrendingUp className="h-4 w-4" />
+                                  <span>Connect Google Ads</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : googleAdsConnected === true ? (
+                      <>
+                        {/* PPC Secondary Menu */}
+                        <div className="bg-white border border-gray-200 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <div>
+                              <h2 className="text-xl font-semibold text-gray-900">PPC</h2>
+                              {googleAdsAccountEmail && (
+                                <p className="text-sm text-gray-500 mt-1">
+                                  Account: {googleAdsAccountEmail}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              onClick={handleDisconnectGoogleAds}
+                              disabled={googleAdsConnecting}
+                              className="text-sm text-red-600 hover:text-red-700 disabled:opacity-60"
+                            >
+                              Disconnect
+                            </button>
+                          </div>
+                          <nav className="flex space-x-2 border-b border-gray-200 mb-4">
+                            {[
+                              { id: "campaigns", label: "Campaigns" },
+                              { id: "ad-groups", label: "Ad Groups" },
+                              { id: "keywords", label: "Keywords" },
+                              { id: "conversions", label: "Conversions" },
+                            ].map((item) => (
+                              <button
+                                key={item.id}
+                                onClick={() => setPpcSubSection(item.id as typeof ppcSubSection)}
+                                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                  ppcSubSection === item.id
+                                    ? "border-primary-500 text-primary-600"
+                                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                                }`}
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </nav>
+                          {/* Date Range Selector */}
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2">
+                              <label className="text-sm text-gray-600">Date Range:</label>
+                              <select
+                                value={ppcDateRange}
+                                onChange={(e) => {
+                                  setPpcDateRange(e.target.value);
+                                  if (e.target.value !== "custom") {
+                                    setTimeout(() => loadPpcData(), 100);
+                                  }
+                                }}
+                                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              >
+                                <option value="7">Last 7 days</option>
+                                <option value="30">Last 30 days</option>
+                                <option value="90">Last 90 days</option>
+                                <option value="custom">Custom</option>
+                              </select>
+                            </div>
+                            {ppcDateRange === "custom" && (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="date"
+                                  value={ppcCustomStartDate}
+                                  onChange={(e) => setPpcCustomStartDate(e.target.value)}
+                                  max={ppcCustomEndDate || new Date().toISOString().split("T")[0]}
+                                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                                <span className="text-gray-500">to</span>
+                                <input
+                                  type="date"
+                                  value={ppcCustomEndDate}
+                                  onChange={(e) => setPpcCustomEndDate(e.target.value)}
+                                  min={ppcCustomStartDate || undefined}
+                                  max={new Date().toISOString().split("T")[0]}
+                                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                                <button
+                                  onClick={loadPpcData}
+                                  disabled={!ppcCustomStartDate || !ppcCustomEndDate}
+                                  className="bg-primary-600 text-white px-4 py-1.5 rounded-lg hover:bg-primary-700 transition-colors text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                  Apply
+                                </button>
+                              </div>
+                            )}
+                            <button
+                              onClick={loadPpcData}
+                              disabled={ppcLoading}
+                              className="ml-auto text-sm text-primary-600 hover:text-primary-700 flex items-center gap-2 disabled:opacity-60"
+                            >
+                              <RefreshCw className={`h-4 w-4 ${ppcLoading ? 'animate-spin' : ''}`} />
+                              Refresh
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* PPC Content */}
+                        <div className="bg-white border border-gray-200 rounded-xl p-6">
+                          {ppcLoading ? (
+                            <div className="text-center py-8">
+                              <Loader2 className="h-8 w-8 animate-spin mx-auto text-gray-400" />
+                              <p className="mt-2 text-sm text-gray-500">Loading PPC data...</p>
+                            </div>
+                          ) : ppcError ? (
+                            <div className="text-center py-8">
+                              <AlertTriangle className="h-8 w-8 mx-auto text-red-400" />
+                              <p className="mt-2 text-sm text-red-600">{ppcError}</p>
+                              <button
+                                onClick={loadPpcData}
+                                className="mt-4 text-sm text-primary-600 hover:text-primary-700"
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-6">
+                              {ppcSubSection === "campaigns" && (
+                                <div>
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Campaigns</h3>
+                                  {ppcData?.data?.campaigns?.length > 0 ? (
+                                    <div className="space-y-6">
+                                      {/* Summary Cards */}
+                                      {ppcData?.data?.summary && (
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+                                            <p className="text-sm text-blue-700 font-medium">Clicks</p>
+                                            <p className="text-2xl font-bold text-blue-900 mt-1">
+                                              {ppcData.data.summary.clicks?.toLocaleString() || 0}
+                                            </p>
+                                          </div>
+                                          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+                                            <p className="text-sm text-green-700 font-medium">Conversions</p>
+                                            <p className="text-2xl font-bold text-green-900 mt-1">
+                                              {ppcData.data.summary.conversions?.toLocaleString() || 0}
+                                            </p>
+                                          </div>
+                                          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4 border border-purple-200">
+                                            <p className="text-sm text-purple-700 font-medium">Cost</p>
+                                            <p className="text-2xl font-bold text-purple-900 mt-1">
+                                              ${ppcData.data.summary.cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                            </p>
+                                          </div>
+                                          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-4 border border-orange-200">
+                                            <p className="text-sm text-orange-700 font-medium">Cost / Conversion</p>
+                                            <p className="text-2xl font-bold text-orange-900 mt-1">
+                                              ${ppcData.data.summary.costPerConversion?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      )}
+                                      
+                                      {/* Additional Metrics */}
+                                      {ppcData?.data?.summary && (
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                          <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                            <p className="text-sm text-gray-600">Impressions</p>
+                                            <p className="text-xl font-semibold text-gray-900 mt-1">
+                                              {ppcData.data.summary.impressions?.toLocaleString() || 0}
+                                            </p>
+                                          </div>
+                                          <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                            <p className="text-sm text-gray-600">Avg CPC</p>
+                                            <p className="text-xl font-semibold text-gray-900 mt-1">
+                                              ${ppcData.data.summary.avgCpc?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                            </p>
+                                          </div>
+                                          <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                            <p className="text-sm text-gray-600">Conversion Rate</p>
+                                            <p className="text-xl font-semibold text-gray-900 mt-1">
+                                              {ppcData.data.summary.conversionRate?.toFixed(2) || "0.00"}%
+                                            </p>
+                                          </div>
+                                          <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                            <p className="text-sm text-gray-600">CTR</p>
+                                            <p className="text-xl font-semibold text-gray-900 mt-1">
+                                              {ppcData.data.summary.impressions > 0 
+                                                ? ((ppcData.data.summary.clicks / ppcData.data.summary.impressions) * 100).toFixed(2)
+                                                : "0.00"}%
+                                            </p>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {/* Campaigns Table */}
+                                      <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                        <table className="min-w-full divide-y divide-gray-200">
+                                          <thead className="bg-gray-50">
+                                            <tr>
+                                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Campaign
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Clicks
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Impressions
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                CTR
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Conversions
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Conv. Rate
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Cost
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Avg CPC
+                                              </th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Cost/Conv.
+                                              </th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="bg-white divide-y divide-gray-200">
+                                            {ppcData.data.campaigns.map((campaign: any, idx: number) => {
+                                              const ctr = campaign.impressions > 0 
+                                                ? ((campaign.clicks / campaign.impressions) * 100).toFixed(2)
+                                                : "0.00";
+                                              const convRate = campaign.clicks > 0
+                                                ? ((campaign.conversions / campaign.clicks) * 100).toFixed(2)
+                                                : "0.00";
+                                              return (
+                                                <tr key={idx} className="hover:bg-gray-50">
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                    <div className="flex items-center gap-2">
+                                                      <span>{campaign.name || "N/A"}</span>
+                                                      {campaign.status && (
+                                                        <span className={`px-2 py-0.5 rounded text-xs ${
+                                                          campaign.status === 'ENABLED' 
+                                                            ? 'bg-green-100 text-green-800'
+                                                            : campaign.status === 'PAUSED'
+                                                            ? 'bg-yellow-100 text-yellow-800'
+                                                            : 'bg-gray-100 text-gray-800'
+                                                        }`}>
+                                                          {campaign.status}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                    {campaign.clicks?.toLocaleString() || 0}
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                    {campaign.impressions?.toLocaleString() || 0}
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                    {ctr}%
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                    {campaign.conversions?.toLocaleString() || 0}
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                    {convRate}%
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                    ${campaign.cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                    ${campaign.avgCpc?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                                  </td>
+                                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                    ${campaign.conversions > 0 
+                                                      ? (campaign.cost / campaign.conversions).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                                      : "0.00"}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-500">No campaign data available.</p>
+                                  )}
+                                </div>
+                              )}
+                              {ppcSubSection === "ad-groups" && (
+                                <div>
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Ad Groups</h3>
+                                  {ppcData?.data?.adGroups?.length > 0 ? (
+                                    <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                      <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50">
+                                          <tr>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Group</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Impressions</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CTR</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg CPC</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                          {ppcData.data.adGroups.map((adGroup: any, idx: number) => {
+                                            const ctr = adGroup.impressions > 0 
+                                              ? ((adGroup.clicks / adGroup.impressions) * 100).toFixed(2)
+                                              : "0.00";
+                                            return (
+                                              <tr key={idx} className="hover:bg-gray-50">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                  {adGroup.name || "N/A"}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                  {adGroup.campaignName || "N/A"}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                  {adGroup.clicks?.toLocaleString() || 0}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                  {adGroup.impressions?.toLocaleString() || 0}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                  {ctr}%
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                  {adGroup.conversions?.toLocaleString() || 0}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                  ${adGroup.cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                  ${adGroup.avgCpc?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-500">No ad group data available.</p>
+                                  )}
+                                </div>
+                              )}
+                              {ppcSubSection === "keywords" && (
+                                <div>
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Keywords</h3>
+                                  {ppcData?.data?.keywords?.length > 0 ? (
+                                    <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                      <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50">
+                                          <tr>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Match Type</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Impressions</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CTR</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Imp. Share</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg CPC</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                          {ppcData.data.keywords.map((keyword: any, idx: number) => {
+                                            const ctr = keyword.impressions > 0 
+                                              ? ((keyword.clicks / keyword.impressions) * 100).toFixed(2)
+                                              : "0.00";
+                                            return (
+                                              <tr key={idx} className="hover:bg-gray-50">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                  {keyword.keyword || "N/A"}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                  <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">
+                                                    {keyword.matchType || "UNKNOWN"}
+                                                  </span>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                  {keyword.campaignName || "N/A"}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                  {keyword.clicks?.toLocaleString() || 0}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                  {keyword.impressions?.toLocaleString() || 0}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                  {ctr}%
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                  {keyword.impressionShare ? (keyword.impressionShare * 100).toFixed(1) : "0.0"}%
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                  {keyword.conversions?.toLocaleString() || 0}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                  ${keyword.cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                  ${keyword.avgCpc?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-500">No keyword data available.</p>
+                                  )}
+                                </div>
+                              )}
+                              {ppcSubSection === "conversions" && (
+                                <div>
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Conversions</h3>
+                                  {ppcData?.data?.summary && (
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+                                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+                                        <p className="text-sm text-green-700 font-medium">Total Conversions</p>
+                                        <p className="text-2xl font-bold text-green-900 mt-1">
+                                          {ppcData.data.summary.totalConversions?.toLocaleString() || 0}
+                                        </p>
+                                      </div>
+                                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+                                        <p className="text-sm text-blue-700 font-medium">Conversion Value</p>
+                                        <p className="text-2xl font-bold text-blue-900 mt-1">
+                                          ${ppcData.data.summary.conversionValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                        </p>
+                                      </div>
+                                      <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4 border border-purple-200">
+                                        <p className="text-sm text-purple-700 font-medium">Conversion Rate</p>
+                                        <p className="text-2xl font-bold text-purple-900 mt-1">
+                                          {ppcData.data.summary.conversionRate?.toFixed(2) || "0.00"}%
+                                        </p>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {ppcData?.data?.conversions?.length > 0 ? (
+                                    <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                                      <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50">
+                                          <tr>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Conversion Action</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost/Conv.</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                          {ppcData.data.conversions.map((conversion: any, idx: number) => (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                {conversion.date ? new Date(conversion.date).toLocaleDateString() : "N/A"}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                {conversion.conversionAction || "N/A"}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {conversion.campaignName || "N/A"}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                {conversion.conversions?.toLocaleString() || 0}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                ${conversion.conversionValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                {conversion.clicks?.toLocaleString() || 0}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                                ${conversion.cost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                              </td>
+                                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                ${conversion.costPerConversion?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-500">No conversion data available.</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                 )}
 
@@ -6798,6 +7628,91 @@ const ClientDashboardPage: React.FC = () => {
                       setGa4PropertyId("");
                       setGa4Properties([]);
                       setGa4PropertySearch("");
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Google Ads Customer Selection Modal */}
+      {showGoogleAdsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Select Google Ads Account</h3>
+              <button
+                onClick={() => {
+                  setShowGoogleAdsModal(false);
+                  setGoogleAdsCustomerId("");
+                  setGoogleAdsCustomers([]);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Select a Google Ads account to connect. These are all the accounts accessible with your Google account.
+            </p>
+            
+            {loadingGoogleAdsCustomers ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                <span className="ml-2 text-gray-600">Loading accounts...</span>
+              </div>
+            ) : googleAdsCustomers.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No Google Ads accounts found.</p>
+                <p className="text-sm mt-2">Please make sure you have access to at least one Google Ads account.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
+                  <div className="divide-y divide-gray-200">
+                    {googleAdsCustomers.map((customer) => (
+                      <button
+                        key={customer.customerId}
+                        onClick={() => handleSubmitGoogleAdsCustomerId(customer.customerId)}
+                        disabled={googleAdsConnecting}
+                        className="w-full text-left p-4 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">{customer.customerName}</div>
+                            <div className="text-sm text-gray-500 mt-1">
+                              Customer ID: {customer.customerId}
+                            </div>
+                            <div className="text-xs text-gray-400 mt-1">
+                              Currency: {customer.currencyCode} | Timezone: {customer.timeZone}
+                            </div>
+                          </div>
+                          {googleAdsConnecting ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                          ) : (
+                            <div className="text-primary-600">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-end">
+                  <button
+                    onClick={() => {
+                      setShowGoogleAdsModal(false);
+                      setGoogleAdsCustomerId("");
+                      setGoogleAdsCustomers([]);
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >

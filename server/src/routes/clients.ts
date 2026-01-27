@@ -1199,6 +1199,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
 // GA4 Connection Routes
 import { getGA4AuthUrl, exchangeCodeForTokens, isGA4Connected, listGA4Properties } from '../lib/ga4.js';
+// Google Ads Connection Routes
+import { getGoogleAdsAuthUrl, exchangeCodeForTokens as exchangeGoogleAdsCodeForTokens, isGoogleAdsConnected, listGoogleAdsCustomers, fetchGoogleAdsCampaigns, fetchGoogleAdsAdGroups, fetchGoogleAdsKeywords, fetchGoogleAdsConversions } from '../lib/googleAds.js';
 
 // GA4 OAuth callback (no auth required - handled via state parameter)
 router.get('/ga4/callback', async (req, res) => {
@@ -2028,6 +2030,604 @@ router.post('/:id/ga4/disconnect', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('GA4 disconnect error:', error);
         res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// ============================================
+// Google Ads (PPC) Connection Routes
+// ============================================
+
+// Google Ads OAuth callback (no auth required - handled via state parameter)
+router.get('/google-ads/callback', async (req, res) => {
+    try {
+        const { code, state, error } = req.query;
+
+        // Parse state: can be "clientId" or "clientId|popup"
+        let clientId = '';
+        let isPopup = false;
+        if (state) {
+            const stateParts = (state as string).split('|');
+            clientId = stateParts[0];
+            isPopup = stateParts[1] === 'popup';
+        }
+        if (!isPopup) {
+            const fromQuery = req.query.popup === 'true';
+            const fromReferer = !!req.headers.referer?.includes('popup=true');
+            isPopup = fromQuery || fromReferer;
+        }
+
+        if (error) {
+            if (isPopup) {
+                return res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Google Ads Connection</title>
+                        <style>
+                            body {
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                height: 100vh;
+                                margin: 0;
+                                background: #f5f5f5;
+                            }
+                            .container {
+                                text-align: center;
+                                padding: 2rem;
+                            }
+                            .error {
+                                color: #ef4444;
+                                font-size: 1.1rem;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="error">Connection failed: ${error}</div>
+                        </div>
+                        <script>
+                            if (window.opener) {
+                                window.opener.postMessage({
+                                    type: 'GOOGLE_ADS_OAUTH_ERROR',
+                                    error: '${error}'
+                                }, '*');
+                                setTimeout(() => window.close(), 2000);
+                            } else {
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(error as string)}';
+                            }
+                        </script>
+                    </body>
+                    </html>
+                `);
+            }
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(error as string)}`);
+        }
+
+        if (!code || !state) {
+            if (isPopup) {
+                return res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Google Ads Connection</title>
+                        <style>
+                            body {
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                height: 100vh;
+                                margin: 0;
+                                background: #f5f5f5;
+                            }
+                            .container {
+                                text-align: center;
+                                padding: 2rem;
+                            }
+                            .error {
+                                color: #ef4444;
+                                font-size: 1.1rem;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="error">Missing authorization code or state</div>
+                        </div>
+                        <script>
+                            if (window.opener) {
+                                window.opener.postMessage({
+                                    type: 'GOOGLE_ADS_OAUTH_ERROR',
+                                    error: 'Missing authorization code or state'
+                                }, '*');
+                                setTimeout(() => window.close(), 2000);
+                            } else {
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=missing_code';
+                            }
+                        </script>
+                    </body>
+                    </html>
+                `);
+            }
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=missing_code`);
+        }
+
+        try {
+            const { accessToken, refreshToken, email } = await exchangeGoogleAdsCodeForTokens(code as string);
+
+            // Save tokens to client
+            await prisma.client.update({
+                where: { id: clientId },
+                data: {
+                    googleAdsAccessToken: accessToken,
+                    googleAdsRefreshToken: refreshToken,
+                    googleAdsAccountEmail: email || null,
+                },
+            });
+
+            if (isPopup) {
+                return res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Google Ads Connection</title>
+                        <style>
+                            body {
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                height: 100vh;
+                                margin: 0;
+                                background: #f5f5f5;
+                            }
+                            .container {
+                                text-align: center;
+                                padding: 2rem;
+                            }
+                            .success {
+                                color: #10b981;
+                                font-size: 1.1rem;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="success">Google Ads connected successfully!</div>
+                        </div>
+                        <script>
+                            if (window.opener) {
+                                window.opener.postMessage({
+                                    type: 'GOOGLE_ADS_OAUTH_SUCCESS'
+                                }, '*');
+                                setTimeout(() => window.close(), 1000);
+                            } else {
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients/${clientId}';
+                            }
+                        </script>
+                    </body>
+                    </html>
+                `);
+            }
+
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients/${clientId}?google_ads_connected=true`);
+        } catch (error: any) {
+            console.error('Google Ads OAuth callback error:', error);
+            const errorMsg = error.message || 'Failed to connect Google Ads';
+            
+            if (isPopup) {
+                return res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Google Ads Connection</title>
+                        <style>
+                            body {
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                height: 100vh;
+                                margin: 0;
+                                background: #f5f5f5;
+                            }
+                            .container {
+                                text-align: center;
+                                padding: 2rem;
+                            }
+                            .error {
+                                color: #ef4444;
+                                font-size: 1.1rem;
+                            }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="error">${errorMsg}</div>
+                        </div>
+                        <script>
+                            if (window.opener) {
+                                window.opener.postMessage({
+                                    type: 'GOOGLE_ADS_OAUTH_ERROR',
+                                    error: '${errorMsg.replace(/'/g, "\\'")}'
+                                }, '*');
+                                setTimeout(() => window.close(), 2000);
+                            } else {
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(errorMsg)}';
+                            }
+                        </script>
+                    </body>
+                    </html>
+                `);
+            }
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(errorMsg)}`);
+        }
+    } catch (error: any) {
+        console.error('Google Ads callback error:', error);
+        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(error.message || 'Unknown error')}`);
+    }
+});
+
+// Get Google Ads OAuth URL
+router.get('/:id/google-ads/auth', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const authUrl = getGoogleAdsAuthUrl(clientId);
+        res.json({ authUrl });
+    } catch (error: any) {
+        console.error('Google Ads auth URL error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Get Google Ads connection status
+router.get('/:id/google-ads/status', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+
+        // Check access
+        const { client: clientCheck, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const connected = await isGoogleAdsConnected(clientId);
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            select: {
+                googleAdsAccountEmail: true,
+                googleAdsCustomerId: true,
+                googleAdsConnectedAt: true,
+            },
+        });
+
+        res.json({
+            connected,
+            accountEmail: client?.googleAdsAccountEmail || null,
+            customerId: client?.googleAdsCustomerId || null,
+            connectedAt: client?.googleAdsConnectedAt || null,
+        });
+    } catch (error: any) {
+        console.error('Google Ads status error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// List Google Ads customers (accessible accounts)
+router.get('/:id/google-ads/customers', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        // Check if tokens exist (from OAuth callback)
+        const existingClient = await prisma.client.findUnique({
+            where: { id: clientId },
+            select: { googleAdsAccessToken: true, googleAdsRefreshToken: true },
+        });
+
+        if (!existingClient?.googleAdsAccessToken || !existingClient?.googleAdsRefreshToken) {
+            return res.status(400).json({ message: 'Please complete OAuth flow first by clicking "Connect Google Ads"' });
+        }
+
+        // List all Google Ads customers
+        const customers = await listGoogleAdsCustomers(clientId);
+        res.json({ customers });
+    } catch (error: any) {
+        console.error('Google Ads customers list error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Connect Google Ads with customer ID (after OAuth callback)
+router.post('/:id/google-ads/connect', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const { customerId } = req.body;
+
+        if (!customerId) {
+            return res.status(400).json({ message: 'Customer ID is required' });
+        }
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        // Check if tokens exist (from OAuth callback)
+        const existingClient = await prisma.client.findUnique({
+            where: { id: clientId },
+            select: { googleAdsAccessToken: true, googleAdsRefreshToken: true },
+        });
+
+        if (!existingClient?.googleAdsAccessToken || !existingClient?.googleAdsRefreshToken) {
+            return res.status(400).json({ message: 'Please complete OAuth flow first by clicking "Connect Google Ads"' });
+        }
+
+        // Normalize customer ID (remove dashes if present)
+        const normalizedCustomerId = customerId.replace(/-/g, '');
+
+        // Update client with customer ID
+        await prisma.client.update({
+            where: { id: clientId },
+            data: {
+                googleAdsCustomerId: normalizedCustomerId,
+                googleAdsConnectedAt: new Date(),
+            },
+        });
+
+        res.json({ 
+            message: 'Google Ads connected successfully',
+            customerId: normalizedCustomerId,
+        });
+    } catch (error: any) {
+        console.error('Google Ads connect error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Disconnect Google Ads
+router.post('/:id/google-ads/disconnect', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        await prisma.client.update({
+            where: { id: clientId },
+            data: {
+                googleAdsAccessToken: null,
+                googleAdsRefreshToken: null,
+                googleAdsCustomerId: null,
+                googleAdsAccountEmail: null,
+                googleAdsConnectedAt: null,
+            },
+        });
+
+        res.json({ message: 'Google Ads disconnected successfully' });
+    } catch (error: any) {
+        console.error('Google Ads disconnect error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Get Google Ads campaigns data
+router.get('/:id/google-ads/campaigns', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const { start, end, period } = req.query;
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        // Check if Google Ads is connected
+        if (!client?.googleAdsRefreshToken || !client?.googleAdsCustomerId || !client?.googleAdsConnectedAt) {
+            return res.status(400).json({ 
+                message: 'Google Ads is not connected for this client',
+                connected: false 
+            });
+        }
+
+        // Calculate date range
+        let startDate: Date;
+        let endDate: Date = new Date();
+
+        if (start && end) {
+            startDate = new Date(start as string);
+            endDate = new Date(end as string);
+        } else if (period) {
+            const days = parseInt(period as string, 10);
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+        } else {
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+        }
+
+        // Fetch Google Ads campaigns data
+        const data = await fetchGoogleAdsCampaigns(clientId, startDate, endDate);
+
+        res.json({
+            success: true,
+            data,
+            dateRange: {
+                start: startDate.toISOString().split('T')[0],
+                end: endDate.toISOString().split('T')[0],
+            },
+            customerId: client.googleAdsCustomerId,
+        });
+    } catch (error: any) {
+        console.error('Google Ads campaigns fetch error:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message || 'Failed to fetch Google Ads campaigns data',
+            error: error.message 
+        });
+    }
+});
+
+// Get Google Ads ad groups data
+router.get('/:id/google-ads/ad-groups', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const { start, end, period, campaignId } = req.query;
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        if (!client?.googleAdsRefreshToken || !client?.googleAdsCustomerId) {
+            return res.status(400).json({ message: 'Google Ads is not connected' });
+        }
+
+        // Calculate date range
+        let startDate: Date;
+        let endDate: Date = new Date();
+
+        if (start && end) {
+            startDate = new Date(start as string);
+            endDate = new Date(end as string);
+        } else if (period) {
+            const days = parseInt(period as string, 10);
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+        } else {
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+        }
+
+        const data = await fetchGoogleAdsAdGroups(clientId, startDate, endDate, campaignId as string | undefined);
+
+        res.json({
+            success: true,
+            data,
+            dateRange: {
+                start: startDate.toISOString().split('T')[0],
+                end: endDate.toISOString().split('T')[0],
+            },
+        });
+    } catch (error: any) {
+        console.error('Google Ads ad groups fetch error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Get Google Ads keywords data
+router.get('/:id/google-ads/keywords', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const { start, end, period, campaignId, adGroupId } = req.query;
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        if (!client?.googleAdsRefreshToken || !client?.googleAdsCustomerId) {
+            return res.status(400).json({ message: 'Google Ads is not connected' });
+        }
+
+        // Calculate date range
+        let startDate: Date;
+        let endDate: Date = new Date();
+
+        if (start && end) {
+            startDate = new Date(start as string);
+            endDate = new Date(end as string);
+        } else if (period) {
+            const days = parseInt(period as string, 10);
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+        } else {
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+        }
+
+        const data = await fetchGoogleAdsKeywords(clientId, startDate, endDate, campaignId as string | undefined, adGroupId as string | undefined);
+
+        res.json({
+            success: true,
+            data,
+            dateRange: {
+                start: startDate.toISOString().split('T')[0],
+                end: endDate.toISOString().split('T')[0],
+            },
+        });
+    } catch (error: any) {
+        console.error('Google Ads keywords fetch error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
+    }
+});
+
+// Get Google Ads conversions data
+router.get('/:id/google-ads/conversions', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const { start, end, period } = req.query;
+
+        // Check access
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        if (!client?.googleAdsRefreshToken || !client?.googleAdsCustomerId) {
+            return res.status(400).json({ message: 'Google Ads is not connected' });
+        }
+
+        // Calculate date range
+        let startDate: Date;
+        let endDate: Date = new Date();
+
+        if (start && end) {
+            startDate = new Date(start as string);
+            endDate = new Date(end as string);
+        } else if (period) {
+            const days = parseInt(period as string, 10);
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+        } else {
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+        }
+
+        const data = await fetchGoogleAdsConversions(clientId, startDate, endDate);
+
+        res.json({
+            success: true,
+            data,
+            dateRange: {
+                start: startDate.toISOString().split('T')[0],
+                end: endDate.toISOString().split('T')[0],
+            },
+        });
+    } catch (error: any) {
+        console.error('Google Ads conversions fetch error:', error);
+        res.status(500).json({ message: error.message || 'Internal server error' });
     }
 });
 
