@@ -634,4 +634,82 @@ router.post('/:agencyId/assign-client/:clientId', authenticateToken, async (req,
   }
 });
 
+// Remove client from agency (Super Admin only)
+router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can remove clients from agencies.' });
+    }
+
+    const { agencyId, clientId } = req.params;
+
+    // Verify agency exists
+    const agency = await prisma.agency.findUnique({
+      where: { id: agencyId },
+      include: {
+        members: {
+          include: {
+            user: true,
+          },
+        },
+      },
+    });
+
+    if (!agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+
+    // Verify client exists and get current user
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: 'Client not found' });
+    }
+
+    // Check if client is actually assigned to this agency
+    const clientUserAgencyIds = client.user.memberships.map(m => m.agencyId);
+    if (!clientUserAgencyIds.includes(agencyId)) {
+      return res.status(400).json({ message: 'Client is not assigned to this agency' });
+    }
+
+    // Find a SUPER_ADMIN user to assign the client to (unassigned clients belong to SUPER_ADMIN)
+    const superAdminUser = await prisma.user.findFirst({
+      where: { role: 'SUPER_ADMIN' },
+      select: { id: true },
+    });
+
+    if (!superAdminUser) {
+      return res.status(500).json({ message: 'No SUPER_ADMIN user found. Cannot unassign client.' });
+    }
+
+    // Update client's userId to SUPER_ADMIN (removes from agency)
+    await prisma.client.update({
+      where: { id: clientId },
+      data: {
+        userId: superAdminUser.id,
+      },
+    });
+
+    res.json({ 
+      message: 'Client removed from agency successfully',
+      clientId,
+      agencyId,
+    });
+  } catch (error: any) {
+    console.error('Remove client from agency error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
+  }
+});
+
 export default router;

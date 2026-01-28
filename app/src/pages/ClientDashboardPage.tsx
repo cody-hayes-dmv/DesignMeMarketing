@@ -2440,27 +2440,54 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const handleFetchGA4Properties = async () => {
+  const handleFetchGA4Properties = async (showModal: boolean = true) => {
     if (!clientId) return;
     try {
       setLoadingProperties(true);
-      const res = await api.get(`/clients/${clientId}/ga4/properties`);
+      // Add cache-busting parameter to ensure fresh data
+      const res = await api.get(`/clients/${clientId}/ga4/properties`, {
+        params: { _t: Date.now() } // Cache busting
+      });
       const properties = res.data?.properties || [];
       
       if (properties.length === 0) {
-        toast.error("No GA4 properties found. Please make sure you have access to at least one GA4 property.");
+        if (showModal) {
+          toast.error("No GA4 properties found. Please make sure you have access to at least one GA4 property.");
+        }
+        setGa4Properties([]);
+        if (showModal) {
+          setShowGA4Modal(true);
+        }
         return;
       }
       
       setGa4Properties(properties);
-      setShowGA4Modal(true);
+      if (showModal) {
+        setShowGA4Modal(true);
+      }
     } catch (error: any) {
       console.error("Failed to fetch GA4 properties:", error);
-      toast.error(error.response?.data?.message || "Failed to fetch GA4 properties");
+      const errorMsg = error.response?.data?.message || "Failed to fetch GA4 properties";
+      if (showModal) {
+        toast.error(errorMsg);
+      }
+      // If token expired, suggest reconnecting
+      if (errorMsg.includes("expired") || errorMsg.includes("revoked") || errorMsg.includes("reconnect")) {
+        toast.error("GA4 access token may be expired. Please disconnect and reconnect GA4 to refresh your permissions.", { duration: 6000 });
+      }
     } finally {
       setLoadingProperties(false);
     }
   };
+
+  // Auto-refresh properties when modal opens to ensure latest access is shown
+  useEffect(() => {
+    if (showGA4Modal && clientId && !loadingProperties) {
+      // Always refresh properties when modal opens to get latest GA4 access
+      handleFetchGA4Properties(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGA4Modal, clientId]);
 
   const handleSubmitPropertyId = async (selectedPropertyId?: string) => {
     const propertyIdToUse = selectedPropertyId || ga4PropertyId.trim();
@@ -5436,19 +5463,31 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Select GA4 Property</h3>
-                      <button
-                        onClick={() => {
-                          setShowGA4Modal(false);
-                          setGa4PropertyId("");
-                          setGa4Properties([]);
-                        }}
-                        className="text-gray-400 hover:text-gray-600"
-                      >
-                        <X className="h-5 w-5" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            handleFetchGA4Properties(false); // Don't show modal again, just refresh
+                          }}
+                          disabled={loadingProperties}
+                          className="text-gray-400 hover:text-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Refresh properties list to see newly added GA4 access"
+                        >
+                          <RefreshCw className={`h-5 w-5 ${loadingProperties ? 'animate-spin' : ''}`} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowGA4Modal(false);
+                            setGa4PropertyId("");
+                            setGa4Properties([]);
+                          }}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-sm text-gray-600 mb-4">
-                      Select a Google Analytics 4 property to connect. These are all the properties accessible with your Google account.
+                      Select a Google Analytics 4 property to connect. These are all the properties accessible with your Google account. Click the refresh icon to update the list if you recently gained access to new properties.
                     </p>
                     
                     {loadingProperties ? (
@@ -7528,19 +7567,31 @@ const ClientDashboardPage: React.FC = () => {
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Select GA4 Property</h3>
-              <button
-                onClick={() => {
-                  setShowGA4Modal(false);
-                  setGa4PropertyId("");
-                  setGa4Properties([]);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    handleFetchGA4Properties(false); // Don't show modal again, just refresh
+                  }}
+                  disabled={loadingProperties}
+                  className="text-gray-400 hover:text-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Refresh properties list to see newly added GA4 access"
+                >
+                  <RefreshCw className={`h-5 w-5 ${loadingProperties ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={() => {
+                    setShowGA4Modal(false);
+                    setGa4PropertyId("");
+                    setGa4Properties([]);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Select a Google Analytics 4 property to connect. These are all the properties accessible with your Google account.
+              Select a Google Analytics 4 property to connect. These are all the properties accessible with your Google account. Click the refresh icon to update the list if you recently gained access to new properties.
             </p>
             
             {loadingProperties ? (

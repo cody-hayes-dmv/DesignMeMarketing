@@ -1,6 +1,9 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { resolve } from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 import authRoutes from "./routes/auth.js";
 import agencyRoutes from "./routes/agencies.js";
 import taskRoutes from "./routes/tasks.js";
@@ -11,7 +14,16 @@ import teamRoutes from "./routes/team.js";
 import uploadRoutes from "./routes/upload.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
-dotenv.config();
+// Load .env file from server directory
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+dotenv.config({ path: resolve(__dirname, "../.env") });
+
+// Log email configuration status (without sensitive data)
+console.log("[Email Config] SMTP_HOST:", process.env.SMTP_HOST ? `${process.env.SMTP_HOST.substring(0, 20)}...` : "NOT SET");
+console.log("[Email Config] SMTP_PORT:", process.env.SMTP_PORT || "NOT SET");
+console.log("[Email Config] SMTP_USER:", process.env.SMTP_USER ? `${process.env.SMTP_USER.substring(0, 10)}...` : "NOT SET");
+console.log("[Email Config] SMTP_PASS:", process.env.SMTP_PASS ? "***SET***" : "NOT SET");
 
 const app = express();
 const PORT = process.env.PORT || 5000;

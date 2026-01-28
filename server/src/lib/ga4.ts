@@ -1366,7 +1366,7 @@ export async function getGA4MetricsFromDB(
 /**
  * Get analytics admin client with valid access token
  */
-async function getAnalyticsAdminClient(clientId: string) {
+async function getAnalyticsAdminClient(clientId: string, forceRefresh: boolean = false) {
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     select: {
@@ -1385,8 +1385,8 @@ async function getAnalyticsAdminClient(clientId: string) {
 
   let accessToken = client.ga4AccessToken;
 
-  // Refresh token if needed
-  if (!accessToken && client.ga4RefreshToken) {
+  // Refresh token if needed or if forceRefresh is true (to get latest permissions)
+  if (forceRefresh || !accessToken) {
     try {
       accessToken = await refreshAccessToken(client.ga4RefreshToken);
       // Update stored access token
@@ -1450,9 +1450,10 @@ export type GA4Property = {
   displayName: string;
 };
 
-export async function listGA4Properties(clientId: string): Promise<GA4Property[]> {
+export async function listGA4Properties(clientId: string, forceRefresh: boolean = true): Promise<GA4Property[]> {
   try {
-    const admin = await getAnalyticsAdminClient(clientId);
+    // Always force refresh token to get latest permissions when listing properties
+    const admin = await getAnalyticsAdminClient(clientId, forceRefresh);
     
     // List all accounts first to get account names
     const accountsResponse = await admin.accounts.list();

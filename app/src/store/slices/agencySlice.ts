@@ -103,6 +103,20 @@ export const assignClientToAgency = createAsyncThunk(
   }
 );
 
+export const removeClientFromAgency = createAsyncThunk(
+  "agency/removeClientFromAgency",
+  async ({ agencyId, clientId }: { agencyId: string; clientId: string }) => {
+    try {
+      const response = await api.post(`/agencies/${agencyId}/remove-client/${clientId}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(
+        error.response?.data?.message || "Failed to remove client from agency"
+      );
+    }
+  }
+);
+
 const agencySlice = createSlice({
   name: "agency",
   initialState,
@@ -168,6 +182,17 @@ const agencySlice = createSlice({
       .addCase(assignClientToAgency.rejected, (state, action) => {
         state.loading = false;
         state.error = action.error.message || "Failed to assign client to agency";
+      })
+      .addCase(removeClientFromAgency.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(removeClientFromAgency.fulfilled, (state) => {
+        state.loading = false;
+      })
+      .addCase(removeClientFromAgency.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || "Failed to remove client from agency";
       });
   },
 });

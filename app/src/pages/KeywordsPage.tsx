@@ -64,6 +64,15 @@ function parseBulkKeywords(input: string): string[] {
   return [...new Set(raw)];
 }
 
+// Format location name with spaces after commas for better readability
+function formatLocationName(locationName: string): string {
+  if (!locationName) return "";
+  return locationName
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const KeywordsPage: React.FC = () => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [activeTab, setActiveTab] = useState<TabId>("tracked");
@@ -401,7 +410,7 @@ const KeywordsPage: React.FC = () => {
         if (failed > 0) parts.push(`${failed} failed`);
         const msg = parts.join(". ") || "Done.";
         toast.success(msg);
-        setAddKeywordMessage(created > 0 ? `${msg} SEARCH VOLUME, KEYWORD DIFFICULTY, CPC, COMPETITIVE DENSITY, and CURRENT POSITION fetched from DataForSEO.` : msg);
+        setAddKeywordMessage(created > 0 ? `${msg} keywords` : msg);
       }
 
       setNewKeywordValue("");
@@ -525,21 +534,21 @@ const KeywordsPage: React.FC = () => {
   };
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Keyword Intelligence</h1>
-          <p className="text-sm text-gray-600 mt-1">
+    <div className="p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-gray-50 min-h-screen">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-2">
+          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Keyword Intelligence</h1>
+          <p className="text-base text-gray-600 leading-relaxed">
             Research new keyword opportunities and track the phrases that matter for each client.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 bg-white rounded-xl border border-gray-200 p-1.5 shadow-sm">
           <button
             onClick={() => setActiveTab("tracked")}
-            className={`inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium ${
+            className={`inline-flex items-center rounded-lg px-5 py-2.5 text-sm font-semibold transition-all duration-200 ${
               activeTab === "tracked"
-                ? "bg-primary-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                ? "bg-primary-600 text-white shadow-md"
+                : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"
             }`}
           >
             <CheckCircle2 className="h-4 w-4 mr-2" />
@@ -547,10 +556,10 @@ const KeywordsPage: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab("research")}
-            className={`inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium ${
+            className={`inline-flex items-center rounded-lg px-5 py-2.5 text-sm font-semibold transition-all duration-200 ${
               activeTab === "research"
-                ? "bg-primary-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                ? "bg-primary-600 text-white shadow-md"
+                : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"
             }`}
           >
             <Search className="h-4 w-4 mr-2" />
@@ -569,31 +578,31 @@ const KeywordsPage: React.FC = () => {
         <div className="space-y-6">
           <form
             onSubmit={handleResearchSubmit}
-            className="bg-white rounded-xl border border-gray-200 p-6 space-y-4"
+            className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 space-y-6"
           >
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
               <div className="lg:col-span-2">
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Seed keyword or phrase
                 </label>
-                <input
-                  type="text"
-                  value={researchSeed}
-                  onChange={(e) => setResearchSeed(e.target.value)}
-                  placeholder="e.g. buy running shoes"
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                  required
-                />
+                  <input
+                    type="text"
+                    value={researchSeed}
+                    onChange={(e) => setResearchSeed(e.target.value)}
+                    placeholder="e.g. buy running shoes"
+                    className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-150 shadow-sm hover:shadow"
+                    required
+                  />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Location
                 </label>
-                <select
-                  value={researchLocation}
-                  onChange={(e) => setResearchLocation(Number(e.target.value))}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                >
+                  <select
+                    value={researchLocation}
+                    onChange={(e) => setResearchLocation(Number(e.target.value))}
+                    className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-150 shadow-sm hover:shadow"
+                  >
                   {LOCATION_OPTIONS.map((option) => (
                     <option key={option.code} value={option.code}>
                       {option.name}
@@ -605,11 +614,11 @@ const KeywordsPage: React.FC = () => {
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Language
                 </label>
-                <select
-                  value={researchLanguage}
-                  onChange={(e) => setResearchLanguage(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                >
+                  <select
+                    value={researchLanguage}
+                    onChange={(e) => setResearchLanguage(e.target.value)}
+                    className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-150 shadow-sm hover:shadow"
+                  >
                   {LANGUAGE_OPTIONS.map((option) => (
                     <option key={option.code} value={option.code}>
                       {option.name}
@@ -621,14 +630,14 @@ const KeywordsPage: React.FC = () => {
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Suggestions
                 </label>
-                <input
-                  type="number"
-                  min={5}
-                  max={100}
-                  value={researchLimit}
-                  onChange={(e) => setResearchLimit(Number(e.target.value))}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                />
+                  <input
+                    type="number"
+                    min={5}
+                    max={100}
+                    value={researchLimit}
+                    onChange={(e) => setResearchLimit(Number(e.target.value))}
+                    className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-150 shadow-sm hover:shadow"
+                  />
               </div>
             </div>
             <div className="flex items-center justify-between">
@@ -638,7 +647,7 @@ const KeywordsPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={researchLoading}
-                className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60"
+                className="inline-flex items-center rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60 shadow-md hover:shadow-lg transition-all duration-200"
               >
                 {researchLoading ? (
                   <>
@@ -662,8 +671,8 @@ const KeywordsPage: React.FC = () => {
             </div>
           )}
 
-          <div className="bg-white rounded-xl border border-gray-200">
-            <div className="flex flex-col gap-3 border-b border-gray-200 p-6 md:flex-row md:items-center md:justify-between">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="flex flex-col gap-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white p-6 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Keyword Suggestions</h2>
                 <p className="text-sm text-gray-500">
@@ -679,7 +688,7 @@ const KeywordsPage: React.FC = () => {
                     <select
                       value={assignClientId || ""}
                       onChange={(e) => setAssignClientId(e.target.value)}
-                      className="h-11 w-full bg-white px-4 text-sm font-medium text-gray-900 focus:outline-none"
+                      className="h-11 w-full bg-white pl-6 pr-4 text-sm font-medium text-gray-900 focus:outline-none"
                     >
                       <option value="" disabled>
                         Choose client
@@ -696,7 +705,7 @@ const KeywordsPage: React.FC = () => {
                   type="button"
                   onClick={handleAssignSelected}
                   disabled={assigningKeywords || Object.values(selectedSuggestions).every((value) => !value)}
-                  className="inline-flex h-11 items-center rounded-xl border-2 border-primary-300 bg-white px-4 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:opacity-60"
+                  className="inline-flex h-11 items-center rounded-xl border-2 border-primary-300 bg-white px-5 text-sm font-semibold text-primary-700 hover:bg-primary-50 hover:border-primary-400 disabled:opacity-60 shadow-sm hover:shadow transition-all duration-200"
                 >
                   {assigningKeywords ? (
                     <>
@@ -721,32 +730,32 @@ const KeywordsPage: React.FC = () => {
 
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
+                <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                   <tr>
-                    <th className="px-4 py-3">
+                    <th className="px-6 py-4">
                       <span className="sr-only">Select</span>
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Keyword
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Search volume
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       CPC (USD)
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Competitive density 
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Difficulty
                     </th>
-                    <th className="px-4 py-3">
+                    <th className="px-6 py-4">
                       <span className="sr-only">Actions</span>
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-gray-100">
                   {researchLoading ? (
                     <tr>
                       <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
@@ -764,45 +773,45 @@ const KeywordsPage: React.FC = () => {
                     </tr>
                   ) : (
                     researchResults.map((result) => (
-                      <tr key={result.keyword} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
+                      <tr key={result.keyword} className="hover:bg-gray-50 transition-colors duration-150">
+                        <td className="px-6 py-4">
                           <input
                             type="checkbox"
                             checked={Boolean(selectedSuggestions[result.keyword])}
                             onChange={() => toggleSuggestionSelection(result.keyword)}
-                            className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                            className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 cursor-pointer"
                           />
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-4">
                           <div>
-                            <p className="font-medium text-gray-900">{result.keyword}</p>
-                            <p className="text-xs text-gray-500">
-                              Seed: <span className="font-medium">{result.seed}</span>
+                            <p className="font-semibold text-gray-900">{result.keyword}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Seed: <span className="font-medium text-gray-600">{result.seed}</span>
                             </p>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {formatNumber(result.searchVolume)}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {result.cpc && result.cpc > 0 ? `$${result.cpc.toFixed(2)}` : "—"}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {result.competitionLevel
                             ? result.competitionLevel
                             : result.competition !== null
                             ? result.competition.toFixed(2)
                             : "—"}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {result.difficulty !== null ? `${result.difficulty}` : "—"}
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-6 py-4 text-right">
                           <button
                             type="button"
                             onClick={() => handleAssignSingle(result)}
                             disabled={assigningKeywords}
-                            className="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-60"
+                            className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 transition-all duration-150 shadow-sm hover:shadow"
                           >
                             Track
                           </button>
@@ -819,24 +828,24 @@ const KeywordsPage: React.FC = () => {
 
       {activeTab === "tracked" && (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 space-y-6">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div className="flex-1">
                 <h2 className="text-lg font-semibold text-gray-900">Manually add keywords</h2>
                 <p className="text-sm text-gray-500">
                   Keywords that are currently being monitored for ranking performance.
                 </p>
               </div>
-              <div className="flex items-end gap-3">
-                <div className="min-w-[240px]">
+              <div className="flex items-end gap-4 flex-shrink-0">
+                <div className="flex-shrink-0">
                   <div className="flex h-11 overflow-hidden rounded-xl border-2 border-primary-500 bg-white shadow-sm focus-within:ring-2 focus-within:ring-primary-200">
-                    <div className="flex items-center bg-primary-600 px-3 text-[11px] font-semibold uppercase tracking-wider text-white">
+                    <div className="flex items-center justify-center bg-primary-600 px-5 text-[11px] font-semibold uppercase tracking-wider text-white whitespace-nowrap flex-shrink-0">
                       Client
                     </div>
                     <select
                       value={selectedClientId || ""}
                       onChange={(e) => setSelectedClientId(e.target.value)}
-                      className="h-11 w-full bg-white px-4 text-sm font-medium text-gray-900 focus:outline-none"
+                      className="h-11 min-w-[200px] bg-white pl-6 pr-4 py-2 text-sm font-medium text-gray-900 focus:outline-none"
                     >
                       <option value="" disabled>
                         Select client
@@ -849,14 +858,14 @@ const KeywordsPage: React.FC = () => {
                     </select>
                   </div>
                 </div>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <div className="relative flex-1 max-w-md">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
                     value={trackSearchTerm}
                     onChange={(e) => setTrackSearchTerm(e.target.value)}
                     placeholder="Search tracked keywords"
-                    className="h-11 w-full rounded-xl border-2 border-gray-300 bg-white pl-9 pr-3 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                    className="h-11 w-full rounded-xl border-2 border-gray-300 bg-white pl-10 pr-4 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-150 shadow-sm hover:shadow"
                   />
                 </div>
               </div>
@@ -864,91 +873,101 @@ const KeywordsPage: React.FC = () => {
 
             <form
               onSubmit={handleAddTrackedKeyword}
-              className="rounded-lg border border-gray-200 bg-gray-50/60 p-4"
+              className="rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50/80 to-white p-6 shadow-sm"
             >
               <div className="flex items-start gap-3">
                 <div className="flex-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                     Keywords
                   </label>
-                  <div className="mt-1 flex flex-col sm:flex-row gap-3">
+                  <div className="mt-1 flex flex-col gap-3">
                     <textarea
                       value={newKeywordValue}
                       onChange={(e) => setNewKeywordValue(e.target.value)}
                       placeholder="e.g. best running shoes — or paste many (comma or new line separated)"
                       rows={3}
-                      className="flex-1 min-w-0 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 resize-y"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 resize-y transition-all duration-150 shadow-sm hover:shadow"
                       required
                     />
-                    <div ref={locationBoxRef} className="relative w-full sm:w-72 flex-shrink-0">
-                      <label className="sr-only">Location</label>
-                      <input
-                        type="text"
-                        value={trackLocationQuery}
-                        onChange={(e) => {
-                          setTrackLocationQuery(e.target.value);
-                          setTrackLocationOpen(true);
-                        }}
-                        onFocus={() => setTrackLocationOpen(true)}
-                        placeholder="Search location"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
-                      />
-                      {trackLocationOpen && (
-                        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
-                          <div className="max-h-64 overflow-y-auto">
-                            {trackLocationLoading ? (
-                              <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>
-                            ) : trackLocationQuery.trim().length < 2 ? (
-                              <div className="px-3 py-2 text-sm text-gray-500">Type 2+ characters to search.</div>
-                            ) : trackLocationOptions.length === 0 ? (
-                              <div className="px-3 py-2 text-sm text-gray-500">No locations found.</div>
-                            ) : (
-                              trackLocationOptions.map((opt) => (
-                                <button
-                                  key={`${opt.location_name}-${opt.country_iso_code ?? ""}-${opt.location_type ?? ""}`}
-                                  type="button"
-                                  onClick={() => {
-                                    setTrackLocationSelected(opt);
-                                    setTrackLocationQuery(opt.location_name);
-                                    setTrackLocationOpen(false);
-                                  }}
-                                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
-                                >
-                                  <div className="font-medium text-gray-900">{opt.location_name}</div>
-                                  <div className="text-xs text-gray-500">
-                                    {(opt.location_type || "Location")}
-                                    {opt.country_iso_code ? ` • ${opt.country_iso_code}` : ""}
-                                  </div>
-                                </button>
-                              ))
-                            )}
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <div ref={locationBoxRef} className="relative flex-1">
+                        <label className="sr-only">Location</label>
+                        <input
+                          type="text"
+                          value={formatLocationName(trackLocationQuery)}
+                          onChange={(e) => {
+                            // Allow user to type, but format for display
+                            const rawValue = e.target.value;
+                            setTrackLocationQuery(rawValue);
+                            setTrackLocationOpen(true);
+                          }}
+                          onBlur={() => {
+                            // Format on blur to ensure clean display
+                            if (trackLocationQuery) {
+                              setTrackLocationQuery(formatLocationName(trackLocationQuery));
+                            }
+                          }}
+                          onFocus={() => setTrackLocationOpen(true)}
+                          placeholder="Search location"
+                          className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-150 shadow-sm hover:shadow"
+                        />
+                        {trackLocationOpen && (
+                          <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+                            <div className="max-h-64 overflow-y-auto">
+                              {trackLocationLoading ? (
+                                <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>
+                              ) : trackLocationQuery.trim().length < 2 ? (
+                                <div className="px-3 py-2 text-sm text-gray-500">Type 2+ characters to search.</div>
+                              ) : trackLocationOptions.length === 0 ? (
+                                <div className="px-3 py-2 text-sm text-gray-500">No locations found.</div>
+                              ) : (
+                                trackLocationOptions.map((opt) => (
+                                  <button
+                                    key={`${opt.location_name}-${opt.country_iso_code ?? ""}-${opt.location_type ?? ""}`}
+                                    type="button"
+                                    onClick={() => {
+                                      setTrackLocationSelected(opt);
+                                      // Format location name when selecting from dropdown
+                                      setTrackLocationQuery(formatLocationName(opt.location_name));
+                                      setTrackLocationOpen(false);
+                                    }}
+                                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+                                  >
+                                    <div className="font-medium text-gray-900">{formatLocationName(opt.location_name)}</div>
+                                    <div className="text-xs text-gray-500">
+                                      {(opt.location_type || "Location")}
+                                      {opt.country_iso_code ? ` • ${opt.country_iso_code}` : ""}
+                                    </div>
+                                  </button>
+                                ))
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={addingKeyword || !selectedClientId}
+                        className="inline-flex items-center justify-center rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60 transition-all duration-200 shadow-md hover:shadow-lg w-full sm:w-auto"
+                      >
+                        {addingKeyword ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            {addingProgress
+                              ? `Adding ${addingProgress.current}/${addingProgress.total}…`
+                              : "Tracking…"}
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Track
+                          </>
+                        )}
+                      </button>
                     </div>
-                    <button
-                      type="submit"
-                      disabled={addingKeyword || !selectedClientId}
-                      className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60 whitespace-nowrap"
-                    >
-                      {addingKeyword ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          {addingProgress
-                            ? `Adding ${addingProgress.current}/${addingProgress.total}…`
-                            : "Tracking…"}
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Track
-                        </>
-                      )}
-                    </button>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
-                    SEARCH VOLUME, KEYWORD DIFFICULTY, CPC, COMPETITIVE DENSITY and CURRENT POSITION are fetched from
-                    DataForSEO for each keyword (single or multiple, comma/new line separated).
+                    All data is fetched from data for SEO, for each keyword 
                   </p>
                 </div>
               </div>
@@ -960,53 +979,53 @@ const KeywordsPage: React.FC = () => {
             </form>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
+                <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                   <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Keyword
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Search volume
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Keyword Difficulty
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       CPC
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Competitive density
                     </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Current position
                     </th>
-                    <th className="px-4 py-3">
+                    <th className="px-6 py-4">
                       <span className="sr-only">Actions</span>
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-gray-100">
                   {trackedLoading || clientsLoading ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
-                        <span className="inline-flex items-center gap-2 text-sm">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                      <td colSpan={7} className="px-6 py-16 text-center text-gray-500">
+                        <span className="inline-flex items-center gap-3 text-sm font-medium">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
                           Loading tracked keywords…
                         </span>
                       </td>
                     </tr>
                   ) : trackedError ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-sm text-rose-600">
+                      <td colSpan={7} className="px-6 py-16 text-center text-sm text-rose-600 font-medium">
                         {trackedError}
                       </td>
                     </tr>
                   ) : filteredTrackedKeywords.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-500">
+                      <td colSpan={7} className="px-6 py-16 text-center text-sm text-gray-500 font-medium">
                         {selectedClientId
                           ? "No tracked keywords yet. Use the research tab or add one manually."
                           : "Select a client to view tracked keywords."}
@@ -1014,45 +1033,45 @@ const KeywordsPage: React.FC = () => {
                     </tr>
                   ) : (
                     filteredTrackedKeywords.map((keyword) => (
-                      <tr key={keyword.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-gray-900">{keyword.keyword}</p>
+                      <tr key={keyword.id} className="hover:bg-gray-50 transition-colors duration-150">
+                        <td className="px-6 py-4">
+                          <p className="font-semibold text-gray-900">{keyword.keyword}</p>
                           {keyword.googleUrl && (
                             <a
                               href={keyword.googleUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs text-primary-600 hover:underline"
+                              className="text-xs text-primary-600 hover:text-primary-700 hover:underline font-medium mt-1 inline-block transition-colors"
                             >
                               View ranking URL
                             </a>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {formatNumber(keyword.searchVolume)}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {keyword.difficulty !== null && keyword.difficulty !== undefined
                             ? Math.round(Number(keyword.difficulty))
                             : "—"}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {keyword.cpc ? `$${Number(keyword.cpc).toFixed(2)}` : "—"}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {keyword.competition || "—"}
                         </td>
-                        <td className="px-4 py-3 text-gray-700">
+                        <td className="px-6 py-4 text-gray-700 font-medium">
                           {keyword.currentPosition ?? "—"}
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-2">
                             {user?.role === "SUPER_ADMIN" && (
                               <button
                                 type="button"
                                 onClick={() => handleRefreshTrackedKeyword(keyword.id)}
                                 disabled={Boolean(refreshingKeywordIds[keyword.id])}
-                                className="inline-flex items-center justify-center rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-60 transition-colors"
+                                className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 transition-all duration-150 shadow-sm hover:shadow"
                                 title="Refresh keyword data from DataForSEO"
                               >
                                 {refreshingKeywordIds[keyword.id] ? (
@@ -1066,7 +1085,7 @@ const KeywordsPage: React.FC = () => {
                               type="button"
                               onClick={() => handleDeleteTrackedKeyword(keyword.id, keyword.keyword)}
                               disabled={Boolean(deletingKeywordIds[keyword.id])}
-                              className="inline-flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
+                              className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white p-2 text-red-600 hover:bg-red-50 hover:border-red-300 disabled:opacity-60 transition-all duration-150 shadow-sm hover:shadow"
                               title="Delete this keyword"
                             >
                               {deletingKeywordIds[keyword.id] ? (

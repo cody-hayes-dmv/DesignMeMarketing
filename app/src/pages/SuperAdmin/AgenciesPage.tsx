@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { RootState } from "@/store";
-import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency } from "@/store/slices/agencySlice";
+import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -65,6 +65,12 @@ const AgenciesPage = () => {
     });
     const [assignClientModal, setAssignClientModal] = useState<{ isOpen: boolean; clientId: string | null; clientName: string | null }>({
         isOpen: false,
+        clientId: null,
+        clientName: null,
+    });
+    const [removeClientConfirm, setRemoveClientConfirm] = useState<{ isOpen: boolean; agencyId: string | null; clientId: string | null; clientName: string | null }>({
+        isOpen: false,
+        agencyId: null,
         clientId: null,
         clientName: null,
     });
@@ -134,6 +140,36 @@ const AgenciesPage = () => {
             setAssignClientModal({ isOpen: false, clientId: null, clientName: null });
         } catch (error: any) {
             console.error("Failed to assign client:", error);
+        }
+    };
+
+    const handleRemoveClientFromAgency = (agencyId: string, clientId: string, clientName: string) => {
+        setRemoveClientConfirm({
+            isOpen: true,
+            agencyId,
+            clientId,
+            clientName,
+        });
+    };
+
+    const confirmRemoveClientFromAgency = async () => {
+        if (!removeClientConfirm.agencyId || !removeClientConfirm.clientId) return;
+        try {
+            await dispatch(removeClientFromAgency({ 
+                agencyId: removeClientConfirm.agencyId, 
+                clientId: removeClientConfirm.clientId 
+            }) as any);
+            toast.success("Client removed from agency successfully!");
+            if (expandedAgencyId === removeClientConfirm.agencyId) {
+                await refreshAgencyClientsCache(removeClientConfirm.agencyId);
+            }
+            if (selectedAgencyId === removeClientConfirm.agencyId) {
+                handleViewClients(removeClientConfirm.agencyId, selectedAgencyName);
+            }
+            setRemoveClientConfirm({ isOpen: false, agencyId: null, clientId: null, clientName: null });
+        } catch (error: any) {
+            console.error("Failed to remove client from agency:", error);
+            setRemoveClientConfirm({ isOpen: false, agencyId: null, clientId: null, clientName: null });
         }
     };
 
@@ -594,11 +630,22 @@ const AgenciesPage = () => {
                                                                                         <Edit className="h-4 w-4" />
                                                                                     </button>
                                                                                     <button
+                                                                                        className="p-1 text-gray-400 hover:text-orange-600 transition-colors"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleRemoveClientFromAgency(agency.id, client.id, client.name);
+                                                                                        }}
+                                                                                        title="Remove from Agency"
+                                                                                    >
+                                                                                        <UserMinus className="h-4 w-4" />
+                                                                                    </button>
+                                                                                    <button
                                                                                         className="p-1 text-gray-400 hover:text-red-600 transition-colors"
                                                                                         onClick={(e) => {
                                                                                             e.stopPropagation();
                                                                                             handleDeleteClient(client.id);
                                                                                         }}
+                                                                                        title="Delete Client"
                                                                                     >
                                                                                         <Trash2 className="h-4 w-4" />
                                                                                     </button>
@@ -989,8 +1036,20 @@ const AgenciesPage = () => {
                                                             <Edit className="h-4 w-4" />
                                                         </button>
                                                         <button
+                                                            className="p-1 text-gray-400 hover:text-orange-600 transition-colors"
+                                                            onClick={() => {
+                                                                if (selectedAgencyId) {
+                                                                    handleRemoveClientFromAgency(selectedAgencyId, client.id, client.name);
+                                                                }
+                                                            }}
+                                                            title="Remove from Agency"
+                                                        >
+                                                            <UserMinus className="h-4 w-4" />
+                                                        </button>
+                                                        <button
                                                             className="p-1 text-gray-400 hover:text-red-600 transition-colors"
                                                             onClick={() => handleDeleteClient(client.id)}
+                                                            title="Delete Client"
                                                         >
                                                             <Trash2 className="h-4 w-4" />
                                                         </button>
@@ -1078,6 +1137,19 @@ const AgenciesPage = () => {
                     confirmText="Delete"
                     requireConfirmText="DELETE"
                     variant="danger"
+                />
+            )}
+
+            {/* Remove Client from Agency Confirmation Dialog */}
+            {removeClientConfirm.isOpen && (
+                <ConfirmDialog
+                    isOpen={removeClientConfirm.isOpen}
+                    onClose={() => setRemoveClientConfirm({ isOpen: false, agencyId: null, clientId: null, clientName: null })}
+                    onConfirm={confirmRemoveClientFromAgency}
+                    title="Remove Client from Agency"
+                    message={`Are you sure you want to remove "${removeClientConfirm.clientName}" from this agency? The client will be unassigned but not deleted.`}
+                    confirmText="Remove"
+                    variant="warning"
                 />
             )}
 
