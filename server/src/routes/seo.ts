@@ -4991,54 +4991,64 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     let previousMetrics: any = null;
     let searchMentions: any[] = [];
 
-    // Fetch DataForSEO AI aggregated metrics (current period)
-    try {
-      currentMetrics = await fetchAiAggregatedMetrics(
+    // Parallelize independent DataForSEO API calls to reduce total time
+    const [currentMetricsResult, previousMetricsResult, searchMentionsResult] = await Promise.allSettled([
+      // Fetch DataForSEO AI aggregated metrics (current period)
+      fetchAiAggregatedMetrics(
         targetDomain,
         "domain",
         locationCode,
         languageCode,
         dateFrom,
         dateTo
-      );
-      console.log("[AI Intelligence] Aggregated metrics response:", {
-        hasData: !!currentMetrics,
-        totalMentions: currentMetrics?.total_mentions,
-        aiSearchVolume: currentMetrics?.ai_search_volume,
-        aggregatedDataLength: currentMetrics?.aggregated_data?.length || 0,
-      });
-    } catch (error: any) {
-      console.error("[AI Intelligence] DataForSEO aggregated metrics fetch failed:", {
-        error: error.message,
-        targetDomain,
-        dateFrom,
-        dateTo,
-      });
-    }
-
-    // Fetch DataForSEO AI aggregated metrics (previous period for trends)
-    try {
-      previousMetrics = await fetchAiAggregatedMetrics(
+      ),
+      // Fetch DataForSEO AI aggregated metrics (previous period for trends)
+      fetchAiAggregatedMetrics(
         targetDomain,
         "domain",
         locationCode,
         languageCode,
         prevDateFrom,
         prevDateTo
-      );
-    } catch (error: any) {
-      console.warn("[AI Intelligence] DataForSEO previous period metrics fetch failed:", error.message);
-    }
-
-    // Fetch DataForSEO AI search mentions (queries)
-    try {
-      searchMentions = await fetchAiSearchMentions(
+      ),
+      // Fetch DataForSEO AI search mentions (queries)
+      fetchAiSearchMentions(
         targetDomain,
         "domain",
         locationCode,
         languageCode,
         100
-      );
+      ),
+    ]);
+
+    // Process current metrics result
+    if (currentMetricsResult.status === 'fulfilled') {
+      currentMetrics = currentMetricsResult.value;
+      console.log("[AI Intelligence] Aggregated metrics response:", {
+        hasData: !!currentMetrics,
+        totalMentions: currentMetrics?.total_mentions,
+        aiSearchVolume: currentMetrics?.ai_search_volume,
+        aggregatedDataLength: currentMetrics?.aggregated_data?.length || 0,
+      });
+    } else {
+      console.error("[AI Intelligence] DataForSEO aggregated metrics fetch failed:", {
+        error: currentMetricsResult.reason?.message,
+        targetDomain,
+        dateFrom,
+        dateTo,
+      });
+    }
+
+    // Process previous metrics result
+    if (previousMetricsResult.status === 'fulfilled') {
+      previousMetrics = previousMetricsResult.value;
+    } else {
+      console.warn("[AI Intelligence] DataForSEO previous period metrics fetch failed:", previousMetricsResult.reason?.message);
+    }
+
+    // Process search mentions result
+    if (searchMentionsResult.status === 'fulfilled') {
+      searchMentions = searchMentionsResult.value;
       console.log("[AI Intelligence] Search mentions response:", {
         count: searchMentions.length,
         firstItem: searchMentions[0] ? {
@@ -5047,62 +5057,95 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
           ai_search_volume: searchMentions[0].ai_search_volume,
         } : null,
       });
-    } catch (error: any) {
+    } else {
       console.error("[AI Intelligence] DataForSEO search mentions fetch failed:", {
-        error: error.message,
+        error: searchMentionsResult.reason?.message,
         targetDomain,
-        stack: error.stack,
+        stack: searchMentionsResult.reason?.stack,
       });
     }
 
     // Fallback to GA4 + SERP data if DataForSEO has no data
+    // Fetch GA4 fallback and SERP data in parallel with competitor domain extraction
     const isGA4Connected = !!(client.ga4RefreshToken && client.ga4PropertyId && client.ga4ConnectedAt);
     let fallbackChatgpt = { sessions: 0, citedPages: 0 };
     let fallbackGemini = { sessions: 0, citedPages: 0 };
     let fallbackAiOverviewMentions = 0;
     let fallbackAiModeMentions = 0;
+    let competitorDomains: string[] = [];
 
-    if (isGA4Connected && (!currentMetrics || !currentMetrics.total_mentions)) {
-      try {
-        const { fetchGA4AiSearchVisibility } = await import("../lib/ga4AiSearchVisibility.js");
-        const ga4 = await fetchGA4AiSearchVisibility(clientId, startDate, endDate);
-        fallbackChatgpt = {
-          sessions: ga4.providers.chatgpt.sessions || 0,
-          citedPages: ga4.providers.chatgpt.citedPages || 0,
-        };
-        fallbackGemini = {
-          sessions: ga4.providers.gemini.sessions || 0,
-          citedPages: ga4.providers.gemini.citedPages || 0,
-        };
-      } catch (e) {
-        console.warn("[AI Intelligence] GA4 fallback fetch failed:", e);
-      }
-    }
-
-    // Get AI Overview/AI Mode mentions from SERP cache
-    const tks = await prisma.targetKeyword.findMany({
-      where: { clientId },
-      select: { serpItemTypes: true },
-    });
-    const parsedTypes = tks
-      .map((tk) => {
-        const raw = tk.serpItemTypes;
-        if (!raw) return [];
+    // Parallelize GA4 fallback, SERP cache parsing, and competitor domain extraction
+    const [ga4FallbackResult, serpCacheResult, competitorDomainsResult] = await Promise.allSettled([
+      // GA4 fallback (only if needed and connected)
+      isGA4Connected && (!currentMetrics || !currentMetrics.total_mentions)
+        ? (async () => {
+            try {
+              const { fetchGA4AiSearchVisibility } = await import("../lib/ga4AiSearchVisibility.js");
+              return await fetchGA4AiSearchVisibility(clientId, startDate, endDate);
+            } catch (e) {
+              console.warn("[AI Intelligence] GA4 fallback fetch failed:", e);
+              return null;
+            }
+          })()
+        : Promise.resolve(null),
+      // SERP cache parsing for AI Overview mentions
+      (async () => {
         try {
-          const arr = JSON.parse(raw);
-          return Array.isArray(arr) ? (arr as any[]).map(String) : [];
-        } catch {
+          const tks = await prisma.targetKeyword.findMany({
+            where: { clientId },
+            select: { serpItemTypes: true },
+          });
+          return tks
+            .map((tk) => {
+              const raw = tk.serpItemTypes;
+              if (!raw) return [];
+              try {
+                const arr = JSON.parse(raw);
+                return Array.isArray(arr) ? (arr as any[]).map(String) : [];
+              } catch {
+                return [];
+              }
+            })
+            .filter((arr) => Array.isArray(arr));
+        } catch (e) {
+          console.warn("[AI Intelligence] SERP cache parsing failed:", e);
           return [];
         }
-      })
-      .filter((arr) => Array.isArray(arr));
-    const totalKw = parsedTypes.length;
-    fallbackAiOverviewMentions = parsedTypes.filter((arr) =>
-      arr.some((t) => String(t).toLowerCase().includes("ai_overview"))
-    ).length;
-    fallbackAiModeMentions = parsedTypes.filter((arr) =>
-      arr.some((t) => String(t).toLowerCase().includes("ai_mode") || String(t).toLowerCase().includes("ai mode"))
-    ).length;
+      })(),
+      // Competitor domains extraction
+      extractCompetitorDomainsFromSerp(clientId, 10),
+    ]);
+
+    // Process GA4 fallback result
+    if (ga4FallbackResult.status === 'fulfilled' && ga4FallbackResult.value) {
+      const ga4 = ga4FallbackResult.value;
+      fallbackChatgpt = {
+        sessions: ga4.providers.chatgpt.sessions || 0,
+        citedPages: ga4.providers.chatgpt.citedPages || 0,
+      };
+      fallbackGemini = {
+        sessions: ga4.providers.gemini.sessions || 0,
+        citedPages: ga4.providers.gemini.citedPages || 0,
+      };
+    }
+
+    // Process competitor domains result
+    if (competitorDomainsResult.status === 'fulfilled') {
+      competitorDomains = competitorDomainsResult.value;
+    } else {
+      console.warn("[AI Intelligence] Failed to extract competitor domains:", competitorDomainsResult.reason);
+    }
+
+    // Process SERP cache result for AI Overview mentions
+    if (serpCacheResult.status === 'fulfilled') {
+      const parsedTypes = serpCacheResult.value;
+      fallbackAiOverviewMentions = parsedTypes.filter((arr) =>
+        arr.some((t) => String(t).toLowerCase().includes("ai_overview"))
+      ).length;
+      fallbackAiModeMentions = parsedTypes.filter((arr) =>
+        arr.some((t) => String(t).toLowerCase().includes("ai_mode") || String(t).toLowerCase().includes("ai mode"))
+      ).length;
+    }
 
     // Parse aggregated metrics (use DataForSEO if available, otherwise use fallback)
     // DataForSEO returns data in summary object with total_mentions, ai_search_volume, impressions
@@ -5437,9 +5480,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     const totalContextsCount = howAiMentionsYou.length || searchMentions.length || 0;
 
     // ===== COMPETITOR ANALYSIS (Real Data) =====
-    // Extract competitor domains from SERP cache
-    const competitorDomains = await extractCompetitorDomainsFromSerp(clientId, 10);
-    
+    // Competitor domains already extracted above in parallel section
     // Fetch competitor AI metrics
     let competitorMetricsMap = new Map<string, any>();
     if (competitorDomains.length > 0) {
@@ -5492,18 +5533,25 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     const gapBehind = leader && you ? Math.max(0, leader.score - you.score) : 0;
 
     // ===== COMPETITOR QUERIES (Real Data) =====
+    // Fetch competitor queries with timeout to prevent blocking the entire response
     let competitorQueries: any[] = [];
     if (competitorDomains.length > 0) {
       try {
-        competitorQueries = await findCompetitorQueries(
+        // Use Promise.race to timeout after 15 seconds
+        const competitorQueriesPromise = findCompetitorQueries(
           targetDomain,
           competitorDomains,
           locationCode,
           languageCode,
           10
         );
+        const timeoutPromise = new Promise<any[]>((resolve) => {
+          setTimeout(() => resolve([]), 15000); // 15 second timeout
+        });
+        competitorQueries = await Promise.race([competitorQueriesPromise, timeoutPromise]);
       } catch (error: any) {
         console.warn("[AI Intelligence] Failed to fetch competitor queries:", error);
+        competitorQueries = []; // Return empty array on error
       }
     }
 

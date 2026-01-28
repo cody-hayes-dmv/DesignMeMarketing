@@ -1883,7 +1883,7 @@ const ClientDashboardPage: React.FC = () => {
       } else {
         params.period = dateRange;
       }
-      const res = await api.get(`/seo/ai-intelligence/${clientId}`, { params, timeout: 30000 });
+      const res = await api.get(`/seo/ai-intelligence/${clientId}`, { params, timeout: 60000 }); // Increased to 60s for heavy DataForSEO API calls
       setAiIntelligence(res.data);
     } catch (error: any) {
       console.error("Failed to fetch AI Intelligence", error);
@@ -2507,13 +2507,16 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const handleFetchGA4Properties = async (showModal: boolean = true) => {
+  const handleFetchGA4Properties = async (showModal: boolean = true, forceRefresh: boolean = true) => {
     if (!clientId) return;
     try {
       setLoadingProperties(true);
-      // Add cache-busting parameter to ensure fresh data
+      // Add cache-busting parameter and force refresh flag to ensure fresh data
       const res = await api.get(`/clients/${clientId}/ga4/properties`, {
-        params: { _t: Date.now() } // Cache busting
+        params: { 
+          _t: Date.now(), // Cache busting
+          forceRefresh: forceRefresh ? 'true' : 'false' // Force token refresh on backend
+        }
       });
       const properties = res.data?.properties || [];
       
@@ -2559,7 +2562,7 @@ const ClientDashboardPage: React.FC = () => {
   useEffect(() => {
     if (showGA4Modal && clientId && !loadingProperties) {
       // Always refresh properties when modal opens to get latest GA4 access
-      handleFetchGA4Properties(false);
+      handleFetchGA4Properties(false, true); // Force refresh when modal opens
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showGA4Modal, clientId]);
@@ -5857,7 +5860,7 @@ const ClientDashboardPage: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => {
-                            handleFetchGA4Properties(false); // Don't show modal again, just refresh
+                            handleFetchGA4Properties(false, true); // Don't show modal again, but force refresh
                           }}
                           disabled={loadingProperties}
                           className="text-gray-400 hover:text-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -8139,7 +8142,7 @@ const ClientDashboardPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
-                    handleFetchGA4Properties(false); // Don't show modal again, just refresh
+                    handleFetchGA4Properties(false, true); // Don't show modal again, but force refresh
                   }}
                   disabled={loadingProperties}
                   className="text-gray-400 hover:text-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

@@ -156,21 +156,37 @@ const AgenciesPage = () => {
 
     const confirmRemoveClientFromAgency = async () => {
         if (!removeClientConfirm.agencyId || !removeClientConfirm.clientId) return;
+        const agencyId = removeClientConfirm.agencyId;
+        const clientId = removeClientConfirm.clientId;
         try {
             await dispatch(removeClientFromAgency({ 
-                agencyId: removeClientConfirm.agencyId, 
-                clientId: removeClientConfirm.clientId 
+                agencyId, 
+                clientId 
             }) as any);
             toast.success("Client removed from agency successfully!");
             
-            // Refresh the clients cache for the expanded agency
-            if (expandedAgencyId === removeClientConfirm.agencyId) {
-                await refreshAgencyClientsCache(removeClientConfirm.agencyId);
+            // Immediately remove from cache to update UI
+            setAgencyClientsByAgencyId((prev) => {
+                const updated = { ...prev };
+                if (updated[agencyId]) {
+                    updated[agencyId] = updated[agencyId].filter(client => client.id !== clientId);
+                }
+                return updated;
+            });
+            
+            // Also remove from clients modal state if open
+            if (selectedAgencyId === agencyId) {
+                setClients((prev) => prev.filter(client => client.id !== clientId));
+            }
+            
+            // Refresh the clients cache for the expanded agency to ensure consistency
+            if (expandedAgencyId === agencyId) {
+                await refreshAgencyClientsCache(agencyId);
             }
             
             // Refresh the clients modal if open
-            if (selectedAgencyId === removeClientConfirm.agencyId) {
-                handleViewClients(removeClientConfirm.agencyId, selectedAgencyName);
+            if (selectedAgencyId === agencyId) {
+                handleViewClients(agencyId, selectedAgencyName);
             }
             
             // Refresh the agencies list to update client count
@@ -179,6 +195,7 @@ const AgenciesPage = () => {
             setRemoveClientConfirm({ isOpen: false, agencyId: null, clientId: null, clientName: null });
         } catch (error: any) {
             console.error("Failed to remove client from agency:", error);
+            toast.error(error?.response?.data?.message || "Failed to remove client from agency");
             setRemoveClientConfirm({ isOpen: false, agencyId: null, clientId: null, clientName: null });
         }
     };

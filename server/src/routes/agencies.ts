@@ -739,8 +739,11 @@ router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req,
     }
 
     // Check if client is actually assigned to this agency
+    // A client belongs to an agency if the client's userId belongs to a user who is a member of that agency
     const clientUserAgencyIds = client.user.memberships.map(m => m.agencyId);
-    if (!clientUserAgencyIds.includes(agencyId)) {
+    const isClientAssignedToAgency = clientUserAgencyIds.includes(agencyId);
+    
+    if (!isClientAssignedToAgency) {
       return res.status(400).json({ message: 'Client is not assigned to this agency' });
     }
 

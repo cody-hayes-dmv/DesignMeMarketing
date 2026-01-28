@@ -321,11 +321,18 @@ export async function fetchGA4TrafficData(
       const [response] = await analytics.runReport(requestConfig);
       return response;
     } catch (error: any) {
-      console.warn(`[GA4] ${requestName} request failed:`, {
-        error: error.message,
-        code: error.code,
-        propertyId,
-      });
+      // Suppress warnings for expected errors (conversions not configured, etc.)
+      const isExpectedError = 
+        (error.code === 3 && requestName.includes('Conversions')) || // INVALID_ARGUMENT for conversions is expected if not configured
+        (error.code === 3 && requestName.includes('Key Events')); // INVALID_ARGUMENT for key events is expected if not configured
+      
+      if (!isExpectedError) {
+        console.warn(`[GA4] ${requestName} request failed:`, {
+          error: error.message,
+          code: error.code,
+          propertyId,
+        });
+      }
       // Return null so other requests can still succeed
       return null;
     }
@@ -1459,34 +1466,44 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
     // Always force refresh token to get latest permissions when listing properties
     const admin = await getAnalyticsAdminClient(clientId, forceRefresh);
     
-    // List all accounts first to get account names
-    const accountsResponse = await admin.accounts.list();
-    const accounts = accountsResponse.data.accounts || [];
+    // List all accounts first to get account names (with pagination support)
+    let allAccounts: any[] = [];
+    let accountsPageToken: string | undefined = undefined;
     
-    console.log(`[GA4 Properties] Found ${accounts.length} account(s) for clientId=${clientId}`);
+    do {
+      const accountsResponse = await admin.accounts.list({
+        pageSize: 200, // Max page size
+        pageToken: accountsPageToken,
+      });
+      const accounts = accountsResponse.data.accounts || [];
+      allAccounts.push(...accounts);
+      accountsPageToken = accountsResponse.data.nextPageToken;
+    } while (accountsPageToken);
     
-    if (accounts.length === 0) {
+    console.log(`[GA4 Properties] Found ${allAccounts.length} account(s) for clientId=${clientId}`);
+    
+    if (allAccounts.length === 0) {
       console.warn(`[GA4 Properties] No accounts found for clientId=${clientId}. User may need to grant account access permissions.`);
       return [];
     }
     
     // Log account details for debugging
-    accounts.forEach((account) => {
+    allAccounts.forEach((account) => {
       const accountId = account.name?.split('/')[1] || '';
       console.log(`[GA4 Properties] Account: ${account.displayName || accountId} (ID: ${accountId})`);
     });
     
     // Create a map of account ID to account name
     const accountMap = new Map<string, string>();
-    accounts.forEach((account) => {
+    allAccounts.forEach((account) => {
       const accountId = account.name?.split('/')[1] || '';
       if (accountId) {
         accountMap.set(accountId, account.displayName || accountId);
       }
     });
     
-    // For each account, list its properties
-    const propertyPromises = accounts.map(async (account) => {
+    // For each account, list its properties (with pagination support)
+    const propertyPromises = allAccounts.map(async (account) => {
       try {
         const accountId = account.name?.split('/')[1] || '';
         const accountName = accountMap.get(accountId) || accountId;
@@ -1497,22 +1514,32 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
         
         console.log(`[GA4 Properties] Fetching properties for account: ${accountName} (${accountId})`);
         
-        // List properties for this account
-        const propertiesResponse = await admin.properties.list({
-          filter: `parent:accounts/${accountId}`,
-        });
+        // List properties for this account with pagination support
+        let allProperties: any[] = [];
+        let propertiesPageToken: string | undefined = undefined;
         
-        const properties = propertiesResponse.data.properties || [];
-        console.log(`[GA4 Properties] Found ${properties.length} property/properties in account ${accountName}`);
+        do {
+          const propertiesResponse = await admin.properties.list({
+            filter: `parent:accounts/${accountId}`,
+            pageSize: 200, // Max page size
+            pageToken: propertiesPageToken,
+          });
+          
+          const properties = propertiesResponse.data.properties || [];
+          allProperties.push(...properties);
+          propertiesPageToken = propertiesResponse.data.nextPageToken;
+        } while (propertiesPageToken);
+        
+        console.log(`[GA4 Properties] Found ${allProperties.length} property/properties in account ${accountName}`);
         
         // Log each property found with details
-        properties.forEach((property) => {
+        allProperties.forEach((property) => {
           const propertyId = property.name?.split('/')[1] || '';
           const propertyType = (property as any).propertyType || 'unknown';
           console.log(`[GA4 Properties]   - ${property.displayName || propertyId} (ID: ${propertyId}, Type: ${propertyType})`);
         });
         
-        return properties.map((property) => {
+        return allProperties.map((property) => {
           // Property name format: "properties/123456789"
           const propertyId = property.name?.split('/')[1] || '';
           const accountName = accountMap.get(accountId) || accountId;
@@ -1543,6 +1570,11 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
     const allProperties = propertyArrays.flat();
     
     console.log(`[GA4 Properties] Total properties found: ${allProperties.length} for clientId=${clientId}`);
+    
+    // Log all property names for debugging
+    if (allProperties.length > 0) {
+      console.log(`[GA4 Properties] Property names:`, allProperties.map(p => p.displayName).join(', '));
+    }
     
     return allProperties;
   } catch (error: any) {

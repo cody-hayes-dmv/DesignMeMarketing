@@ -1716,8 +1716,9 @@ router.get('/:id/ga4/properties', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Please complete OAuth flow first by clicking "Connect GA4"' });
         }
 
-        // List all GA4 properties
-        const properties = await listGA4Properties(clientId);
+        // List all GA4 properties - force refresh if requested via query param
+        const forceRefresh = req.query.forceRefresh === 'true' || req.query.refresh === 'true';
+        const properties = await listGA4Properties(clientId, forceRefresh);
         res.json({ properties });
     } catch (error: any) {
         console.error('GA4 properties list error:', error);
