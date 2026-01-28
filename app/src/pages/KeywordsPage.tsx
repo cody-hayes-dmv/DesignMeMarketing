@@ -745,9 +745,6 @@ const KeywordsPage: React.FC = () => {
                       CPC (USD)
                     </th>
                     <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
-                      Competitive density 
-                    </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Difficulty
                     </th>
                     <th className="px-6 py-4">
@@ -758,7 +755,7 @@ const KeywordsPage: React.FC = () => {
                 <tbody className="bg-white divide-y divide-gray-100">
                   {researchLoading ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
+                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
                         <span className="inline-flex items-center gap-2 text-sm">
                           <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
                           Fetching keyword suggestions…
@@ -767,7 +764,7 @@ const KeywordsPage: React.FC = () => {
                     </tr>
                   ) : researchResults.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-gray-500 text-sm">
+                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500 text-sm">
                         Run a keyword search to see suggestions.
                       </td>
                     </tr>
@@ -795,13 +792,6 @@ const KeywordsPage: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 text-gray-700 font-medium">
                           {result.cpc && result.cpc > 0 ? `$${result.cpc.toFixed(2)}` : "—"}
-                        </td>
-                        <td className="px-6 py-4 text-gray-700 font-medium">
-                          {result.competitionLevel
-                            ? result.competitionLevel
-                            : result.competition !== null
-                            ? result.competition.toFixed(2)
-                            : "—"}
                         </td>
                         <td className="px-6 py-4 text-gray-700 font-medium">
                           {result.difficulty !== null ? `${result.difficulty}` : "—"}
@@ -894,9 +884,9 @@ const KeywordsPage: React.FC = () => {
                         <label className="sr-only">Location</label>
                         <input
                           type="text"
-                          value={formatLocationName(trackLocationQuery)}
+                          value={trackLocationQuery}
                           onChange={(e) => {
-                            // Allow user to type, but format for display
+                            // Allow user to type freely without formatting
                             const rawValue = e.target.value;
                             setTrackLocationQuery(rawValue);
                             setTrackLocationOpen(true);
@@ -997,9 +987,6 @@ const KeywordsPage: React.FC = () => {
                       CPC
                     </th>
                     <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
-                      Competitive density
-                    </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Current position
                     </th>
                     <th className="px-6 py-4">
@@ -1010,7 +997,7 @@ const KeywordsPage: React.FC = () => {
                 <tbody className="bg-white divide-y divide-gray-100">
                   {trackedLoading || clientsLoading ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-16 text-center text-gray-500">
+                      <td colSpan={6} className="px-6 py-16 text-center text-gray-500">
                         <span className="inline-flex items-center gap-3 text-sm font-medium">
                           <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
                           Loading tracked keywords…
@@ -1019,13 +1006,13 @@ const KeywordsPage: React.FC = () => {
                     </tr>
                   ) : trackedError ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-16 text-center text-sm text-rose-600 font-medium">
+                      <td colSpan={6} className="px-6 py-16 text-center text-sm text-rose-600 font-medium">
                         {trackedError}
                       </td>
                     </tr>
                   ) : filteredTrackedKeywords.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-16 text-center text-sm text-gray-500 font-medium">
+                      <td colSpan={6} className="px-6 py-16 text-center text-sm text-gray-500 font-medium">
                         {selectedClientId
                           ? "No tracked keywords yet. Use the research tab or add one manually."
                           : "Select a client to view tracked keywords."}
@@ -1057,9 +1044,6 @@ const KeywordsPage: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 text-gray-700 font-medium">
                           {keyword.cpc ? `$${Number(keyword.cpc).toFixed(2)}` : "—"}
-                        </td>
-                        <td className="px-6 py-4 text-gray-700 font-medium">
-                          {keyword.competition || "—"}
                         </td>
                         <td className="px-6 py-4 text-gray-700 font-medium">
                           {keyword.currentPosition ?? "—"}

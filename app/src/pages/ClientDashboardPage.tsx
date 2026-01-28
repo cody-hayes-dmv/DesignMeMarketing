@@ -2261,7 +2261,13 @@ const ClientDashboardPage: React.FC = () => {
         if (cancelled) return;
 
         const tkRows = Array.isArray(tkRes.data) ? (tkRes.data as ReportTargetKeywordRow[]) : [];
-        setReportPreviewTargetKeywords(tkRows.slice(0, 50));
+        // Sort by highest rank (lowest position number) first, nulls at the end
+        const sorted = tkRows.sort((a, b) => {
+          const aPos = a.googlePosition ?? Infinity;
+          const bPos = b.googlePosition ?? Infinity;
+          return aPos - bPos; // Lower position number = higher rank
+        });
+        setReportPreviewTargetKeywords(sorted.slice(0, 50));
 
         const token = shareRes?.data?.token;
         const url = token ? `${window.location.origin}/share/${encodeURIComponent(token)}` : null;
@@ -2529,13 +2535,21 @@ const ClientDashboardPage: React.FC = () => {
     } catch (error: any) {
       console.error("Failed to fetch GA4 properties:", error);
       const errorMsg = error.response?.data?.message || "Failed to fetch GA4 properties";
+      console.error("GA4 Properties Error Details:", {
+        message: errorMsg,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
       if (showModal) {
         toast.error(errorMsg);
       }
       // If token expired, suggest reconnecting
       if (errorMsg.includes("expired") || errorMsg.includes("revoked") || errorMsg.includes("reconnect")) {
         toast.error("GA4 access token may be expired. Please disconnect and reconnect GA4 to refresh your permissions.", { duration: 6000 });
+      } else if (errorMsg.includes("OAuth flow")) {
+        toast.error("Please complete the OAuth flow first by clicking 'Connect GA4' and authorizing access.", { duration: 6000 });
       }
+      setGa4Properties([]);
     } finally {
       setLoadingProperties(false);
     }
@@ -5874,8 +5888,30 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                     ) : ga4Properties.length === 0 ? (
                       <div className="text-center py-8 text-gray-500">
-                        <p>No GA4 properties found.</p>
-                        <p className="text-sm mt-2">Please make sure you have access to at least one GA4 property.</p>
+                        <p className="font-medium mb-2">No GA4 properties found.</p>
+                        <p className="text-sm mb-2">Please make sure you have access to at least one GA4 property.</p>
+                        <p className="text-xs mb-4 text-gray-400">Note: Only GA4 properties are shown. Universal Analytics properties are not supported.</p>
+                        <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                          <p className="text-sm font-medium text-gray-700 mb-2">Can't find your property?</p>
+                          <p className="text-xs text-gray-600 mb-3">If you know your GA4 Property ID, you can enter it manually below:</p>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={ga4PropertyId}
+                              onChange={(e) => setGa4PropertyId(e.target.value)}
+                              placeholder="Enter Property ID (e.g., 502875974)"
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                            <button
+                              onClick={() => handleSubmitPropertyId()}
+                              disabled={!ga4PropertyId.trim() || ga4Connecting}
+                              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                            >
+                              Connect
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-2">Find your Property ID in Google Analytics: Admin → Property Settings</p>
+                        </div>
                       </div>
                     ) : (
                       <>
@@ -5957,7 +5993,29 @@ const ClientDashboardPage: React.FC = () => {
                           );
                         })()}
                         
-                        <div className="flex items-center justify-end">
+                        {/* Manual Property ID Input (fallback) */}
+                        <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                          <p className="text-xs font-medium text-gray-700 mb-2">Can't find your property in the list?</p>
+                          <p className="text-xs text-gray-600 mb-2">You can manually enter your GA4 Property ID:</p>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={ga4PropertyId}
+                              onChange={(e) => setGa4PropertyId(e.target.value)}
+                              placeholder="Enter Property ID (e.g., 502875974)"
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                            <button
+                              onClick={() => handleSubmitPropertyId()}
+                              disabled={!ga4PropertyId.trim() || ga4Connecting}
+                              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                            >
+                              Connect
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end mt-4">
                           <button
                             onClick={() => {
                               setShowGA4Modal(false);
@@ -7254,155 +7312,281 @@ const ClientDashboardPage: React.FC = () => {
       {/* View Report Modal */}
       {viewReportModalOpen && selectedReport && createPortal(
         <div className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-50 z-50 m-0 p-0">
-          <div className="bg-white w-full h-full overflow-hidden flex flex-col m-0 p-0">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">{selectedReport.name}</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  {selectedReport.type} Report • Last Generated: {selectedReport.lastGenerated}
-                </p>
-              </div>
-              <button
-                onClick={handleCloseViewModal}
-                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
+          <div className="bg-gray-50 w-full h-full overflow-hidden flex flex-col m-0 p-0">
+            {/* Close button - floating */}
+            <button
+              onClick={handleCloseViewModal}
+              className="fixed top-4 right-4 z-50 p-2 bg-white rounded-full shadow-lg text-gray-400 hover:text-gray-600 transition-colors"
+              aria-label="Close report"
+            >
+              <X className="h-6 w-6" />
+            </button>
 
             {/* Modal Content - Report Preview */}
-            <div className="flex-1 overflow-y-auto p-6">
-              <div ref={modalDashboardContentRef} className="space-y-8">
-                {/* Report preview (matches emailed PDF/text format) */}
-                <div className="bg-white border border-gray-200 rounded-xl p-8 max-w-4xl mx-auto">
+            <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+              <div ref={modalDashboardContentRef} className="max-w-5xl mx-auto space-y-6">
+                {/* Report Header Card */}
+                <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-8 text-white shadow-lg">
                   <div className="text-center">
-                    <h1 className="text-2xl font-bold text-gray-900">SEO Analytics Report</h1>
-                    <p className="text-sm text-gray-600 mt-1">
+                    <div className="flex items-center justify-center mb-3">
+                      <FileText className="h-8 w-8 mr-3" />
+                      <h1 className="text-3xl font-bold">SEO Analytics Report</h1>
+                    </div>
+                    <p className="text-primary-100 text-lg mt-2">
                       {(serverReport?.period ? String(serverReport.period) : String(selectedReport.type)).charAt(0).toUpperCase() +
                         (serverReport?.period ? String(serverReport.period) : String(selectedReport.type)).slice(1).toLowerCase()}{" "}
                       report for {client?.name || "Client"}
                     </p>
                   </div>
 
-                  <div className="mt-6 text-sm text-gray-800 space-y-0.5">
-                    <div>
-                      <span className="font-semibold">Client:</span> {client?.name || "—"}
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm">
+                      <div className="text-primary-200 text-xs font-medium mb-1">Client</div>
+                      <div className="text-white font-semibold">{client?.name || "—"}</div>
                     </div>
-                    <div>
-                      <span className="font-semibold">Domain:</span> {client?.domain || "—"}
+                    <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm">
+                      <div className="text-primary-200 text-xs font-medium mb-1">Domain</div>
+                      <div className="text-white font-semibold">{client?.domain || "—"}</div>
                     </div>
-                    <div>
-                      <span className="font-semibold">Report date:</span>{" "}
-                      {serverReport?.reportDate ? new Date(serverReport.reportDate).toLocaleDateString() : selectedReport.lastGenerated}
-                    </div>
-                  </div>
-
-                  <div className="mt-6">
-                    <h2 className="text-sm font-bold text-gray-900 underline">Traffic Overview</h2>
-                    <div className="mt-2 text-sm text-gray-900 space-y-0.5">
-                      <div>Total Sessions: {Number(serverReport?.totalSessions ?? 0).toLocaleString()}</div>
-                      <div>Organic Sessions: {Number(serverReport?.organicSessions ?? 0).toLocaleString()}</div>
-                      {serverReport?.activeUsers != null && <div>Active Users: {Number(serverReport.activeUsers ?? 0).toLocaleString()}</div>}
-                      {serverReport?.newUsers != null && <div>New Users: {Number(serverReport.newUsers ?? 0).toLocaleString()}</div>}
-                      {serverReport?.eventCount != null && <div>Event Count: {Number(serverReport.eventCount ?? 0).toLocaleString()}</div>}
-                      {serverReport?.keyEvents != null && <div>Key Events: {Number(serverReport.keyEvents ?? 0).toLocaleString()}</div>}
-                    </div>
-                  </div>
-
-                  <div className="mt-6">
-                    <h2 className="text-sm font-bold text-gray-900 underline">SEO Performance</h2>
-                    <div className="mt-2 text-sm text-gray-900 space-y-0.5">
-                      <div>
-                        Average Position:{" "}
-                        {serverReport?.averagePosition != null ? Number(serverReport.averagePosition).toFixed(1) : "0.0"}
-                      </div>
-                      <div>Total Clicks: {Number(serverReport?.totalClicks ?? 0).toLocaleString()}</div>
-                      <div>Total Impressions: {Number(serverReport?.totalImpressions ?? 0).toLocaleString()}</div>
-                      <div>
-                        Average CTR: {serverReport?.averageCtr != null ? (Number(serverReport.averageCtr) * 100).toFixed(2) : "0.00"}%
+                    <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm">
+                      <div className="text-primary-200 text-xs font-medium mb-1">Report Date</div>
+                      <div className="text-white font-semibold">
+                        {serverReport?.reportDate ? new Date(serverReport.reportDate).toLocaleDateString() : selectedReport.lastGenerated}
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  <div className="mt-8">
-                    <h2 className="text-sm font-bold text-gray-900 underline">Target Keywords</h2>
-                    {reportPreviewTargetKeywordsError && (
-                      <div className="mt-3 text-sm text-rose-600">{reportPreviewTargetKeywordsError}</div>
-                    )}
-                    {reportPreviewTargetKeywordsLoading ? (
-                      <div className="mt-3 text-sm text-gray-500">Loading target keywords…</div>
-                    ) : reportPreviewTargetKeywords.length === 0 ? (
-                      <div className="mt-3 text-sm text-gray-500">No target keywords available.</div>
-                    ) : (
-                      <div className="mt-3 overflow-x-auto border border-gray-200 rounded-lg">
-                        <table className="min-w-full text-xs">
-                          <thead className="bg-gray-50 border-b border-gray-200">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Keyword</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Location</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Date Added</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google Change</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google SERP Features</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-700">Google URL</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {reportPreviewTargetKeywords.map((k) => {
-                              const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
-                              const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
-                              const diff = current != null && prev != null ? prev - current : null;
-                              const diffText =
-                                diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
-                              const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
-                              return (
-                                <tr key={k.id} className="bg-white">
-                                  <td className="px-3 py-2 whitespace-nowrap text-gray-900">{k.keyword}</td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">{k.locationName || "United States"}</td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">
-                                    {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}
-                                  </td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-gray-900">{current ?? "—"}</td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-gray-900">{diffText}</td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">{serp}</td>
-                                  <td className="px-3 py-2 text-gray-700 break-all">
-                                    {k.googleUrl ? (
-                                      <a className="text-blue-600 underline" href={k.googleUrl} target="_blank" rel="noreferrer">
-                                        {k.googleUrl}
-                                      </a>
-                                    ) : (
-                                      "—"
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                {/* Traffic Overview Card */}
+                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                  <div className="flex items-center mb-4">
+                    <Activity className="h-5 w-5 text-blue-500 mr-2" />
+                    <h2 className="text-xl font-bold text-gray-900">Traffic Overview</h2>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                      <div className="text-xs font-medium text-blue-600 mb-1">Total Sessions</div>
+                      <div className="text-2xl font-bold text-blue-900">{Number(serverReport?.totalSessions ?? 0).toLocaleString()}</div>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                      <div className="text-xs font-medium text-green-600 mb-1">Organic Sessions</div>
+                      <div className="text-2xl font-bold text-green-900">{Number(serverReport?.organicSessions ?? 0).toLocaleString()}</div>
+                    </div>
+                    {serverReport?.activeUsers != null && (
+                      <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                        <div className="text-xs font-medium text-purple-600 mb-1">Active Users</div>
+                        <div className="text-2xl font-bold text-purple-900">{Number(serverReport.activeUsers ?? 0).toLocaleString()}</div>
                       </div>
                     )}
-                  </div>
-
-                  <div className="mt-8">
-                    <h2 className="text-sm font-bold text-gray-900 underline">Live Dashboard</h2>
-                    {reportPreviewShareLoading ? (
-                      <div className="mt-3 text-sm text-gray-500">Generating share link…</div>
-                    ) : reportPreviewShareUrl ? (
-                      <div className="mt-3 text-sm">
-                        <a className="text-blue-600 underline break-all" href={reportPreviewShareUrl} target="_blank" rel="noreferrer">
-                          {reportPreviewShareUrl}
-                        </a>
+                    {serverReport?.newUsers != null && (
+                      <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                        <div className="text-xs font-medium text-orange-600 mb-1">New Users</div>
+                        <div className="text-2xl font-bold text-orange-900">{Number(serverReport.newUsers ?? 0).toLocaleString()}</div>
                       </div>
-                    ) : (
-                      <div className="mt-3 text-sm text-gray-500">Share link unavailable.</div>
+                    )}
+                    {serverReport?.eventCount != null && (
+                      <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-100">
+                        <div className="text-xs font-medium text-indigo-600 mb-1">Event Count</div>
+                        <div className="text-2xl font-bold text-indigo-900">{Number(serverReport.eventCount ?? 0).toLocaleString()}</div>
+                      </div>
+                    )}
+                    {serverReport?.keyEvents != null && (
+                      <div className="bg-pink-50 rounded-lg p-4 border border-pink-100">
+                        <div className="text-xs font-medium text-pink-600 mb-1">Key Events</div>
+                        <div className="text-2xl font-bold text-pink-900">{Number(serverReport.keyEvents ?? 0).toLocaleString()}</div>
+                      </div>
                     )}
                   </div>
                 </div>
 
+                {/* SEO Performance Card */}
+                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                  <div className="flex items-center mb-4">
+                    <TrendingUp className="h-5 w-5 text-green-500 mr-2" />
+                    <h2 className="text-xl font-bold text-gray-900">SEO Performance</h2>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Average Position</div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {serverReport?.averagePosition != null ? Number(serverReport.averagePosition).toFixed(1) : "0.0"}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Total Clicks</div>
+                      <div className="text-2xl font-bold text-gray-900">{Number(serverReport?.totalClicks ?? 0).toLocaleString()}</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Total Impressions</div>
+                      <div className="text-2xl font-bold text-gray-900">{Number(serverReport?.totalImpressions ?? 0).toLocaleString()}</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Average CTR</div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {serverReport?.averageCtr != null ? (Number(serverReport.averageCtr) * 100).toFixed(2) : "0.00"}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Target Keywords Card */}
+                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                  <div className="flex items-center mb-4">
+                    <Target className="h-5 w-5 text-primary-600 mr-2" />
+                    <h2 className="text-xl font-bold text-gray-900">Target Keywords</h2>
+                    <span className="ml-2 text-sm text-gray-500">(Sorted by highest rank)</span>
+                  </div>
+                  {reportPreviewTargetKeywordsError && (
+                    <div className="mt-3 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                      {reportPreviewTargetKeywordsError}
+                    </div>
+                  )}
+                  {reportPreviewTargetKeywordsLoading ? (
+                    <div className="mt-3 flex items-center justify-center py-8 text-gray-500">
+                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                      <span>Loading target keywords…</span>
+                    </div>
+                  ) : reportPreviewTargetKeywords.length === 0 ? (
+                    <div className="mt-3 p-8 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
+                      <Target className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                      <p>No target keywords available.</p>
+                    </div>
+                  ) : (
+                    <div className="mt-3 overflow-x-auto border border-gray-200 rounded-lg">
+                      <table className="min-w-full">
+                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b-2 border-gray-300">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Keyword</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Location</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date Added</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Position</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Change</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">SERP Features</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">URL</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {reportPreviewTargetKeywords.map((k) => {
+                            const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+                            const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+                            const diff = current != null && prev != null ? prev - current : null;
+                            const diffText =
+                              diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+                            const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+                            const isRanked = current !== null && current <= 10;
+                            const isTop3 = current !== null && current <= 3;
+                            
+                            return (
+                              <tr key={k.id} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <div className="flex items-center">
+                                    {isTop3 && <Trophy className="h-4 w-4 text-yellow-500 mr-2" />}
+                                    <span className="font-semibold text-gray-900">{k.keyword}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{k.locationName || "United States"}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                                  {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  {current !== null ? (
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                      isTop3 ? 'bg-green-100 text-green-800' : 
+                                      isRanked ? 'bg-blue-100 text-blue-800' : 
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {current}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  {diff !== null ? (
+                                    <div className="flex items-center">
+                                      {diff > 0 ? (
+                                        <TrendingUp className="h-4 w-4 text-green-500 mr-1" />
+                                      ) : diff < 0 ? (
+                                        <TrendingDown className="h-4 w-4 text-red-500 mr-1" />
+                                      ) : null}
+                                      <span className={`text-sm font-medium ${
+                                        diff > 0 ? 'text-green-600' : 
+                                        diff < 0 ? 'text-red-600' : 
+                                        'text-gray-600'
+                                      }`}>
+                                        {diffText}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                                  <div className="flex flex-wrap gap-1">
+                                    {serp !== "—" ? serp.split(", ").map((feature, idx) => (
+                                      <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">
+                                        {feature}
+                                      </span>
+                                    )) : <span className="text-gray-400">—</span>}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600 break-all max-w-xs">
+                                  {k.googleUrl ? (
+                                    <a 
+                                      className="text-blue-600 hover:text-blue-800 underline truncate block" 
+                                      href={k.googleUrl} 
+                                      target="_blank" 
+                                      rel="noreferrer"
+                                      title={k.googleUrl}
+                                    >
+                                      {k.googleUrl.length > 50 ? `${k.googleUrl.substring(0, 50)}...` : k.googleUrl}
+                                    </a>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Live Dashboard Card */}
+                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                  <div className="flex items-center mb-4">
+                    <Share2 className="h-5 w-5 text-purple-500 mr-2" />
+                    <h2 className="text-xl font-bold text-gray-900">Live Dashboard</h2>
+                  </div>
+                  {reportPreviewShareLoading ? (
+                    <div className="flex items-center justify-center py-8 text-gray-500">
+                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                      <span>Generating share link…</span>
+                    </div>
+                  ) : reportPreviewShareUrl ? (
+                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                      <a 
+                        className="text-purple-700 hover:text-purple-900 underline break-all font-medium flex items-center" 
+                        href={reportPreviewShareUrl} 
+                        target="_blank" 
+                        rel="noreferrer"
+                      >
+                        <Share2 className="h-4 w-4 mr-2" />
+                        {reportPreviewShareUrl}
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">
+                      Share link unavailable.
+                    </div>
+                  )}
+                </div>
+
                 {/* Hide the old dashboard-style preview */}
                 <div className="hidden">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="bg-white p-6 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div>
@@ -7838,7 +8022,7 @@ const ClientDashboardPage: React.FC = () => {
                       });
                     })()}
                   </div>
-                </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -7851,8 +8035,8 @@ const ClientDashboardPage: React.FC = () => {
               >
                 Close
               </button>
-                <button
-                 onClick={async () => {
+              <button
+                onClick={async () => {
                    if (!modalDashboardContentRef.current) {
                      toast.error("Unable to export. Please try again.");
                      return;

@@ -1459,9 +1459,18 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
     const accountsResponse = await admin.accounts.list();
     const accounts = accountsResponse.data.accounts || [];
     
+    console.log(`[GA4 Properties] Found ${accounts.length} account(s) for clientId=${clientId}`);
+    
     if (accounts.length === 0) {
+      console.warn(`[GA4 Properties] No accounts found for clientId=${clientId}. User may need to grant account access permissions.`);
       return [];
     }
+    
+    // Log account details for debugging
+    accounts.forEach((account) => {
+      const accountId = account.name?.split('/')[1] || '';
+      console.log(`[GA4 Properties] Account: ${account.displayName || accountId} (ID: ${accountId})`);
+    });
     
     // Create a map of account ID to account name
     const accountMap = new Map<string, string>();
@@ -1476,7 +1485,13 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
     const propertyPromises = accounts.map(async (account) => {
       try {
         const accountId = account.name?.split('/')[1] || '';
-        if (!accountId) return [];
+        const accountName = accountMap.get(accountId) || accountId;
+        if (!accountId) {
+          console.warn(`[GA4 Properties] Skipping account with invalid name format: ${account.name}`);
+          return [];
+        }
+        
+        console.log(`[GA4 Properties] Fetching properties for account: ${accountName} (${accountId})`);
         
         // List properties for this account
         const propertiesResponse = await admin.properties.list({
@@ -1484,6 +1499,14 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
         });
         
         const properties = propertiesResponse.data.properties || [];
+        console.log(`[GA4 Properties] Found ${properties.length} property/properties in account ${accountName}`);
+        
+        // Log each property found with details
+        properties.forEach((property) => {
+          const propertyId = property.name?.split('/')[1] || '';
+          const propertyType = (property as any).propertyType || 'unknown';
+          console.log(`[GA4 Properties]   - ${property.displayName || propertyId} (ID: ${propertyId}, Type: ${propertyType})`);
+        });
         
         return properties.map((property) => {
           // Property name format: "properties/123456789"
@@ -1498,17 +1521,35 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
             displayName: `${accountName} - ${property.displayName || propertyId}`,
           };
         });
-      } catch (error) {
-        console.warn(`Failed to list properties for account ${account.name}:`, error);
+      } catch (error: any) {
+        const accountName = accountMap.get(account.name?.split('/')[1] || '') || account.name || 'unknown';
+        const errorMsg = error?.message || String(error);
+        const errorCode = error?.code || 'UNKNOWN';
+        console.error(`[GA4 Properties] Failed to list properties for account ${accountName} (${account.name}):`, {
+          error: errorMsg,
+          code: errorCode,
+          details: error?.response?.data || error?.errors || null,
+        });
+        // Don't silently fail - return empty array but log the error
         return [];
       }
     });
 
     const propertyArrays = await Promise.all(propertyPromises);
-    return propertyArrays.flat();
+    const allProperties = propertyArrays.flat();
+    
+    console.log(`[GA4 Properties] Total properties found: ${allProperties.length} for clientId=${clientId}`);
+    
+    return allProperties;
   } catch (error: any) {
-    console.error('Failed to list GA4 properties:', error);
-    throw new Error(`Failed to list GA4 properties: ${error.message || 'Unknown error'}`);
+    const errorMsg = error?.message || String(error);
+    const errorCode = error?.code || 'UNKNOWN';
+    console.error(`[GA4 Properties] Failed to list GA4 properties for clientId=${clientId}:`, {
+      error: errorMsg,
+      code: errorCode,
+      details: error?.response?.data || error?.errors || null,
+    });
+    throw new Error(`Failed to list GA4 properties: ${errorMsg}`);
   }
 }
 /**

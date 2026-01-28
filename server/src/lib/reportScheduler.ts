@@ -87,25 +87,33 @@ export async function getReportTargetKeywords(clientId: string): Promise<ReportT
 
   const allTargetKeywords = await prisma.targetKeyword.findMany({
     where: { clientId },
-    orderBy: [{ searchVolume: "desc" }, { keyword: "asc" }],
   });
 
   const filtered = allTargetKeywords
     .filter((tk) => trackedKeywordSet.has(normalizeKeywordKey(tk.keyword)))
     .slice(0, 50);
 
-  return filtered.map((tk) => {
+  // Map to include position data and sort by highest rank (lowest position number) first
+  const mapped = filtered.map((tk) => {
     const tracked = trackedByKeyword.get(normalizeKeywordKey(tk.keyword));
+    const googlePosition = (tk as any).googlePosition ?? tracked?.currentPosition ?? null;
     return {
       id: tk.id,
       keyword: tk.keyword,
       locationName: tk.locationName ? normalizeLocationName(tk.locationName) : tk.locationName,
       createdAt: tk.createdAt,
-      googlePosition: (tk as any).googlePosition ?? tracked?.currentPosition ?? null,
+      googlePosition,
       previousPosition: (tk as any).previousPosition ?? tracked?.previousPosition ?? null,
       serpItemTypes: (tk as any).serpItemTypes,
       googleUrl: (tk as any).googleUrl ?? tracked?.googleUrl ?? null,
     };
+  });
+
+  // Sort by highest rank (lowest position number) first, nulls at the end
+  return mapped.sort((a, b) => {
+    const aPos = a.googlePosition ?? Infinity;
+    const bPos = b.googlePosition ?? Infinity;
+    return aPos - bPos;
   });
 }
 
@@ -178,7 +186,12 @@ export function generateReportEmailHTML(
   const safeClientName = escapeHtml(client?.name);
   const safeDomain = client?.domain ? escapeHtml(client.domain) : "";
   const shareUrl = opts?.shareUrl || null;
-  const targetKeywords = opts?.targetKeywords || [];
+  // Sort keywords by highest rank (lowest position number) first
+  const targetKeywords = (opts?.targetKeywords || []).sort((a, b) => {
+    const aPos = a.googlePosition ?? Infinity;
+    const bPos = b.googlePosition ?? Infinity;
+    return aPos - bPos;
+  });
 
   return `
     <!DOCTYPE html>
@@ -188,96 +201,294 @@ export function generateReportEmailHTML(
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>SEO Report - ${safeClientName}</title>
     </head>
-    <body style="font-family: Arial, sans-serif; line-height: 1.35; color: #111827; max-width: 900px; margin: 0 auto; padding: 24px;">
-      <div style="text-align:center;">
-        <h1 style="margin: 0; font-size: 24px;">SEO Analytics Report</h1>
-        <p style="margin: 6px 0 0 0; font-size: 14px; color: #374151;">${escapeHtml(periodLabel)} report for ${safeClientName}</p>
-      </div>
-
-      <div style="margin-top: 16px; font-size: 13px;">
-        <p style="margin: 0;"><strong>Client:</strong> ${safeClientName}</p>
-        ${safeDomain ? `<p style="margin: 0;"><strong>Domain:</strong> ${safeDomain}</p>` : ""}
-        <p style="margin: 0;"><strong>Report date:</strong> ${escapeHtml(reportDate)}</p>
-      </div>
-
-      <h2 style="margin: 18px 0 6px 0; font-size: 15px; text-decoration: underline;">Traffic Overview</h2>
-      <div style="font-size: 13px;">
-        <div>Total Sessions: ${Number(report.totalSessions || 0).toLocaleString()}</div>
-        <div>Organic Sessions: ${Number(report.organicSessions || 0).toLocaleString()}</div>
-        ${report.activeUsers != null ? `<div>Active Users: ${Number(report.activeUsers || 0).toLocaleString()}</div>` : ""}
-        ${report.newUsers != null ? `<div>New Users: ${Number(report.newUsers || 0).toLocaleString()}</div>` : ""}
-        ${report.eventCount != null ? `<div>Event Count: ${Number(report.eventCount || 0).toLocaleString()}</div>` : ""}
-        ${report.keyEvents != null ? `<div>Key Events: ${Number(report.keyEvents || 0).toLocaleString()}</div>` : ""}
-      </div>
-
-      <h2 style="margin: 18px 0 6px 0; font-size: 15px; text-decoration: underline;">SEO Performance</h2>
-      <div style="font-size: 13px;">
-        <div>Average Position: ${report.averagePosition != null ? Number(report.averagePosition).toFixed(1) : "0.0"}</div>
-        <div>Total Clicks: ${Number(report.totalClicks || 0).toLocaleString()}</div>
-        <div>Total Impressions: ${Number(report.totalImpressions || 0).toLocaleString()}</div>
-        <div>Average CTR: ${report.averageCtr != null ? (Number(report.averageCtr) * 100).toFixed(2) : "0.00"}%</div>
-      </div>
-
-      <h2 style="margin: 18px 0 8px 0; font-size: 15px; text-decoration: underline;">Target Keywords</h2>
-      ${
-        targetKeywords.length === 0
-          ? `<div style="font-size: 13px; color: #4b5563;">No target keywords available.</div>`
-          : `
-            <div style="overflow-x:auto;">
-              <table style="border-collapse: collapse; width: 100%; font-size: 12px;">
-                <thead>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #111827; background-color: #f3f4f6; margin: 0; padding: 24px;">
+      <div style="max-width: 900px; margin: 0 auto; background-color: #ffffff;">
+        
+        <!-- Report Header Card -->
+        <div style="background-color: #2563eb; border-radius: 12px 12px 0 0; padding: 32px; color: #ffffff; text-align: center;">
+          <h1 style="margin: 0 0 12px 0; font-size: 28px; font-weight: 700; color: #ffffff;">SEO Analytics Report</h1>
+          <p style="margin: 0; font-size: 16px; color: #bfdbfe;">${escapeHtml(periodLabel)} report for ${safeClientName}</p>
+          
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 24px;">
+            <tr>
+              <td align="center" style="padding: 0 6px;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: rgba(255, 255, 255, 0.15); border-radius: 8px;">
                   <tr>
-                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Keyword</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Location</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Date Added</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google Change</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google SERP Features</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 6px; text-align: left; background:#f9fafb;">Google URL</th>
+                    <td style="padding: 12px; text-align: center;">
+                      <div style="font-size: 11px; color: #bfdbfe; margin-bottom: 4px; font-weight: 500;">Client</div>
+                      <div style="font-size: 14px; font-weight: 600; color: #ffffff;">${safeClientName}</div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  ${targetKeywords
-                    .map((k) => {
-                      const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
-                      const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
-                      const diff = current != null && prev != null ? prev - current : null; // positive means improved
-                      const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
-                      const dateAdded = k.createdAt ? new Date(k.createdAt as any).toLocaleDateString() : "—";
-                      const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
-                      const urlCell = k.googleUrl
-                        ? `<a href="${escapeHtml(k.googleUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(k.googleUrl)}</a>`
-                        : "—";
-                      return `
-                        <tr>
-                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(k.keyword)}</td>
-                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(k.locationName || "United States")}</td>
-                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(dateAdded)}</td>
-                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${current != null ? escapeHtml(current) : "—"}</td>
-                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(diffText)}</td>
-                          <td style="border: 1px solid #e5e7eb; padding: 6px;">${escapeHtml(serp)}</td>
-                          <td style="border: 1px solid #e5e7eb; padding: 6px; word-break: break-all;">${urlCell}</td>
+                </table>
+              </td>
+              ${safeDomain ? `
+              <td align="center" style="padding: 0 6px;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: rgba(255, 255, 255, 0.15); border-radius: 8px;">
+                  <tr>
+                    <td style="padding: 12px; text-align: center;">
+                      <div style="font-size: 11px; color: #bfdbfe; margin-bottom: 4px; font-weight: 500;">Domain</div>
+                      <div style="font-size: 14px; font-weight: 600; color: #ffffff;">${safeDomain}</div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+              ` : ""}
+              <td align="center" style="padding: 0 6px;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: rgba(255, 255, 255, 0.15); border-radius: 8px;">
+                  <tr>
+                    <td style="padding: 12px; text-align: center;">
+                      <div style="font-size: 11px; color: #bfdbfe; margin-bottom: 4px; font-weight: 500;">Report Date</div>
+                      <div style="font-size: 14px; font-weight: 600; color: #ffffff;">${escapeHtml(reportDate)}</div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <div style="padding: 24px;">
+          <!-- Traffic Overview Card -->
+          <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+            <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
+              <span style="display: inline-block; width: 4px; height: 20px; background-color: #3b82f6; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
+              Traffic Overview
+            </h2>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
+              <tr>
+                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #1e40af; margin-bottom: 4px;">Total Sessions</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #1e3a8a;">${Number(report.totalSessions || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #166534; margin-bottom: 4px;">Organic Sessions</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #14532d;">${Number(report.organicSessions || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                ${report.activeUsers != null ? `
+                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #6b21a8; margin-bottom: 4px;">Active Users</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #581c87;">${Number(report.activeUsers || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                ` : ""}
+              </tr>
+              ${(report.newUsers != null || report.eventCount != null || report.keyEvents != null) ? `
+              <tr>
+                ${report.newUsers != null ? `
+                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #9a3412; margin-bottom: 4px;">New Users</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #7c2d12;">${Number(report.newUsers || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                ` : ""}
+                ${report.eventCount != null ? `
+                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #3730a3; margin-bottom: 4px;">Event Count</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #312e81;">${Number(report.eventCount || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                ` : ""}
+                ${report.keyEvents != null ? `
+                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #fce7f3; border: 1px solid #fbcfe8; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #9f1239; margin-bottom: 4px;">Key Events</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #831843;">${Number(report.keyEvents || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                ` : ""}
+              </tr>
+              ` : ""}
+            </table>
+          </div>
+
+          <!-- SEO Performance Card -->
+          <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+            <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
+              <span style="display: inline-block; width: 4px; height: 20px; background-color: #10b981; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
+              SEO Performance
+            </h2>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
+              <tr>
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Average Position</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${report.averagePosition != null ? Number(report.averagePosition).toFixed(1) : "0.0"}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Total Clicks</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${Number(report.totalClicks || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Total Impressions</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${Number(report.totalImpressions || 0).toLocaleString()}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+                    <tr>
+                      <td style="padding: 16px; text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Average CTR</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${report.averageCtr != null ? (Number(report.averageCtr) * 100).toFixed(2) : "0.00"}%</div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Target Keywords Card -->
+          <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+            <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;">
+              <span style="display: inline-block; width: 4px; height: 20px; background-color: #2563eb; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
+              Target Keywords
+            </h2>
+            <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">(Sorted by highest rank)</p>
+            ${
+              targetKeywords.length === 0
+                ? `<div style="padding: 32px; text-align: center; color: #6b7280; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
+                    <p style="margin: 0;">No target keywords available.</p>
+                  </div>`
+                : `
+                  <div style="overflow-x: auto;">
+                    <table style="border-collapse: collapse; width: 100%; font-size: 12px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                      <thead>
+                        <tr style="background: linear-gradient(to right, #f9fafb, #f3f4f6); border-bottom: 2px solid #d1d5db;">
+                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Keyword</th>
+                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Location</th>
+                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Date Added</th>
+                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Position</th>
+                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Change</th>
+                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">SERP Features</th>
+                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">URL</th>
                         </tr>
-                      `;
-                    })
-                    .join("")}
-                </tbody>
-              </table>
-            </div>
-          `
-      }
+                      </thead>
+                      <tbody>
+                        ${targetKeywords
+                          .map((k) => {
+                            const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+                            const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+                            const diff = current != null && prev != null ? prev - current : null;
+                            const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+                            const dateAdded = k.createdAt ? new Date(k.createdAt as any).toLocaleDateString() : "—";
+                            const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+                            const urlCell = k.googleUrl
+                              ? `<a href="${escapeHtml(k.googleUrl)}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">${escapeHtml(k.googleUrl.length > 50 ? k.googleUrl.substring(0, 50) + "..." : k.googleUrl)}</a>`
+                              : "—";
+                            const isTop3 = current !== null && current <= 3;
+                            const isRanked = current !== null && current <= 10;
+                            const positionBadgeColor = isTop3 ? "#dcfce7" : isRanked ? "#dbeafe" : "#f3f4f6";
+                            const positionTextColor = isTop3 ? "#166534" : isRanked ? "#1e40af" : "#374151";
+                            const diffColor = diff !== null ? (diff > 0 ? "#059669" : diff < 0 ? "#dc2626" : "#6b7280") : "#6b7280";
+                            const diffSymbol = diff !== null ? (diff > 0 ? "↑" : diff < 0 ? "↓" : "") : "";
+                            
+                            return `
+                              <tr style="border-bottom: 1px solid #e5e7eb;">
+                                <td style="padding: 12px; font-weight: 600; color: #111827;">${isTop3 ? "🏆 " : ""}${escapeHtml(k.keyword)}</td>
+                                <td style="padding: 12px; color: #4b5563;">${escapeHtml(k.locationName || "United States")}</td>
+                                <td style="padding: 12px; color: #6b7280;">${escapeHtml(dateAdded)}</td>
+                                <td style="padding: 12px;">
+                                  ${current !== null ? `
+                                    <span style="display: inline-block; background-color: ${positionBadgeColor}; color: ${positionTextColor}; padding: 4px 8px; border-radius: 12px; font-weight: 600; font-size: 11px;">
+                                      ${current}
+                                    </span>
+                                  ` : '<span style="color: #9ca3af;">—</span>'}
+                                </td>
+                                <td style="padding: 12px;">
+                                  ${diff !== null ? `
+                                    <span style="color: ${diffColor}; font-weight: 600;">
+                                      ${diffSymbol} ${diffText}
+                                    </span>
+                                  ` : '<span style="color: #9ca3af;">—</span>'}
+                                </td>
+                                <td style="padding: 12px; color: #4b5563;">
+                                  ${serp !== "—" ? serp.split(", ").map((feature) => 
+                                    `<span style="display: inline-block; background-color: #f3f4f6; color: #374151; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 4px; margin-bottom: 4px;">${escapeHtml(feature)}</span>`
+                                  ).join("") : '<span style="color: #9ca3af;">—</span>'}
+                                </td>
+                                <td style="padding: 12px; word-break: break-all; max-width: 200px; color: #4b5563;">${urlCell}</td>
+                              </tr>
+                            `;
+                          })
+                          .join("")}
+                      </tbody>
+                    </table>
+                  </div>
+                `
+            }
+          </div>
 
-      ${
-        shareUrl
-          ? `<div style="margin-top: 18px; font-size: 13px;">
-              <strong>Live dashboard:</strong> <a href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(shareUrl)}</a>
-            </div>`
-          : ""
-      }
+          <!-- Live Dashboard Card -->
+          ${
+            shareUrl
+              ? `<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+                  <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
+                    <span style="display: inline-block; width: 4px; height: 20px; background-color: #a855f7; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
+                    Live Dashboard
+                  </h2>
+                  <div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 16px;">
+                    <a href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" style="color: #7c3aed; font-weight: 600; text-decoration: underline; word-break: break-all;">
+                      ${escapeHtml(shareUrl)}
+                    </a>
+                  </div>
+                </div>`
+              : ""
+          }
+        </div>
 
-      <p style="text-align: center; color: #6b7280; font-size: 12px; margin-top: 22px;">
-        This is an automated report generated by SEO Dashboard.
-      </p>
+        <div style="background-color: #f9fafb; border-top: 1px solid #e5e7eb; padding: 16px; text-align: center;">
+          <p style="margin: 0; color: #6b7280; font-size: 12px;">
+            This is an automated report generated by SEO Dashboard.
+          </p>
+        </div>
+      </div>
     </body>
     </html>
   `;
