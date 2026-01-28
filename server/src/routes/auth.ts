@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../lib/email.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -49,7 +49,7 @@ router.post("/register", async (req, res) => {
     // Create verification token
     const verificationToken = jwt.sign(
       { userId: user.id },
-      process.env.JWT_SECRET!,
+      getJwtSecret(),
       { expiresIn: "24h" }
     );
 
@@ -131,7 +131,7 @@ router.post("/login", async (req, res) => {
     // Generate JWT
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
+      getJwtSecret(),
       { expiresIn: "7d" }
     );
 
@@ -357,7 +357,7 @@ router.post("/invite/accept", async (req, res) => {
     // Issue login JWT
     const jwtToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
+      getJwtSecret(),
       { expiresIn: "7d" }
     );
 

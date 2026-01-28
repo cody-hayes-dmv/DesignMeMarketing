@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { sendEmail } from '../lib/email.js';
 
 const router = express.Router();
@@ -42,12 +42,34 @@ const updateClientUserAccessSchema = z.object({
     clientIds: z.array(z.string().min(1)).optional().default([]),
 });
 
-async function canStaffAccessClient(user: { userId: string; role: string }, clientId: string) {
+interface ClientWithUser {
+    id: string;
+    userId: string;
+    googleAdsAccessToken?: string | null;
+    googleAdsRefreshToken?: string | null;
+    googleAdsCustomerId?: string | null;
+    googleAdsConnectedAt?: Date | null;
+    user: {
+        id: string;
+        memberships: Array<{ agencyId: string }>;
+    };
+}
+
+async function canStaffAccessClient(user: { userId: string; role: string }, clientId: string, includeGoogleAds: boolean = false): Promise<{ client: ClientWithUser | null; hasAccess: boolean }> {
     const client = await prisma.client.findUnique({
         where: { id: clientId },
-        include: {
+        select: {
+            id: true,
+            userId: true,
+            ...(includeGoogleAds ? {
+                googleAdsAccessToken: true,
+                googleAdsRefreshToken: true,
+                googleAdsCustomerId: true,
+                googleAdsConnectedAt: true,
+            } : {}),
             user: {
-                include: {
+                select: {
+                    id: true,
                     memberships: {
                         select: { agencyId: true },
                     },
@@ -56,7 +78,7 @@ async function canStaffAccessClient(user: { userId: string; role: string }, clie
         },
     });
 
-    if (!client) return { client: null as any, hasAccess: false };
+    if (!client) return { client: null, hasAccess: false };
 
     const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
     const isOwner = client.userId === user.userId;
@@ -526,7 +548,7 @@ router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => 
         if (resolvedSendInvite) {
             const inviteToken = jwt.sign(
                 { email: membership.user.email, clientId, kind: 'CLIENT_USER_INVITE' },
-                process.env.JWT_SECRET!,
+                getJwtSecret(),
                 { expiresIn: '7d' }
             );
 
@@ -619,7 +641,7 @@ router.post('/:id/users/:userId/invite', authenticateToken, async (req, res) => 
 
         const inviteToken = jwt.sign(
             { email: membership.user.email, clientId, kind: 'CLIENT_USER_INVITE' },
-            process.env.JWT_SECRET!,
+            getJwtSecret(),
             { expiresIn: '7d' }
         );
 
@@ -718,7 +740,7 @@ router.post('/:id/users/:userId/impersonate', authenticateToken, async (req, res
 
         const jwtToken = jwt.sign(
             { userId: membership.user.id, email: membership.user.email, role: membership.user.role },
-            process.env.JWT_SECRET!,
+            getJwtSecret(),
             { expiresIn: '7d' }
         );
 
@@ -806,7 +828,7 @@ router.post('/users/invite', authenticateToken, async (req, res) => {
             // Create invite token that includes all clientIds
             const inviteToken = jwt.sign(
                 { email, clientIds, kind: 'CLIENT_USER_INVITE' },
-                process.env.JWT_SECRET!,
+                getJwtSecret(),
                 { expiresIn: '7d' }
             );
 
@@ -919,7 +941,7 @@ router.post('/:id/users/invite', authenticateToken, async (req, res) => {
             // Create invite token (even if user exists; token will just lead them to portal signup/login)
             const inviteToken = jwt.sign(
                 { email, clientId, kind: 'CLIENT_USER_INVITE' },
-                process.env.JWT_SECRET!,
+                getJwtSecret(),
                 { expiresIn: '7d' }
             );
 
@@ -1254,6 +1276,25 @@ router.get('/ga4/callback', async (req, res) => {
         }
 
         if (error) {
+            console.error('[GA4 OAuth Callback] Error from Google:', {
+                error,
+                errorDescription: req.query.error_description,
+                state,
+                clientId,
+            });
+            
+            let errorMessage = error as string;
+            let errorDescription = req.query.error_description as string || '';
+            
+            // Provide helpful error messages for common issues
+            if (error === 'access_denied') {
+                errorMessage = 'Access was denied. Please grant the required permissions.';
+            } else if (error === 'invalid_request') {
+                errorMessage = 'Invalid request. Please check your OAuth configuration.';
+            } else if (errorDescription.includes('403')) {
+                errorMessage = '403 Forbidden: Your account may not have access, or the OAuth app may need to be published. See OAUTH_FIX_GUIDE.md for help.';
+            }
+            
             if (isPopup) {
                 // Return HTML page that closes popup and sends error message to parent
                 return res.send(`
@@ -1274,33 +1315,42 @@ router.get('/ga4/callback', async (req, res) => {
                             .container {
                                 text-align: center;
                                 padding: 2rem;
+                                max-width: 500px;
                             }
                             .error {
                                 color: #ef4444;
                                 font-size: 1.1rem;
+                                margin-bottom: 1rem;
+                            }
+                            .description {
+                                color: #666;
+                                font-size: 0.9rem;
+                                margin-top: 0.5rem;
                             }
                         </style>
                     </head>
                     <body>
                         <div class="container">
-                            <div class="error">Connection failed: ${error}</div>
+                            <div class="error">Connection failed: ${errorMessage}</div>
+                            ${errorDescription ? `<div class="description">${errorDescription}</div>` : ''}
                         </div>
                         <script>
                             if (window.opener) {
                                 window.opener.postMessage({
                                     type: 'GA4_OAUTH_ERROR',
-                                    error: '${error}'
+                                    error: '${error}',
+                                    errorDescription: '${errorDescription}'
                                 }, '*');
-                                setTimeout(() => window.close(), 2000);
+                                setTimeout(() => window.close(), 3000);
                             } else {
-                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?ga4_error=${encodeURIComponent(error as string)}';
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?ga4_error=${encodeURIComponent(errorMessage)}';
                             }
                         </script>
                     </body>
                     </html>
                 `);
             }
-            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?ga4_error=${encodeURIComponent(error as string)}`);
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?ga4_error=${encodeURIComponent(errorMessage)}`);
         }
 
         if (!code || !state) {
@@ -1342,14 +1392,14 @@ router.get('/ga4/callback', async (req, res) => {
                                 }, '*');
                                 setTimeout(() => window.close(), 2000);
                             } else {
-                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?ga4_error=missing_params';
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?ga4_error=missing_params';
                             }
                         </script>
                     </body>
                     </html>
                 `);
             }
-            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?ga4_error=missing_params`);
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?ga4_error=missing_params`);
         }
 
         // Exchange code for tokens (clientId already parsed above)
@@ -1421,7 +1471,7 @@ router.get('/ga4/callback', async (req, res) => {
                             }, '*');
                             setTimeout(() => window.close(), 1000);
                         } else {
-                            window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients/${clientId}?ga4_tokens_received=true';
+                            window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients/${clientId}?ga4_tokens_received=true';
                         }
                     </script>
                 </body>
@@ -1430,7 +1480,7 @@ router.get('/ga4/callback', async (req, res) => {
         }
 
         // Redirect to client page with token stored, user can now select property
-        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients/${clientId}?ga4_tokens_received=true`);
+        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients/${clientId}?ga4_tokens_received=true`);
     } catch (error: any) {
         console.error('GA4 callback error:', error);
         const isPopup = req.query.popup === 'true' || req.headers.referer?.includes('popup=true');
@@ -1473,14 +1523,14 @@ router.get('/ga4/callback', async (req, res) => {
                             }, '*');
                             setTimeout(() => window.close(), 2000);
                         } else {
-                            window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?ga4_error=${encodeURIComponent(error.message || 'connection_failed')}';
+                            window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?ga4_error=${encodeURIComponent(error.message || 'connection_failed')}';
                         }
                     </script>
                 </body>
                 </html>
             `);
         }
-        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?ga4_error=${encodeURIComponent(error.message || 'connection_failed')}`);
+        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?ga4_error=${encodeURIComponent(error.message || 'connection_failed')}`);
     }
 });
 
@@ -1535,11 +1585,13 @@ router.get('/:id/ga4/status', authenticateToken, async (req, res) => {
                 ga4PropertyId: true,
                 ga4AccountEmail: true,
                 ga4ConnectedAt: true,
+                ga4RefreshToken: true,
             },
         });
 
         res.json({
             connected,
+            hasTokens: !!(clientData?.ga4RefreshToken),
             propertyId: clientData?.ga4PropertyId || null,
             accountEmail: clientData?.ga4AccountEmail || null,
             connectedAt: clientData?.ga4ConnectedAt || null,
@@ -2088,6 +2140,25 @@ router.get('/google-ads/callback', async (req, res) => {
         }
 
         if (error) {
+            console.error('[Google Ads OAuth Callback] Error from Google:', {
+                error,
+                errorDescription: req.query.error_description,
+                state,
+                clientId,
+            });
+            
+            let errorMessage = error as string;
+            let errorDescription = req.query.error_description as string || '';
+            
+            // Provide helpful error messages for common issues
+            if (error === 'access_denied') {
+                errorMessage = 'Access was denied. Please grant the required permissions.';
+            } else if (error === 'invalid_request') {
+                errorMessage = 'Invalid request. Please check your OAuth configuration.';
+            } else if (errorDescription.includes('403')) {
+                errorMessage = '403 Forbidden: Your account may not have access, or the OAuth app may need to be published. See OAUTH_FIX_GUIDE.md for help.';
+            }
+            
             if (isPopup) {
                 return res.send(`
                     <!DOCTYPE html>
@@ -2107,33 +2178,42 @@ router.get('/google-ads/callback', async (req, res) => {
                             .container {
                                 text-align: center;
                                 padding: 2rem;
+                                max-width: 500px;
                             }
                             .error {
                                 color: #ef4444;
                                 font-size: 1.1rem;
+                                margin-bottom: 1rem;
+                            }
+                            .description {
+                                color: #666;
+                                font-size: 0.9rem;
+                                margin-top: 0.5rem;
                             }
                         </style>
                     </head>
                     <body>
                         <div class="container">
-                            <div class="error">Connection failed: ${error}</div>
+                            <div class="error">Connection failed: ${errorMessage}</div>
+                            ${errorDescription ? `<div class="description">${errorDescription}</div>` : ''}
                         </div>
                         <script>
                             if (window.opener) {
                                 window.opener.postMessage({
                                     type: 'GOOGLE_ADS_OAUTH_ERROR',
-                                    error: '${error}'
+                                    error: '${error}',
+                                    errorDescription: '${errorDescription}'
                                 }, '*');
-                                setTimeout(() => window.close(), 2000);
+                                setTimeout(() => window.close(), 3000);
                             } else {
-                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(error as string)}';
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(errorMessage)}';
                             }
                         </script>
                     </body>
                     </html>
                 `);
             }
-            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(error as string)}`);
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(errorMessage)}`);
         }
 
         if (!code || !state) {
@@ -2175,14 +2255,14 @@ router.get('/google-ads/callback', async (req, res) => {
                                 }, '*');
                                 setTimeout(() => window.close(), 2000);
                             } else {
-                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=missing_code';
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=missing_code';
                             }
                         </script>
                     </body>
                     </html>
                 `);
             }
-            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=missing_code`);
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=missing_code`);
         }
 
         try {
@@ -2235,7 +2315,7 @@ router.get('/google-ads/callback', async (req, res) => {
                                 }, '*');
                                 setTimeout(() => window.close(), 1000);
                             } else {
-                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients/${clientId}';
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients/${clientId}?google_ads_tokens_received=true';
                             }
                         </script>
                     </body>
@@ -2243,7 +2323,7 @@ router.get('/google-ads/callback', async (req, res) => {
                 `);
             }
 
-            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients/${clientId}?google_ads_connected=true`);
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients/${clientId}?google_ads_tokens_received=true`);
         } catch (error: any) {
             console.error('Google Ads OAuth callback error:', error);
             const errorMsg = error.message || 'Failed to connect Google Ads';
@@ -2286,18 +2366,18 @@ router.get('/google-ads/callback', async (req, res) => {
                                 }, '*');
                                 setTimeout(() => window.close(), 2000);
                             } else {
-                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(errorMsg)}';
+                                window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(errorMsg)}';
                             }
                         </script>
                     </body>
                     </html>
                 `);
             }
-            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(errorMsg)}`);
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(errorMsg)}`);
         }
     } catch (error: any) {
         console.error('Google Ads callback error:', error);
-        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/agency/clients?google_ads_error=${encodeURIComponent(error.message || 'Unknown error')}`);
+        return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(error.message || 'Unknown error')}`);
     }
 });
 
@@ -2338,11 +2418,13 @@ router.get('/:id/google-ads/status', authenticateToken, async (req, res) => {
                 googleAdsAccountEmail: true,
                 googleAdsCustomerId: true,
                 googleAdsConnectedAt: true,
+                googleAdsRefreshToken: true,
             },
         });
 
         res.json({
             connected,
+            hasTokens: !!(client?.googleAdsRefreshToken),
             accountEmail: client?.googleAdsAccountEmail || null,
             customerId: client?.googleAdsCustomerId || null,
             connectedAt: client?.googleAdsConnectedAt || null,
@@ -2467,7 +2549,7 @@ router.get('/:id/google-ads/campaigns', authenticateToken, async (req, res) => {
         const { start, end, period } = req.query;
 
         // Check access
-        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
         }
@@ -2525,7 +2607,7 @@ router.get('/:id/google-ads/ad-groups', authenticateToken, async (req, res) => {
         const { start, end, period, campaignId } = req.query;
 
         // Check access
-        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
         }
@@ -2573,7 +2655,7 @@ router.get('/:id/google-ads/keywords', authenticateToken, async (req, res) => {
         const { start, end, period, campaignId, adGroupId } = req.query;
 
         // Check access
-        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
         }
@@ -2621,7 +2703,7 @@ router.get('/:id/google-ads/conversions', authenticateToken, async (req, res) =>
         const { start, end, period } = req.query;
 
         // Check access
-        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId);
+        const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });
         }

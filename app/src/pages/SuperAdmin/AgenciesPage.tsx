@@ -78,7 +78,7 @@ const AgenciesPage = () => {
     const [loadingAllClients, setLoadingAllClients] = useState(false);
     const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const navigate = useNavigate();
-    const [sortField, setSortField] = useState<"agency" | "subdomain" | "members">("agency");
+    const [sortField, setSortField] = useState<"agency" | "subdomain" | "clients">("agency");
     const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
     const [createForm, setCreateForm] = useState({
         name: "",
@@ -162,12 +162,20 @@ const AgenciesPage = () => {
                 clientId: removeClientConfirm.clientId 
             }) as any);
             toast.success("Client removed from agency successfully!");
+            
+            // Refresh the clients cache for the expanded agency
             if (expandedAgencyId === removeClientConfirm.agencyId) {
                 await refreshAgencyClientsCache(removeClientConfirm.agencyId);
             }
+            
+            // Refresh the clients modal if open
             if (selectedAgencyId === removeClientConfirm.agencyId) {
                 handleViewClients(removeClientConfirm.agencyId, selectedAgencyName);
             }
+            
+            // Refresh the agencies list to update client count
+            dispatch(fetchAgencies() as any);
+            
             setRemoveClientConfirm({ isOpen: false, agencyId: null, clientId: null, clientName: null });
         } catch (error: any) {
             console.error("Failed to remove client from agency:", error);
@@ -356,7 +364,7 @@ const AgenciesPage = () => {
         }
     };
 
-    const handleSort = (field: "agency" | "subdomain" | "members") => {
+    const handleSort = (field: "agency" | "subdomain" | "clients") => {
         if (sortField === field) {
             setSortDirection(sortDirection === "asc" ? "desc" : "asc");
         } else {
@@ -376,9 +384,9 @@ const AgenciesPage = () => {
             aValue = (a.subdomain || "").toLowerCase();
             bValue = (b.subdomain || "").toLowerCase();
         } else {
-            // members
-            aValue = a.memberCount || 0;
-            bValue = b.memberCount || 0;
+            // clients
+            aValue = (a as any).clientCount || 0;
+            bValue = (b as any).clientCount || 0;
         }
 
         if (typeof aValue === "string" && typeof bValue === "string") {
@@ -440,11 +448,11 @@ const AgenciesPage = () => {
                                 </th>
                                 <th 
                                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                                    onClick={() => handleSort("members")}
+                                    onClick={() => handleSort("clients")}
                                 >
                                     <div className="flex items-center gap-2">
-                                        Members
-                                        {sortField === "members" && (
+                                        Clients
+                                        {sortField === "clients" && (
                                             sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                                         )}
                                     </div>
@@ -512,7 +520,7 @@ const AgenciesPage = () => {
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="text-sm text-gray-900">
-                                                {agency.memberCount}
+                                                {(agency as any).clientCount ?? 0}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">

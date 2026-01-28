@@ -1,7 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
 import jwt from "jsonwebtoken";
 
 const router = express.Router();
@@ -1470,7 +1470,7 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const secret = process.env.JWT_SECRET || "change_me_secret";
+    const secret = getJwtSecret();
     const token = jwt.sign(
       {
         type: "client_share",
@@ -1491,7 +1491,7 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
 // Public: Shared dashboard by token (no auth)
 // Helper function to verify share token
 function verifyShareToken(token: string): { clientId: string } | null {
-  const secret = process.env.JWT_SECRET || "change_me_secret";
+  const secret = getJwtSecret();
   try {
     const decoded = jwt.verify(token, secret) as any;
     if (!decoded || decoded.type !== "client_share" || !decoded.clientId) {

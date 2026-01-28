@@ -19,6 +19,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: resolve(__dirname, "../.env") });
 
+// Validate critical environment variables
+const requiredEnvVars = {
+  JWT_SECRET: process.env.JWT_SECRET,
+  DATABASE_URL: process.env.DATABASE_URL,
+};
+
+const missingVars = Object.entries(requiredEnvVars)
+  .filter(([_, value]) => !value)
+  .map(([key]) => key);
+
+if (missingVars.length > 0) {
+  console.error(`[Server] CRITICAL: Missing required environment variables: ${missingVars.join(', ')}`);
+  console.error(`[Server] Please set these in server/.env file`);
+  process.exit(1);
+}
+
 // Log email configuration status (without sensitive data)
 console.log("[Email Config] SMTP_HOST:", process.env.SMTP_HOST ? `${process.env.SMTP_HOST.substring(0, 20)}...` : "NOT SET");
 console.log("[Email Config] SMTP_PORT:", process.env.SMTP_PORT || "NOT SET");
@@ -62,6 +78,22 @@ app.get("/health", (req, res) => {
 app.use(errorHandler);
 
 const server = app.listen(PORT);
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  console.error('[Server] Unhandled Promise Rejection:', reason);
+  // Don't exit in production, but log the error
+  if (process.env.NODE_ENV === 'production') {
+    // In production, you might want to send this to a monitoring service
+  }
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error: Error) => {
+  console.error('[Server] Uncaught Exception:', error);
+  // Exit gracefully
+  process.exit(1);
+});
 
 server.on("listening", async () => {
   console.log(`Server running on port ${PORT}`);

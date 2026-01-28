@@ -15,6 +15,18 @@ declare global {
   }
 }
 
+/**
+ * Get JWT secret from environment variables
+ * Validates that JWT_SECRET is set (should be validated at startup)
+ */
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is not configured. Please set JWT_SECRET in server/.env file.');
+  }
+  return secret;
+}
+
 export const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -24,10 +36,14 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+    const secret = getJwtSecret();
+    const decoded = jwt.verify(token, secret) as JwtPayload;
     req.user = decoded;
     next();
   } catch (error) {
     return res.status(403).json({ message: 'Invalid token' });
   }
 };
+
+// Export getJwtSecret for use in other files
+export { getJwtSecret };

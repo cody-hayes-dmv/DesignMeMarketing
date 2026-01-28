@@ -258,43 +258,137 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
   timeZone: string;
 }>> {
   try {
-    const { oauth2Client } = await getGoogleAdsClient(clientId);
-    const accessToken = oauth2Client.credentials.access_token;
-
-    // Use Google Ads API to list accessible customers
-    // Note: This requires a developer token, but we'll try without it first
-    // The customer service endpoint: https://googleads.googleapis.com/v16/customers/{customerId}/googleAds:search
-    
-    // For listing accessible customers, we use the CustomerService
-    // However, without a developer token, we can't use the full API
-    // We'll return the connected customer ID as a workaround
+    // Get tokens directly from database instead of using getGoogleAdsClient
+    // because getGoogleAdsClient requires customerId which we don't have yet
     const client = await prisma.client.findUnique({
       where: { id: clientId },
-      select: { googleAdsCustomerId: true },
+      select: {
+        googleAdsAccessToken: true,
+        googleAdsRefreshToken: true,
+      },
     });
 
-    if (!client?.googleAdsCustomerId) {
+    if (!client?.googleAdsRefreshToken || !client?.googleAdsAccessToken) {
+      throw new Error('Google Ads tokens not found. Please complete OAuth flow first.');
+    }
+
+    // Create OAuth2 client and set credentials
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials({
+      access_token: client.googleAdsAccessToken,
+      refresh_token: client.googleAdsRefreshToken,
+    });
+
+    const accessToken = oauth2Client.credentials.access_token;
+
+    if (!accessToken) {
+      throw new Error('No access token available');
+    }
+
+    // Use Google Ads API to list accessible customers
+    // Endpoint: GET https://googleads.googleapis.com/v16/customers:listAccessibleCustomers
+    // This endpoint doesn't require a customer ID or developer token
+    const apiUrl = 'https://googleads.googleapis.com/v16/customers:listAccessibleCustomers';
+    
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Google Ads] List customers API error:', response.status, errorText);
+      
+      // If API call fails, fall back to returning empty array
+      // User can still connect manually by entering customer ID
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('Google Ads API authentication failed. Please reconnect Google Ads.');
+      }
+      
+      // For other errors, return empty array so user can still connect manually
       return [];
     }
 
-    // Format customer ID (add dashes for display)
-    const customerId = client.googleAdsCustomerId;
-    const formattedId = customerId.length === 10 
-      ? `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
-      : customerId;
+    const data = await response.json();
+    const resourceNames = data.resourceNames || [];
 
-    // Try to fetch customer details
-    // Note: This is a simplified implementation
-    // Full implementation would require developer token and use the Google Ads API client library
-    return [{
-      customerId: customerId,
-      customerName: `Account ${formattedId}`,
-      currencyCode: 'USD', // Default, would be fetched from API
-      timeZone: 'America/New_York', // Default, would be fetched from API
-    }];
+    if (resourceNames.length === 0) {
+      console.warn('[Google Ads] No accessible customers found');
+      return [];
+    }
+
+    // Extract customer IDs from resource names (format: "customers/1234567890")
+    const customerIds = resourceNames.map((resourceName: string) => {
+      const match = resourceName.match(/customers\/(\d+)/);
+      return match ? match[1] : null;
+    }).filter((id: string | null) => id !== null);
+
+    // Fetch details for each customer
+    // Note: We'll use a simplified approach - fetch basic info for each customer
+    const customers = await Promise.all(
+      customerIds.map(async (customerId: string) => {
+        try {
+          // Try to fetch customer details using the CustomerService
+          // Endpoint: GET https://googleads.googleapis.com/v16/customers/{customerId}
+          const customerUrl = `https://googleads.googleapis.com/v16/customers/${customerId}`;
+          const customerResponse = await fetch(customerUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+              'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
+            },
+          });
+
+          if (customerResponse.ok) {
+            const customerData = await customerResponse.json();
+            return {
+              customerId: customerId,
+              customerName: customerData.descriptiveName || `Account ${customerId}`,
+              currencyCode: customerData.currencyCode || 'USD',
+              timeZone: customerData.timeZone || 'America/New_York',
+            };
+          } else {
+            // If detailed fetch fails, return basic info
+            const formattedId = customerId.length === 10 
+              ? `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
+              : customerId;
+            return {
+              customerId: customerId,
+              customerName: `Account ${formattedId}`,
+              currencyCode: 'USD',
+              timeZone: 'America/New_York',
+            };
+          }
+        } catch (err: any) {
+          console.warn(`[Google Ads] Failed to fetch details for customer ${customerId}:`, err.message);
+          // Return basic info even if detail fetch fails
+          const formattedId = customerId.length === 10 
+            ? `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
+            : customerId;
+          return {
+            customerId: customerId,
+            customerName: `Account ${formattedId}`,
+            currencyCode: 'USD',
+            timeZone: 'America/New_York',
+          };
+        }
+      })
+    );
+
+    return customers;
   } catch (error: any) {
     console.error('[Google Ads] Failed to list customers:', error);
-    // Return empty array on error - user can still connect manually
+    
+    // If error is about missing tokens, re-throw it
+    if (error.message?.includes('No access token') || error.message?.includes('authentication failed')) {
+      throw error;
+    }
+    
+    // For other errors, return empty array - user can still connect manually
     return [];
   }
 }

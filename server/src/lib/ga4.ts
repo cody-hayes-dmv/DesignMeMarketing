@@ -471,7 +471,9 @@ export async function fetchGA4TrafficData(
 
     // Check if we got at least some data
     if (!sessionsResponse && !usersResponse && !engagementResponse && !trendResponse) {
-      throw new Error('All GA4 API requests failed. Please check property ID and permissions.');
+      // Check if any of the errors were permission-related
+      const hasPermissionError = false; // Will be caught by the outer catch block if permission error occurred
+      throw new Error('All GA4 API requests failed. Please check property ID and permissions. If you see PERMISSION_DENIED errors, ensure the Google account has at least "Viewer" access to this property in Google Analytics.');
     }
 
   } catch (apiError: any) {
@@ -485,6 +487,8 @@ export async function fetchGA4TrafficData(
     let errorMessage = `Failed to fetch GA4 data: ${apiError.message || 'Unknown error'}`;
     if (apiError.code === 3 || apiError.message?.includes('INVALID_ARGUMENT')) {
       errorMessage = `GA4 API invalid argument. This usually means: 1) Property ID is incorrect, 2) Date range is invalid, or 3) Metric/dimension combination is not allowed. Property: ${propertyId}, Date range: ${startDateStr} to ${endDateStr}`;
+    } else if (apiError.code === 7 || apiError.message?.includes('PERMISSION_DENIED')) {
+      errorMessage = `GA4 Permission Denied: The Google account used to connect GA4 does not have sufficient permissions for property ${propertyId}. Please ensure the account has at least "Viewer" access to this property in Google Analytics, or reconnect GA4 with an account that has proper permissions.`;
     } else if (apiError.code === 403 || apiError.statusCode === 403) {
       errorMessage = 'GA4 API access denied. Please check that the property ID is correct and the account has access.';
     } else if (apiError.code === 404 || apiError.statusCode === 404) {

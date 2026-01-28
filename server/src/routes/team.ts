@@ -1,7 +1,7 @@
 import express from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { sendEmail } from '../lib/email.js';
 import jwt from 'jsonwebtoken';
 
@@ -272,7 +272,7 @@ router.post('/invite', authenticateToken, async (req, res) => {
         // Create invite token
         const inviteToken = jwt.sign(
             { userId: newUser.id, email },
-            process.env.JWT_SECRET!,
+            getJwtSecret(),
             { expiresIn: '7d' }
         );
 

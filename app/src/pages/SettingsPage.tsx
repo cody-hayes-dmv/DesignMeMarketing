@@ -48,10 +48,10 @@ const SettingsPage = () => {
     teamUpdates: true,
   });
 
-  // Remove billing tab for SUPER_ADMIN
+  // Remove billing tab for SUPER_ADMIN, remove agency tab for SUPER_ADMIN (they don't have agencies)
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
-    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"] },
+    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] }, // Removed SUPER_ADMIN
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
     { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
     { id: "billing", label: "Billing", icon: CreditCard, roles: ["ADMIN", "AGENCY", "WORKER"] }, // Removed SUPER_ADMIN
@@ -79,11 +79,14 @@ const SettingsPage = () => {
     try {
       setAgencyLoading(true);
       const response = await api.get("/agencies/me");
-      setAgencyForm({
-        name: response.data.name || "",
-        subdomain: response.data.subdomain || "",
-        website: "", // Not stored in backend currently
-      });
+      // Handle null response for SUPER_ADMIN (though they shouldn't call this)
+      if (response.data) {
+        setAgencyForm({
+          name: response.data.name || "",
+          subdomain: response.data.subdomain || "",
+          website: "", // Not stored in backend currently
+        });
+      }
     } catch (error: any) {
       if (error.response?.status !== 404) {
         console.error("Error fetching agency data:", error);

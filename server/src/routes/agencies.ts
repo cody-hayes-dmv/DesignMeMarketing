@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -19,22 +19,73 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
+    // Fetch all agencies with member counts
     const agencies = await prisma.agency.findMany({
       include: {
         _count: {
           select: { members: true },
         },
+        members: {
+          select: { userId: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const formattedAgencies = agencies.map(agency => ({
-      id: agency.id,
-      name: agency.name,
-      subdomain: agency.subdomain,
-      createdAt: agency.createdAt,
-      memberCount: agency._count.members,
-    }));
+    // Collect all user IDs from all agencies
+    const allUserIds = new Set<string>();
+    agencies.forEach(agency => {
+      agency.members.forEach(member => {
+        allUserIds.add(member.userId);
+      });
+    });
+
+    // Batch query: Get client counts for all users at once
+    const userIdsArray = Array.from(allUserIds);
+    const clientCountsByUserId = new Map<string, number>();
+    
+    if (userIdsArray.length > 0) {
+      // Use groupBy to get counts per user
+      const clientCounts = await prisma.client.groupBy({
+        by: ['userId'],
+        where: {
+          userId: { in: userIdsArray },
+        },
+        _count: {
+          id: true,
+        },
+      });
+
+      // Build map of userId -> client count
+      clientCounts.forEach(item => {
+        clientCountsByUserId.set(item.userId, item._count.id);
+      });
+    }
+
+    // Build map of agencyId -> user IDs for that agency
+    const agencyUserIdsMap = new Map<string, string[]>();
+    agencies.forEach(agency => {
+      agencyUserIdsMap.set(agency.id, agency.members.map(m => m.userId));
+    });
+
+    // Calculate client count for each agency
+    const formattedAgencies = agencies.map((agency) => {
+      const userIds = agencyUserIdsMap.get(agency.id) || [];
+      
+      // Sum up client counts for all users in this agency
+      const clientCount = userIds.reduce((sum, userId) => {
+        return sum + (clientCountsByUserId.get(userId) || 0);
+      }, 0);
+
+      return {
+        id: agency.id,
+        name: agency.name,
+        subdomain: agency.subdomain,
+        createdAt: agency.createdAt,
+        memberCount: agency._count.members,
+        clientCount: clientCount,
+      };
+    });
 
     res.json(formattedAgencies);
   } catch (error) {
@@ -232,7 +283,7 @@ router.post('/invite', authenticateToken, async (req, res) => {
     // Generate invitation token
     const inviteToken = jwt.sign(
       { email, agencyId: agency.id, role: 'AGENCY' },
-      process.env.JWT_SECRET!,
+      getJwtSecret(),
       { expiresIn: '7d' }
     );
 
@@ -291,7 +342,7 @@ router.post('/:agencyId/invite-worker', authenticateToken, async (req, res) => {
     // Generate invitation token
     const inviteToken = jwt.sign(
       { email, agencyId, role: 'WORKER' },
-      process.env.JWT_SECRET!,
+      getJwtSecret(),
       { expiresIn: '7d' }
     );
 
@@ -331,6 +382,11 @@ router.get('/me', authenticateToken, async (req, res) => {
   try {
     const user = req.user;
 
+    // SUPER_ADMIN users don't have agency memberships - return null gracefully
+    if (user.role === 'SUPER_ADMIN') {
+      return res.json(null);
+    }
+
     // Get user's first agency membership
     const membership = await prisma.userAgency.findFirst({
       where: { userId: user.userId },
@@ -366,6 +422,11 @@ router.put('/me', authenticateToken, async (req, res) => {
   try {
     const user = req.user;
     const updateData = updateAgencySchema.parse(req.body);
+
+    // SUPER_ADMIN users don't have agency memberships
+    if (user.role === 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'SUPER_ADMIN users cannot update agency settings' });
+    }
 
     // Get user's first agency membership
     const membership = await prisma.userAgency.findFirst({

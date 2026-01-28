@@ -7,6 +7,7 @@ export interface Agency {
   subdomain?: string;
   createdAt: string;
   memberCount: number;
+  clientCount?: number;
 }
 
 interface AgencyState {
