@@ -311,8 +311,8 @@ export async function fetchGoogleAdsCampaigns(
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
     
     // Format dates for API (YYYY-MM-DD)
-    const startDateStr = startDate.toISOString().split('T')[0].replace(/-/g, '');
-    const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
 
     // Google Ads API query for campaigns with metrics
     const query = `
@@ -334,7 +334,7 @@ export async function fetchGoogleAdsCampaigns(
       ORDER BY metrics.clicks DESC
     `;
 
-    // Use Google Ads API REST endpoint
+    // Use Google Ads API REST endpoint (v22 is current, but v16 should still work)
     const apiUrl = `https://googleads.googleapis.com/v16/customers/${customerId}/googleAds:searchStream`;
     
     // Build headers - developer token is optional
@@ -388,11 +388,15 @@ export async function fetchGoogleAdsCampaigns(
       for (const row of data.results) {
         const campaignId = row.campaign?.id?.toString() || 'unknown';
         const campaignName = row.campaign?.name || 'Unnamed Campaign';
-        const clicks = parseInt(row.metrics?.clicks || '0', 10);
+        // Google Ads API returns metrics in camelCase format
+        const clicks = parseInt(row.metrics?.clicks || row.metrics?.clicks || '0', 10);
         const impressions = parseInt(row.metrics?.impressions || '0', 10);
-        const costMicros = parseInt(row.metrics?.costMicros || '0', 10);
+        // cost_micros becomes costMicros in JSON response
+        const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
         const conversions = parseFloat(row.metrics?.conversions || '0');
-        const avgCpc = parseFloat(row.metrics?.averageCpc?.micros || '0') / 1000000;
+        // average_cpc becomes averageCpc, and it's a Money object with micros field
+        const avgCpcMicros = row.metrics?.averageCpc?.micros || row.metrics?.average_cpc?.micros || 0;
+        const avgCpc = typeof avgCpcMicros === 'number' ? avgCpcMicros / 1000000 : parseFloat(row.metrics?.averageCpc || row.metrics?.average_cpc || '0');
         const ctr = parseFloat(row.metrics?.ctr || '0');
 
         if (!campaignMap.has(campaignId)) {
@@ -476,8 +480,8 @@ export async function fetchGoogleAdsAdGroups(
   try {
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
     
-    const startDateStr = startDate.toISOString().split('T')[0].replace(/-/g, '');
-    const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
 
     let query = `
       SELECT
@@ -554,9 +558,11 @@ export async function fetchGoogleAdsAdGroups(
         const adGroup = adGroupMap.get(adGroupId)!;
         adGroup.clicks += parseInt(row.metrics?.clicks || '0', 10);
         adGroup.impressions += parseInt(row.metrics?.impressions || '0', 10);
-        adGroup.cost += parseFloat(row.metrics?.costMicros || '0') / 1000000;
+        const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
+        adGroup.cost += costMicros / 1000000;
         adGroup.conversions += parseFloat(row.metrics?.conversions || '0');
-        adGroup.avgCpc = parseFloat(row.metrics?.averageCpc?.micros || '0') / 1000000;
+        const avgCpcMicros = row.metrics?.averageCpc?.micros || row.metrics?.average_cpc?.micros || 0;
+        adGroup.avgCpc = typeof avgCpcMicros === 'number' ? avgCpcMicros / 1000000 : parseFloat(row.metrics?.averageCpc || row.metrics?.average_cpc || '0');
         adGroup.ctr = parseFloat(row.metrics?.ctr || '0');
       }
 
@@ -588,8 +594,8 @@ export async function fetchGoogleAdsKeywords(
   try {
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
     
-    const startDateStr = startDate.toISOString().split('T')[0].replace(/-/g, '');
-    const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
 
     let query = `
       SELECT
@@ -652,8 +658,8 @@ export async function fetchGoogleAdsKeywords(
 
     if (data.results && Array.isArray(data.results)) {
       for (const row of data.results) {
-        const keywordText = row.adGroupCriterion?.keyword?.text || 'Unknown';
-        const matchType = row.adGroupCriterion?.keyword?.matchType || 'UNKNOWN';
+        const keywordText = row.adGroupCriterion?.keyword?.text || row.ad_group_criterion?.keyword?.text || 'Unknown';
+        const matchType = row.adGroupCriterion?.keyword?.matchType || row.ad_group_criterion?.keyword?.match_type || 'UNKNOWN';
         const key = `${keywordText}_${matchType}`;
 
         if (!keywordMap.has(key)) {
@@ -676,11 +682,13 @@ export async function fetchGoogleAdsKeywords(
         const keyword = keywordMap.get(key)!;
         keyword.clicks += parseInt(row.metrics?.clicks || '0', 10);
         keyword.impressions += parseInt(row.metrics?.impressions || '0', 10);
-        keyword.cost += parseFloat(row.metrics?.costMicros || '0') / 1000000;
+        const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
+        keyword.cost += costMicros / 1000000;
         keyword.conversions += parseFloat(row.metrics?.conversions || '0');
-        keyword.avgCpc = parseFloat(row.metrics?.averageCpc?.micros || '0') / 1000000;
+        const avgCpcMicros = row.metrics?.averageCpc?.micros || row.metrics?.average_cpc?.micros || 0;
+        keyword.avgCpc = typeof avgCpcMicros === 'number' ? avgCpcMicros / 1000000 : parseFloat(row.metrics?.averageCpc || row.metrics?.average_cpc || '0');
         keyword.ctr = parseFloat(row.metrics?.ctr || '0');
-        keyword.impressionShare = parseFloat(row.metrics?.searchImpressionShare || '0');
+        keyword.impressionShare = parseFloat(row.metrics?.searchImpressionShare || row.metrics?.search_impression_share || '0');
       }
 
       keywords.push(...Array.from(keywordMap.values()));
@@ -709,8 +717,8 @@ export async function fetchGoogleAdsConversions(
   try {
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
     
-    const startDateStr = startDate.toISOString().split('T')[0].replace(/-/g, '');
-    const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
 
     // Query for conversion actions and their performance
     const query = `
@@ -763,12 +771,13 @@ export async function fetchGoogleAdsConversions(
 
     if (data.results && Array.isArray(data.results)) {
       for (const row of data.results) {
-        const conversionName = row.segments?.conversionActionName || 'Unknown Conversion';
+        const conversionName = row.segments?.conversionActionName || row.segments?.conversion_action_name || 'Unknown Conversion';
         const date = row.segments?.date || '';
         const campaignName = row.campaign?.name || 'Unknown Campaign';
         const conversionsCount = parseFloat(row.metrics?.conversions || '0');
-        const conversionValue = parseFloat(row.metrics?.conversionsValue || '0');
-        const cost = parseFloat(row.metrics?.costMicros || '0') / 1000000;
+        const conversionValue = parseFloat(row.metrics?.conversionsValue || row.metrics?.conversions_value || '0');
+        const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
+        const cost = costMicros / 1000000;
         const clicks = parseInt(row.metrics?.clicks || '0', 10);
 
         conversions.push({
