@@ -22,6 +22,10 @@ import {
   X,
   Copy,
   ExternalLink,
+  ArrowUp,
+  ArrowDown,
+  Store,
+  ArrowRight,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -166,6 +170,8 @@ const ClientsPage = () => {
   const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const cardMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [openCardMenuId, setOpenCardMenuId] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<"name" | "domain" | "industry">("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     dispatch(fetchClients() as any);
@@ -403,6 +409,17 @@ const ClientsPage = () => {
     setDeleteConfirm({ isOpen: true, clientId: id });
   };
 
+  const handleMoveToVendasta = async (client: Client) => {
+    try {
+      await dispatch(updateClient({ id: client.id, data: { vendasta: true } }) as any);
+      toast.success(`${client.name} moved to Vendasta successfully!`);
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Failed to move client to Vendasta:", error);
+      toast.error(error?.response?.data?.message || "Failed to move client to Vendasta");
+    }
+  };
+
   const confirmDeleteClient = async () => {
     if (!deleteConfirm.clientId) return;
     try {
@@ -494,8 +511,19 @@ const ClientsPage = () => {
   const activeCount = modifiedClients.filter((m) => m.status === "ACTIVE").length;
   const archivedCount = modifiedClients.filter((m) => isArchivedStatus(m.status)).length;
 
+  const handleSort = (field: "name" | "domain" | "industry") => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
   const filteredClients = modifiedClients
     .filter((client) => {
+      // Exclude vendasta clients from regular clients page
+      if (client.vendasta) return false;
       if (statusFilter === "active") return client.status === "ACTIVE";
       if (statusFilter === "archived") return isArchivedStatus(client.status);
       return true;
@@ -508,6 +536,26 @@ const ClientsPage = () => {
         client.domain.toLowerCase().includes(searchLower) ||
         (client.industry && client.industry.toLowerCase().includes(searchLower))
       );
+    })
+    .sort((a, b) => {
+      let aValue: string;
+      let bValue: string;
+
+      if (sortField === "name") {
+        aValue = a.name.toLowerCase();
+        bValue = b.name.toLowerCase();
+      } else if (sortField === "domain") {
+        aValue = a.domain.toLowerCase();
+        bValue = b.domain.toLowerCase();
+      } else {
+        // industry
+        aValue = (a.industry || "").toLowerCase();
+        bValue = (b.industry || "").toLowerCase();
+      }
+
+      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+      return 0;
     });
 
   return (
@@ -622,9 +670,39 @@ const ClientsPage = () => {
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industy</th>
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("name")}
+                  >
+                    <div className="flex items-center gap-2">
+                      Name
+                      {sortField === "name" && (
+                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("domain")}
+                  >
+                    <div className="flex items-center gap-2">
+                      Domain
+                      {sortField === "domain" && (
+                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      )}
+                    </div>
+                  </th>
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => handleSort("industry")}
+                  >
+                    <div className="flex items-center gap-2">
+                      Industry
+                      {sortField === "industry" && (
+                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      )}
+                    </div>
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -727,6 +805,15 @@ const ClientsPage = () => {
                             title="Assign to Agency"
                           >
                             <Users className="h-4 w-4" />
+                          </button>
+                        )}
+                        {user?.role === "SUPER_ADMIN" && !client.vendasta && (
+                          <button
+                            className="p-1 text-gray-400 hover:text-orange-600 transition-colors"
+                            onClick={() => handleMoveToVendasta(client)}
+                            title="Move to Vendasta"
+                          >
+                            <Store className="h-4 w-4" />
                           </button>
                         )}
                         <button
@@ -865,6 +952,18 @@ const ClientsPage = () => {
                           >
                             Open Dashboard
                           </button>
+                          {user?.role === "SUPER_ADMIN" && !client.vendasta && (
+                            <button
+                              className="w-full text-left px-4 py-2 text-xs hover:bg-orange-50 text-orange-600 flex items-center gap-2"
+                              onClick={() => {
+                                setOpenCardMenuId(null);
+                                handleMoveToVendasta(client);
+                              }}
+                            >
+                              <Store className="h-3 w-3" />
+                              Move to Vendasta
+                            </button>
+                          )}
                           <button
                             className="w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 last:rounded-b-md"
                             onClick={() => {

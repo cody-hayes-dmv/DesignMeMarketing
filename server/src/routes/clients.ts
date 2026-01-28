@@ -1055,7 +1055,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update a client
 router.put('/:id', authenticateToken, async (req, res) => {
     const clientId = req.params.id;
-    const { name, domain, status, industry, targets, loginUrl, username, password, accountInfo } = req.body.data || req.body;
+    const { name, domain, status, industry, targets, loginUrl, username, password, accountInfo, vendasta } = req.body.data || req.body;
 
     try {
         if (req.user.role === 'USER') {
@@ -1134,6 +1134,24 @@ router.put('/:id', authenticateToken, async (req, res) => {
             }
         }
 
+        // Allow updating vendasta field (only ADMIN / SUPER_ADMIN)
+        if (vendasta !== undefined) {
+            if (isAdmin) {
+                // Handle boolean conversion: accept true, false, 'true', 'false', 1, 0
+                if (typeof vendasta === 'boolean') {
+                    updateData.vendasta = vendasta;
+                } else if (vendasta === 'true' || vendasta === true || vendasta === 1 || vendasta === '1') {
+                    updateData.vendasta = true;
+                } else if (vendasta === 'false' || vendasta === false || vendasta === 0 || vendasta === '0') {
+                    updateData.vendasta = false;
+                } else {
+                    updateData.vendasta = Boolean(vendasta);
+                }
+            } else {
+                return res.status(403).json({ message: 'Not allowed to update vendasta status' });
+            }
+        }
+
         const updated = await prisma.client.update({
             where: { id: clientId },
             data: updateData,
@@ -1145,9 +1163,22 @@ router.put('/:id', authenticateToken, async (req, res) => {
         });
 
         res.json(updated);
-    } catch (error) {
+    } catch (error: any) {
         console.error('Update client error:', error);
-        res.status(500).json({ message: 'Internal server error' });
+        // Provide more detailed error information
+        const errorMessage = error?.message || 'Internal server error';
+        const errorCode = error?.code || 'UNKNOWN';
+        console.error('Error details:', { errorMessage, errorCode, stack: error?.stack });
+        
+        // Check if it's a database column error (migration not run)
+        if (errorMessage.includes('vendasta') || errorMessage.includes('Unknown column')) {
+            return res.status(500).json({ 
+                message: 'Database schema error. Please run migrations: npx prisma migrate deploy',
+                details: errorMessage 
+            });
+        }
+        
+        res.status(500).json({ message: 'Internal server error', details: errorMessage });
     }
 });
 

@@ -151,6 +151,7 @@ model Client {
   googleAdsCustomerId   String?
   googleAdsAccountEmail String?
   googleAdsConnectedAt  DateTime?
+  vendasta              Boolean                  @default(false)
   userId                String
   aiSearchSerpCache     AiSearchSerpCache?
   backlinkTimeseries    BacklinkTimeseries[]

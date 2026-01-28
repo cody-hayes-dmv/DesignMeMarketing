@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus, ArrowUp, ArrowDown } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -78,6 +78,8 @@ const AgenciesPage = () => {
     const [loadingAllClients, setLoadingAllClients] = useState(false);
     const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const navigate = useNavigate();
+    const [sortField, setSortField] = useState<"agency" | "subdomain" | "members">("agency");
+    const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
     const [createForm, setCreateForm] = useState({
         name: "",
         subdomain: "",
@@ -354,6 +356,41 @@ const AgenciesPage = () => {
         }
     };
 
+    const handleSort = (field: "agency" | "subdomain" | "members") => {
+        if (sortField === field) {
+            setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+        } else {
+            setSortField(field);
+            setSortDirection("asc");
+        }
+    };
+
+    const sortedAgencies = [...agencies].sort((a, b) => {
+        let aValue: string | number;
+        let bValue: string | number;
+
+        if (sortField === "agency") {
+            aValue = a.name.toLowerCase();
+            bValue = b.name.toLowerCase();
+        } else if (sortField === "subdomain") {
+            aValue = (a.subdomain || "").toLowerCase();
+            bValue = (b.subdomain || "").toLowerCase();
+        } else {
+            // members
+            aValue = a.memberCount || 0;
+            bValue = b.memberCount || 0;
+        }
+
+        if (typeof aValue === "string" && typeof bValue === "string") {
+            if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+            if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+        } else {
+            if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+            if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+        }
+        return 0;
+    });
+
     return (
         <div className="p-8">
             {/* Header */}
@@ -379,14 +416,38 @@ const AgenciesPage = () => {
                     <table className="w-full">
                         <thead className="bg-gray-50">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Agency
+                                <th 
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                                    onClick={() => handleSort("agency")}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        Agency
+                                        {sortField === "agency" && (
+                                            sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                        )}
+                                    </div>
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Subdomain
+                                <th 
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                                    onClick={() => handleSort("subdomain")}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        Subdomain
+                                        {sortField === "subdomain" && (
+                                            sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                        )}
+                                    </div>
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Members
+                                <th 
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                                    onClick={() => handleSort("members")}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        Members
+                                        {sortField === "members" && (
+                                            sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                        )}
+                                    </div>
                                 </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Created
@@ -403,14 +464,14 @@ const AgenciesPage = () => {
                                         Loading agencies...
                                     </td>
                                 </tr>
-                            ) : agencies.length === 0 ? (
+                            ) : sortedAgencies.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
                                         No agencies found. Create your first agency.
                                     </td>
                                 </tr>
                             ) : (
-                                agencies.map((agency) => (
+                                sortedAgencies.map((agency) => (
                                 <React.Fragment key={agency.id}>
                                     <tr
                                         className="hover:bg-gray-50 cursor-pointer"

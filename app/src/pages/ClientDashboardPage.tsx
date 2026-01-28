@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
 import {
   FileText,
   Download,
@@ -29,6 +29,11 @@ import {
   AlertTriangle,
   MoreVertical,
   EyeOff,
+  Sparkles,
+  Trophy,
+  Lightbulb,
+  Info,
+  Target,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -238,7 +243,7 @@ const ClientDashboardPage: React.FC = () => {
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [loading, setLoading] = useState(false);
   type ClientDashboardTopTab = "dashboard" | "report" | "users";
-  type ClientDashboardSection = "seo" | "ppc" | "backlinks" | "worklog";
+  type ClientDashboardSection = "seo" | "ai-intelligence" | "ppc" | "backlinks" | "worklog";
 
   const initialNav = (() => {
     if (clientPortalMode) {
@@ -323,6 +328,34 @@ const ClientDashboardPage: React.FC = () => {
   const [aiSearchRows, setAiSearchRows] = useState<AiSearchVisibilityRow[]>([]);
   const [aiSearchLoading, setAiSearchLoading] = useState(false);
   const [aiSearchError, setAiSearchError] = useState<string | null>(null);
+  const [aiIntelligence, setAiIntelligence] = useState<{
+    kpis: { aiVisibilityScore: number; aiVisibilityScoreTrend: number; totalAiMentions: number; totalAiMentionsTrend: number; aiSearchVolume: number; aiSearchVolumeTrend: number; monthlyTrendPercent: number };
+    platforms: { platform: string; color: string; mentions: number; aiSearchVol: number; impressions: number; trend: number; share: number }[];
+    queriesWhereYouAppear: { query: string; aiVolPerMo: number; platforms: string; mentions: number }[];
+    totalQueriesCount: number;
+    competitors: { domain: string; label: string; isLeader: boolean; isYou: boolean; score: number; trend: number | null }[];
+    gapBehindLeader: number;
+    howAiMentionsYou: { query: string; platform: string; aiVolPerMo: number; snippet: string; sourceUrl: string; citationIndex: number }[];
+    totalContextsCount: number;
+    competitorQueries: { query: string; compMentions: number; aiVol: number; priority: string }[];
+    actionItems: string[];
+    meta?: {
+      startDate: string;
+      endDate: string;
+      dataForSeoConnected: boolean;
+      locationCode: number;
+      languageCode: string;
+      competitorDomainsCount: number;
+      hasDataForSeoCredentials?: boolean;
+      targetDomain?: string;
+      apiResponseStatus?: string;
+    };
+  } | null>(null);
+  const [aiIntelligenceLoading, setAiIntelligenceLoading] = useState(false);
+  const [aiIntelligenceError, setAiIntelligenceError] = useState<string | null>(null);
+  const [showAllQueriesModal, setShowAllQueriesModal] = useState(false);
+  const [showCompetitiveAnalysisModal, setShowCompetitiveAnalysisModal] = useState(false);
+  const [showAllContextsModal, setShowAllContextsModal] = useState(false);
   const [topPages, setTopPages] = useState<TopPageItem[]>([]);
   const [topPagesLoading, setTopPagesLoading] = useState(false);
   const [topPagesError, setTopPagesError] = useState<string | null>(null);
@@ -1838,10 +1871,38 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [clientId, customEndDate, customStartDate, dateRange]);
 
+  const fetchAiIntelligence = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setAiIntelligenceLoading(true);
+      setAiIntelligenceError(null);
+      const params: Record<string, string> = {};
+      if (dateRange === "custom" && customStartDate && customEndDate) {
+        params.start = customStartDate;
+        params.end = customEndDate;
+      } else {
+        params.period = dateRange;
+      }
+      const res = await api.get(`/seo/ai-intelligence/${clientId}`, { params, timeout: 30000 });
+      setAiIntelligence(res.data);
+    } catch (error: any) {
+      console.error("Failed to fetch AI Intelligence", error);
+      setAiIntelligence(null);
+      setAiIntelligenceError(error?.response?.data?.message || "Unable to load AI Intelligence");
+    } finally {
+      setAiIntelligenceLoading(false);
+    }
+  }, [clientId, customEndDate, customStartDate, dateRange]);
+
   useEffect(() => {
     if (activeTab !== "dashboard") return;
     void fetchAiSearchVisibility();
   }, [activeTab, fetchAiSearchVisibility]);
+
+  useEffect(() => {
+    if (activeTab !== "dashboard" || dashboardSection !== "ai-intelligence") return;
+    void fetchAiIntelligence();
+  }, [activeTab, dashboardSection, fetchAiIntelligence]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -3446,6 +3507,7 @@ const ClientDashboardPage: React.FC = () => {
                       {(
                         [
                           { id: "seo", label: "SEO Overview", icon: Search },
+                          { id: "ai-intelligence", label: "AI Intelligence", icon: Sparkles },
                           { id: "ppc", label: "PPC", icon: TrendingUp },
                           { id: "backlinks", label: "Backlinks", icon: Search },
                           { id: "worklog", label: "Work Log", icon: Clock },
@@ -3794,16 +3856,26 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={resolvedTrafficSources as any}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={70}
-                            labelLine={false}
-                            label={createNonOverlappingPieValueLabel({ fontSizePx: 16 }) as any}
+                        <BarChart
+                          data={resolvedTrafficSources}
+                          layout="vertical"
+                          margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" />
+                          <YAxis 
+                            dataKey="name" 
+                            type="category" 
+                            width={70}
+                            tick={{ fontSize: 12 }}
+                          />
+                          <Tooltip 
+                            formatter={(value: number) => value.toLocaleString()}
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '4px' }}
+                          />
+                          <Bar 
+                            dataKey="value" 
+                            radius={[0, 4, 4, 0]}
                           >
                             {resolvedTrafficSources.map((entry, index) => (
                               <Cell
@@ -3811,10 +3883,8 @@ const ClientDashboardPage: React.FC = () => {
                                 fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
                               />
                             ))}
-                          </Pie>
-                          <Tooltip />
-                          <Legend />
-                        </PieChart>
+                          </Bar>
+                        </BarChart>
                       </ResponsiveContainer>
                     )}
                   </div>
@@ -4283,6 +4353,313 @@ const ClientDashboardPage: React.FC = () => {
                       })()}
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {dashboardSection === "ai-intelligence" && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-50 text-primary-600">
+                        <Sparkles className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-semibold text-gray-900">AI Intelligence</h2>
+                        <p className="text-sm text-gray-500 mt-0.5">
+                          Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms.
+                        </p>
+                      </div>
+                    </div>
+
+                    {aiIntelligenceError && (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                        {aiIntelligenceError}
+                      </div>
+                    )}
+
+                    {aiIntelligenceLoading ? (
+                      <div className="bg-white border border-gray-200 rounded-xl p-12 flex items-center justify-center">
+                        <span className="inline-flex items-center gap-2 text-gray-500">
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                          Loading AI Intelligence…
+                        </span>
+                      </div>
+                    ) : aiIntelligence ? (
+                      <>
+                        {aiIntelligence.meta?.apiResponseStatus === "no_data_or_error" && (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+                            <div className="flex items-start gap-3">
+                              <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-sm font-medium text-yellow-900 mb-1">
+                                  No AI Intelligence data available
+                                </p>
+                                <p className="text-xs text-yellow-800">
+                                  {aiIntelligence.meta?.hasDataForSeoCredentials 
+                                    ? "The domain may not have any AI mentions yet, or the DataForSEO API may need time to index your domain. Data will appear once your domain starts appearing in AI responses."
+                                    : "DataForSEO credentials are not configured. Please configure DATAFORSEO_BASE64 environment variable to enable AI Intelligence tracking."}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Visibility Score</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">
+                              {aiIntelligence.kpis.aiVisibilityScore} <span className="text-base font-normal text-gray-500">/100</span>
+                            </p>
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
+                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis.aiVisibilityScoreTrend} pts
+                            </span>
+                          </div>
+                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total AI Mentions</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">{aiIntelligence.kpis.totalAiMentions}</p>
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
+                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis.totalAiMentionsTrend}
+                            </span>
+                          </div>
+                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Search Volume</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">
+                              {aiIntelligence.kpis.aiSearchVolume.toLocaleString()}
+                            </p>
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
+                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis.aiSearchVolumeTrend.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monthly Trend</p>
+                            <p className="mt-1 text-2xl font-bold text-green-600">+{aiIntelligence.kpis.monthlyTrendPercent}%</p>
+                            <p className="text-xs text-gray-500 mt-1">vs last month</p>
+                          </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                          <div className="px-6 py-4 border-b border-gray-200">
+                            <h3 className="text-lg font-semibold text-gray-900">AI Platform Performance</h3>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-200 text-sm">
+                              <thead className="bg-gray-50">
+                                <tr>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Platform</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Mentions</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">AI Search Vol</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Impressions</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Trend</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Share</th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white divide-y divide-gray-100">
+                                {aiIntelligence.platforms.map((p) => (
+                                  <tr key={p.platform} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4">
+                                      <span className="inline-flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                                        <span className="font-medium text-gray-900">{p.platform}</span>
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.mentions}</td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.aiSearchVol.toLocaleString()}</td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.impressions.toLocaleString()}</td>
+                                    <td className="px-6 py-4">
+                                      {p.trend > 0 && <span className="inline-flex items-center gap-1 text-green-600 font-medium"><TrendingUp className="h-4 w-4" />+{p.trend}%</span>}
+                                      {p.trend === 0 && <span className="text-gray-400">—</span>}
+                                    </td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.share}%</td>
+                                  </tr>
+                                ))}
+                                <tr className="bg-gray-50 font-semibold">
+                                  <td className="px-6 py-4 text-gray-900">TOTAL</td>
+                                  <td className="px-6 py-4 text-gray-900">{aiIntelligence.kpis.totalAiMentions}</td>
+                                  <td className="px-6 py-4 text-gray-900">{aiIntelligence.kpis.aiSearchVolume.toLocaleString()}</td>
+                                  <td className="px-6 py-4 text-gray-900">
+                                    {aiIntelligence.platforms.reduce((s, p) => s + p.impressions, 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-6 py-4 text-green-600">+{aiIntelligence.kpis.monthlyTrendPercent}%</td>
+                                  <td className="px-6 py-4 text-gray-900">100%</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                          <div className="flex items-start justify-between gap-4 mb-4">
+                            <div>
+                              <div className="w-1 h-6 bg-green-500 rounded-full inline-block mr-2 align-middle" />
+                              <h3 className="text-lg font-semibold text-gray-900 inline align-middle">Queries Where You Appear in AI</h3>
+                              <p className="text-sm text-gray-500 mt-1">Top performing queries triggering AI mentions</p>
+                            </div>
+                            <button 
+                              type="button" 
+                              onClick={() => setShowAllQueriesModal(true)}
+                              className="text-sm font-medium text-primary-600 hover:text-primary-700 whitespace-nowrap"
+                            >
+                              View All ({aiIntelligence.totalQueriesCount}) <ChevronRight className="h-4 w-4 inline" />
+                            </button>
+                          </div>
+                          <div className="space-y-3">
+                            {aiIntelligence.queriesWhereYouAppear.slice(0, 5).map((q) => (
+                              <div key={q.query} className="flex items-center justify-between gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50/50 hover:bg-gray-50">
+                                <div>
+                                  <p className="font-semibold text-gray-900">{q.query}</p>
+                                  <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                                    <span className="inline-flex items-center gap-1"><Search className="h-3.5 w-3.5" />{q.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                                    <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />{q.platforms}</span>
+                                  </div>
+                                </div>
+                                <span className="px-3 py-1 rounded-full bg-primary-100 text-primary-700 text-xs font-semibold whitespace-nowrap">{q.mentions} mentions</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                          <div className="flex items-start justify-between gap-4 mb-4">
+                            <div>
+                              <div className="w-1 h-6 bg-amber-500 rounded-full inline-block mr-2 align-middle" />
+                              <h3 className="text-lg font-semibold text-gray-900 inline align-middle">AI Competitive Position</h3>
+                              <p className="text-sm text-gray-500 mt-1">Your AI visibility vs competitors</p>
+                            </div>
+                            <button 
+                              type="button" 
+                              onClick={() => setShowCompetitiveAnalysisModal(true)}
+                              className="text-sm font-medium text-primary-600 hover:text-primary-700 whitespace-nowrap"
+                            >
+                              Full Analysis <ChevronRight className="h-4 w-4 inline" />
+                            </button>
+                          </div>
+                          <div className="space-y-4">
+                            {aiIntelligence.competitors.map((c) => (
+                              <div key={c.domain} className="flex items-center gap-4">
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  {c.isLeader && <Trophy className="h-4 w-4 text-amber-500 flex-shrink-0" />}
+                                  {c.isYou && <Users className="h-4 w-4 text-primary-600 flex-shrink-0" />}
+                                  <span className="font-medium text-gray-900 truncate">{c.label}{c.isYou ? " (YOU)" : ""}</span>
+                                </div>
+                                <div className="flex-1 max-w-xs">
+                                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${c.isYou ? "bg-primary-500" : "bg-gray-400"}`}
+                                      style={{ width: `${Math.min(100, c.score)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                <span className="font-semibold text-gray-900 w-8 text-right">{c.score}</span>
+                                {c.trend != null && (
+                                  <span className={`text-sm font-medium w-12 text-right ${c.trend >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                    {c.trend >= 0 ? "+" : ""}{c.trend}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
+                            <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium text-amber-900">
+                                Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} mentions behind the leader</strong>. View opportunities to close the gap.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                          <div className="flex items-start justify-between gap-4 mb-4">
+                            <div>
+                              <h3 className="text-lg font-semibold text-gray-900">How AI Platforms Mention You</h3>
+                              <p className="text-sm text-gray-500 mt-1">See exactly how AI tools are citing your business.</p>
+                            </div>
+                            <button 
+                              type="button" 
+                              onClick={() => setShowAllContextsModal(true)}
+                              className="text-sm font-medium text-primary-600 hover:text-primary-700 whitespace-nowrap"
+                            >
+                              View All Contexts ({aiIntelligence.totalContextsCount}) <ChevronRight className="h-4 w-4 inline" />
+                            </button>
+                          </div>
+                          <div className="space-y-4">
+                            {aiIntelligence.howAiMentionsYou.slice(0, 2).map((h, idx) => (
+                              <div key={idx} className="p-4 rounded-lg border border-gray-200 bg-gray-50/30">
+                                <p className="font-semibold text-gray-900">&quot;{h.query}&quot;</p>
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">{h.platform}</span>
+                                  <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{h.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                                </div>
+                                <div className="mt-2 pl-3 border-l-2 border-primary-200 text-sm text-gray-600 italic">{h.snippet}</div>
+                                <a href={h.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm text-primary-600 hover:underline">
+                                  URL: {h.sourceUrl.replace(/^https?:\/\//, "")}
+                                </a>
+                                <div className="mt-2 flex justify-end">
+                                  <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">#{h.citationIndex} Citation</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                          <div className="mb-4">
+                            <div className="w-1 h-6 bg-red-500 rounded-full inline-block mr-2 align-middle" />
+                            <h3 className="text-lg font-semibold text-gray-900 inline align-middle">Queries Where Competitors Appear But You Don&apos;t</h3>
+                          </div>
+                          <div className="rounded-lg bg-red-50 border border-red-200 p-3 mb-4 flex items-center gap-2">
+                            <Target className="h-4 w-4 text-red-600 flex-shrink-0" />
+                            <p className="text-sm font-medium text-red-900">High-value opportunities to increase your AI visibility.</p>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-200 text-sm">
+                              <thead className="bg-gray-50">
+                                <tr>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Query</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Comp Mentions</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">AI Vol</th>
+                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Priority</th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white divide-y divide-gray-100">
+                                {aiIntelligence.competitorQueries.map((q) => (
+                                  <tr key={q.query} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 font-medium text-gray-900">{q.query}</td>
+                                    <td className="px-6 py-4 text-gray-700">{q.compMentions}</td>
+                                    <td className="px-6 py-4 text-gray-700">{q.aiVol.toLocaleString()}</td>
+                                    <td className="px-6 py-4">
+                                      <span
+                                        className={`px-2 py-1 rounded-full text-xs font-semibold text-white ${
+                                          q.priority === "HIGH" ? "bg-red-500" : q.priority === "MED" ? "bg-amber-500" : "bg-gray-400"
+                                        }`}
+                                      >
+                                        {q.priority}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="mt-4 rounded-lg bg-blue-50 border border-blue-200 p-4">
+                            <div className="flex items-center gap-2 font-semibold text-gray-900 mb-2">
+                              <Lightbulb className="h-4 w-4 text-amber-500" />
+                              Action Items:
+                            </div>
+                            <ul className="list-disc list-inside space-y-1 text-sm text-blue-900">
+                              {aiIntelligence.actionItems.map((item, i) => (
+                                <li key={i}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </>
+                    ) : !aiIntelligenceError ? (
+                      <div className="bg-white border border-gray-200 rounded-xl p-12 text-center text-gray-500">
+                        <Sparkles className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                        <p className="text-sm font-medium">No AI Intelligence data yet</p>
+                        <p className="text-xs mt-1">Data will appear when connected to DataForSEO and AI visibility sources.</p>
+                      </div>
+                    ) : null}
                   </div>
                 )}
 
@@ -7196,16 +7573,26 @@ const ClientDashboardPage: React.FC = () => {
                         </div>
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={resolvedTrafficSources as any}
-                              dataKey="value"
-                              nameKey="name"
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={70}
-                              labelLine={false}
-                              label={createNonOverlappingPieValueLabel({ fontSizePx: 16 }) as any}
+                          <BarChart
+                            data={resolvedTrafficSources}
+                            layout="vertical"
+                            margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis type="number" />
+                            <YAxis 
+                              dataKey="name" 
+                              type="category" 
+                              width={70}
+                              tick={{ fontSize: 12 }}
+                            />
+                            <Tooltip 
+                              formatter={(value: number) => value.toLocaleString()}
+                              contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '4px' }}
+                            />
+                            <Bar 
+                              dataKey="value" 
+                              radius={[0, 4, 4, 0]}
                             >
                               {resolvedTrafficSources.map((entry, index) => (
                                 <Cell
@@ -7213,10 +7600,8 @@ const ClientDashboardPage: React.FC = () => {
                                   fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
                                 />
                               ))}
-                            </Pie>
-                            <Tooltip />
-                            <Legend />
-                          </PieChart>
+                            </Bar>
+                          </BarChart>
                         </ResponsiveContainer>
                       )}
                     </div>
@@ -7789,6 +8174,165 @@ const ClientDashboardPage: React.FC = () => {
       )}
             </>
           )}
+        </div>
+      )}
+
+      {/* View All Queries Modal */}
+      {showAllQueriesModal && aiIntelligence && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">All Queries Where You Appear in AI</h2>
+                <p className="text-sm text-gray-500 mt-1">Total: {aiIntelligence.totalQueriesCount} queries</p>
+              </div>
+              <button
+                onClick={() => setShowAllQueriesModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="space-y-3">
+                {aiIntelligence.queriesWhereYouAppear.map((q, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50/50 hover:bg-gray-50">
+                    <div className="flex-1">
+                      <p className="font-semibold text-gray-900">{q.query}</p>
+                      <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                        <span className="inline-flex items-center gap-1"><Search className="h-3.5 w-3.5" />{q.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                        <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />{q.platforms}</span>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 rounded-full bg-primary-100 text-primary-700 text-xs font-semibold whitespace-nowrap">{q.mentions} mentions</span>
+                  </div>
+                ))}
+                {aiIntelligence.queriesWhereYouAppear.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                    <p className="text-sm font-medium">No queries found</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Competitive Analysis Modal */}
+      {showCompetitiveAnalysisModal && aiIntelligence && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Full Competitive Analysis</h2>
+                <p className="text-sm text-gray-500 mt-1">AI Visibility Score Comparison</p>
+              </div>
+              <button
+                onClick={() => setShowCompetitiveAnalysisModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="space-y-4 mb-6">
+                {aiIntelligence.competitors.map((c) => (
+                  <div key={c.domain} className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50/50">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {c.isLeader && <Trophy className="h-5 w-5 text-amber-500 flex-shrink-0" />}
+                      {c.isYou && <Users className="h-5 w-5 text-primary-600 flex-shrink-0" />}
+                      <span className="font-medium text-gray-900 truncate">{c.label}{c.isYou ? " (YOU)" : ""}</span>
+                    </div>
+                    <div className="flex-1 max-w-xs">
+                      <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${c.isYou ? "bg-primary-500" : "bg-gray-400"}`}
+                          style={{ width: `${Math.min(100, c.score)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span className="font-semibold text-gray-900 w-12 text-right">{c.score}/100</span>
+                    {c.trend != null && (
+                      <span className={`text-sm font-medium w-16 text-right ${c.trend >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {c.trend >= 0 ? "+" : ""}{c.trend}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-4">
+                <div className="flex items-start gap-3">
+                  <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-900 mb-2">
+                      Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} points behind the leader</strong>
+                    </p>
+                    <p className="text-xs text-amber-800">
+                      Focus on increasing your AI mentions and search volume to close the gap with competitors.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 font-semibold text-gray-900 mb-2">
+                  <Lightbulb className="h-4 w-4 text-amber-500" />
+                  Action Items:
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-sm text-blue-900">
+                  {aiIntelligence.actionItems.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View All Contexts Modal */}
+      {showAllContextsModal && aiIntelligence && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">All AI Platform Mentions</h2>
+                <p className="text-sm text-gray-500 mt-1">Total: {aiIntelligence.totalContextsCount} contexts</p>
+              </div>
+              <button
+                onClick={() => setShowAllContextsModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="space-y-4">
+                {aiIntelligence.howAiMentionsYou.map((h, idx) => (
+                  <div key={idx} className="p-4 rounded-lg border border-gray-200 bg-gray-50/30">
+                    <p className="font-semibold text-gray-900">&quot;{h.query}&quot;</p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">{h.platform}</span>
+                      <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{h.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                    </div>
+                    <div className="mt-2 pl-3 border-l-2 border-primary-200 text-sm text-gray-600 italic">{h.snippet}</div>
+                    <a href={h.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm text-primary-600 hover:underline break-all">
+                      URL: {h.sourceUrl.replace(/^https?:\/\//, "")}
+                    </a>
+                    <div className="mt-2 flex justify-end">
+                      <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">#{h.citationIndex} Citation</span>
+                    </div>
+                  </div>
+                ))}
+                {aiIntelligence.howAiMentionsYou.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    <Sparkles className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                    <p className="text-sm font-medium">No contexts found</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

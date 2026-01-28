@@ -12,6 +12,7 @@ export interface Client {
   username?: string | null;
   password?: string | null;
   accountInfo?: string | Record<string, any> | null;
+  vendasta?: boolean;
   createdAt: string;
   updatedAt: string;
   userId: string;
