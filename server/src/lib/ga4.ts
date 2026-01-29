@@ -1471,7 +1471,7 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
     let accountsPageToken: string | undefined = undefined;
     
     do {
-      const accountsResponse = await admin.accounts.list({
+      const accountsResponse: any = await admin.accounts.list({
         pageSize: 200, // Max page size
         pageToken: accountsPageToken,
       });
@@ -1519,7 +1519,7 @@ export async function listGA4Properties(clientId: string, forceRefresh: boolean 
         let propertiesPageToken: string | undefined = undefined;
         
         do {
-          const propertiesResponse = await admin.properties.list({
+          const propertiesResponse: any = await admin.properties.list({
             filter: `parent:accounts/${accountId}`,
             pageSize: 200, // Max page size
             pageToken: propertiesPageToken,
