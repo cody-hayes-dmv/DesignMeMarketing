@@ -725,7 +725,9 @@ router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req,
       where: { id: clientId },
       include: {
         user: {
-          include: {
+          select: {
+            id: true,
+            role: true,
             memberships: {
               select: { agencyId: true },
             },
@@ -740,10 +742,16 @@ router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req,
 
     // Check if client is actually assigned to this agency
     // A client belongs to an agency if the client's userId belongs to a user who is a member of that agency
+    // OR if the client's user is SUPER_ADMIN and the agency is "Super Agency" (clients created by SUPER_ADMIN default to Super Agency)
     const clientUserAgencyIds = client.user.memberships.map(m => m.agencyId);
     const isClientAssignedToAgency = clientUserAgencyIds.includes(agencyId);
     
-    if (!isClientAssignedToAgency) {
+    // Special case: If client's user is SUPER_ADMIN (no agency memberships), allow removal from "Super Agency"
+    const isClientUserSuperAdmin = client.user.role === 'SUPER_ADMIN';
+    const isSuperAgency = agency.name === 'Super Agency' || agency.name.toLowerCase() === 'super agency';
+    const canRemoveFromSuperAgency = isClientUserSuperAdmin && isSuperAgency;
+    
+    if (!isClientAssignedToAgency && !canRemoveFromSuperAgency) {
       return res.status(400).json({ message: 'Client is not assigned to this agency' });
     }
 
