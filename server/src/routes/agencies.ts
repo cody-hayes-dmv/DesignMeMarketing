@@ -635,16 +635,44 @@ router.post('/:agencyId/assign-client/:clientId', authenticateToken, async (req,
       return res.status(404).json({ message: 'Agency not found' });
     }
 
-    // Verify client exists
+    // Verify client exists and get full details
     const client = await prisma.client.findUnique({
       where: { id: clientId },
       include: {
-        user: true,
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
       },
     });
 
     if (!client) {
       return res.status(404).json({ message: 'Client not found' });
+    }
+
+    // Restriction 1: Vendasta clients cannot be assigned to regular agencies
+    if (client.vendasta === true) {
+      return res.status(400).json({ 
+        message: 'Vendasta clients cannot be assigned to regular agencies. They must be managed through the Vendasta section.' 
+      });
+    }
+
+    // Restriction 2: REJECTED clients cannot be assigned to agencies
+    if (client.status === 'REJECTED') {
+      return res.status(400).json({ 
+        message: 'Rejected clients cannot be assigned to agencies. Please activate the client first.' 
+      });
+    }
+
+    // Restriction 3: Check if client is already assigned to this agency
+    const clientUserAgencyIds = client.user.memberships.map(m => m.agencyId);
+    if (clientUserAgencyIds.includes(agencyId)) {
+      return res.status(400).json({ 
+        message: 'Client is already assigned to this agency.' 
+      });
     }
 
     // Find or create an agency owner user
@@ -742,24 +770,50 @@ router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req,
 
     // Check if client is actually assigned to this agency
     // A client belongs to an agency if the client's userId belongs to a user who is a member of that agency
-    // OR if the client's user is SUPER_ADMIN and the agency is "Super Agency" (clients created by SUPER_ADMIN default to Super Agency)
     const clientUserAgencyIds = client.user.memberships.map(m => m.agencyId);
     const isClientAssignedToAgency = clientUserAgencyIds.includes(agencyId);
     
-    // Special case: If client's user is SUPER_ADMIN (no agency memberships), allow removal from "Super Agency"
+    // Special case: If client's user is SUPER_ADMIN and has no agency memberships,
+    // allow removal from any agency (these clients are effectively unassigned)
+    // This handles cases where clients are owned by SUPER_ADMIN users who don't have agency memberships
     const isClientUserSuperAdmin = client.user.role === 'SUPER_ADMIN';
-    const isSuperAgency = agency.name === 'Super Agency' || agency.name.toLowerCase() === 'super agency';
-    const canRemoveFromSuperAgency = isClientUserSuperAdmin && isSuperAgency;
+    const hasNoAgencyMemberships = clientUserAgencyIds.length === 0;
+    const canRemoveUnassignedClient = isClientUserSuperAdmin && hasNoAgencyMemberships;
     
-    if (!isClientAssignedToAgency && !canRemoveFromSuperAgency) {
+    if (!isClientAssignedToAgency && !canRemoveUnassignedClient) {
       return res.status(400).json({ message: 'Client is not assigned to this agency' });
     }
 
     // Find a SUPER_ADMIN user to assign the client to (unassigned clients belong to SUPER_ADMIN)
-    const superAdminUser = await prisma.user.findFirst({
+    // Try to find a SUPER_ADMIN who is NOT a member of the agency being removed from
+    // This ensures the client is actually removed from the agency
+    const superAdminUsers = await prisma.user.findMany({
       where: { role: 'SUPER_ADMIN' },
-      select: { id: true },
+      select: {
+        id: true,
+        memberships: {
+          where: { agencyId },
+          select: { id: true },
+        },
+      },
     });
+    
+    // Find one who is NOT a member of this agency
+    let superAdminUser: { id: string } | null | undefined = superAdminUsers.find(u => u.memberships.length === 0);
+    
+    // If all SUPER_ADMIN users are members of this agency, use the first one
+    // (This is rare but can happen - the client will still be reassigned)
+    if (!superAdminUser && superAdminUsers.length > 0) {
+      superAdminUser = superAdminUsers[0];
+    }
+    
+    // Fallback: if no SUPER_ADMIN users found at all (shouldn't happen)
+    if (!superAdminUser) {
+      superAdminUser = await prisma.user.findFirst({
+        where: { role: 'SUPER_ADMIN' },
+        select: { id: true },
+      });
+    }
 
     if (!superAdminUser) {
       return res.status(500).json({ message: 'No SUPER_ADMIN user found. Cannot unassign client.' });
