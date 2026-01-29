@@ -150,9 +150,11 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
   const fetchTemplates = async () => {
     try {
       const response = await api.get("/onboarding/templates");
-      setTemplates(response.data);
+      const data = response.data;
+      setTemplates(Array.isArray(data) ? data : Array.isArray(data?.templates) ? data.templates : []);
     } catch (error: any) {
       console.error("Error fetching templates:", error);
+      setTemplates([]);
       // Toast is already shown by API interceptor
     }
   };
@@ -295,6 +297,9 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
             <div>
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Select Template</h3>
               <div className="space-y-3">
+                {templates.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-4">No templates available. Loading or creating default…</p>
+                ) : null}
                 {templates.map((template) => (
                   <div
                     key={template.id}

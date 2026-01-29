@@ -5,21 +5,78 @@ import { authenticateToken } from "../middleware/auth.js";
 
 const router = express.Router();
 
+// Default onboarding tasks used when ensuring an agency has at least one template
+const DEFAULT_ONBOARDING_TASKS = [
+  { title: "Collect logins", description: null, category: "Onboarding", priority: "high", estimatedHours: 1, order: 1 },
+  { title: "Set up GHL", description: null, category: "Onboarding", priority: "high", estimatedHours: 1, order: 2 },
+  { title: "Set up Claude project", description: null, category: "Onboarding", priority: "high", estimatedHours: 1, order: 3 },
+  { title: "Master input", description: null, category: "Onboarding", priority: "high", estimatedHours: 1, order: 4 },
+  { title: "Keyword and map pack research", description: null, category: "Research", priority: "high", estimatedHours: 1, order: 5 },
+  { title: "Technical audit", description: null, category: "Technical SEO", priority: "high", estimatedHours: 1, order: 6 },
+  { title: "GBP categories research", description: null, category: "GBP", priority: "medium", estimatedHours: 1, order: 7 },
+  { title: "GBP services research", description: null, category: "GBP", priority: "medium", estimatedHours: 1, order: 8 },
+  { title: "Create avatar", description: null, category: "Strategy", priority: "medium", estimatedHours: 1, order: 9 },
+  { title: "Keyword research", description: null, category: "Research", priority: "high", estimatedHours: 1, order: 10 },
+  { title: "SEO content gap analysis", description: null, category: "Research", priority: "medium", estimatedHours: 1, order: 11 },
+  { title: "Site hierarchy", description: null, category: "Architecture", priority: "medium", estimatedHours: 1, order: 12 },
+  { title: "Internal linking structure", description: null, category: "Architecture", priority: "medium", estimatedHours: 1, order: 13 },
+  { title: "SEO silo architecture", description: null, category: "Architecture", priority: "medium", estimatedHours: 1, order: 14 },
+  { title: "12-month content building plan", description: null, category: "Content", priority: "medium", estimatedHours: 1, order: 15 },
+  { title: "Create 12-month roadmap", description: null, category: "Strategy", priority: "medium", estimatedHours: 1, order: 16 },
+  { title: "Map pack optimization", description: null, category: "Local SEO", priority: "medium", estimatedHours: 1, order: 17 },
+  { title: "Update all GBP categories", description: null, category: "GBP", priority: "medium", estimatedHours: 1, order: 18 },
+  { title: "Update all GBP services", description: null, category: "GBP", priority: "medium", estimatedHours: 1, order: 19 },
+  { title: "Complete entire GBP profile", description: null, category: "GBP", priority: "high", estimatedHours: 1, order: 20 },
+];
+
+async function ensureDefaultTemplateForAgency(agencyId: string) {
+  const existing = await prisma.onboardingTemplate.findFirst({ where: { agencyId } });
+  if (existing) return;
+  await prisma.onboardingTemplate.create({
+    data: {
+      name: "Standard SEO Onboarding",
+      description: "Default template for new SEO clients",
+      isDefault: true,
+      agencyId,
+      tasks: {
+        create: DEFAULT_ONBOARDING_TASKS.map((t) => ({
+          title: t.title,
+          description: t.description,
+          category: t.category,
+          priority: t.priority,
+          estimatedHours: t.estimatedHours,
+          order: t.order,
+        })),
+      },
+    },
+  });
+}
+
 // Get all onboarding templates for the user's agency
 router.get("/templates", authenticateToken, async (req, res) => {
   try {
     const user = req.user;
     
-    let agencyId;
+    let agencyId: string | undefined;
     if (user.role === "SUPER_ADMIN") {
       // Super admin can see all templates
-      const templates = await prisma.onboardingTemplate.findMany({
+      let templates = await prisma.onboardingTemplate.findMany({
         include: {
           tasks: {
             orderBy: { order: "asc" }
           }
         }
       });
+      // If no templates exist (e.g. fresh DB), create default for first agency so "Standard SEO Onboarding" is visible
+      if (templates.length === 0) {
+        const firstAgency = await prisma.agency.findFirst({ select: { id: true } });
+        if (firstAgency) {
+          await ensureDefaultTemplateForAgency(firstAgency.id);
+          templates = await prisma.onboardingTemplate.findMany({
+            include: { tasks: { orderBy: { order: "asc" } } }
+          });
+        }
+      }
       return res.json(templates);
     } else if (user.role === "AGENCY" || user.role === "ADMIN") {
       // Get user's agency
@@ -37,7 +94,7 @@ router.get("/templates", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const templates = await prisma.onboardingTemplate.findMany({
+    let templates = await prisma.onboardingTemplate.findMany({
       where: { agencyId },
       include: {
         tasks: {
@@ -45,6 +102,17 @@ router.get("/templates", authenticateToken, async (req, res) => {
         }
       }
     });
+
+    // If this agency has no templates, create the default one so the modal always has something to show
+    if (templates.length === 0 && agencyId) {
+      await ensureDefaultTemplateForAgency(agencyId);
+      templates = await prisma.onboardingTemplate.findMany({
+        where: { agencyId },
+        include: {
+          tasks: { orderBy: { order: "asc" } }
+        }
+      });
+    }
 
     res.json(templates);
   } catch (error) {

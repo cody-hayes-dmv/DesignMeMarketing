@@ -106,6 +106,8 @@ const AgenciesPage = () => {
             setShowCreateModal(false);
             toast.success("Agency created successfully!");
             dispatch(fetchAgencies() as any);
+            // Notify Team page so it refetches and shows the new agency owner (if one was created)
+            window.dispatchEvent(new CustomEvent("agency-created"));
         } catch (error: any) {
             console.error("Failed to create agency:", error);
             // Toast is already shown by API interceptor
@@ -123,6 +125,8 @@ const AgenciesPage = () => {
             toast.success("Agency deleted successfully!");
             setDeleteAgencyConfirm({ isOpen: false, agencyId: null, agencyName: null });
             dispatch(fetchAgencies() as any);
+            // Notify Team page so it refetches and removes the agency from members' lists
+            window.dispatchEvent(new CustomEvent("agency-deleted"));
         } catch (error: any) {
             console.error("Failed to delete agency:", error);
             setDeleteAgencyConfirm({ isOpen: false, agencyId: null, agencyName: null });

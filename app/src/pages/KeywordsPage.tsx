@@ -537,7 +537,7 @@ const KeywordsPage: React.FC = () => {
     <div className="p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-gray-50 min-h-screen">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Keyword Intelligence</h1>
+          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Keyword Hub</h1>
           <p className="text-base text-gray-600 leading-relaxed">
             Research new keyword opportunities and track the phrases that matter for each client.
           </p>
@@ -980,7 +980,7 @@ const KeywordsPage: React.FC = () => {
                     <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
                       Search volume
                     </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs" title="From DataForSEO (0–100). Low-volume keywords may show 0.">
                       Keyword Difficulty
                     </th>
                     <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">

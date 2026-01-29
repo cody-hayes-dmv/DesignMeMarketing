@@ -598,7 +598,8 @@ router.delete('/:agencyId', authenticateToken, async (req, res) => {
       });
     }
 
-    // Delete agency (cascade will handle UserAgency relationships)
+    // Delete agency. Database CASCADE removes all UserAgency rows for this agency,
+    // so the agency is removed from Team (members' agency lists) in the database.
     await prisma.agency.delete({
       where: { id: agencyId },
     });
@@ -653,21 +654,14 @@ router.post('/:agencyId/assign-client/:clientId', authenticateToken, async (req,
       return res.status(404).json({ message: 'Client not found' });
     }
 
-    // Restriction 1: Vendasta clients cannot be assigned to regular agencies
-    if (client.vendasta === true) {
-      return res.status(400).json({ 
-        message: 'Vendasta clients cannot be assigned to regular agencies. They must be managed through the Vendasta section.' 
-      });
-    }
-
-    // Restriction 2: REJECTED clients cannot be assigned to agencies
+    // Restriction 1: REJECTED clients cannot be assigned to agencies
     if (client.status === 'REJECTED') {
       return res.status(400).json({ 
         message: 'Rejected clients cannot be assigned to agencies. Please activate the client first.' 
       });
     }
 
-    // Restriction 3: Check if client is already assigned to this agency
+    // Restriction 2: Check if client is already assigned to this agency
     const clientUserAgencyIds = client.user.memberships.map(m => m.agencyId);
     if (clientUserAgencyIds.includes(agencyId)) {
       return res.status(400).json({ 

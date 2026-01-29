@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store";
 import { fetchClients, updateClient, deleteClient, Client } from "../store/slices/clientSlice";
+import { fetchAgencies, assignClientToAgency } from "../store/slices/agencySlice";
 import {
   Search,
   Table,
@@ -19,6 +20,7 @@ import {
   X,
   Copy,
   ExternalLink,
+  Users,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -30,6 +32,7 @@ const VendastaPage = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { clients } = useSelector((state: RootState) => state.client);
+  const { agencies } = useSelector((state: RootState) => state.agency);
   const { user } = useSelector((state: RootState) => state.auth);
   const [searchTerm, setSearchTerm] = useState("");
   const [enabled, setEnabled] = useState(false);
@@ -43,9 +46,15 @@ const VendastaPage = () => {
   const [shareLink, setShareLink] = useState("");
   const [openStatusId, setOpenStatusId] = useState("");
   const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [showAssignAgencyModal, setShowAssignAgencyModal] = useState(false);
+  const [selectedClientForAgency, setSelectedClientForAgency] = useState<Client | null>(null);
 
   useEffect(() => {
     dispatch(fetchClients() as any);
+  }, [dispatch]);
+
+  useEffect(() => {
+    dispatch(fetchAgencies() as any);
   }, [dispatch]);
 
   // Close status dropdown when clicking outside
@@ -131,6 +140,25 @@ const VendastaPage = () => {
 
   const handleEditClick = (client: Client) => {
     navigate(`/agency/clients/${client.id}`, { state: { client, edit: true } });
+  };
+
+  const handleAssignToAgency = (client: Client) => {
+    setSelectedClientForAgency(client);
+    setShowAssignAgencyModal(true);
+  };
+
+  const confirmAssignToAgency = async (agencyId: string) => {
+    if (!selectedClientForAgency) return;
+    try {
+      await dispatch(assignClientToAgency({ agencyId, clientId: selectedClientForAgency.id }) as any);
+      toast.success("Client assigned to agency successfully!");
+      setShowAssignAgencyModal(false);
+      setSelectedClientForAgency(null);
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Failed to assign client to agency:", error);
+      toast.error(error?.response?.data?.message || "Failed to assign client to agency");
+    }
   };
 
   const isArchivedStatus = (status: string) => status !== "ACTIVE";
@@ -413,6 +441,15 @@ const VendastaPage = () => {
                           </button>
                           {user?.role === "SUPER_ADMIN" && (
                             <button
+                              className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                              onClick={() => handleAssignToAgency(client)}
+                              title="Assign to Agency"
+                            >
+                              <Users className="h-4 w-4" />
+                            </button>
+                          )}
+                          {user?.role === "SUPER_ADMIN" && (
+                            <button
                               className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
                               onClick={() => handleMoveBackToClients(client)}
                               title="Move Back to Clients"
@@ -554,6 +591,15 @@ const VendastaPage = () => {
                   </button>
                   {user?.role === "SUPER_ADMIN" && (
                     <button
+                      className="p-2 text-gray-400 hover:text-primary-600 transition-colors"
+                      onClick={() => handleAssignToAgency(client)}
+                      title="Assign to Agency"
+                    >
+                      <Users className="h-4 w-4" />
+                    </button>
+                  )}
+                  {user?.role === "SUPER_ADMIN" && (
+                    <button
                       className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
                       onClick={() => handleMoveBackToClients(client)}
                       title="Move Back to Clients"
@@ -593,6 +639,60 @@ const VendastaPage = () => {
         cancelText="Cancel"
         variant="danger"
       />
+
+      {/* Assign to Agency Modal */}
+      {showAssignAgencyModal && selectedClientForAgency && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-gray-900">
+                Assign Client to Agency
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAssignAgencyModal(false);
+                  setSelectedClientForAgency(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Select an agency to assign &quot;{selectedClientForAgency.name}&quot; to:
+              </p>
+              <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+                {agencies.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500">
+                    No agencies available. Create an agency first.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-200">
+                    {agencies.map((agency) => (
+                      <button
+                        key={agency.id}
+                        onClick={() => confirmAssignToAgency(agency.id)}
+                        className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="font-medium text-gray-900">{agency.name}</div>
+                        {agency.subdomain && (
+                          <div className="text-sm text-gray-500">
+                            {agency.subdomain}.yourseodashboard.com
+                          </div>
+                        )}
+                        <div className="text-xs text-gray-400 mt-1">
+                          {(agency as any).memberCount ?? 0} member{((agency as any).memberCount ?? 0) !== 1 ? "s" : ""}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Share Modal */}
       {showShareModal && (

@@ -65,6 +65,25 @@ function isHttpUrl(value: unknown): value is string {
   return /^https?:\/\//i.test(s);
 }
 
+/** Returns true if the URL is a Google search/SERP page, not a ranking website. */
+function isGoogleSerpUrl(url: string | null | undefined): boolean {
+  if (!url || typeof url !== "string") return false;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    return (host === "google.com" || host.endsWith(".google.com")) && u.pathname === "/search";
+  } catch {
+    return false;
+  }
+}
+
+/** Use only for the "Google URL" field: returns the URL if it's a real website, null if it's a Google SERP URL. */
+function onlyRankingWebsiteUrl(url: string | null | undefined): string | null {
+  if (!url || typeof url !== "string" || !url.startsWith("http")) return null;
+  if (isGoogleSerpUrl(url)) return null;
+  return url;
+}
+
 export async function getReportTargetKeywords(clientId: string): Promise<ReportTargetKeywordRow[]> {
   // Match the dashboard behavior:
   // - only show TargetKeywords that are also tracked keywords
@@ -105,7 +124,7 @@ export async function getReportTargetKeywords(clientId: string): Promise<ReportT
       googlePosition,
       previousPosition: (tk as any).previousPosition ?? tracked?.previousPosition ?? null,
       serpItemTypes: (tk as any).serpItemTypes,
-      googleUrl: (tk as any).googleUrl ?? tracked?.googleUrl ?? null,
+      googleUrl: onlyRankingWebsiteUrl((tk as any).googleUrl ?? tracked?.googleUrl) ?? null,
     };
   });
 
@@ -419,8 +438,9 @@ export function generateReportEmailHTML(
                             const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
                             const dateAdded = k.createdAt ? new Date(k.createdAt as any).toLocaleDateString() : "—";
                             const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
-                            const urlCell = k.googleUrl
-                              ? `<a href="${escapeHtml(k.googleUrl)}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">${escapeHtml(k.googleUrl.length > 50 ? k.googleUrl.substring(0, 50) + "..." : k.googleUrl)}</a>`
+                            const displayUrl = onlyRankingWebsiteUrl(k.googleUrl);
+                            const urlCell = displayUrl
+                              ? `<a href="${escapeHtml(displayUrl)}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">${escapeHtml(displayUrl.length > 50 ? displayUrl.substring(0, 50) + "..." : displayUrl)}</a>`
                               : "—";
                             const isTop3 = current !== null && current <= 3;
                             const isRanked = current !== null && current <= 10;
@@ -655,7 +675,7 @@ export async function generateReportPDFBuffer(
           google: current != null ? String(current) : "—",
           change: diffText,
           serp,
-          url: k.googleUrl ? String(k.googleUrl) : "—",
+          url: onlyRankingWebsiteUrl(k.googleUrl) ? String(onlyRankingWebsiteUrl(k.googleUrl)) : "—",
         };
 
         // Measure row height based on wrapped text.
@@ -688,7 +708,7 @@ export async function generateReportPDFBuffer(
           const rowHSafe = Math.max(1, safeNumber(rowH, 14));
 
           doc.strokeColor(borderColor).rect(xSafe, ySafe, colW, rowHSafe).stroke();
-          if (key === "url" && isHttpUrl(k.googleUrl)) {
+          if (key === "url" && isHttpUrl(onlyRankingWebsiteUrl(k.googleUrl))) {
             doc
               .fillColor("#1d4ed8")
               .text(cells.url, xSafe + rowPaddingX, ySafe + rowPaddingY, {
@@ -739,17 +759,20 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
     throw new Error('Client not found');
   }
 
-  // Calculate date range based on period
+  // Calculate date range based on period (aligned so "Monthly report" = data for that calendar month)
   const endDate = new Date();
-  const startDate = new Date();
-  
+  let startDate: Date;
   if (period === "weekly") {
+    startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 7);
   } else if (period === "biweekly") {
+    startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 14);
   } else if (period === "monthly") {
-    startDate.setMonth(startDate.getMonth() - 1);
+    // First day of current month so GA4 Event Count / Key Events match the report period
+    startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
   } else {
+    startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 30);
   }
 
@@ -796,6 +819,18 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
     averageRank: firstSource.averageRank,
   } : null;
 
+  // Total Clicks / Impressions: use Keyword table (GSC) when available; fallback to traffic source when 0
+  const keywordClicks = keywordStats._sum.clicks ?? 0;
+  const keywordImpressions = keywordStats._sum.impressions ?? 0;
+  const totalClicks = keywordClicks > 0
+    ? keywordClicks
+    : Math.round(trafficSourceSummary?.organicEstimatedTraffic ?? 0);
+  const totalImpressions = keywordImpressions > 0
+    ? keywordImpressions
+    : (trafficSourceSummary?.organicEstimatedTraffic != null
+        ? Math.round(trafficSourceSummary.organicEstimatedTraffic * 15)
+        : 0);
+
   // Create report data
   const reportData = {
     reportDate: endDate,
@@ -806,8 +841,8 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
     paidSessions: 0,
     directSessions: 0,
     referralSessions: 0,
-    totalClicks: keywordStats._sum.clicks || 0,
-    totalImpressions: keywordStats._sum.impressions || 0,
+    totalClicks,
+    totalImpressions,
     averageCtr: keywordStats._avg.ctr || 0,
     averagePosition: trafficSourceSummary?.averageRank || keywordStats._avg.currentPosition || 0,
     bounceRate: ga4Data?.bounceRate || 0,

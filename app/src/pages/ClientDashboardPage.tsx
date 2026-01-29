@@ -97,7 +97,7 @@ type WorkLogTask = {
   createdBy?: { id: string; name?: string | null; email: string } | null;
 };
 
-type BacklinkFilter = "all" | "new";
+type BacklinkFilter = "all" | "new" | "natural" | "manual";
 type BacklinkRow = {
   id: string;
   sourceUrl: string;
@@ -302,6 +302,8 @@ const ClientDashboardPage: React.FC = () => {
   const [backlinksForChartLoading, setBacklinksForChartLoading] = useState(false);
   const [backlinksForChartError, setBacklinksForChartError] = useState<string | null>(null);
   const [backlinksFilter, setBacklinksFilter] = useState<BacklinkFilter>("all");
+  const [backlinksSortBy, setBacklinksSortBy] = useState<"sourceUrl" | "anchorText" | "domainRating" | "firstSeen">("firstSeen");
+  const [backlinksOrder, setBacklinksOrder] = useState<"asc" | "desc">("desc");
   const [backlinks, setBacklinks] = useState<BacklinkRow[]>([]);
   const [backlinksLoading, setBacklinksLoading] = useState(false);
   const [backlinksError, setBacklinksError] = useState<string | null>(null);
@@ -1140,9 +1142,9 @@ const ClientDashboardPage: React.FC = () => {
       // Also refresh the backlinks table if it's being viewed
       if (activeTab === "dashboard" && dashboardSection === "backlinks") {
         try {
-          const daysForList = backlinksFilter === "all" ? 365 : 28;
+          const daysForList = backlinksFilter === "new" ? 28 : 365;
           const listRes = await api.get(`/seo/backlinks/${clientId}`, {
-            params: { filter: backlinksFilter, days: daysForList, limit: 5000, sortBy: "domainRating", order: "desc" },
+            params: { filter: backlinksFilter, days: daysForList, limit: 5000, sortBy: backlinksSortBy, order: backlinksOrder },
           });
           const list = Array.isArray(listRes.data) ? (listRes.data as BacklinkRow[]) : [];
           setBacklinks(list);
@@ -1156,7 +1158,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingBacklinks(false);
     }
-  }, [activeTab, backlinksFilter, clientId, dashboardSection, fetchBacklinksForChart]);
+  }, [activeTab, backlinksFilter, backlinksSortBy, backlinksOrder, clientId, dashboardSection, fetchBacklinksForChart]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;
@@ -1634,6 +1636,7 @@ const ClientDashboardPage: React.FC = () => {
     const totalBacklinks = Number(dashboardSummary?.backlinkStats?.total ?? 0) || 0;
     const avgDomainRating = Number(dashboardSummary?.backlinkStats?.avgDomainRating ?? 0) || 0;
     const lostCount = Number(dashboardSummary?.backlinkStats?.lost ?? 0) || 0;
+    const dofollowCount = Number(dashboardSummary?.backlinkStats?.dofollowCount ?? 0) || 0;
     // These should match the Backlinks table tabs:
     // - New tab: last 4 weeks new backlinks (unique rows)
     const newLast4Weeks =
@@ -1644,7 +1647,7 @@ const ClientDashboardPage: React.FC = () => {
       Number(dashboardSummary?.backlinkStats?.lostLast4Weeks ?? 0) ||
       weeklyBacklinkTimeseries.reduce((sum, w) => sum + (Number(w.lostBacklinks) || 0), 0) ||
       0;
-    return { totalBacklinks, avgDomainRating, lostCount, newLast4Weeks, lostLast4Weeks };
+    return { totalBacklinks, avgDomainRating, lostCount, newLast4Weeks, lostLast4Weeks, dofollowCount };
   }, [dashboardSummary, weeklyBacklinkTimeseries]);
 
   // Backlinks pagination (applies to "All" and "New" tables)
@@ -1679,14 +1682,14 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setBacklinksLoading(true);
-      const daysForList = backlinksFilter === "all" ? 365 : 28; // New tab is "last 4 weeks"
+      const daysForList = backlinksFilter === "new" ? 28 : 365;
       const res = await api.get(`/seo/backlinks/${clientId}`, {
         params: {
           filter: backlinksFilter,
           days: daysForList,
           limit: 5000,
-          sortBy: "domainRating",
-          order: "desc",
+          sortBy: backlinksSortBy,
+          order: backlinksOrder,
         },
       });
       const data = Array.isArray(res.data) ? (res.data as BacklinkRow[]) : [];
@@ -1710,8 +1713,8 @@ const ClientDashboardPage: React.FC = () => {
                 filter: backlinksFilter,
                 days: daysForList,
                 limit: 5000,
-                sortBy: "domainRating",
-                order: "desc",
+                sortBy: backlinksSortBy,
+                order: backlinksOrder,
               },
             });
             const data2 = Array.isArray(res2.data) ? (res2.data as BacklinkRow[]) : [];
@@ -1728,7 +1731,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setBacklinksLoading(false);
     }
-  }, [clientId, backlinksFilter, user?.role]);
+  }, [clientId, backlinksFilter, backlinksSortBy, backlinksOrder, user?.role]);
 
   useEffect(() => {
     if (activeTab !== "dashboard" || dashboardSection !== "backlinks") return;
@@ -4403,23 +4406,6 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                     ) : aiIntelligence ? (
                       <>
-                        {aiIntelligence.meta?.apiResponseStatus === "no_data_or_error" && (
-                          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
-                            <div className="flex items-start gap-3">
-                              <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                              <div>
-                                <p className="text-sm font-medium text-yellow-900 mb-1">
-                                  No AI Intelligence data available
-                                </p>
-                                <p className="text-xs text-yellow-800">
-                                  {aiIntelligence.meta?.hasDataForSeoCredentials 
-                                    ? "The domain may not have any AI mentions yet, or the DataForSEO API may need time to index your domain. Data will appear once your domain starts appearing in AI responses."
-                                    : "DataForSEO credentials are not configured. Please configure DATAFORSEO_BASE64 environment variable to enable AI Intelligence tracking."}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Visibility Score</p>
@@ -4578,7 +4564,7 @@ const ClientDashboardPage: React.FC = () => {
                             <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                             <div>
                               <p className="text-sm font-medium text-amber-900">
-                                Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} mentions behind the leader</strong>. View opportunities to close the gap.
+                                Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} points behind the leader</strong>. View opportunities to close the gap.
                               </p>
                             </div>
                           </div>
@@ -5254,21 +5240,19 @@ const ClientDashboardPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="bg-white p-6 rounded-xl border border-gray-200">
-                        <p className="text-sm font-medium text-gray-600">Average Domain Rating</p>
-                        <p className="text-2xl font-bold text-gray-900 mt-2">
-                          {backlinksKpis.avgDomainRating ? backlinksKpis.avgDomainRating.toFixed(0) : "—"}
-                        </p>
+                        <p className="text-sm font-medium text-gray-600">New Backlinks</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.newLast4Weeks}</p>
                         <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
                           <TrendingUp className="h-4 w-4" />
-                          <span>Calculated from tracked backlinks</span>
+                          <span>Last 4 weeks</span>
                         </div>
                       </div>
                       <div className="bg-white p-6 rounded-xl border border-gray-200">
-                        <p className="text-sm font-medium text-gray-600">Lost Backlinks (last 4 weeks)</p>
-                        <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.lostLast4Weeks}</p>
+                        <p className="text-sm font-medium text-gray-600">DoFollow Backlinks</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.dofollowCount}</p>
                         <div className="mt-3 flex items-center space-x-2 text-sm text-gray-600">
-                          <TrendingDown className="h-4 w-4" />
-                          <span>Currently lost backlinks: {backlinksKpis.lostCount}</span>
+                          <TrendingUp className="h-4 w-4" />
+                          <span>Follow links</span>
                         </div>
                       </div>
                     </div>
@@ -5279,7 +5263,7 @@ const ClientDashboardPage: React.FC = () => {
                           <h3 className="text-lg font-semibold text-gray-900">Backlinks</h3>
                           <p className="text-sm text-gray-500 mt-1">Monitor follow vs nofollow backlinks and their quality.</p>
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() => setBacklinksFilter("all")}
@@ -5302,16 +5286,56 @@ const ClientDashboardPage: React.FC = () => {
                           >
                             New (Last 30 days)
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setBacklinksFilter("natural")}
+                            className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
+                              backlinksFilter === "natural"
+                                ? "border-primary-200 text-primary-700 bg-primary-50"
+                                : "border-gray-200 text-gray-700"
+                            }`}
+                          >
+                            Natural
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBacklinksFilter("manual")}
+                            className={`px-3 py-1 text-sm rounded-lg border hover:bg-gray-50 ${
+                              backlinksFilter === "manual"
+                                ? "border-primary-200 text-primary-700 bg-primary-50"
+                                : "border-gray-200 text-gray-700"
+                            }`}
+                          >
+                            Manual
+                          </button>
                         </div>
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Anchor Text</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain Rating</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Publish Date</th>
+                              {[
+                                { key: "sourceUrl" as const, label: "Source" },
+                                { key: "anchorText" as const, label: "Anchor Text" },
+                                { key: "domainRating" as const, label: "Domain Rating" },
+                                { key: "firstSeen" as const, label: "Publish Date" },
+                              ].map(({ key, label }) => (
+                                <th
+                                  key={key}
+                                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                                  onClick={() => {
+                                    setBacklinksSortBy(key);
+                                    setBacklinksOrder((prev) => (backlinksSortBy === key && prev === "desc" ? "asc" : "desc"));
+                                  }}
+                                >
+                                  <span className="inline-flex items-center gap-1">
+                                    {label}
+                                    {backlinksSortBy === key && (
+                                      <span className="text-primary-600" aria-hidden>{backlinksOrder === "desc" ? "↓" : "↑"}</span>
+                                    )}
+                                  </span>
+                                </th>
+                              ))}
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                               <th className="px-6 py-3"></th>
                             </tr>
@@ -5334,7 +5358,11 @@ const ClientDashboardPage: React.FC = () => {
                                 <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
                                   {backlinksFilter === "all"
                                     ? "No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO."
-                                    : "No new backlinks found in the last 4 weeks."}
+                                    : backlinksFilter === "new"
+                                    ? "No new backlinks found in the last 4 weeks."
+                                    : backlinksFilter === "natural"
+                                    ? "No natural (DataForSEO) backlinks."
+                                    : "No manual backlinks."}
                                 </td>
                               </tr>
                             ) : (

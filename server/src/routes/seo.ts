@@ -77,6 +77,25 @@ function isFresh(lastUpdatedAt: Date | null | undefined, ttlMs: number): boolean
   return Date.now() - lastUpdatedAt.getTime() < ttlMs;
 }
 
+/** Returns true if the URL is a Google search/SERP page (e.g. google.com/search?q=...), not a ranking website. */
+function isGoogleSerpUrl(url: string | null | undefined): boolean {
+  if (!url || typeof url !== "string") return false;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    return (host === "google.com" || host.endsWith(".google.com")) && u.pathname === "/search";
+  } catch {
+    return false;
+  }
+}
+
+/** Use only for the "Google URL" / ranking URL field: returns the URL if it's a real website, null if it's a Google SERP URL or invalid. */
+function onlyRankingWebsiteUrl(url: string | null | undefined): string | null {
+  if (!url || typeof url !== "string" || !url.startsWith("http")) return null;
+  if (isGoogleSerpUrl(url)) return null;
+  return url;
+}
+
 async function getLatestTrafficSourceUpdatedAt(clientId: string): Promise<Date | null> {
   const latest = await prisma.trafficSource.findFirst({
     where: { clientId },
@@ -312,8 +331,9 @@ async function fetchKeywordDataFromDataForSEO(
                 : i + 1;
 
             currentPosition = resolvedRank;
-            // Prefer the ranking page URL; fall back to domain if needed.
-            googleUrl = itemUrl || (itemDomain ? `https://${itemDomain}` : null);
+            // Prefer the ranking page URL; fall back to domain if needed. Never use a Google SERP URL.
+            const candidate = itemUrl || (itemDomain ? `https://${itemDomain}` : null);
+            googleUrl = onlyRankingWebsiteUrl(candidate) || null;
             break;
           }
         }
@@ -833,6 +853,33 @@ type DataForSEOBacklinkListItem = {
   lastSeen: Date | null;
 };
 
+/**
+ * Domain rating: DataForSEO uses 0–1,000 by default (PageRank-like).
+ * With rank_scale: "one_hundred" the API returns 0–100 using sin(rank/636.62)*100.
+ * For existing 0–1,000 values (legacy DB or API without rank_scale), we apply the same formula.
+ */
+function normalizeDomainRating(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (value <= 100) return Math.min(100, Math.max(0, Math.round(value)));
+  // 0–1,000 scale: DataForSEO's formula sin(rank/636.62)*100
+  const normalized = Math.sin(value / 636.62) * 100;
+  return Math.min(100, Math.max(0, Math.round(normalized)));
+}
+
+/**
+ * Read real keyword difficulty from DataForSEO Keyword Overview response.
+ * API returns keyword_properties.keyword_difficulty (0-100, logarithmic scale; link profiles of top-10 SERP).
+ * Handles both flat item and nested keyword_data structure. Returns raw value from DataForSEO.
+ */
+function getKeywordDifficultyFromOverviewItem(item: any): number | null {
+  if (!item || typeof item !== "object") return null;
+  const fromProps = item?.keyword_properties?.keyword_difficulty;
+  const fromData = item?.keyword_data?.keyword_properties?.keyword_difficulty;
+  const raw = fromProps ?? fromData;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
 function parseDataForSeoDate(value: unknown): Date | null {
   if (value == null) return null;
 
@@ -889,7 +936,8 @@ async function fetchBacklinksListFromDataForSEO(
       include_subdomains: true,
       limit,
       offset,
-      // Prefer strongest referring domains first
+      // 0–100 scale (DataForSEO uses sin(rank/636.62)*100); default is 0–1,000
+      rank_scale: "one_hundred",
       order_by: ["domain_from_rank,desc"],
     },
   ];
@@ -944,7 +992,7 @@ async function fetchBacklinksListFromDataForSEO(
         sourceUrl,
         targetUrl,
         anchorText,
-        domainRating: Number.isFinite(domainFromRank) ? domainFromRank : null,
+        domainRating: normalizeDomainRating(domainFromRank),
         urlRating: Number.isFinite(pageFromRank) ? pageFromRank : null,
         traffic: Number.isFinite(trafficNum) ? Math.max(0, Math.round(trafficNum)) : null,
         isFollow: dofollow,
@@ -1693,6 +1741,10 @@ router.get("/share/:token/dashboard", async (req, res) => {
       },
     });
 
+    const dofollowBacklinksCount = await prisma.backlink.count({
+      where: { clientId, isLost: false, isFollow: true },
+    });
+
     // Read traffic sources from database (fallback if GA4 not available)
     const trafficSources = await prisma.trafficSource.findMany({
       where: { clientId },
@@ -1792,9 +1844,10 @@ router.get("/share/:token/dashboard", async (req, res) => {
       backlinkStats: {
         total: backlinkStats._count.id,
         lost: lostBacklinks,
-        avgDomainRating: backlinkStats._avg.domainRating,
+        avgDomainRating: normalizeDomainRating(backlinkStats._avg.domainRating) ?? backlinkStats._avg.domainRating,
         newLast4Weeks: newBacklinksLast4Weeks,
         lostLast4Weeks: lostBacklinksLast4Weeks,
+        dofollowCount: dofollowBacklinksCount,
       },
       topKeywords,
       ga4Events: ga4EventsData?.events || null
@@ -1929,7 +1982,11 @@ router.get("/share/:token/backlinks", async (req, res) => {
       take: limit,
     });
 
-    res.json(backlinks);
+    const normalized = backlinks.map((b) => ({
+      ...b,
+      domainRating: normalizeDomainRating(b.domainRating) ?? b.domainRating,
+    }));
+    res.json(normalized);
   } catch (error: any) {
     console.error("Share backlinks fetch error:", error);
     res.status(500).json({ message: "Failed to fetch backlinks data" });
@@ -2533,7 +2590,14 @@ router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
       }
     }
 
-    res.json(keywords);
+    // Never expose Google SERP URLs; difficulty is passed through as returned by DataForSEO
+    const sanitized = Array.isArray(keywords)
+      ? keywords.map((kw: any) => ({
+          ...kw,
+          googleUrl: onlyRankingWebsiteUrl(kw.googleUrl) ?? null,
+        }))
+      : keywords;
+    res.json(sanitized);
   } catch (error) {
     console.error("Fetch keywords error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -2650,8 +2714,8 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
             keywordData.searchVolume = Math.round(searchVolume);
           }
 
-          const difficulty = Number(item?.keyword_properties?.keyword_difficulty);
-          if (Number.isFinite(difficulty)) {
+          const difficulty = getKeywordDifficultyFromOverviewItem(item);
+          if (difficulty !== null) {
             keywordData.difficulty = difficulty;
           }
 
@@ -2665,8 +2729,8 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
             keywordData.competition = competitionLevel;
           }
 
-          const checkUrl = item?.serp_info?.check_url;
-          if (typeof checkUrl === "string" && checkUrl.startsWith("http")) {
+          const checkUrl = onlyRankingWebsiteUrl(item?.serp_info?.check_url);
+          if (checkUrl) {
             keywordData.googleUrl = checkUrl;
           }
 
@@ -2728,8 +2792,9 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
             keywordData.languageCode || "en"
           );
 
-          if (serpRankData?.googleUrl) {
-            keywordData.googleUrl = serpRankData.googleUrl;
+          const rankingUrl = onlyRankingWebsiteUrl(serpRankData?.googleUrl);
+          if (rankingUrl) {
+            keywordData.googleUrl = rankingUrl;
           }
           if (Array.isArray(serpRankData?.serpFeatures) && serpRankData.serpFeatures.length > 0) {
             keywordData.serpFeatures = serpRankData.serpFeatures;
@@ -2756,7 +2821,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       currentPosition: keywordData.currentPosition,
       previousPosition: keywordData.previousPosition,
       bestPosition: keywordData.bestPosition,
-      googleUrl: keywordData.googleUrl,
+      googleUrl: onlyRankingWebsiteUrl(keywordData.googleUrl) ?? undefined,
       // Prisma stores this as a LongText string; serialize arrays to JSON.
       serpFeatures: Array.isArray(keywordData.serpFeatures) ? JSON.stringify(keywordData.serpFeatures) : undefined,
       totalResults: keywordData.totalResults,
@@ -2816,7 +2881,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
         serpItemTypes: Array.isArray(item?.serp_info?.serp_item_types)
           ? JSON.stringify(item.serp_info.serp_item_types)
           : undefined,
-        googleUrl: keywordData.googleUrl || (typeof item?.serp_info?.check_url === "string" ? item.serp_info.check_url : undefined),
+        googleUrl: onlyRankingWebsiteUrl(keywordData.googleUrl || item?.serp_info?.check_url) ?? undefined,
         googlePosition: nextGooglePosition,
         previousPosition: previousPositionForUpdate,
         seResultsCount:
@@ -3096,8 +3161,8 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
           updateData.searchVolume = Math.round(searchVolume);
         }
 
-        const difficulty = Number(item?.keyword_properties?.keyword_difficulty);
-        if (Number.isFinite(difficulty)) {
+        const difficulty = getKeywordDifficultyFromOverviewItem(item);
+        if (difficulty !== null) {
           updateData.difficulty = difficulty;
         }
 
@@ -3111,8 +3176,8 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
           updateData.competition = competitionLevel;
         }
 
-        const checkUrl = item?.serp_info?.check_url;
-        if (typeof checkUrl === "string" && checkUrl.startsWith("http")) {
+        const checkUrl = onlyRankingWebsiteUrl(item?.serp_info?.check_url);
+        if (checkUrl) {
           updateData.googleUrl = checkUrl;
         }
 
@@ -3181,9 +3246,10 @@ router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (
       }
     }
 
-    // Update Google URL if found
-    if (dataForSEOData.googleUrl) {
-      updateData.googleUrl = dataForSEOData.googleUrl;
+    // Update Google URL only if it's the ranking website URL (not a Google SERP page)
+    const rankingUrl = onlyRankingWebsiteUrl(dataForSEOData.googleUrl);
+    if (rankingUrl) {
+      updateData.googleUrl = rankingUrl;
     }
 
     // Update SERP features
@@ -3783,14 +3849,14 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
     const lost = typeof req.query.lost === "string" ? req.query.lost : "false";
-    const filter = typeof req.query.filter === "string" ? req.query.filter : undefined; // all|new|lost
-    const sortByRaw = typeof req.query.sortBy === "string" ? req.query.sortBy : "domainRating";
+    const filter = typeof req.query.filter === "string" ? req.query.filter : undefined; // all|new|lost|natural|manual
+    const sortByRaw = typeof req.query.sortBy === "string" ? req.query.sortBy : "firstSeen";
     const orderRaw = typeof req.query.order === "string" ? req.query.order : "desc";
     const limitRaw = typeof req.query.limit === "string" ? req.query.limit : "200";
     const daysRaw = typeof req.query.days === "string" ? req.query.days : "30";
 
-    const allowedSortFields = new Set(["domainRating", "firstSeen", "lastSeen", "traffic", "createdAt"]);
-    const sortBy = allowedSortFields.has(sortByRaw) ? sortByRaw : "domainRating";
+    const allowedSortFields = new Set(["domainRating", "firstSeen", "lastSeen", "traffic", "createdAt", "sourceUrl", "anchorText"]);
+    const sortBy = allowedSortFields.has(sortByRaw) ? sortByRaw : "firstSeen";
     const order: "asc" | "desc" = orderRaw === "asc" ? "asc" : "desc";
     const limit = Math.min(10000, Math.max(1, Number(limitRaw) || 200));
     const days = Math.min(365, Math.max(1, Number(daysRaw) || 30));
@@ -3850,28 +3916,38 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
       whereClause.isLost = false;
       const from = new Date();
       from.setDate(from.getDate() - days);
-      // Include DataForSEO links (firstSeen) and manual links (createdAt)
       whereClause.OR = [
         { firstSeen: { gte: from } },
         { firstSeen: null, createdAt: { gte: from } },
       ];
+    } else if (normalizedFilter === "natural") {
+      whereClause.isLost = false;
+      whereClause.firstSeen = { not: null };
+    } else if (normalizedFilter === "manual") {
+      whereClause.isLost = false;
+      whereClause.firstSeen = null;
     } else if (normalizedFilter === "all" || lost === "all") {
-      // "All" tab should show total (current/live) backlinks.
       whereClause.isLost = false;
     } else {
-      // default to live links only (existing behavior)
       whereClause.isLost = false;
     }
 
+    const orderBy =
+      sortBy === "firstSeen"
+        ? [{ firstSeen: { sort: order, nulls: "last" as const } }, { createdAt: order }]
+        : { [sortBy]: order };
+
     const backlinks = await prisma.backlink.findMany({
       where: whereClause,
-      orderBy: {
-        [sortBy]: order
-      },
+      orderBy: orderBy as any,
       take: limit,
     });
 
-    res.json(backlinks);
+    const normalized = backlinks.map((b) => ({
+      ...b,
+      domainRating: normalizeDomainRating(b.domainRating) ?? b.domainRating,
+    }));
+    res.json(normalized);
   } catch (error) {
     console.error("Fetch backlinks error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -5065,89 +5141,16 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       });
     }
 
-    // Fallback to GA4 + SERP data if DataForSEO has no data
-    // Fetch GA4 fallback and SERP data in parallel with competitor domain extraction
-    const isGA4Connected = !!(client.ga4RefreshToken && client.ga4PropertyId && client.ga4ConnectedAt);
-    let fallbackChatgpt = { sessions: 0, citedPages: 0 };
-    let fallbackGemini = { sessions: 0, citedPages: 0 };
-    let fallbackAiOverviewMentions = 0;
-    let fallbackAiModeMentions = 0;
+    // AI Intelligence uses DataForSEO only; no GA4 or SERP cache fallbacks
     let competitorDomains: string[] = [];
-
-    // Parallelize GA4 fallback, SERP cache parsing, and competitor domain extraction
-    const [ga4FallbackResult, serpCacheResult, competitorDomainsResult] = await Promise.allSettled([
-      // GA4 fallback (only if needed and connected)
-      isGA4Connected && (!currentMetrics || !currentMetrics.total_mentions)
-        ? (async () => {
-            try {
-              const { fetchGA4AiSearchVisibility } = await import("../lib/ga4AiSearchVisibility.js");
-              return await fetchGA4AiSearchVisibility(clientId, startDate, endDate);
-            } catch (e) {
-              console.warn("[AI Intelligence] GA4 fallback fetch failed:", e);
-              return null;
-            }
-          })()
-        : Promise.resolve(null),
-      // SERP cache parsing for AI Overview mentions
-      (async () => {
-        try {
-          const tks = await prisma.targetKeyword.findMany({
-            where: { clientId },
-            select: { serpItemTypes: true },
-          });
-          return tks
-            .map((tk) => {
-              const raw = tk.serpItemTypes;
-              if (!raw) return [];
-              try {
-                const arr = JSON.parse(raw);
-                return Array.isArray(arr) ? (arr as any[]).map(String) : [];
-              } catch {
-                return [];
-              }
-            })
-            .filter((arr) => Array.isArray(arr));
-        } catch (e) {
-          console.warn("[AI Intelligence] SERP cache parsing failed:", e);
-          return [];
-        }
-      })(),
-      // Competitor domains extraction
-      extractCompetitorDomainsFromSerp(clientId, 10),
-    ]);
-
-    // Process GA4 fallback result
-    if (ga4FallbackResult.status === 'fulfilled' && ga4FallbackResult.value) {
-      const ga4 = ga4FallbackResult.value;
-      fallbackChatgpt = {
-        sessions: ga4.providers.chatgpt.sessions || 0,
-        citedPages: ga4.providers.chatgpt.citedPages || 0,
-      };
-      fallbackGemini = {
-        sessions: ga4.providers.gemini.sessions || 0,
-        citedPages: ga4.providers.gemini.citedPages || 0,
-      };
-    }
-
-    // Process competitor domains result
-    if (competitorDomainsResult.status === 'fulfilled') {
-      competitorDomains = competitorDomainsResult.value;
+    const competitorDomainsResult = await Promise.allSettled([extractCompetitorDomainsFromSerp(clientId, 10)]);
+    if (competitorDomainsResult[0].status === 'fulfilled') {
+      competitorDomains = competitorDomainsResult[0].value;
     } else {
-      console.warn("[AI Intelligence] Failed to extract competitor domains:", competitorDomainsResult.reason);
+      console.warn("[AI Intelligence] Failed to extract competitor domains:", competitorDomainsResult[0].reason);
     }
 
-    // Process SERP cache result for AI Overview mentions
-    if (serpCacheResult.status === 'fulfilled') {
-      const parsedTypes = serpCacheResult.value;
-      fallbackAiOverviewMentions = parsedTypes.filter((arr) =>
-        arr.some((t) => String(t).toLowerCase().includes("ai_overview"))
-      ).length;
-      fallbackAiModeMentions = parsedTypes.filter((arr) =>
-        arr.some((t) => String(t).toLowerCase().includes("ai_mode") || String(t).toLowerCase().includes("ai mode"))
-      ).length;
-    }
-
-    // Parse aggregated metrics (use DataForSEO if available, otherwise use fallback)
+    // Parse aggregated metrics from DataForSEO only
     // DataForSEO returns data in summary object with total_mentions, ai_search_volume, impressions
     // And platform breakdown in platform_based_grouping array
     const summary = currentMetrics?.summary || currentMetrics || {};
@@ -5157,20 +5160,6 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     
     // Also check aggregated_data for backward compatibility
     const aggregatedData = currentMetrics?.aggregated_data || [];
-
-    // Use fallback data if DataForSEO has no data
-    if (totalMentions === 0 && (fallbackChatgpt.sessions > 0 || fallbackGemini.sessions > 0 || fallbackAiOverviewMentions > 0 || fallbackAiModeMentions > 0)) {
-      totalMentions = fallbackChatgpt.sessions + fallbackGemini.sessions + fallbackAiOverviewMentions + fallbackAiModeMentions;
-      totalAiSearchVolume = totalMentions * 80; // Estimate based on mentions
-      totalImpressions = totalMentions * 95; // Estimate based on mentions
-      console.log("[AI Intelligence] Using GA4/SERP fallback data:", {
-        totalMentions,
-        chatgpt: fallbackChatgpt.sessions,
-        gemini: fallbackGemini.sessions,
-        aiOverview: fallbackAiOverviewMentions,
-        aiMode: fallbackAiModeMentions,
-      });
-    }
 
     // Parse platform breakdown from aggregated_data
     // DataForSEO returns platform_based_grouping array OR aggregated_data with platform field
@@ -5211,25 +5200,6 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         platformMap[key].aiSearchVol += Number(item?.ai_search_volume || 0);
         platformMap[key].impressions += Number(item?.impressions || 0);
       }
-    }
-
-    // Use fallback data for platforms if DataForSEO has no data
-    if (totalMentions > 0 && Object.keys(platformMap).length === 0) {
-      platformMap.chatgpt = {
-        mentions: fallbackChatgpt.sessions,
-        aiSearchVol: fallbackChatgpt.sessions * 80,
-        impressions: fallbackChatgpt.sessions * 95,
-      };
-      platformMap.google_ai = {
-        mentions: fallbackAiOverviewMentions + fallbackGemini.sessions,
-        aiSearchVol: (fallbackAiOverviewMentions + fallbackGemini.sessions) * 75,
-        impressions: (fallbackAiOverviewMentions + fallbackGemini.sessions) * 95,
-      };
-      platformMap.perplexity = {
-        mentions: 0,
-        aiSearchVol: 0,
-        impressions: 0,
-      };
     }
 
     // Get previous period metrics for trends
@@ -5401,9 +5371,9 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
           }
         })
         .slice(0, 5)
-        .map((tk, idx) => ({
+        .map((tk) => ({
           query: tk.keyword,
-          aiVolPerMo: Math.floor(Math.random() * 500) + 100, // Estimate
+          aiVolPerMo: totalAiSearchVolume > 0 ? Math.round(totalAiSearchVolume / Math.max(1, totalMentions)) : 300,
           platforms: "GAI",
           mentions: 1,
         }));
@@ -5470,7 +5440,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         .map((tk, idx) => ({
           query: tk.keyword,
           platform: "Google AI Overview",
-          aiVolPerMo: Math.floor(Math.random() * 500) + 100,
+          aiVolPerMo: totalAiSearchVolume > 0 ? Math.round(totalAiSearchVolume / Math.max(1, totalMentions)) : 300,
           snippet: `${clientName} appears in AI responses for "${tk.keyword}". This indicates your content is being cited by AI platforms.`,
           sourceUrl: `https://${domain}`,
           citationIndex: idx + 1,
@@ -5608,7 +5578,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         competitorDomainsCount: competitorDomains.length,
         hasDataForSeoCredentials: !!process.env.DATAFORSEO_BASE64,
         targetDomain,
-        apiResponseStatus: currentMetrics ? "success" : "no_data_or_error",
+        apiResponseStatus: (currentMetrics || totalMentions > 0) ? "success" : "no_data_or_error",
       },
     });
   } catch (error: any) {
@@ -6037,6 +6007,10 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       },
     });
 
+    const dofollowBacklinksCount = await prisma.backlink.count({
+      where: { clientId, isLost: false, isFollow: true },
+    });
+
     // Get top performing keywords
     const topKeywords = await prisma.keyword.findMany({
       where: { 
@@ -6146,9 +6120,10 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       backlinkStats: {
         total: backlinkStats._count.id,
         lost: lostBacklinks,
-        avgDomainRating: backlinkStats._avg.domainRating,
+        avgDomainRating: normalizeDomainRating(backlinkStats._avg.domainRating) ?? backlinkStats._avg.domainRating,
         newLast4Weeks: newBacklinksLast4Weeks,
         lostLast4Weeks: lostBacklinksLast4Weeks,
+        dofollowCount: dofollowBacklinksCount,
       },
       topKeywords,
       ga4Events: ga4EventsData?.events || null
@@ -7572,16 +7547,16 @@ async function fetchKeywordsForSiteFromDataForSEO(
           });
           
           if (organicResult) {
-            googleUrl = organicResult.url || null;
+            googleUrl = onlyRankingWebsiteUrl(organicResult.url) || null;
             if (googlePosition == null) {
               googlePosition = organicResult.rank_group || organicResult.rank_absolute || null;
             }
           }
         }
         
-        // Alternative: check if serpInfo has direct URL reference
+        // Alternative: check if serpInfo has direct URL reference (must not be a Google SERP URL)
         if (!googleUrl && serpInfo.relevant_url) {
-          googleUrl = serpInfo.relevant_url;
+          googleUrl = onlyRankingWebsiteUrl(serpInfo.relevant_url) || null;
         }
       }
       
@@ -8818,12 +8793,12 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
     // Calculate organic traffic from top pages
     const organicTraffic = topPagesFromDb.reduce((sum, page) => sum + page.organicEtv, 0);
 
-    // Format recent rankings
+    // Format recent rankings (only expose ranking website URL, not Google SERP URL)
     const formattedRecentRankings = recentRankings.map(kw => ({
       keyword: kw.keyword,
       position: kw.currentPosition!,
       change: kw.previousPosition ? kw.currentPosition! - kw.previousPosition : 0,
-      url: kw.googleUrl || "",
+      url: onlyRankingWebsiteUrl(kw.googleUrl) || "",
       volume: kw.searchVolume || 0,
     }));
 
@@ -8944,7 +8919,7 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
         {
           currentPosition: k.currentPosition ?? null,
           previousPosition: k.previousPosition ?? null,
-          googleUrl: k.googleUrl ?? null,
+          googleUrl: onlyRankingWebsiteUrl(k.googleUrl) ?? null,
         },
       ])
     );
@@ -8977,8 +8952,8 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
           tk.previousPosition ??
           trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.previousPosition ??
           null,
-        // Also fall back googleUrl if it's missing on target keyword.
-        googleUrl: tk.googleUrl ?? trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.googleUrl ?? null,
+        // Also fall back googleUrl if it's missing on target keyword. Never expose Google SERP URLs.
+        googleUrl: onlyRankingWebsiteUrl(tk.googleUrl ?? trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.googleUrl) ?? null,
       }))
     );
   } catch (error: any) {
@@ -9023,7 +8998,7 @@ router.get("/share/:token/target-keywords", async (req, res) => {
         {
           currentPosition: k.currentPosition ?? null,
           previousPosition: k.previousPosition ?? null,
-          googleUrl: k.googleUrl ?? null,
+          googleUrl: onlyRankingWebsiteUrl(k.googleUrl) ?? null,
         },
       ])
     );
@@ -9049,7 +9024,7 @@ router.get("/share/:token/target-keywords", async (req, res) => {
           tk.previousPosition ??
           trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.previousPosition ??
           null,
-        googleUrl: tk.googleUrl ?? trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.googleUrl ?? null,
+        googleUrl: onlyRankingWebsiteUrl(tk.googleUrl ?? trackedByKeyword.get(normalizeKeywordKey(tk.keyword))?.googleUrl) ?? null,
       }))
     );
   } catch (error: any) {
@@ -9344,7 +9319,7 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
                 ...(normalizedLocationName ? { locationName: normalizedLocationName } : {}),
                 googlePosition: nextPos,
                 previousPosition,
-                googleUrl: serp.googleUrl ?? tk.googleUrl,
+                googleUrl: onlyRankingWebsiteUrl(serp.googleUrl) ?? onlyRankingWebsiteUrl(tk.googleUrl) ?? null,
                 serpInfo: serp.serpData ? JSON.stringify(serp.serpData) : tk.serpInfo,
                 serpItemTypes: Array.isArray(serp.serpFeatures) ? JSON.stringify(serp.serpFeatures) : tk.serpItemTypes,
                 seResultsCount: typeof serp.totalResults === "number" ? String(serp.totalResults) : tk.seResultsCount,
@@ -9404,7 +9379,8 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
           resolvedLocationCode,
           resolvedLanguageCode
         );
-        if (serp?.googleUrl) kw.googleUrl = serp.googleUrl;
+        const rankingUrl = onlyRankingWebsiteUrl(serp?.googleUrl);
+        if (rankingUrl) kw.googleUrl = rankingUrl;
         if (typeof serp?.currentPosition === "number" && serp.currentPosition > 0) kw.googlePosition = serp.currentPosition;
         if (serp?.serpData) kw.serpInfo = serp.serpData;
         if (Array.isArray(serp?.serpFeatures)) kw.serpItemTypes = serp.serpFeatures;
@@ -9478,7 +9454,7 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
             languageName: languageName,
             serpInfo: kw.serpInfo ? JSON.stringify(kw.serpInfo) : null,
             serpItemTypes: kw.serpItemTypes ? JSON.stringify(kw.serpItemTypes) : null,
-            googleUrl: kw.googleUrl,
+            googleUrl: onlyRankingWebsiteUrl(kw.googleUrl) ?? null,
             previousPosition: previousPosition,
             googlePosition: kw.googlePosition,
             seResultsCount: kw.seResultsCount ? String(kw.seResultsCount) : null,
@@ -9498,7 +9474,7 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
             languageName: languageName,
             serpInfo: kw.serpInfo ? JSON.stringify(kw.serpInfo) : null,
             serpItemTypes: kw.serpItemTypes ? JSON.stringify(kw.serpItemTypes) : null,
-            googleUrl: kw.googleUrl,
+            googleUrl: onlyRankingWebsiteUrl(kw.googleUrl) ?? null,
             googlePosition: kw.googlePosition,
             seResultsCount: kw.seResultsCount ? String(kw.seResultsCount) : null,
           },

@@ -54,6 +54,20 @@ const TeamPage = () => {
     fetchTeamMembers();
   }, []);
 
+  // Refetch team when an agency is created so the new agency owner appears in the list
+  useEffect(() => {
+    const onAgencyCreated = () => fetchTeamMembers();
+    window.addEventListener("agency-created", onAgencyCreated);
+    return () => window.removeEventListener("agency-created", onAgencyCreated);
+  }, []);
+
+  // Refetch team when an agency is deleted so the agency disappears from members' lists
+  useEffect(() => {
+    const onAgencyDeleted = () => fetchTeamMembers();
+    window.addEventListener("agency-deleted", onAgencyDeleted);
+    return () => window.removeEventListener("agency-deleted", onAgencyDeleted);
+  }, []);
+
   const fetchTeamMembers = async () => {
     try {
       setLoading(true);
