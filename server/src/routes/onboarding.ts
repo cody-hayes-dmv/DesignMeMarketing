@@ -29,6 +29,30 @@ const DEFAULT_ONBOARDING_TASKS = [
   { title: "Complete entire GBP profile", description: null, category: "GBP", priority: "high", estimatedHours: 1, order: 20 },
 ];
 
+/** Global template (no agency) – shown to everyone. No "Default Agency" is created. */
+async function ensureDefaultGlobalTemplate() {
+  const existing = await prisma.onboardingTemplate.findFirst({ where: { agencyId: null } });
+  if (existing) return;
+  await prisma.onboardingTemplate.create({
+    data: {
+      name: "Standard SEO Onboarding",
+      description: "Default template for new SEO clients",
+      isDefault: true,
+      agencyId: null,
+      tasks: {
+        create: DEFAULT_ONBOARDING_TASKS.map((t) => ({
+          title: t.title,
+          description: t.description,
+          category: t.category,
+          priority: t.priority,
+          estimatedHours: t.estimatedHours,
+          order: t.order,
+        })),
+      },
+    },
+  });
+}
+
 async function ensureDefaultTemplateForAgency(agencyId: string) {
   const existing = await prisma.onboardingTemplate.findFirst({ where: { agencyId } });
   if (existing) return;
@@ -52,85 +76,32 @@ async function ensureDefaultTemplateForAgency(agencyId: string) {
   });
 }
 
-// Get all onboarding templates for the user's agency
+const includeTasks = { tasks: { orderBy: { order: "asc" as const } } };
+
+// Get onboarding templates. Client-based: agency/admin see only global template(s). Super admin sees all.
 router.get("/templates", authenticateToken, async (req, res) => {
   try {
     const user = req.user;
-    
-    let agencyId: string | undefined;
+
+    await ensureDefaultGlobalTemplate();
+
     if (user.role === "SUPER_ADMIN") {
-      // Super admin can see all templates
-      let templates = await prisma.onboardingTemplate.findMany({
-        include: {
-          tasks: {
-            orderBy: { order: "asc" }
-          }
-        }
+      const templates = await prisma.onboardingTemplate.findMany({
+        include: includeTasks,
       });
-      // If no templates exist (e.g. fresh DB or no agencies), ensure "Standard SEO Onboarding" is always visible
-      if (templates.length === 0) {
-        let firstAgency = await prisma.agency.findFirst({ select: { id: true } });
-        if (!firstAgency) {
-          firstAgency = await prisma.agency.create({
-            data: { name: "Default Agency" },
-            select: { id: true }
-          });
-        }
-        await ensureDefaultTemplateForAgency(firstAgency.id);
-        templates = await prisma.onboardingTemplate.findMany({
-          include: { tasks: { orderBy: { order: "asc" } } }
-        });
-      }
       return res.json(templates);
-    } else if (user.role === "AGENCY" || user.role === "ADMIN") {
-      // Get user's agency
-      const userAgency = await prisma.userAgency.findFirst({
-        where: { userId: user.userId },
-        include: { agency: true }
+    }
+
+    // Agency/Admin: onboarding is client-based – only show global template(s), not agency-specific
+    if (user.role === "AGENCY" || user.role === "ADMIN") {
+      const globalTemplates = await prisma.onboardingTemplate.findMany({
+        where: { agencyId: null },
+        include: includeTasks,
       });
-
-      if (userAgency) {
-        agencyId = userAgency.agencyId;
-      }
-      // If no agency linked, we still show "Standard SEO Onboarding" via default agency below (agencyId stays undefined)
-    } else {
-      return res.status(403).json({ message: "Access denied" });
+      return res.json(globalTemplates);
     }
 
-    // Resolve which agency's templates to show (user's agency or default when none)
-    let effectiveAgencyId = agencyId;
-    if (effectiveAgencyId == null) {
-      let defaultAgency = await prisma.agency.findFirst({ select: { id: true } });
-      if (!defaultAgency) {
-        defaultAgency = await prisma.agency.create({
-          data: { name: "Default Agency" },
-          select: { id: true }
-        });
-      }
-      effectiveAgencyId = defaultAgency.id;
-    }
-
-    let templates = await prisma.onboardingTemplate.findMany({
-      where: { agencyId: effectiveAgencyId },
-      include: {
-        tasks: {
-          orderBy: { order: "asc" }
-        }
-      }
-    });
-
-    // If this agency has no templates, create the default one so "Standard SEO Onboarding" always shows
-    if (templates.length === 0) {
-      await ensureDefaultTemplateForAgency(effectiveAgencyId);
-      templates = await prisma.onboardingTemplate.findMany({
-        where: { agencyId: effectiveAgencyId },
-        include: {
-          tasks: { orderBy: { order: "asc" } }
-        }
-      });
-    }
-
-    res.json(templates);
+    return res.status(403).json({ message: "Access denied" });
   } catch (error) {
     console.error("Error fetching templates:", error);
     res.status(500).json({ message: "Internal server error" });

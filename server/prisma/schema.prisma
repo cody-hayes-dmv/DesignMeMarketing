@@ -328,15 +328,15 @@ model Backlink {
 }
 
 model OnboardingTemplate {
-  id          String           @id @default(cuid())
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id          String            @id @default(cuid())
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
   name        String
   description String?
-  isDefault   Boolean          @default(false)
-  agencyId    String
+  isDefault   Boolean           @default(false)
+  agencyId    String?           // null = global template (e.g. "Standard SEO Onboarding") shown to all
   tasks       OnboardingTask[]
-  agency      Agency           @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agency      Agency?           @relation(fields: [agencyId], references: [id], onDelete: Cascade)
 
   @@index([agencyId])
   @@map("onboarding_templates")
