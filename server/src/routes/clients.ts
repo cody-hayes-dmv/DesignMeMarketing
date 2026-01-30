@@ -2266,18 +2266,48 @@ router.get('/google-ads/callback', async (req, res) => {
             return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=missing_code`);
         }
 
+        // Must have a valid clientId from state so we know which client to store tokens for
+        if (!clientId || clientId.trim() === '') {
+            console.error('[Google Ads OAuth Callback] Missing or empty clientId in state:', { state });
+            const errMsg = 'Missing client in authorization. Please start the connection from the client page.';
+            return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(errMsg)}`);
+        }
+
         try {
             const { accessToken, refreshToken, email } = await exchangeGoogleAdsCodeForTokens(code as string);
 
-            // Save tokens to client
+            if (!refreshToken) {
+                console.error('[Google Ads OAuth Callback] No refresh token from Google');
+                return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent('Google did not return a refresh token. Try disconnecting and reconnecting with "Consent" prompt.')}`);
+            }
+
+            // Save tokens and connection time to client
             await prisma.client.update({
                 where: { id: clientId },
                 data: {
                     googleAdsAccessToken: accessToken,
                     googleAdsRefreshToken: refreshToken,
                     googleAdsAccountEmail: email || null,
+                    googleAdsConnectedAt: new Date(),
                 },
             });
+            console.log('[Google Ads OAuth Callback] Stored refresh token and access token for client:', clientId);
+
+            // If exactly one Google Ads account is accessible, auto-set customer ID so connection is complete
+            try {
+                const customers = await listGoogleAdsCustomers(clientId);
+                if (customers.length === 1 && customers[0].customerId) {
+                    const normalizedCustomerId = String(customers[0].customerId).replace(/-/g, '');
+                    await prisma.client.update({
+                        where: { id: clientId },
+                        data: { googleAdsCustomerId: normalizedCustomerId },
+                    });
+                    console.log('[Google Ads OAuth Callback] Auto-set customer ID for client:', clientId, normalizedCustomerId);
+                }
+            } catch (listErr: any) {
+                // Non-fatal: user can pick account via POST /connect
+                console.warn('[Google Ads OAuth Callback] Could not list customers to auto-set customer ID:', listErr?.message || listErr);
+            }
 
             if (isPopup) {
                 return res.send(`

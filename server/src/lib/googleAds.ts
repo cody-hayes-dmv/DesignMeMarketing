@@ -26,13 +26,23 @@ function isGoogleAdsRevokedCached(clientId: string): boolean {
   return true;
 }
 
+const GOOGLE_ADS_CALLBACK_PATH = '/api/clients/google-ads/callback';
+
+/** Single source of redirect URI so auth URL and token exchange always match (required for refresh_token). */
+function getGoogleAdsRedirectUri(): string {
+  return (
+    process.env.GOOGLE_ADS_REDIRECT_URI ||
+    `${process.env.BACKEND_URL || 'http://localhost:5000'}${GOOGLE_ADS_CALLBACK_PATH}`
+  );
+}
+
 /**
- * Get OAuth2 client for Google Ads
+ * Get OAuth2 client for Google Ads (uses same redirect_uri as auth URL for valid token exchange)
  */
 function getOAuth2Client() {
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
-  const redirectUri = process.env.GOOGLE_ADS_REDIRECT_URI || 'http://localhost:5000/api/clients/google-ads/callback';
+  const redirectUri = getGoogleAdsRedirectUri();
 
   if (!clientId || !clientSecret) {
     const errorMsg = 'Google Ads credentials not configured. Please set GOOGLE_ADS_CLIENT_ID and GOOGLE_ADS_CLIENT_SECRET environment variables in server/.env file.\n\n' +
@@ -57,14 +67,12 @@ export function getGoogleAdsAuthUrl(clientId: string): string {
     'https://www.googleapis.com/auth/userinfo.email', // Required to get user email
   ];
 
-  const redirectUri = process.env.GOOGLE_ADS_REDIRECT_URI || `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/clients/google-ads/callback`;
-
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
     prompt: 'consent', // Force consent to get refresh token
     state: clientId,
-    redirect_uri: redirectUri,
+    redirect_uri: getGoogleAdsRedirectUri(),
   });
 }
 
@@ -77,14 +85,13 @@ export async function exchangeCodeForTokens(code: string): Promise<{
   email?: string;
 }> {
   const oauth2Client = getOAuth2Client();
-  
-  const redirectUri = process.env.GOOGLE_ADS_REDIRECT_URI || `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/clients/google-ads/callback`;
-  
+  const redirectUri = getGoogleAdsRedirectUri();
+
   let tokens;
   try {
-    const tokenResponse = await oauth2Client.getToken(code);
+    const tokenResponse = await oauth2Client.getToken({ code, redirect_uri: redirectUri });
     tokens = tokenResponse.tokens;
-    
+
     if (!tokens.access_token || !tokens.refresh_token) {
       throw new Error('Failed to get access and refresh tokens from Google');
     }
