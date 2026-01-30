@@ -67,15 +67,19 @@ router.get("/templates", authenticateToken, async (req, res) => {
           }
         }
       });
-      // If no templates exist (e.g. fresh DB), create default for first agency so "Standard SEO Onboarding" is visible
+      // If no templates exist (e.g. fresh DB or no agencies), ensure "Standard SEO Onboarding" is always visible
       if (templates.length === 0) {
-        const firstAgency = await prisma.agency.findFirst({ select: { id: true } });
-        if (firstAgency) {
-          await ensureDefaultTemplateForAgency(firstAgency.id);
-          templates = await prisma.onboardingTemplate.findMany({
-            include: { tasks: { orderBy: { order: "asc" } } }
+        let firstAgency = await prisma.agency.findFirst({ select: { id: true } });
+        if (!firstAgency) {
+          firstAgency = await prisma.agency.create({
+            data: { name: "Default Agency" },
+            select: { id: true }
           });
         }
+        await ensureDefaultTemplateForAgency(firstAgency.id);
+        templates = await prisma.onboardingTemplate.findMany({
+          include: { tasks: { orderBy: { order: "asc" } } }
+        });
       }
       return res.json(templates);
     } else if (user.role === "AGENCY" || user.role === "ADMIN") {
@@ -84,18 +88,30 @@ router.get("/templates", authenticateToken, async (req, res) => {
         where: { userId: user.userId },
         include: { agency: true }
       });
-      
-      if (!userAgency) {
-        return res.status(404).json({ message: "Agency not found" });
+
+      if (userAgency) {
+        agencyId = userAgency.agencyId;
       }
-      
-      agencyId = userAgency.agencyId;
+      // If no agency linked, we still show "Standard SEO Onboarding" via default agency below (agencyId stays undefined)
     } else {
       return res.status(403).json({ message: "Access denied" });
     }
 
+    // Resolve which agency's templates to show (user's agency or default when none)
+    let effectiveAgencyId = agencyId;
+    if (effectiveAgencyId == null) {
+      let defaultAgency = await prisma.agency.findFirst({ select: { id: true } });
+      if (!defaultAgency) {
+        defaultAgency = await prisma.agency.create({
+          data: { name: "Default Agency" },
+          select: { id: true }
+        });
+      }
+      effectiveAgencyId = defaultAgency.id;
+    }
+
     let templates = await prisma.onboardingTemplate.findMany({
-      where: { agencyId },
+      where: { agencyId: effectiveAgencyId },
       include: {
         tasks: {
           orderBy: { order: "asc" }
@@ -103,11 +119,11 @@ router.get("/templates", authenticateToken, async (req, res) => {
       }
     });
 
-    // If this agency has no templates, create the default one so the modal always has something to show
-    if (templates.length === 0 && agencyId) {
-      await ensureDefaultTemplateForAgency(agencyId);
+    // If this agency has no templates, create the default one so "Standard SEO Onboarding" always shows
+    if (templates.length === 0) {
+      await ensureDefaultTemplateForAgency(effectiveAgencyId);
       templates = await prisma.onboardingTemplate.findMany({
-        where: { agencyId },
+        where: { agencyId: effectiveAgencyId },
         include: {
           tasks: { orderBy: { order: "asc" } }
         }
