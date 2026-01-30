@@ -34,6 +34,7 @@ import {
   Lightbulb,
   Info,
   Target,
+  Plug,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -242,16 +243,17 @@ const ClientDashboardPage: React.FC = () => {
   const [clientPortalClients, setClientPortalClients] = useState<Array<{ id: string; name: string }>>([]);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [loading, setLoading] = useState(false);
-  type ClientDashboardTopTab = "dashboard" | "report" | "users";
+  type ClientDashboardTopTab = "dashboard" | "report" | "users" | "integration";
   type ClientDashboardSection = "seo" | "ai-intelligence" | "ppc" | "backlinks" | "worklog";
 
   const initialNav = (() => {
     if (clientPortalMode) {
       return { tab: "dashboard" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     }
-    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" } | null)?.tab;
+    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "integration" } | null)?.tab;
     if (requested === "report") return { tab: "report" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "users") return { tab: "users" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+    if (requested === "integration") return { tab: "integration" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "backlinks") return { tab: "dashboard" as ClientDashboardTopTab, section: "backlinks" as ClientDashboardSection };
     if (requested === "worklog") return { tab: "dashboard" as ClientDashboardTopTab, section: "worklog" as ClientDashboardSection };
     return { tab: (reportOnly ? "report" : "dashboard") as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
@@ -401,6 +403,7 @@ const ClientDashboardPage: React.FC = () => {
   const [ga4ConnectionError, setGa4ConnectionError] = useState<string | null>(null);
   // Google Ads (PPC) connection state
   const [googleAdsConnected, setGoogleAdsConnected] = useState<boolean | null>(null);
+  const [googleAdsHasTokens, setGoogleAdsHasTokens] = useState(false);
   const [googleAdsAccountEmail, setGoogleAdsAccountEmail] = useState<string | null>(null);
   const [googleAdsConnecting, setGoogleAdsConnecting] = useState(false);
   const [googleAdsStatusLoading, setGoogleAdsStatusLoading] = useState(true);
@@ -1367,21 +1370,16 @@ const ClientDashboardPage: React.FC = () => {
         setGoogleAdsStatusLoading(true);
         const res = await api.get(`/clients/${clientId}/google-ads/status`);
         const isConnected = res.data?.connected || false;
+        const hasTokens = res.data?.hasTokens || false;
         const accountEmail = res.data?.accountEmail || null;
         setGoogleAdsConnected(isConnected);
+        setGoogleAdsHasTokens(hasTokens);
         setGoogleAdsAccountEmail(accountEmail);
-        
-        // If tokens exist but not connected (customer ID missing), show modal
-        if (!isConnected && !googleAdsTokensReceived && !googleAdsConnected && !googleAdsError) {
-          // Check if we have tokens but no customer ID
-          const hasTokens = res.data?.hasTokens || false;
-          if (hasTokens) {
-            setShowGoogleAdsModal(true);
-          }
-        }
+        // Do not auto-open Select Google Ads Account modal here; only open after OAuth redirect (google_ads_tokens_received). User can open it from Integration tab.
       } catch (error: any) {
         console.error("Failed to check Google Ads status:", error);
         setGoogleAdsConnected(false);
+        setGoogleAdsHasTokens(false);
         setGoogleAdsAccountEmail(null);
       } finally {
         setGoogleAdsStatusLoading(false);
@@ -1398,7 +1396,7 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
     const state = location.state as {
-      tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users";
+      tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "integration";
       section?: ClientDashboardSection;
     };
     if (!state?.tab && !state?.section) return;
@@ -1410,6 +1408,11 @@ const ClientDashboardPage: React.FC = () => {
 
     if (state?.tab === "users") {
       setActiveTab("users");
+      return;
+    }
+
+    if (state?.tab === "integration") {
+      setActiveTab("integration");
       return;
     }
 
@@ -2754,6 +2757,7 @@ const ClientDashboardPage: React.FC = () => {
       await api.post(`/clients/${clientId}/google-ads/disconnect`);
       toast.success("Google Ads disconnected successfully");
       setGoogleAdsConnected(false);
+      setGoogleAdsHasTokens(false);
       setGoogleAdsAccountEmail(null);
       setGoogleAdsConnectionError(null);
       setPpcData(null);
@@ -2820,6 +2824,13 @@ const ClientDashboardPage: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId]);
+
+  // When Google Ads is disconnected, leave PPC section so we don't show a hidden section
+  useEffect(() => {
+    if (googleAdsConnected !== true && dashboardSection === "ppc") {
+      setDashboardSection("seo");
+    }
+  }, [googleAdsConnected, dashboardSection]);
 
   // Web Visitors (same as Active Users / Total Users)
   const websiteVisitorsDisplay = useMemo(() => {
@@ -2934,8 +2945,6 @@ const ClientDashboardPage: React.FC = () => {
   // For the Client Dashboard "Dashboard" tab we want the scroll to live *inside* the tab
   // (so the page chrome stays put). For other tabs we let the layout scroll normally.
   const dashboardOwnsScroll = !reportOnly && activeTab === "dashboard";
-  const ga4ConnectedBannerRef = useRef<HTMLDivElement | null>(null);
-  const [ga4ConnectedBannerHeight, setGa4ConnectedBannerHeight] = useState<number | null>(null);
   const dashboardRightPanelScrollRef = useRef<HTMLDivElement | null>(null);
 
   const handleInviteUserClick = useCallback(() => {
@@ -3217,25 +3226,6 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [clientId, fetchClientUsers, removeClientUserConfirm.userId]);
 
-  useEffect(() => {
-    const el = ga4ConnectedBannerRef.current;
-    if (!el) {
-      setGa4ConnectedBannerHeight(null);
-      return;
-    }
-
-    // Measure and keep in sync (banner height can change with responsive layout)
-    const update = () => {
-      const next = el.getBoundingClientRect().height;
-      setGa4ConnectedBannerHeight(Number.isFinite(next) && next > 0 ? next : null);
-    };
-
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ga4Connected]);
-
   // When switching Dashboard left-nav sections, ensure the user sees the section header/actions
   // (e.g. Backlinks Import/Add, Work Log +) by resetting the right panel scroll to the top.
   useEffect(() => {
@@ -3326,6 +3316,7 @@ const ClientDashboardPage: React.FC = () => {
                     { id: "dashboard", label: "Dashboard", icon: Users },
                     { id: "report", label: "Report", icon: FileText },
                     { id: "users", label: "Users", icon: UserPlus },
+                    { id: "integration", label: "Integration", icon: Plug },
                   ]
               ).map((tab) => (
                 <button
@@ -3488,6 +3479,8 @@ const ClientDashboardPage: React.FC = () => {
                 >
                   Create Report
                 </button>
+              ) : activeTab === "integration" ? (
+                null
               ) : (
                 <button
                   type="button"
@@ -3515,20 +3508,13 @@ const ClientDashboardPage: React.FC = () => {
                 className="flex flex-col gap-6 lg:flex-row lg:items-start h-full min-h-0 lg:h-full"
               >
                 <aside className="w-full lg:w-64 shrink-0" data-pdf-hide="true">
-                  <div
-                    className="bg-white border border-gray-200 rounded-xl p-2 lg:sticky lg:top-4"
-                    style={
-                      dashboardSection === "seo" && ga4ConnectedBannerHeight
-                        ? { height: ga4ConnectedBannerHeight }
-                        : undefined
-                    }
-                  >
+                  <div className="bg-white border border-gray-200 rounded-xl p-2 lg:sticky lg:top-4">
                     <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-2">
                       {(
                         [
                           { id: "seo", label: "SEO Overview", icon: Search },
                           { id: "ai-intelligence", label: "AI Intelligence", icon: Sparkles },
-                          { id: "ppc", label: "PPC", icon: TrendingUp },
+                          ...(googleAdsConnected === true ? [{ id: "ppc" as const, label: "PPC", icon: TrendingUp }] : []),
                           { id: "backlinks", label: "Backlinks", icon: Search },
                           { id: "worklog", label: "Work Log", icon: Clock },
                         ] as const
@@ -3558,146 +3544,7 @@ const ClientDashboardPage: React.FC = () => {
                 >
                 {dashboardSection === "seo" && (
                   <div className="space-y-8">
-                    {/* GA4 connection UI (hidden in PDF export) */}
-                    <div data-pdf-hide="true">
-                      {/* GA4 Connection Status - Show loading skeleton while checking */}
-                      {ga4StatusLoading ? (
-                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 animate-pulse">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="h-6 bg-gray-200 rounded w-48 mb-3"></div>
-                              <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
-                              <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
-                              <div className="h-10 bg-gray-200 rounded w-32"></div>
-                            </div>
-                            <div className="h-5 w-5 bg-gray-200 rounded"></div>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          {/* GA4 Connection Error Banner - Show when connection is invalid */}
-                          {ga4ConnectionError && (
-                            <div className="bg-red-50 border border-red-200 rounded-xl p-6">
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <h3 className="text-lg font-semibold text-red-900 mb-2 flex items-center gap-2">
-                                    <AlertTriangle className="h-5 w-5" />
-                                    GA4 Connection Invalid
-                                  </h3>
-                                  <p className="text-sm text-red-800 mb-4">
-                                    {ga4ConnectionError} GA4 data has been cleared to prevent displaying stale information.
-                                  </p>
-                                  <button
-                                    onClick={handleConnectGA4}
-                                    disabled={ga4Connecting}
-                                    className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                                  >
-                                    {ga4Connecting ? (
-                                      <>
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        <span>Connecting...</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <RefreshCw className="h-4 w-4" />
-                                        <span>Reconnect GA4</span>
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                                <button
-                                  onClick={() => setGa4ConnectionError(null)}
-                                  className="text-red-600 hover:text-red-800"
-                                  title="Dismiss warning"
-                                >
-                                  <X className="h-5 w-5" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* One-time GA4 auto-refresh indicator */}
-                          {autoRefreshingGa4 && (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                              <div className="flex items-center gap-3 text-emerald-900">
-                                <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
-                                <div className="text-sm">
-                                  <span className="font-medium">Refreshing GA4 data…</span>{" "}
-                                  <span className="text-emerald-800">Just a moment while we pull the latest numbers.</span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* GA4 Connection Banner */}
-                          {/* Show banner when GA4 is not connected (false = confirmed not connected) */}
-                          {ga4Connected === false && !ga4ConnectionError && (
-                            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <h3 className="text-lg font-semibold text-yellow-900 mb-2">
-                                    Connect Google Analytics 4
-                                  </h3>
-                                  <p className="text-sm text-yellow-800 mb-4">
-                                    To view real traffic and analytics data, please connect your Google Analytics 4 account.
-                                    Without GA4 connection, traffic metrics cannot be displayed.
-                                  </p>
-                                  <button
-                                    onClick={handleConnectGA4}
-                                    disabled={ga4Connecting}
-                                    className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                                  >
-                                    {ga4Connecting ? (
-                                      <>
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        <span>Connecting...</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Search className="h-4 w-4" />
-                                        <span>Connect GA4</span>
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                                <button
-                                  onClick={() => setGa4Connected(null)}
-                                  className="text-yellow-600 hover:text-yellow-800 ml-4"
-                                >
-                                  <X className="h-5 w-5" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                          {/* GA4 Connected Banner with Disconnect button */}
-                          {ga4Connected === true && (
-                            <div
-                              ref={ga4ConnectedBannerRef}
-                              className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center justify-between"
-                            >
-                              <div className="flex items-center space-x-3">
-                                <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                                  <TrendingUp className="h-4 w-4 text-emerald-600" />
-                                </div>
-                                <div>
-                                  <p className="text-sm font-semibold text-emerald-900">GA4 is connected</p>
-                                  <p className="text-xs text-emerald-800">
-                                    You can disconnect and connect a different GA4 property at any time.
-                                  </p>
-                                </div>
-                              </div>
-                              <button
-                                onClick={handleDisconnectGA4}
-                                disabled={ga4Connecting}
-                                className="bg-white border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              >
-                                {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
-                              </button>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
+                    {/* GA4 connection is managed in the Integration tab */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
@@ -6073,6 +5920,99 @@ const ClientDashboardPage: React.FC = () => {
             <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">Loading client data...</div>
           ) : (
             <>
+              {!reportOnly && activeTab === "integration" && (
+                <div className="space-y-8 max-w-3xl">
+                  <h2 className="text-xl font-semibold text-gray-900">Integrations</h2>
+                  <p className="text-sm text-gray-600">Connect Google Analytics 4 and Google Ads for this client. When Google Ads is connected, the PPC tab appears in the Dashboard.</p>
+
+                  {/* GA4 */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-primary-600" />
+                      Google Analytics 4 (GA4)
+                    </h3>
+                    {ga4StatusLoading ? (
+                      <div className="h-20 bg-gray-50 rounded-lg animate-pulse" />
+                    ) : ga4Connected === true ? (
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-emerald-800">GA4 is connected</p>
+                          <p className="text-xs text-gray-500 mt-1">Traffic and analytics data come from your connected property.</p>
+                        </div>
+                        <button
+                          onClick={handleDisconnectGA4}
+                          disabled={ga4Connecting}
+                          className="bg-white border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {ga4Connecting ? "Disconnecting..." : "Disconnect GA4"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm text-gray-600 mb-3">Connect GA4 to view real traffic and analytics on the Dashboard.</p>
+                        <button
+                          onClick={handleConnectGA4}
+                          disabled={ga4Connecting}
+                          className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {ga4Connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                          {ga4Connecting ? "Connecting..." : "Connect GA4"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Google Ads (PPC) */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-primary-600" />
+                      Google Ads (PPC)
+                    </h3>
+                    {googleAdsStatusLoading ? (
+                      <div className="h-20 bg-gray-50 rounded-lg animate-pulse" />
+                    ) : googleAdsConnected === false && googleAdsHasTokens ? (
+                      <div>
+                        <p className="text-sm text-gray-600 mb-3">Select a Google Ads account to finish connecting. The PPC tab will appear in the Dashboard once connected.</p>
+                        <button
+                          onClick={handleFetchGoogleAdsCustomers}
+                          disabled={loadingGoogleAdsCustomers}
+                          className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {loadingGoogleAdsCustomers ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+                          {loadingGoogleAdsCustomers ? "Loading..." : "Select Google Ads account"}
+                        </button>
+                      </div>
+                    ) : googleAdsConnected === false ? (
+                      <div>
+                        <p className="text-sm text-gray-600 mb-3">Connect Google Ads to view PPC campaigns and the PPC tab in the Dashboard.</p>
+                        <button
+                          onClick={handleConnectGoogleAds}
+                          disabled={googleAdsConnecting}
+                          className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {googleAdsConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+                          {googleAdsConnecting ? "Connecting..." : "Connect Google Ads"}
+                        </button>
+                      </div>
+                    ) : googleAdsConnected === true ? (
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-emerald-800">Google Ads is connected</p>
+                          {googleAdsAccountEmail && <p className="text-xs text-gray-500 mt-1">Account: {googleAdsAccountEmail}</p>}
+                          <p className="text-xs text-gray-500 mt-1">The PPC tab is visible in the Dashboard.</p>
+                        </div>
+                        <button
+                          onClick={handleDisconnectGoogleAds}
+                          disabled={googleAdsConnecting}
+                          className="bg-white border border-red-300 text-red-700 px-3 py-1.5 rounded-lg text-sm hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {googleAdsConnecting ? "Disconnecting..." : "Disconnect"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )}
               {!reportOnly && activeTab === "users" && (
                 <div className="space-y-6">
                   <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
