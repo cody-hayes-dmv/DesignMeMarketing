@@ -4839,6 +4839,150 @@ async function fetchCompetitorAiMetrics(
   }
 }
 
+// DataForSEO LLM Mentions Top Pages: aggregated metrics by top mentioned pages for a keyword/niche.
+async function fetchAiTopPages(
+  keywordSeed: string,
+  locationCode: number,
+  languageCode: string,
+  limit: number = 100
+): Promise<{ pageUrl: string; mentions: number; aiSearchVolume: number }[]> {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) return [];
+
+  const requestBody = [{
+    target: [{ keyword: keywordSeed, keyword_search_filter: "like" }],
+    location_code: locationCode,
+    language_code: languageCode,
+    limit,
+  }];
+
+  try {
+    const response = await fetch("https://api.dataforseo.com/v3/ai_optimization/llm_mentions/top_pages/live", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Basic ${base64Auth}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    }
+    const data = await response.json();
+    const result = data?.tasks?.[0]?.result?.[0];
+    const items = result?.items || [];
+    return items.map((item: any) => ({
+      pageUrl: item?.page_url || item?.url || "",
+      mentions: Number(item?.total_mentions ?? 0) || (sumGroupMentions(item?.platform_based_grouping)),
+      aiSearchVolume: Number(item?.ai_search_volume ?? 0) || (sumGroupAiVolume(item?.platform_based_grouping)),
+    })).filter((p: { pageUrl: string }) => p.pageUrl);
+  } catch (error: any) {
+    console.warn("[AI Intelligence] Top Pages API error:", error?.message);
+    return [];
+  }
+}
+
+function sumGroupMentions(grouping: any[] | undefined): number {
+  if (!Array.isArray(grouping)) return 0;
+  return grouping.reduce((s, g) => s + Number(g?.total_mentions || 0), 0);
+}
+function sumGroupAiVolume(grouping: any[] | undefined): number {
+  if (!Array.isArray(grouping)) return 0;
+  return grouping.reduce((s, g) => s + Number(g?.ai_search_volume || 0), 0);
+}
+
+// DataForSEO LLM Mentions Top Domains: aggregated metrics by top domains for a keyword/niche (per-platform breakdown).
+async function fetchAiTopDomains(
+  keywordSeed: string,
+  locationCode: number,
+  languageCode: string,
+  limit: number = 50
+): Promise<{ domain: string; mentions: number; aiSearchVolume: number; platformBasedGrouping?: any[] }[]> {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) return [];
+
+  const requestBody = [{
+    target: [{ keyword: keywordSeed, keyword_search_filter: "like" }],
+    location_code: locationCode,
+    language_code: languageCode,
+    limit,
+  }];
+
+  try {
+    const response = await fetch("https://api.dataforseo.com/v3/ai_optimization/llm_mentions/top_domains/live", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Basic ${base64Auth}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    }
+    const data = await response.json();
+    const result = data?.tasks?.[0]?.result?.[0];
+    const items = result?.items || [];
+    return items.map((item: any) => ({
+      domain: (item?.domain || "").toLowerCase().replace(/^www\./, ""),
+      mentions: Number(item?.total_mentions ?? 0) || sumGroupMentions(item?.platform_based_grouping),
+      aiSearchVolume: Number(item?.ai_search_volume ?? 0) || sumGroupAiVolume(item?.platform_based_grouping),
+      platformBasedGrouping: item?.platform_based_grouping,
+    })).filter((d: { domain: string }) => d.domain);
+  } catch (error: any) {
+    console.warn("[AI Intelligence] Top Domains API error:", error?.message);
+    return [];
+  }
+}
+
+// DataForSEO AI Keyword Data: search volume + 12-month trend per keyword.
+async function fetchAiKeywordSearchVolume(
+  keywords: string[],
+  locationCode: number,
+  languageCode: string
+): Promise<{ keyword: string; aiSearchVolume: number; aiMonthlySearches: { year: number; month: number; aiSearchVolume: number }[] }[]> {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth || keywords.length === 0) return [];
+
+  const requestBody = [{
+    keywords: keywords.slice(0, 200),
+    location_code: locationCode,
+    language_code: languageCode,
+  }];
+
+  try {
+    const response = await fetch("https://api.dataforseo.com/v3/ai_optimization/ai_keyword_data/keywords_search_volume/live", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Basic ${base64Auth}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    }
+    const data = await response.json();
+    const result = data?.tasks?.[0]?.result?.[0];
+    const items = result?.items || [];
+    return items.map((item: any) => ({
+      keyword: item?.keyword || "",
+      aiSearchVolume: Number(item?.ai_search_volume || 0),
+      aiMonthlySearches: (item?.ai_monthly_searches || []).map((m: any) => ({
+        year: Number(m?.year || 0),
+        month: Number(m?.month || 0),
+        aiSearchVolume: Number(m?.ai_search_volume || 0),
+      })),
+    })).filter((i: { keyword: string }) => i.keyword);
+  } catch (error: any) {
+    console.warn("[AI Intelligence] AI Keyword Search Volume API error:", error?.message);
+    return [];
+  }
+}
+
 // Extract competitor domains from SERP cache (from target keywords)
 async function extractCompetitorDomainsFromSerp(clientId: string, limit: number = 10): Promise<string[]> {
   try {
@@ -5049,6 +5193,15 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     const locationCode = 2840; // USA
     const languageCode = "en";
 
+    // Seed keyword for top_pages / top_domains; keyword list for AI search volume trend
+    const targetKeywordRows = await prisma.targetKeyword.findMany({
+      where: { clientId },
+      select: { keyword: true },
+      take: 50,
+    });
+    const targetKeywordStrings = targetKeywordRows.map((r) => r.keyword).filter(Boolean) as string[];
+    const seedKeyword = targetKeywordStrings[0] || "therapy";
+
     // Format dates for DataForSEO API (YYYY-MM-DD)
     const formatDateForAPI = (d: Date) => d.toISOString().split("T")[0];
     const dateFrom = formatDateForAPI(startDate);
@@ -5200,6 +5353,39 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         platformMap[key].aiSearchVol += Number(item?.ai_search_volume || 0);
         platformMap[key].impressions += Number(item?.impressions || 0);
       }
+    }
+
+    // When aggregated_metrics returns no result but search_mentions has items, derive overview from search_mentions
+    if (totalMentions === 0 && totalAiSearchVolume === 0 && searchMentions.length > 0) {
+      let derivedMentions = 0;
+      let derivedAiVol = 0;
+      const derivedPlatformMap: Record<string, { mentions: number; aiSearchVol: number; impressions: number }> = {};
+      for (const item of searchMentions) {
+        const sources = Array.isArray(item?.sources) ? item.sources : [];
+        const itemMentions = sources.filter((s: any) => {
+          const d = (s?.domain || "").toLowerCase();
+          return d && targetDomain && d.includes(targetDomain.toLowerCase());
+        }).length || 1;
+        const vol = Number(item?.ai_search_volume || 0);
+        derivedMentions += itemMentions;
+        derivedAiVol += vol;
+        const platformStr = String(item?.platform || "google").toLowerCase();
+        const key = platformStr.includes("chatgpt") || platformStr.includes("chat_gpt") ? "chatgpt" :
+                    platformStr.includes("perplexity") ? "perplexity" : "google_ai";
+        if (!derivedPlatformMap[key]) derivedPlatformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
+        derivedPlatformMap[key].mentions += itemMentions;
+        derivedPlatformMap[key].aiSearchVol += vol;
+      }
+      totalMentions = derivedMentions;
+      totalAiSearchVolume = derivedAiVol;
+      for (const k of Object.keys(derivedPlatformMap)) {
+        platformMap[k] = derivedPlatformMap[k];
+      }
+      console.log("[AI Intelligence] Derived overview from search_mentions (aggregated_metrics had no result):", {
+        totalMentions,
+        totalAiSearchVolume,
+        platformKeys: Object.keys(platformMap),
+      });
     }
 
     // Get previous period metrics for trends
@@ -5449,6 +5635,110 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 
     const totalContextsCount = howAiMentionsYou.length || searchMentions.length || 0;
 
+    // ===== AI SEARCH VOLUME TREND, TOP PAGES (CONTENT TYPES), PLATFORM DOMINANCE =====
+    let aiSearchVolumeTrend12Months: { year: number; month: number; searchVolume: number }[] = [];
+    let topContentTypes: { contentType: string; exampleUrls: string[]; mentionPercent: number }[] = [];
+    let platformDominance: {
+      chatgpt: { domain: string; label: string; mentions: number; isYou: boolean }[];
+      google_ai: { domain: string; label: string; mentions: number; isYou: boolean }[];
+      perplexity: { domain: string; label: string; mentions: number; isYou: boolean }[];
+    } = { chatgpt: [], google_ai: [], perplexity: [] };
+
+    const [topPagesResult, topDomainsResult, keywordVolumeResult] = await Promise.allSettled([
+      fetchAiTopPages(seedKeyword, locationCode, languageCode, 100),
+      fetchAiTopDomains(seedKeyword, locationCode, languageCode, 50),
+      fetchAiKeywordSearchVolume(targetKeywordStrings.slice(0, 200), locationCode, languageCode),
+    ]);
+
+    if (keywordVolumeResult.status === "fulfilled" && keywordVolumeResult.value.length > 0) {
+      const byMonth = new Map<string, number>();
+      for (const item of keywordVolumeResult.value) {
+        for (const m of item.aiMonthlySearches || []) {
+          const key = `${m.year}-${m.month}`;
+          byMonth.set(key, (byMonth.get(key) || 0) + m.aiSearchVolume);
+        }
+      }
+      aiSearchVolumeTrend12Months = Array.from(byMonth.entries())
+        .map(([key, searchVolume]) => {
+          const [y, m] = key.split("-").map(Number);
+          return { year: y, month: m, searchVolume };
+        })
+        .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+        .slice(-12);
+    }
+
+    if (topPagesResult.status === "fulfilled" && topPagesResult.value.length > 0) {
+      const pages = topPagesResult.value;
+      const totalMentionsPages = pages.reduce((s, p) => s + p.mentions, 0) || 1;
+      const categorize = (url: string): string => {
+        const u = url.toLowerCase();
+        if (/\/health\/|\/benefits\/|healthline|webmd|mayoclinic/.test(u)) return "Health Benefits Articles";
+        if (/\.gov|\/pmc\/|\/research\/|ncbi|pubmed/.test(u)) return "Research/Studies";
+        if (/\/services\/|\/therapy\/|\/treatment\//.test(u)) return "Service Pages";
+        if (/\/locations\/|near-me|near-me\/|\/find\//.test(u)) return "Location Pages";
+        return "Other";
+      };
+      const byType = new Map<string, { mentions: number; urls: string[] }>();
+      for (const p of pages) {
+        const type = categorize(p.pageUrl);
+        if (!byType.has(type)) byType.set(type, { mentions: 0, urls: [] });
+        const entry = byType.get(type)!;
+        entry.mentions += p.mentions;
+        if (entry.urls.length < 3) entry.urls.push(p.pageUrl);
+      }
+      topContentTypes = Array.from(byType.entries())
+        .map(([contentType, { mentions, urls }]) => ({
+          contentType,
+          exampleUrls: urls,
+          mentionPercent: Math.round((mentions / totalMentionsPages) * 100),
+        }))
+        .sort((a, b) => b.mentionPercent - a.mentionPercent);
+    }
+
+    if (topDomainsResult.status === "fulfilled" && topDomainsResult.value.length > 0) {
+      const domains = topDomainsResult.value;
+      const norm = (d: string) => d.toLowerCase().replace(/^www\./, "");
+      const targetNorm = norm(targetDomain);
+      const platformKey = (id: string): "chatgpt" | "google_ai" | "perplexity" | null => {
+        const lower = (id || "").toLowerCase();
+        if (lower.includes("chatgpt")) return "chatgpt";
+        if (lower.includes("google") || lower.includes("ai_overview")) return "google_ai";
+        if (lower.includes("perplexity")) return "perplexity";
+        return null;
+      };
+      for (const platform of ["chatgpt", "google_ai", "perplexity"] as const) {
+        const list: { domain: string; label: string; mentions: number; isYou: boolean }[] = [];
+        const clientMentions = platformMap[platform]?.mentions || 0;
+        if (clientMentions > 0) {
+          list.push({
+            domain: targetDomain,
+            label: clientName,
+            mentions: clientMentions,
+            isYou: true,
+          });
+        }
+        for (const d of domains) {
+          if (norm(d.domain) === targetNorm) continue;
+          const grouping = d.platformBasedGrouping || [];
+          let mentions = 0;
+          for (const g of grouping) {
+            const key = platformKey(g?.grouping_identifier || "");
+            if (key === platform) mentions += Number(g?.total_mentions || 0);
+          }
+          if (mentions > 0) {
+            list.push({
+              domain: d.domain,
+              label: d.domain.replace(/^www\./, "").split(".")[0].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+              mentions,
+              isYou: false,
+            });
+          }
+        }
+        list.sort((a, b) => b.mentions - a.mentions);
+        platformDominance[platform] = list.slice(0, 10);
+      }
+    }
+
     // ===== COMPETITOR ANALYSIS (Real Data) =====
     // Competitor domains already extracted above in parallel section
     // Fetch competitor AI metrics
@@ -5569,6 +5859,9 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       totalContextsCount,
       competitorQueries,
       actionItems,
+      aiSearchVolumeTrend12Months,
+      topContentTypes,
+      platformDominance,
       meta: {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),

@@ -343,6 +343,13 @@ const ClientDashboardPage: React.FC = () => {
     totalContextsCount: number;
     competitorQueries: { query: string; compMentions: number; aiVol: number; priority: string }[];
     actionItems: string[];
+    aiSearchVolumeTrend12Months?: { year: number; month: number; searchVolume: number }[];
+    topContentTypes?: { contentType: string; exampleUrls: string[]; mentionPercent: number }[];
+    platformDominance?: {
+      chatgpt: { domain: string; label: string; mentions: number; isYou: boolean }[];
+      google_ai: { domain: string; label: string; mentions: number; isYou: boolean }[];
+      perplexity: { domain: string; label: string; mentions: number; isYou: boolean }[];
+    };
     meta?: {
       startDate: string;
       endDate: string;
@@ -4257,31 +4264,31 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Visibility Score</p>
                             <p className="mt-1 text-2xl font-bold text-gray-900">
-                              {aiIntelligence.kpis.aiVisibilityScore} <span className="text-base font-normal text-gray-500">/100</span>
+                              {aiIntelligence.kpis?.aiVisibilityScore ?? 0} <span className="text-base font-normal text-gray-500">/100</span>
                             </p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
-                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis.aiVisibilityScoreTrend} pts
+                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0} pts
                             </span>
                           </div>
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total AI Mentions</p>
-                            <p className="mt-1 text-2xl font-bold text-gray-900">{aiIntelligence.kpis.totalAiMentions}</p>
+                            <p className="mt-1 text-2xl font-bold text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
-                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis.totalAiMentionsTrend}
+                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.totalAiMentionsTrend ?? 0}
                             </span>
                           </div>
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Search Volume</p>
                             <p className="mt-1 text-2xl font-bold text-gray-900">
-                              {aiIntelligence.kpis.aiSearchVolume.toLocaleString()}
+                              {(aiIntelligence.kpis?.aiSearchVolume ?? 0).toLocaleString()}
                             </p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
-                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis.aiSearchVolumeTrend.toLocaleString()}
+                              <TrendingUp className="h-3.5 w-3.5" />+{(aiIntelligence.kpis?.aiSearchVolumeTrend ?? 0).toLocaleString()}
                             </span>
                           </div>
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monthly Trend</p>
-                            <p className="mt-1 text-2xl font-bold text-green-600">+{aiIntelligence.kpis.monthlyTrendPercent}%</p>
+                            <p className="mt-1 text-2xl font-bold text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</p>
                             <p className="text-xs text-gray-500 mt-1">vs last month</p>
                           </div>
                         </div>
@@ -4303,7 +4310,7 @@ const ClientDashboardPage: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-100">
-                                {aiIntelligence.platforms.map((p) => (
+                                {(aiIntelligence.platforms ?? []).map((p) => (
                                   <tr key={p.platform} className="hover:bg-gray-50">
                                     <td className="px-6 py-4">
                                       <span className="inline-flex items-center gap-2">
@@ -4311,24 +4318,25 @@ const ClientDashboardPage: React.FC = () => {
                                         <span className="font-medium text-gray-900">{p.platform}</span>
                                       </span>
                                     </td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.mentions}</td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.aiSearchVol.toLocaleString()}</td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.impressions.toLocaleString()}</td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.mentions ?? 0}</td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{(p.aiSearchVol ?? 0).toLocaleString()}</td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{(p.impressions ?? 0).toLocaleString()}</td>
                                     <td className="px-6 py-4">
-                                      {p.trend > 0 && <span className="inline-flex items-center gap-1 text-green-600 font-medium"><TrendingUp className="h-4 w-4" />+{p.trend}%</span>}
-                                      {p.trend === 0 && <span className="text-gray-400">—</span>}
+                                      {(p.trend ?? 0) > 0 && <span className="inline-flex items-center gap-1 text-green-600 font-medium"><TrendingUp className="h-4 w-4" />+{p.trend}%</span>}
+                                      {(p.trend ?? 0) === 0 && <span className="text-gray-400">—</span>}
+                                      {(p.trend ?? 0) < 0 && <span className="inline-flex items-center gap-1 text-red-600 font-medium">{p.trend}%</span>}
                                     </td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.share}%</td>
+                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.share ?? 0}%</td>
                                   </tr>
                                 ))}
                                 <tr className="bg-gray-50 font-semibold">
                                   <td className="px-6 py-4 text-gray-900">TOTAL</td>
-                                  <td className="px-6 py-4 text-gray-900">{aiIntelligence.kpis.totalAiMentions}</td>
-                                  <td className="px-6 py-4 text-gray-900">{aiIntelligence.kpis.aiSearchVolume.toLocaleString()}</td>
+                                  <td className="px-6 py-4 text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</td>
+                                  <td className="px-6 py-4 text-gray-900">{(aiIntelligence.kpis?.aiSearchVolume ?? 0).toLocaleString()}</td>
                                   <td className="px-6 py-4 text-gray-900">
-                                    {aiIntelligence.platforms.reduce((s, p) => s + p.impressions, 0).toLocaleString()}
+                                    {(aiIntelligence.platforms ?? []).reduce((s, p) => s + (p.impressions ?? 0), 0).toLocaleString()}
                                   </td>
-                                  <td className="px-6 py-4 text-green-600">+{aiIntelligence.kpis.monthlyTrendPercent}%</td>
+                                  <td className="px-6 py-4 text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</td>
                                   <td className="px-6 py-4 text-gray-900">100%</td>
                                 </tr>
                               </tbody>
@@ -4348,16 +4356,16 @@ const ClientDashboardPage: React.FC = () => {
                               onClick={() => setShowAllQueriesModal(true)}
                               className="text-sm font-medium text-primary-600 hover:text-primary-700 whitespace-nowrap"
                             >
-                              View All ({aiIntelligence.totalQueriesCount}) <ChevronRight className="h-4 w-4 inline" />
+                              View All ({aiIntelligence.totalQueriesCount ?? 0}) <ChevronRight className="h-4 w-4 inline" />
                             </button>
                           </div>
                           <div className="space-y-3">
-                            {aiIntelligence.queriesWhereYouAppear.slice(0, 5).map((q) => (
+                            {(aiIntelligence.queriesWhereYouAppear ?? []).slice(0, 5).map((q) => (
                               <div key={q.query} className="flex items-center justify-between gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50/50 hover:bg-gray-50">
                                 <div>
                                   <p className="font-semibold text-gray-900">{q.query}</p>
                                   <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
-                                    <span className="inline-flex items-center gap-1"><Search className="h-3.5 w-3.5" />{q.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                                    <span className="inline-flex items-center gap-1"><Search className="h-3.5 w-3.5" />{(q.aiVolPerMo ?? 0).toLocaleString()} AI vol/mo</span>
                                     <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />{q.platforms}</span>
                                   </div>
                                 </div>
@@ -4383,7 +4391,7 @@ const ClientDashboardPage: React.FC = () => {
                             </button>
                           </div>
                           <div className="space-y-4">
-                            {aiIntelligence.competitors.map((c) => (
+                            {(aiIntelligence.competitors ?? []).map((c) => (
                               <div key={c.domain} className="flex items-center gap-4">
                                 <div className="flex items-center gap-2 min-w-0 flex-1">
                                   {c.isLeader && <Trophy className="h-4 w-4 text-amber-500 flex-shrink-0" />}
@@ -4407,14 +4415,16 @@ const ClientDashboardPage: React.FC = () => {
                               </div>
                             ))}
                           </div>
-                          <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
-                            <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <p className="text-sm font-medium text-amber-900">
-                                Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} points behind the leader</strong>. View opportunities to close the gap.
-                              </p>
+                          {(aiIntelligence.gapBehindLeader ?? 0) > 0 && (
+                            <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
+                              <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-sm font-medium text-amber-900">
+                                  Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} points behind the leader</strong>. View opportunities to close the gap.
+                                </p>
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
 
                         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
@@ -4428,16 +4438,16 @@ const ClientDashboardPage: React.FC = () => {
                               onClick={() => setShowAllContextsModal(true)}
                               className="text-sm font-medium text-primary-600 hover:text-primary-700 whitespace-nowrap"
                             >
-                              View All Contexts ({aiIntelligence.totalContextsCount}) <ChevronRight className="h-4 w-4 inline" />
+                              View All Contexts ({aiIntelligence.totalContextsCount ?? 0}) <ChevronRight className="h-4 w-4 inline" />
                             </button>
                           </div>
                           <div className="space-y-4">
-                            {aiIntelligence.howAiMentionsYou.slice(0, 2).map((h, idx) => (
+                            {(aiIntelligence.howAiMentionsYou ?? []).slice(0, 2).map((h, idx) => (
                               <div key={idx} className="p-4 rounded-lg border border-gray-200 bg-gray-50/30">
                                 <p className="font-semibold text-gray-900">&quot;{h.query}&quot;</p>
                                 <div className="flex flex-wrap gap-2 mt-2">
                                   <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">{h.platform}</span>
-                                  <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{h.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                                  <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{(h.aiVolPerMo ?? 0).toLocaleString()} AI vol/mo</span>
                                 </div>
                                 <div className="mt-2 pl-3 border-l-2 border-primary-200 text-sm text-gray-600 italic">{h.snippet}</div>
                                 <a href={h.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm text-primary-600 hover:underline">
@@ -4450,6 +4460,102 @@ const ClientDashboardPage: React.FC = () => {
                             ))}
                           </div>
                         </div>
+
+                        {/* AI Search Volume Trend (12 months) */}
+                        {(aiIntelligence.aiSearchVolumeTrend12Months ?? []).length > 0 && (
+                          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4">AI Search Volume Trend (12 Months)</h3>
+                            <div className="h-64">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart
+                                  data={(aiIntelligence.aiSearchVolumeTrend12Months ?? []).map((d) => ({
+                                    month: `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.month - 1]} ${String(d.year).slice(2)}`,
+                                    volume: d.searchVolume,
+                                  }))}
+                                  margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+                                >
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                  <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#6b7280" />
+                                  <YAxis tick={{ fontSize: 11 }} stroke="#6b7280" tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : String(v))} />
+                                  <Tooltip formatter={(value: number) => [value.toLocaleString(), "AI Search Vol"]} labelFormatter={(l) => l} />
+                                  <Line type="monotone" dataKey="volume" name="AI Search Volume" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Top Content Types Cited in AI */}
+                        {(aiIntelligence.topContentTypes ?? []).length > 0 && (
+                          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                            <div className="px-6 py-4 border-b border-gray-200">
+                              <h3 className="text-lg font-semibold text-gray-900">Top Content Types Cited in AI</h3>
+                              <p className="text-sm text-gray-500 mt-0.5">What types of pages get cited in your niche</p>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Content Type</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Example URLs</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Mention %</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-100">
+                                  {(aiIntelligence.topContentTypes ?? []).map((row) => (
+                                    <tr key={row.contentType} className="hover:bg-gray-50">
+                                      <td className="px-6 py-4 font-medium text-gray-900">{row.contentType}</td>
+                                      <td className="px-6 py-4 text-gray-600 text-xs max-w-md truncate" title={row.exampleUrls.join(", ")}>
+                                        {row.exampleUrls.slice(0, 2).map((u) => u.replace(/^https?:\/\//, "")).join(", ")}
+                                      </td>
+                                      <td className="px-6 py-4 font-medium text-gray-900">{row.mentionPercent}%</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Platform Dominance */}
+                        {aiIntelligence.platformDominance && (
+                          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Platform Dominance</h3>
+                            <p className="text-sm text-gray-500 mb-6">Who leads in mentions per AI platform</p>
+                            <div className="space-y-8">
+                              {[
+                                { key: "chatgpt" as const, label: "ChatGPT", color: "#22c55e" },
+                                { key: "google_ai" as const, label: "Google AI Overview", color: "#3b82f6" },
+                                { key: "perplexity" as const, label: "Perplexity", color: "#8b5cf6" },
+                              ].map(({ key, label, color }) => {
+                                const list = aiIntelligence.platformDominance![key] ?? [];
+                                const maxM = Math.max(...list.map((d) => d.mentions), 1);
+                                return (
+                                  <div key={key}>
+                                    <h4 className="text-sm font-semibold text-gray-700 mb-3">{label}</h4>
+                                    <div className="space-y-2">
+                                      {list.slice(0, 5).map((d) => (
+                                        <div key={d.domain} className="flex items-center gap-3">
+                                          <span className="w-32 text-sm font-medium text-gray-900 truncate" title={d.domain}>
+                                            {d.isYou ? "YOU" : d.label}
+                                          </span>
+                                          <div className="flex-1 h-6 bg-gray-100 rounded overflow-hidden max-w-xs">
+                                            <div
+                                              className="h-full rounded transition-all"
+                                              style={{ width: `${(d.mentions / maxM) * 100}%`, backgroundColor: color }}
+                                            />
+                                          </div>
+                                          <span className="text-sm font-semibold text-gray-700 w-12 text-right">{d.mentions}</span>
+                                        </div>
+                                      ))}
+                                      {list.length === 0 && <p className="text-sm text-gray-400">No data</p>}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
                         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
                           <div className="mb-4">
@@ -4471,11 +4577,11 @@ const ClientDashboardPage: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-100">
-                                {aiIntelligence.competitorQueries.map((q) => (
+                                {(aiIntelligence.competitorQueries ?? []).map((q) => (
                                   <tr key={q.query} className="hover:bg-gray-50">
                                     <td className="px-6 py-4 font-medium text-gray-900">{q.query}</td>
                                     <td className="px-6 py-4 text-gray-700">{q.compMentions}</td>
-                                    <td className="px-6 py-4 text-gray-700">{q.aiVol.toLocaleString()}</td>
+                                    <td className="px-6 py-4 text-gray-700">{(q.aiVol ?? 0).toLocaleString()}</td>
                                     <td className="px-6 py-4">
                                       <span
                                         className={`px-2 py-1 rounded-full text-xs font-semibold text-white ${
@@ -4496,7 +4602,7 @@ const ClientDashboardPage: React.FC = () => {
                               Action Items:
                             </div>
                             <ul className="list-disc list-inside space-y-1 text-sm text-blue-900">
-                              {aiIntelligence.actionItems.map((item, i) => (
+                              {(aiIntelligence.actionItems ?? []).map((item, i) => (
                                 <li key={i}>{item}</li>
                               ))}
                             </ul>
@@ -8339,7 +8445,7 @@ const ClientDashboardPage: React.FC = () => {
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold text-gray-900">All Queries Where You Appear in AI</h2>
-                <p className="text-sm text-gray-500 mt-1">Total: {aiIntelligence.totalQueriesCount} queries</p>
+                <p className="text-sm text-gray-500 mt-1">Total: {aiIntelligence.totalQueriesCount ?? 0} queries</p>
               </div>
               <button
                 onClick={() => setShowAllQueriesModal(false)}
@@ -8350,19 +8456,19 @@ const ClientDashboardPage: React.FC = () => {
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <div className="space-y-3">
-                {aiIntelligence.queriesWhereYouAppear.map((q, idx) => (
+                {(aiIntelligence.queriesWhereYouAppear ?? []).map((q, idx) => (
                   <div key={idx} className="flex items-center justify-between gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50/50 hover:bg-gray-50">
                     <div className="flex-1">
                       <p className="font-semibold text-gray-900">{q.query}</p>
                       <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
-                        <span className="inline-flex items-center gap-1"><Search className="h-3.5 w-3.5" />{q.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                        <span className="inline-flex items-center gap-1"><Search className="h-3.5 w-3.5" />{(q.aiVolPerMo ?? 0).toLocaleString()} AI vol/mo</span>
                         <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />{q.platforms}</span>
                       </div>
                     </div>
-                    <span className="px-3 py-1 rounded-full bg-primary-100 text-primary-700 text-xs font-semibold whitespace-nowrap">{q.mentions} mentions</span>
+                    <span className="px-3 py-1 rounded-full bg-primary-100 text-primary-700 text-xs font-semibold whitespace-nowrap">{q.mentions ?? 0} mentions</span>
                   </div>
                 ))}
-                {aiIntelligence.queriesWhereYouAppear.length === 0 && (
+                {(aiIntelligence.queriesWhereYouAppear ?? []).length === 0 && (
                   <div className="text-center py-12 text-gray-500">
                     <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
                     <p className="text-sm font-medium">No queries found</p>
@@ -8392,7 +8498,7 @@ const ClientDashboardPage: React.FC = () => {
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <div className="space-y-4 mb-6">
-                {aiIntelligence.competitors.map((c) => (
+                {(aiIntelligence.competitors ?? []).map((c) => (
                   <div key={c.domain} className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50/50">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       {c.isLeader && <Trophy className="h-5 w-5 text-amber-500 flex-shrink-0" />}
@@ -8416,26 +8522,28 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 ))}
               </div>
-              <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-4">
-                <div className="flex items-start gap-3">
-                  <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-900 mb-2">
-                      Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} points behind the leader</strong>
-                    </p>
-                    <p className="text-xs text-amber-800">
-                      Focus on increasing your AI mentions and search volume to close the gap with competitors.
-                    </p>
+              {(aiIntelligence.gapBehindLeader ?? 0) > 0 && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-4">
+                  <div className="flex items-start gap-3">
+                    <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-amber-900 mb-2">
+                        Gap Alert: You&apos;re <strong>{aiIntelligence.gapBehindLeader} points behind the leader</strong>
+                      </p>
+                      <p className="text-xs text-amber-800">
+                        Focus on increasing your AI mentions and search volume to close the gap with competitors.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-center gap-2 font-semibold text-gray-900 mb-2">
                   <Lightbulb className="h-4 w-4 text-amber-500" />
                   Action Items:
                 </div>
                 <ul className="list-disc list-inside space-y-1 text-sm text-blue-900">
-                  {aiIntelligence.actionItems.map((item, i) => (
+                  {(aiIntelligence.actionItems ?? []).map((item, i) => (
                     <li key={i}>{item}</li>
                   ))}
                 </ul>
@@ -8452,7 +8560,7 @@ const ClientDashboardPage: React.FC = () => {
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold text-gray-900">All AI Platform Mentions</h2>
-                <p className="text-sm text-gray-500 mt-1">Total: {aiIntelligence.totalContextsCount} contexts</p>
+                <p className="text-sm text-gray-500 mt-1">Total: {aiIntelligence.totalContextsCount ?? 0} contexts</p>
               </div>
               <button
                 onClick={() => setShowAllContextsModal(false)}
@@ -8463,12 +8571,12 @@ const ClientDashboardPage: React.FC = () => {
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <div className="space-y-4">
-                {aiIntelligence.howAiMentionsYou.map((h, idx) => (
+                {(aiIntelligence.howAiMentionsYou ?? []).map((h, idx) => (
                   <div key={idx} className="p-4 rounded-lg border border-gray-200 bg-gray-50/30">
                     <p className="font-semibold text-gray-900">&quot;{h.query}&quot;</p>
                     <div className="flex flex-wrap gap-2 mt-2">
                       <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">{h.platform}</span>
-                      <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{h.aiVolPerMo.toLocaleString()} AI vol/mo</span>
+                      <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{(h.aiVolPerMo ?? 0).toLocaleString()} AI vol/mo</span>
                     </div>
                     <div className="mt-2 pl-3 border-l-2 border-primary-200 text-sm text-gray-600 italic">{h.snippet}</div>
                     <a href={h.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm text-primary-600 hover:underline break-all">
@@ -8479,7 +8587,7 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                   </div>
                 ))}
-                {aiIntelligence.howAiMentionsYou.length === 0 && (
+                {(aiIntelligence.howAiMentionsYou ?? []).length === 0 && (
                   <div className="text-center py-12 text-gray-500">
                     <Sparkles className="h-12 w-12 mx-auto mb-3 text-gray-300" />
                     <p className="text-sm font-medium">No contexts found</p>
