@@ -208,6 +208,16 @@ const normalizeTrendPoints = (trend: any): TrendPoint[] => {
     .filter((point) => Boolean(point.date));
 };
 
+/** Format percent change for "Compare To"; use decimals when |change| < 10% */
+const formatPercentChange = (current: number, previous: number): { text: string; isPositive: boolean } => {
+  if (previous === 0) return { text: current > 0 ? "+100%" : "0%", isPositive: current >= 0 };
+  const pct = ((current - previous) / previous) * 100;
+  const isPositive = pct >= 0;
+  const abs = Math.abs(pct);
+  const text = abs < 10 && abs !== 0 ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : `${pct >= 0 ? "+" : ""}${Math.round(pct)}%`;
+  return { text, isPositive };
+};
+
 const formatDashboardSummary = (payload: any): DashboardSummary => ({
   ...payload,
   totalSessions: parseNumericValue(payload?.totalSessions),
@@ -295,7 +305,14 @@ const ClientDashboardPage: React.FC = () => {
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  const [compareTo, setCompareTo] = useState<"none" | "previous_period" | "previous_year" | "custom">("none");
+  const [compareStartDate, setCompareStartDate] = useState<string>("");
+  const [compareEndDate, setCompareEndDate] = useState<string>("");
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [dashboardSummaryCompare, setDashboardSummaryCompare] = useState<DashboardSummary | null>(null);
+  const [visitorSourcesCompare, setVisitorSourcesCompare] = useState<Array<{ source: string; users: number }>>([]);
+  const [topEventsCompare, setTopEventsCompare] = useState<Array<{ name: string; count: number }>>([]);
+  const [trafficSourcesCompare, setTrafficSourcesCompare] = useState<TrafficSourceSlice[]>([]);
   const [fetchingSummary, setFetchingSummary] = useState(false);
   const [backlinksForChart, setBacklinksForChart] = useState<{
     newRows: BacklinkRow[];
@@ -685,6 +702,59 @@ const ClientDashboardPage: React.FC = () => {
     }
     return url;
   }, [dateRange, customStartDate, customEndDate]);
+
+  // Build comparison period (previous period, previous year, or custom) for "Compare To"
+  const getComparePeriodParams = useCallback((): { start: string; end: string } | null => {
+    if (compareTo === "none") return null;
+    if (compareTo === "custom") {
+      if (!compareStartDate || !compareEndDate) return null;
+      const start = new Date(compareStartDate);
+      const end = new Date(compareEndDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return null;
+      return { start: compareStartDate, end: compareEndDate };
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let periodStart: Date;
+    let periodEnd: Date;
+    if (dateRange === "custom" && customStartDate && customEndDate) {
+      periodStart = new Date(customStartDate);
+      periodEnd = new Date(customEndDate);
+      if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime()) || periodStart > periodEnd) return null;
+    } else {
+      const days = Math.max(1, parseInt(dateRange, 10) || 30);
+      periodEnd = new Date(today);
+      periodStart = new Date(today);
+      periodStart.setDate(periodStart.getDate() - days);
+    }
+    const daysDiff = Math.round((periodEnd.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    let startCompare: Date;
+    let endCompare: Date;
+    if (compareTo === "previous_year") {
+      startCompare = new Date(periodStart);
+      startCompare.setFullYear(startCompare.getFullYear() - 1);
+      endCompare = new Date(periodEnd);
+      endCompare.setFullYear(endCompare.getFullYear() - 1);
+    } else {
+      endCompare = new Date(periodStart);
+      endCompare.setDate(endCompare.getDate() - 1);
+      startCompare = new Date(endCompare);
+      startCompare.setDate(startCompare.getDate() - daysDiff + 1);
+    }
+    return {
+      start: startCompare.toISOString().split("T")[0],
+      end: endCompare.toISOString().split("T")[0],
+    };
+  }, [compareTo, dateRange, customStartDate, customEndDate, compareStartDate, compareEndDate]);
+
+  const buildCompareDashboardUrl = useCallback(
+    (clientId: string): string | null => {
+      const params = getComparePeriodParams();
+      if (!params) return null;
+      return `/seo/dashboard/${clientId}?start=${params.start}&end=${params.end}`;
+    },
+    [getComparePeriodParams]
+  );
 
   const fetchWorkLog = useCallback(async () => {
     if (!clientId) return;
@@ -1594,6 +1664,61 @@ const ClientDashboardPage: React.FC = () => {
     fetchSummary();
   }, [clientId, dateRange, customStartDate, customEndDate, buildDashboardUrl]);
 
+  // Fetch comparison period data when "Compare To" is enabled
+  useEffect(() => {
+    if (!clientId || compareTo === "none") {
+      setDashboardSummaryCompare(null);
+      setVisitorSourcesCompare([]);
+      setTopEventsCompare([]);
+      setTrafficSourcesCompare([]);
+      return;
+    }
+    const params = getComparePeriodParams();
+    if (!params) {
+      setDashboardSummaryCompare(null);
+      setVisitorSourcesCompare([]);
+      setTopEventsCompare([]);
+      setTrafficSourcesCompare([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [dashboardRes, visitorRes, eventsRes, trafficRes] = await Promise.all([
+          api.get(`/seo/dashboard/${clientId}?start=${params.start}&end=${params.end}`),
+          ga4Connected ? api.get(`/seo/visitor-sources/${clientId}`, { params: { ...params, limit: 10 } }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+          ga4Connected ? api.get(`/seo/events/${clientId}/top`, { params: { ...params, limit: 10, type: "keyEvents" } }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+          ga4Connected ? api.get(`/seo/traffic-sources/${clientId}`, { params: { ...params, limit: 100 } }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+        ]);
+        if (cancelled) return;
+        setDashboardSummaryCompare(formatDashboardSummary(dashboardRes.data || {}));
+        setVisitorSourcesCompare(Array.isArray(visitorRes.data) ? visitorRes.data : []);
+        setTopEventsCompare(Array.isArray(eventsRes.data) ? eventsRes.data : []);
+        const trafficPayload = trafficRes.data;
+        const trafficBreakdown = Array.isArray(trafficPayload) ? trafficPayload : Array.isArray(trafficPayload?.breakdown) ? trafficPayload.breakdown : [];
+        const trafficFormatted: TrafficSourceSlice[] = trafficBreakdown
+          .map((item: any) => {
+            const name = typeof item?.name === "string" ? item.name : "Other";
+            const value = Number(item?.value ?? 0);
+            const color = TRAFFIC_SOURCE_COLORS[name] || TRAFFIC_SOURCE_COLORS.Other;
+            return { name, value, color };
+          })
+          .filter((item: TrafficSourceSlice) => Number.isFinite(item.value) && item.value > 0);
+        setTrafficSourcesCompare(trafficFormatted);
+      } catch {
+        if (!cancelled) {
+          setDashboardSummaryCompare(null);
+          setVisitorSourcesCompare([]);
+          setTopEventsCompare([]);
+          setTrafficSourcesCompare([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, compareTo, getComparePeriodParams, ga4Connected]);
+
   const weeklyBacklinkTimeseries = useMemo(() => {
     const weeks = 4;
     const weekStartsOn = 1 as const; // Monday
@@ -2063,8 +2188,15 @@ const ClientDashboardPage: React.FC = () => {
 
     try {
       setTrafficSourcesLoading(true);
+      const params: any = { limit: 100 };
+      if (dateRange === "custom" && customStartDate && customEndDate) {
+        params.start = customStartDate;
+        params.end = customEndDate;
+      } else {
+        params.period = dateRange;
+      }
       const res = await api.get(`/seo/traffic-sources/${clientId}`, {
-        params: { limit: 100 },
+        params,
       });
       const payload = res.data;
       const breakdown = Array.isArray(payload)
@@ -2101,7 +2233,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setTrafficSourcesLoading(false);
     }
-  }, [clientId, ga4Connected, ga4DataRefreshKey]);
+  }, [clientId, dateRange, customStartDate, customEndDate, ga4Connected, ga4DataRefreshKey]);
 
   useEffect(() => {
     fetchTrafficSources();
@@ -2413,9 +2545,17 @@ const ClientDashboardPage: React.FC = () => {
   }, [topPages]);
 
   const resolvedTrafficSources = useMemo<TrafficSourceSlice[]>(() => {
-    // Return actual data only, no sample data fallback
     return trafficSources;
   }, [trafficSources]);
+
+  const trafficSourcesWithCompare = useMemo(() => {
+    if (!trafficSourcesCompare.length) return resolvedTrafficSources.map((t) => ({ ...t, previousValue: undefined as number | undefined }));
+    const byName = new Map(trafficSourcesCompare.map((t) => [t.name, t.value]));
+    return resolvedTrafficSources.map((t) => ({
+      ...t,
+      previousValue: byName.get(t.name),
+    }));
+  }, [resolvedTrafficSources, trafficSourcesCompare]);
 
   const handleConnectGA4 = async () => {
     if (!clientId) return;
@@ -2924,30 +3064,36 @@ const ClientDashboardPage: React.FC = () => {
 
   const newUsersTrendData = useMemo(() => {
     if (!dashboardSummary?.newUsersTrend?.length) return [];
-    return dashboardSummary.newUsersTrend.map((point) => {
+    const compareTrend = dashboardSummaryCompare?.newUsersTrend ?? [];
+    return dashboardSummary.newUsersTrend.map((point, idx) => {
       const dateObj = new Date(point.date);
       const label = Number.isNaN(dateObj.getTime()) ? point.date : format(dateObj, "MMM d");
       const value = Number(point.value ?? 0);
+      const prevValue = idx < compareTrend.length ? Number(compareTrend[idx]?.value ?? 0) : 0;
       return {
         name: label,
         newUsers: Number.isFinite(value) ? value : 0,
+        previousPeriod: Number.isFinite(prevValue) ? prevValue : 0,
       };
     });
-  }, [dashboardSummary?.newUsersTrend]);
+  }, [dashboardSummary?.newUsersTrend, dashboardSummaryCompare?.newUsersTrend]);
 
   const totalUsersTrendData = useMemo(() => {
     const trend = dashboardSummary?.totalUsersTrend ?? dashboardSummary?.activeUsersTrend;
     if (!trend?.length) return [];
-    return trend.map((point) => {
+    const compareTrend = dashboardSummaryCompare?.totalUsersTrend ?? dashboardSummaryCompare?.activeUsersTrend ?? [];
+    return trend.map((point, idx) => {
       const dateObj = new Date(point.date);
       const label = Number.isNaN(dateObj.getTime()) ? point.date : format(dateObj, "MMM d");
       const value = Number(point.value ?? 0);
+      const prevValue = idx < compareTrend.length ? Number(compareTrend[idx]?.value ?? 0) : 0;
       return {
         name: label,
         totalUsers: Number.isFinite(value) ? value : 0,
+        previousPeriod: Number.isFinite(prevValue) ? prevValue : 0,
       };
     });
-  }, [dashboardSummary?.totalUsersTrend, dashboardSummary?.activeUsersTrend]);
+  }, [dashboardSummary?.totalUsersTrend, dashboardSummary?.activeUsersTrend, dashboardSummaryCompare?.totalUsersTrend, dashboardSummaryCompare?.activeUsersTrend]);
 
   if (!clientId) {
     return (
@@ -3371,7 +3517,7 @@ const ClientDashboardPage: React.FC = () => {
             <div className="pb-2 flex flex-col items-end gap-2">
               {activeTab === "dashboard" ? (
                 <>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <select
                       value={dateRange}
                       onChange={(e) => {
@@ -3397,6 +3543,47 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="365">Last year</option>
                       <option value="custom">Custom</option>
                     </select>
+                    <select
+                      value={compareTo}
+                      onChange={(e) => {
+                        const v = e.target.value as "none" | "previous_period" | "previous_year" | "custom";
+                        setCompareTo(v);
+                        if (v === "custom") {
+                          const end = new Date();
+                          const start = new Date();
+                          start.setDate(start.getDate() - 30);
+                          setCompareEndDate(end.toISOString().split("T")[0]);
+                          setCompareStartDate(start.toISOString().split("T")[0]);
+                        }
+                      }}
+                      className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      title="Compare to a previous period"
+                    >
+                      <option value="none">No comparison</option>
+                      <option value="previous_period">Compare to previous period</option>
+                      <option value="previous_year">Compare to previous year</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                    {compareTo === "custom" && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          value={compareStartDate}
+                          onChange={(e) => setCompareStartDate(e.target.value)}
+                          max={compareEndDate || new Date().toISOString().split("T")[0]}
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                        />
+                        <span className="text-gray-500 text-sm">to</span>
+                        <input
+                          type="date"
+                          value={compareEndDate}
+                          onChange={(e) => setCompareEndDate(e.target.value)}
+                          min={compareStartDate || undefined}
+                          max={new Date().toISOString().split("T")[0]}
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                    )}
 
                     {user?.role === "SUPER_ADMIN" && (
                       <button
@@ -3585,6 +3772,18 @@ const ClientDashboardPage: React.FC = () => {
                     <div>
                       <p className="text-sm font-medium text-gray-600">Web Visitors</p>
                       <p className="text-2xl font-bold text-gray-900">{websiteVisitorsDisplay}</p>
+                      {dashboardSummaryCompare != null && (() => {
+                        const curr = Number(dashboardSummary?.totalUsers ?? dashboardSummary?.activeUsers ?? 0);
+                        const prev = Number(dashboardSummaryCompare?.totalUsers ?? dashboardSummaryCompare?.activeUsers ?? 0);
+                        if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
+                        const { text, isPositive } = formatPercentChange(curr, prev);
+                        return (
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                            {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                            {text}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <Users className="h-8 w-8 text-blue-500" />
                   </div>
@@ -3605,6 +3804,18 @@ const ClientDashboardPage: React.FC = () => {
                     <div>
                       <p className="text-sm font-medium text-gray-600">Organic Traffic</p>
                       <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
+                      {dashboardSummaryCompare != null && (() => {
+                        const curr = Number(dashboardSummary?.organicSearchEngagedSessions ?? 0);
+                        const prev = Number(dashboardSummaryCompare?.organicSearchEngagedSessions ?? 0);
+                        if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
+                        const { text, isPositive } = formatPercentChange(curr, prev);
+                        return (
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                            {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                            {text}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <Search className="h-8 w-8 text-green-500" />
                   </div>
@@ -3625,6 +3836,18 @@ const ClientDashboardPage: React.FC = () => {
                     <div>
                       <p className="text-sm font-medium text-gray-600">First Time Visitors</p>
                       <p className="text-2xl font-bold text-gray-900">{firstTimeVisitorsDisplay}</p>
+                      {dashboardSummaryCompare != null && (() => {
+                        const curr = Number(dashboardSummary?.newUsers ?? 0);
+                        const prev = Number(dashboardSummaryCompare?.newUsers ?? 0);
+                        if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
+                        const { text, isPositive } = formatPercentChange(curr, prev);
+                        return (
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                            {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                            {text}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <UserPlus className="h-8 w-8 text-purple-500" />
                   </div>
@@ -3645,6 +3868,18 @@ const ClientDashboardPage: React.FC = () => {
                     <div>
                       <p className="text-sm font-medium text-gray-600">Engaged Visitors</p>
                       <p className="text-2xl font-bold text-gray-900">{engagedVisitorsDisplay}</p>
+                      {dashboardSummaryCompare != null && (() => {
+                        const curr = Number(dashboardSummary?.engagedVisitors ?? 0);
+                        const prev = Number(dashboardSummaryCompare?.engagedVisitors ?? 0);
+                        if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
+                        const { text, isPositive } = formatPercentChange(curr, prev);
+                        return (
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                            {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                            {text}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <Activity className="h-8 w-8 text-orange-500" />
                   </div>
@@ -3677,7 +3912,10 @@ const ClientDashboardPage: React.FC = () => {
                             <YAxis />
                             <Tooltip />
                             <Legend />
-                            <Line type="monotone" dataKey="newUsers" stroke="#3B82F6" strokeWidth={2} />
+                            <Line type="monotone" dataKey="newUsers" stroke="#3B82F6" strokeWidth={2} name="Current" />
+                            {dashboardSummaryCompare != null && (
+                              <Line type="monotone" dataKey="previousPeriod" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 2" name={compareTo === "previous_year" ? "Previous year" : "Previous period"} />
+                            )}
                           </LineChart>
                         </ResponsiveContainer>
                       ) : (
@@ -3705,7 +3943,10 @@ const ClientDashboardPage: React.FC = () => {
                             <YAxis />
                             <Tooltip />
                             <Legend />
-                            <Line type="monotone" dataKey="totalUsers" name="Total Users" stroke="#10B981" strokeWidth={2} />
+                            <Line type="monotone" dataKey="totalUsers" name="Current" stroke="#10B981" strokeWidth={2} />
+                            {dashboardSummaryCompare != null && (
+                              <Line type="monotone" dataKey="previousPeriod" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 2" name={compareTo === "previous_year" ? "Previous year" : "Previous period"} />
+                            )}
                           </LineChart>
                         </ResponsiveContainer>
                       ) : (
@@ -3751,14 +3992,14 @@ const ClientDashboardPage: React.FC = () => {
                       <div className="flex items-center justify-center h-full">
                         <p className="text-sm text-gray-500">Loading traffic sources...</p>
                       </div>
-                    ) : resolvedTrafficSources.length === 0 ? (
+                    ) : trafficSourcesWithCompare.length === 0 ? (
                       <div className="flex items-center justify-center h-full">
                         <p className="text-sm text-gray-500">No traffic sources data available.</p>
                       </div>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          data={resolvedTrafficSources}
+                          data={trafficSourcesWithCompare}
                           layout="vertical"
                           margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
                         >
@@ -3771,20 +4012,46 @@ const ClientDashboardPage: React.FC = () => {
                             tick={{ fontSize: 12 }}
                           />
                           <Tooltip 
-                            formatter={(value: number) => value.toLocaleString()}
                             contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '4px' }}
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const entry = payload[0].payload as TrafficSourceSlice & { previousValue?: number };
+                              const current = entry.value ?? 0;
+                              const previous = entry.previousValue;
+                              const change = previous != null && previous !== 0 ? formatPercentChange(current, previous) : null;
+                              return (
+                                <div className="px-3 py-2 text-sm">
+                                  <p className="font-medium text-gray-900">{entry.name}</p>
+                                  <p className="text-gray-700">Current: {current.toLocaleString()}</p>
+                                  {previous != null && <p className="text-gray-600">Previous: {previous.toLocaleString()}</p>}
+                                  {change != null && (
+                                    <p className={`font-medium ${change.isPositive ? "text-green-600" : "text-red-600"}`}>{change.text}</p>
+                                  )}
+                                </div>
+                              );
+                            }}
                           />
                           <Bar 
                             dataKey="value" 
                             radius={[0, 4, 4, 0]}
+                            name="Current"
                           >
-                            {resolvedTrafficSources.map((entry, index) => (
+                            {trafficSourcesWithCompare.map((entry, index) => (
                               <Cell
                                 key={`traffic-source-${entry.name}-${index}`}
                                 fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
                               />
                             ))}
                           </Bar>
+                          {trafficSourcesCompare.length > 0 && (
+                            <Bar 
+                              dataKey="previousValue" 
+                              radius={[0, 4, 4, 0]}
+                              name={compareTo === "previous_year" ? "Previous year" : "Previous period"}
+                              fill="#94a3b8"
+                              fillOpacity={0.8}
+                            />
+                          )}
                         </BarChart>
                       </ResponsiveContainer>
                     )}
@@ -3861,12 +4128,24 @@ const ClientDashboardPage: React.FC = () => {
                           : "Connect GA4 to view visitor sources data."}
                       </div>
                     ) : (
-                      visitorSources.map((source, index) => (
-                        <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                          <p className="font-medium text-gray-900">{source.source}</p>
-                          <p className="text-sm text-gray-500">{source.users.toLocaleString()} users</p>
-                        </div>
-                      ))
+                      visitorSources.map((source, index) => {
+                        const prev = visitorSourcesCompare.find((c) => String(c.source).toLowerCase() === String(source.source).toLowerCase());
+                        const change = prev != null && prev.users !== 0 ? formatPercentChange(source.users, prev.users) : null;
+                        return (
+                          <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <p className="font-medium text-gray-900">{source.source}</p>
+                            <div className="text-right">
+                              <p className="text-sm text-gray-900">{source.users.toLocaleString()} users</p>
+                              {change != null && (
+                                <p className={`text-xs font-medium flex items-center justify-end gap-0.5 ${change.isPositive ? "text-green-600" : "text-red-600"}`}>
+                                  {change.isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                                  {change.text}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -3892,12 +4171,24 @@ const ClientDashboardPage: React.FC = () => {
                         : "Connect GA4 to view key events data."}
                     </div>
                   ) : (
-                    topEvents.map((event, index) => (
-                      <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <p className="font-medium text-gray-900">{event.name}</p>
-                        <p className="text-sm text-gray-500">{event.count.toLocaleString()}</p>
-                      </div>
-                    ))
+                    topEvents.map((event, index) => {
+                      const prev = topEventsCompare.find((c) => String(c.name).toLowerCase() === String(event.name).toLowerCase());
+                      const change = prev != null && prev.count !== 0 ? formatPercentChange(event.count, prev.count) : null;
+                      return (
+                        <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <p className="font-medium text-gray-900">{event.name}</p>
+                          <div className="text-right">
+                            <p className="text-sm text-gray-900">{event.count.toLocaleString()}</p>
+                            {change != null && (
+                              <p className={`text-xs font-medium flex items-center justify-end gap-0.5 ${change.isPositive ? "text-green-600" : "text-red-600"}`}>
+                                {change.isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                                {change.text}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -7853,14 +8144,14 @@ const ClientDashboardPage: React.FC = () => {
                         <div className="flex items-center justify-center h-full">
                           <p className="text-sm text-gray-500">Loading traffic sources...</p>
                         </div>
-                      ) : resolvedTrafficSources.length === 0 ? (
+                      ) : trafficSourcesWithCompare.length === 0 ? (
                         <div className="flex items-center justify-center h-full">
                           <p className="text-sm text-gray-500">No traffic sources data available.</p>
                         </div>
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
-                            data={resolvedTrafficSources}
+                            data={trafficSourcesWithCompare}
                             layout="vertical"
                             margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
                           >
@@ -7873,20 +8164,46 @@ const ClientDashboardPage: React.FC = () => {
                               tick={{ fontSize: 12 }}
                             />
                             <Tooltip 
-                              formatter={(value: number) => value.toLocaleString()}
                               contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '4px' }}
+                              content={({ active, payload }) => {
+                                if (!active || !payload?.length) return null;
+                                const entry = payload[0].payload as TrafficSourceSlice & { previousValue?: number };
+                                const current = entry.value ?? 0;
+                                const previous = entry.previousValue;
+                                const change = previous != null && previous !== 0 ? formatPercentChange(current, previous) : null;
+                                return (
+                                  <div className="px-3 py-2 text-sm">
+                                    <p className="font-medium text-gray-900">{entry.name}</p>
+                                    <p className="text-gray-700">Current: {current.toLocaleString()}</p>
+                                    {previous != null && <p className="text-gray-600">Previous: {previous.toLocaleString()}</p>}
+                                    {change != null && (
+                                      <p className={`font-medium ${change.isPositive ? "text-green-600" : "text-red-600"}`}>{change.text}</p>
+                                    )}
+                                  </div>
+                                );
+                              }}
                             />
                             <Bar 
                               dataKey="value" 
                               radius={[0, 4, 4, 0]}
+                              name="Current"
                             >
-                              {resolvedTrafficSources.map((entry, index) => (
+                              {trafficSourcesWithCompare.map((entry, index) => (
                                 <Cell
                                   key={`traffic-source-${entry.name}-${index}`}
                                   fill={entry.color || TRAFFIC_SOURCE_COLORS.Other}
                                 />
                               ))}
                             </Bar>
+                            {trafficSourcesCompare.length > 0 && (
+                              <Bar 
+                                dataKey="previousValue" 
+                                radius={[0, 4, 4, 0]}
+                                name={compareTo === "previous_year" ? "Previous year" : "Previous period"}
+                                fill="#94a3b8"
+                                fillOpacity={0.8}
+                              />
+                            )}
                           </BarChart>
                         </ResponsiveContainer>
                       )}
