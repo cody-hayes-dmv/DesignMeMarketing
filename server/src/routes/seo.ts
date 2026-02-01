@@ -1376,15 +1376,14 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    // Optionally ensure we have a recent report without requiring the user to hit a manual refresh.
-    // This does NOT call DataForSEO directly; it regenerates from existing DB + GA4 (if connected).
+    // Optionally refresh an *existing* report when stale. Do NOT auto-create reports for new clients.
     if (ensureFresh) {
       const existing = await prisma.seoReport.findFirst({
         where: { clientId },
         select: { updatedAt: true },
       });
 
-      if (!isFresh(existing?.updatedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+      if (existing && !isFresh(existing.updatedAt, DATAFORSEO_REFRESH_TTL_MS)) {
         await dedupeInFlight(`report-autogen:${clientId}:${requestedPeriod}`, async () => {
           const { autoGenerateReport } = await import("../lib/reportScheduler.js");
           await autoGenerateReport(clientId, requestedPeriod);
@@ -8884,6 +8883,213 @@ router.get("/keyword-research", authenticateToken, async (req, res) => {
   } catch (error: any) {
     console.error("Keyword research fetch error:", error);
     res.status(500).json({ message: "Failed to fetch keyword research suggestions" });
+  }
+});
+
+// Keyword detail for one keyword (Volume, KD, Global Volume, Intent, Trend, CPC, Competition) — Keyword Hub detail cards
+router.get("/keyword-detail", authenticateToken, async (req, res) => {
+  try {
+    const { keyword, locationCode = "2840", languageCode = "en" } = req.query;
+    if (!keyword || typeof keyword !== "string" || keyword.trim().length === 0) {
+      return res.status(400).json({ message: "Keyword is required" });
+    }
+    const parsedLocationCode = Number(locationCode) || 2840;
+    const parsedLanguageCode = typeof languageCode === "string" ? languageCode : "en";
+
+    const { raw, item } = await fetchKeywordOverviewFromDataForSEO({
+      keywords: [keyword.trim()],
+      locationCode: parsedLocationCode,
+      languageCode: parsedLanguageCode,
+      includeSerpInfo: true,
+      includeClickstreamData: false,
+    });
+
+    if (!item) {
+      return res.status(200).json({ keyword: keyword.trim(), found: false, detail: null });
+    }
+
+    const keywordInfo = item?.keyword_info || item?.keyword_data?.keyword_info || {};
+    const keywordProps = item?.keyword_properties || item?.keyword_data?.keyword_properties || {};
+    const monthlySearches = Array.isArray(keywordInfo?.monthly_searches) ? keywordInfo.monthly_searches : [];
+    const searchVolume = Number(keywordInfo?.search_volume ?? 0);
+    const keywordDifficulty = Number(keywordProps?.keyword_difficulty ?? keywordInfo?.competition_index != null ? Math.round(Number(keywordInfo.competition_index) * 100) : 0);
+    const cpc = Number(keywordInfo?.cpc ?? keywordInfo?.cpc_v2 ?? 0);
+    const competition = Number(keywordInfo?.competition ?? 0);
+    const competitionLevel = (keywordInfo?.competition_level || "").toString().toLowerCase();
+    const intent = (keywordProps?.keyword_intent || keywordInfo?.keyword_intent || "commercial").toString().toLowerCase();
+
+    // Country breakdown if available (keyword_info.country_data or similar)
+    const countryData = item?.keyword_info?.country_data || item?.keyword_data?.keyword_info?.country_data || [];
+    const countryBreakdown = Array.isArray(countryData)
+      ? countryData.slice(0, 10).map((c: any) => ({
+          countryCode: (c?.country_code || "").toUpperCase(),
+          searchVolume: Number(c?.search_volume ?? 0),
+        }))
+      : [];
+    const hasCountryBreakdown = countryBreakdown.length > 0;
+    const globalVolume = hasCountryBreakdown
+      ? countryBreakdown.reduce((sum: number, c: { searchVolume: number }) => sum + c.searchVolume, 0)
+      : searchVolume;
+
+    const detailData = {
+      keyword: item?.keyword || keyword.trim(),
+      searchVolume,
+      globalVolume,
+      countryBreakdown: hasCountryBreakdown ? countryBreakdown : [{ countryCode: "US", searchVolume }],
+      keywordDifficulty: Math.max(0, Math.min(100, Math.round(keywordDifficulty))),
+      difficultyLabel: keywordDifficulty >= 80 ? "Very hard" : keywordDifficulty >= 50 ? "Hard" : keywordDifficulty >= 25 ? "Medium" : "Easy",
+      cpc,
+      competition,
+      competitionLevel,
+      intent: intent === "informational" ? "Informational" : intent === "transactional" ? "Transactional" : "Commercial",
+      monthlySearches: monthlySearches.map((m: any) => ({
+        year: Number(m?.year ?? 0),
+        month: Number(m?.month ?? 0),
+        searchVolume: Number(m?.search_volume ?? 0),
+      })),
+    };
+
+    return res.json({ keyword: keyword.trim(), found: true, detail: detailData });
+  } catch (error: any) {
+    console.error("Keyword detail fetch error:", error);
+    return res.status(500).json({ message: "Failed to fetch keyword detail" });
+  }
+});
+
+// SERP analysis for a keyword — ranking URLs table (Keyword Hub SERP Analysis)
+router.get("/serp-analysis", authenticateToken, async (req, res) => {
+  try {
+    const { keyword, locationCode = "2840", languageCode = "en", offset = "0" } = req.query;
+    if (!keyword || typeof keyword !== "string" || keyword.trim().length === 0) {
+      return res.status(400).json({ message: "Keyword is required" });
+    }
+    const parsedLocationCode = Number(locationCode) || 2840;
+    const parsedLanguageCode = typeof languageCode === "string" ? languageCode : "en";
+    const parsedOffset = Math.max(0, Number(offset) || 0);
+
+    const base64Auth = process.env.DATAFORSEO_BASE64;
+    if (!base64Auth) {
+      return res.status(503).json({ message: "DataForSEO credentials not configured" });
+    }
+
+    const requestBody = [{
+      keyword: keyword.trim(),
+      language_code: parsedLanguageCode,
+      location_code: parsedLocationCode,
+      device: "desktop",
+      os: "windows",
+      depth: Math.min(200, Math.max(10, parsedOffset + 10)),
+    }];
+
+    const response = await fetch("https://api.dataforseo.com/v3/serp/google/organic/live/advanced", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${base64Auth}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const result = data?.tasks?.[0]?.result?.[0];
+    const items = result?.items || [];
+    const organic = items.filter((i: any) => i.type === "organic");
+    const totalCount = Number(result?.total_count ?? 0);
+    const serpFeatures: string[] = [];
+    const featureMap: Record<string, string> = {
+      organic: "organic",
+      video: "video",
+      images: "images",
+      local_pack: "local_pack",
+      featured_snippet: "featured_snippet",
+      people_also_ask: "people_also_ask",
+      related_searches: "related_searches",
+    };
+    items.forEach((i: any) => {
+      const name = featureMap[i.type] || i.type;
+      if (name && !serpFeatures.includes(name)) serpFeatures.push(name);
+    });
+
+    // Extract feature details for expandable sections (Local pack, People also ask, Things to know)
+    const localPackItems: { title?: string; link?: string; domain?: string }[] = [];
+    const peopleAlsoAskItems: { title?: string; snippet?: string }[] = [];
+    const thingsToKnowItems: { title?: string; snippet?: string }[] = [];
+    items.forEach((i: any) => {
+      if (i.type === "local_pack") {
+        const places = i?.items || [];
+        places.forEach((p: any) => {
+          localPackItems.push({
+            title: p?.title || p?.name,
+            link: p?.url || p?.link,
+            domain: p?.domain,
+          });
+        });
+      }
+      if (i.type === "people_also_ask") {
+        const expanded = i?.expanded_element || i?.items || [];
+        const list = Array.isArray(expanded) ? expanded : [expanded];
+        list.forEach((e: any) => {
+          peopleAlsoAskItems.push({
+            title: e?.title || e?.question,
+            snippet: e?.description || e?.snippet || e?.answer,
+          });
+        });
+      }
+      if (i.type === "featured_snippet" || (i.type === "knowledge_graph" && i?.items)) {
+        const list = i?.items ? (Array.isArray(i.items) ? i.items : [i.items]) : [];
+        list.forEach((e: any) => {
+          thingsToKnowItems.push({
+            title: e?.title || e?.name,
+            snippet: e?.description || e?.snippet,
+          });
+        });
+      }
+    });
+
+    const rows = organic.slice(parsedOffset, parsedOffset + 10).map((item: any, idx: number) => {
+      const rank = parsedOffset + idx + 1;
+      const url = item?.url || "";
+      let domain = (item?.domain || "").replace(/^www\./, "");
+      if (!domain && url) {
+        try {
+          domain = new URL(url).hostname.replace(/^www\./, "");
+        } catch {
+          domain = "";
+        }
+      }
+      return {
+        position: Number(item?.rank_absolute ?? item?.rank_group ?? rank),
+        url,
+        domain,
+        title: item?.title || "",
+        pageAs: null,
+        refDomains: null,
+        backlinks: null,
+        searchTraffic: null,
+        urlKeywords: null,
+      };
+    });
+
+    return res.json({
+      keyword: keyword.trim(),
+      totalCount,
+      serpFeatures,
+      serpFeatureDetails: {
+        local_pack: localPackItems,
+        people_also_ask: peopleAlsoAskItems,
+        things_to_know: thingsToKnowItems,
+      },
+      items: rows,
+      offset: parsedOffset,
+    });
+  } catch (error: any) {
+    console.error("SERP analysis fetch error:", error);
+    return res.status(500).json({ message: "Failed to fetch SERP analysis" });
   }
 });
 

@@ -219,31 +219,34 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     return current - previous;
   };
 
-  const getSERPFeaturesIcons = (serpItemTypes: string[] | null) => {
+  const getSERPFeaturesIcons = (serpItemTypes: string[] | null, isRanking: boolean) => {
     if (!serpItemTypes || serpItemTypes.length === 0) return null;
     const items = toStringArray(serpItemTypes);
     if (items.length === 0) return null;
-    
-    const featureIcons: Record<string, { icon: string; color: string; label: string }> = {
-      local_pack: { icon: "📍", color: "text-blue-600", label: "Google Maps" },
-      featured_snippet: { icon: "📝", color: "text-green-600", label: "Featured Snippet" },
-      video: { icon: "▶️", color: "text-red-600", label: "Video" },
-      images: { icon: "🖼️", color: "text-purple-600", label: "Google Images" },
-      people_also_ask: { icon: "❓", color: "text-yellow-600", label: "People Also Ask" },
-      related_searches: { icon: "🔍", color: "text-gray-600", label: "Related Searches" },
-      knowledge_graph: { icon: "📊", color: "text-indigo-600", label: "Knowledge Graph" },
-      shopping: { icon: "🛒", color: "text-pink-600", label: "Shopping" },
-      organic: { icon: "🔗", color: "text-gray-600", label: "Organic" },
+
+    // Grey when not ranking (SERP features exist but client isn't in them); green when ranking
+    const colorClass = isRanking ? "text-green-600" : "text-gray-400";
+
+    const featureIcons: Record<string, { icon: string; label: string }> = {
+      local_pack: { icon: "📍", label: "Google Maps" },
+      featured_snippet: { icon: "📝", label: "Featured Snippet" },
+      video: { icon: "▶️", label: "Video" },
+      images: { icon: "🖼️", label: "Google Images" },
+      people_also_ask: { icon: "❓", label: "People Also Ask" },
+      related_searches: { icon: "🔍", label: "Related Searches" },
+      knowledge_graph: { icon: "📊", label: "Knowledge Graph" },
+      shopping: { icon: "🛒", label: "Shopping" },
+      organic: { icon: "🔗", label: "Organic" },
     };
-    
+
     return items
-      .filter(type => featureIcons[type])
+      .filter((type) => featureIcons[type])
       .slice(0, 3) // Show max 3 icons
-      .map(type => (
-        <span 
-          key={type} 
-          className={`inline-block ${featureIcons[type].color} cursor-help`} 
-          title={featureIcons[type].label}
+      .map((type) => (
+        <span
+          key={type}
+          className={`inline-block ${colorClass} cursor-help`}
+          title={isRanking ? `${featureIcons[type].label} (ranking)` : `${featureIcons[type].label} (not ranking)`}
         >
           {featureIcons[type].icon}
         </span>
@@ -511,7 +514,10 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-1">
-                          {getSERPFeaturesIcons(keyword.serpItemTypes) || <span className="text-sm text-gray-400" title="No SERP features">—</span>}
+                          {getSERPFeaturesIcons(
+                            keyword.serpItemTypes,
+                            keyword.googlePosition != null
+                          ) || <span className="text-sm text-gray-400" title="No SERP features">—</span>}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">

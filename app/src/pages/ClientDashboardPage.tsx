@@ -482,6 +482,9 @@ const ClientDashboardPage: React.FC = () => {
   const [clientReportRecipients, setClientReportRecipients] = useState("");
   const [clientReportEmailSubject, setClientReportEmailSubject] = useState("");
   const [clientReportSubmitting, setClientReportSubmitting] = useState(false);
+  // Local form state for Create Report modal so Recipients/Subject update correctly while typing
+  const [modalRecipients, setModalRecipients] = useState("");
+  const [modalEmailSubject, setModalEmailSubject] = useState("");
 
   // Work log (tasks linked to this client)
   const [workLogTasks, setWorkLogTasks] = useState<WorkLogTask[]>([]);
@@ -2143,10 +2146,11 @@ const ClientDashboardPage: React.FC = () => {
         type: period.charAt(0).toUpperCase() + period.slice(1),
         lastGenerated: dateStr,
         status: serverReport.status === "sent" ? "Sent" : serverReport.status === "draft" ? "Draft" : "Scheduled",
-        recipients: Array.isArray(serverReport.recipients) && serverReport.recipients.length > 0
-          ? serverReport.recipients
-          : Array.isArray(serverReport.scheduleRecipients)
+        // Prefer schedule recipients (what user sets in Create Report & Schedule modal) over report.recipients
+        recipients: Array.isArray(serverReport.scheduleRecipients) && serverReport.scheduleRecipients.length > 0
           ? serverReport.scheduleRecipients
+          : Array.isArray(serverReport.recipients) && serverReport.recipients.length > 0
+          ? serverReport.recipients
           : [],
         metrics: {
           keywords: Number(serverReport.totalClicks ?? 0),
@@ -2168,13 +2172,29 @@ const ClientDashboardPage: React.FC = () => {
     setShowClientReportModal(true);
   }, [clientId]);
 
+  // When Create Report modal opens, initialize Recipients and Email Subject from existing schedule or previous input (only on open, not when serverReport updates)
+  const prevShowClientReportModal = useRef(false);
+  useEffect(() => {
+    const justOpened = showClientReportModal && !prevShowClientReportModal.current;
+    prevShowClientReportModal.current = showClientReportModal;
+    if (!justOpened) return;
+    const fromSchedule = Array.isArray(serverReport?.scheduleRecipients) && serverReport.scheduleRecipients.length > 0
+      ? serverReport.scheduleRecipients.join(", ")
+      : "";
+    const fromReport = Array.isArray(serverReport?.recipients) && serverReport.recipients.length > 0
+      ? serverReport.recipients.join(", ")
+      : "";
+    setModalRecipients(fromSchedule || fromReport || clientReportRecipients || "");
+    setModalEmailSubject(serverReport?.scheduleEmailSubject ?? clientReportEmailSubject ?? "");
+  }, [showClientReportModal, serverReport?.scheduleRecipients, serverReport?.recipients, serverReport?.scheduleEmailSubject, clientReportRecipients, clientReportEmailSubject]);
+
   const handleSubmitClientReport = useCallback(async () => {
     if (!clientId) {
       toast.error("Client ID is missing");
       return;
     }
 
-    const recipientsList = clientReportRecipients
+    const recipientsList = modalRecipients
       .split(",")
       .map((email) => email.trim())
       .filter(Boolean);
@@ -2202,25 +2222,32 @@ const ClientDashboardPage: React.FC = () => {
         dayOfMonth: clientReportFrequency === "monthly" ? clientReportDayOfMonth : undefined,
         timeOfDay: clientReportTimeOfDay,
         recipients: recipientsList,
-        emailSubject: clientReportEmailSubject || undefined,
+        emailSubject: modalEmailSubject || undefined,
         isActive: true,
-      });
+      }, { timeout: 15000 });
 
-      // 2) Generate initial report immediately using the chosen frequency as period
+      // 2) Generate initial report immediately (GA4 + DataForSEO can take 30–60s)
       await api.post(`/seo/reports/${clientId}/generate`, {
         period: clientReportFrequency,
-      });
+      }, { timeout: 90000 });
 
       toast.success("Report created and schedule saved successfully");
 
-      // Reload report data from server so UI reflects DB state
-      await loadReport();
+      // Sync parent state so next open shows saved values
+      setClientReportRecipients(modalRecipients);
+      setClientReportEmailSubject(modalEmailSubject);
+
+      // Reload report data from server so table Recipients column matches what was just saved
+      await loadReport(false);
 
       // Close modal
       setShowClientReportModal(false);
     } catch (error: any) {
       console.error("Failed to create report and schedule", error);
-      const msg = error?.response?.data?.message || "Failed to create report and schedule";
+      const isTimeout = error?.code === "ECONNABORTED" || error?.message?.toLowerCase().includes("timeout");
+      const msg = isTimeout
+        ? "Request timed out. Report generation can take up to a minute. Please try again."
+        : (error?.response?.data?.message || "Failed to create report and schedule");
       toast.error(msg);
     } finally {
       setClientReportSubmitting(false);
@@ -2229,11 +2256,11 @@ const ClientDashboardPage: React.FC = () => {
     clientId,
     clientReportDayOfMonth,
     clientReportDayOfWeek,
-    clientReportEmailSubject,
     clientReportFrequency,
-    clientReportRecipients,
     clientReportTimeOfDay,
     loadReport,
+    modalEmailSubject,
+    modalRecipients,
   ]);
 
   const handleViewReport = (report: ClientReport) => {
@@ -6954,16 +6981,14 @@ const ClientDashboardPage: React.FC = () => {
                               >
                                 <Share2 className="h-4 w-4" />
                               </button>
-                              {singleReportForClient.status !== "Sent" && (
-                                <button
-                                  onClick={handleSendReport}
-                                  disabled={sendingReport}
-                                  className="text-secondary-600 hover:text-secondary-800 inline-flex items-center justify-center mr-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                                  title="Send report via email"
-                                >
-                                  <Send className="h-4 w-4" />
-                                </button>
-                              )}
+                              <button
+                                onClick={handleSendReport}
+                                disabled={sendingReport}
+                                className="text-secondary-600 hover:text-secondary-800 inline-flex items-center justify-center mr-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                                title="Send report via email"
+                              >
+                                <Send className="h-4 w-4" />
+                              </button>
                               <button
                                 onClick={handleDeleteReport}
                                 className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
@@ -7057,8 +7082,8 @@ const ClientDashboardPage: React.FC = () => {
                     </label>
                     <input
                       type="text"
-                      value={clientReportRecipients}
-                      onChange={(e) => setClientReportRecipients(e.target.value)}
+                      value={modalRecipients}
+                      onChange={(e) => setModalRecipients(e.target.value)}
                       placeholder="email1@example.com, email2@example.com"
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
@@ -7067,8 +7092,8 @@ const ClientDashboardPage: React.FC = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Email Subject (optional)</label>
                     <input
                       type="text"
-                      value={clientReportEmailSubject}
-                      onChange={(e) => setClientReportEmailSubject(e.target.value)}
+                      value={modalEmailSubject}
+                      onChange={(e) => setModalEmailSubject(e.target.value)}
                       placeholder="Custom email subject"
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />

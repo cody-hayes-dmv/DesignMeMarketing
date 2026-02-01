@@ -862,11 +862,12 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
     where: { clientId }
   });
 
-  // Check if there's an active schedule for this client
+  // Link report to the schedule that matches this period (weekly/biweekly/monthly) so recipients display correctly
   const activeSchedule = await prisma.reportSchedule.findFirst({
     where: {
       clientId,
-      isActive: true
+      isActive: true,
+      frequency: period as "weekly" | "biweekly" | "monthly"
     }
   });
 
