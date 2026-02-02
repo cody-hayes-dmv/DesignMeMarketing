@@ -707,13 +707,16 @@ async function fetchKeywordSuggestionsFromDataForSEO(
     );
   }
 
+  // Request extra from API so that after deduplication we can return exactly `limit` items.
+  const requestLimit = Math.min(Math.max(limit + 20, limit * 2), 100);
+
   const requestBody = [
     {
       keyword: seedKeyword,
       location_code: locationCode,
       language_code: languageCode,
       include_serp_info: false,
-      limit,
+      limit: requestLimit,
     },
   ];
 
@@ -740,7 +743,7 @@ async function fetchKeywordSuggestionsFromDataForSEO(
       ? data.tasks[0].result[0].items
       : [];
 
-  return items.map((item) => {
+  const mapped = items.map((item) => {
     const keywordData = item?.keyword_data || {};
     const keywordInfo = keywordData?.keyword_info || item?.keyword_info || {};
     // DataForSEO Labs related keywords returns keyword difficulty under keyword_properties.
@@ -771,6 +774,81 @@ async function fetchKeywordSuggestionsFromDataForSEO(
       seed: seedKeyword,
     };
   });
+
+  // Deduplicate by keyword (API may return same keyword from different depths); then return exactly `limit`.
+  const seen = new Set<string>();
+  const deduped = mapped.filter((r) => {
+    const key = (r.keyword || "").toLowerCase().trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return deduped.slice(0, limit);
+}
+
+/** DataForSEO keyword_ideas with question filter — returns question-style keywords for Keyword Ideas. */
+async function fetchQuestionKeywordsFromDataForSEO(
+  seedKeyword: string,
+  limit: number = 20,
+  locationCode: number = 2840,
+  languageCode: string = "en"
+): Promise<{ keyword: string; searchVolume: number; cpc: number | null; competition: number | null; competitionLevel: string | null; difficulty: number | null; seed: string }[]> {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) return [];
+
+  // Question words: fetch with "how" and "what" filters, then merge and dedupe
+  const questionFilters = ["%how%", "%what%"];
+  const allItems: { keyword: string; searchVolume: number; cpc: number | null; competition: number | null; competitionLevel: string | null; difficulty: number | null; seed: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const filterVal of questionFilters) {
+    try {
+      const requestBody = [
+        {
+          keywords: [seedKeyword],
+          location_code: locationCode,
+          language_code: languageCode,
+          include_serp_info: false,
+          include_clickstream_data: false,
+          limit: Math.ceil(limit / 2) + 5,
+          filters: [["keyword", "like", filterVal]],
+        },
+      ];
+      const response = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_ideas/live", {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${base64Auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const items: any[] =
+        data?.tasks?.[0]?.result?.[0]?.items && Array.isArray(data.tasks[0].result[0].items) ? data.tasks[0].result[0].items : [];
+      for (const item of items) {
+        const kw = (item?.keyword || "").trim().toLowerCase();
+        if (!kw || seen.has(kw)) continue;
+        seen.add(kw);
+        const keywordInfo = item?.keyword_info || {};
+        const keywordProps = item?.keyword_properties || {};
+        const difficulty = Number(keywordProps?.keyword_difficulty ?? null);
+        allItems.push({
+          keyword: item?.keyword || "",
+          searchVolume: Number(keywordInfo?.search_volume ?? 0),
+          cpc: keywordInfo?.cpc != null ? Number(keywordInfo.cpc) : null,
+          competition: keywordInfo?.competition != null ? Number(keywordInfo.competition) : null,
+          competitionLevel: keywordInfo?.competition_level || null,
+          difficulty: Number.isFinite(difficulty) ? difficulty : null,
+          seed: seedKeyword,
+        });
+      }
+    } catch {
+      // ignore per-filter errors
+    }
+  }
+
+  return allItems.slice(0, limit);
 }
 
 async function fetchBacklinkTimeseriesSummaryFromDataForSEO(
@@ -8871,15 +8949,28 @@ router.get("/keyword-research", authenticateToken, async (req, res) => {
     const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
     const parsedLocationCode = Number(locationCode) || 2840;
     const parsedLanguageCode = typeof languageCode === "string" ? languageCode : "en";
+    const seed = keyword.trim();
 
-    const suggestions = await fetchKeywordSuggestionsFromDataForSEO(
-      keyword.trim(),
-      parsedLimit,
-      parsedLocationCode,
-      parsedLanguageCode
-    );
+    // All Keyword Ideas data from DataForSEO: suggestions + question keywords in parallel
+    const [suggestions, questions] = await Promise.all([
+      fetchKeywordSuggestionsFromDataForSEO(seed, parsedLimit, parsedLocationCode, parsedLanguageCode),
+      fetchQuestionKeywordsFromDataForSEO(seed, 20, parsedLocationCode, parsedLanguageCode),
+    ]);
 
-    res.json(suggestions);
+    // Variations = non-question keywords from DataForSEO related_keywords (same source as suggestions)
+    const isQuestion = (kw: string) =>
+      kw.includes("?") || /^(who|what|where|when|why|how|can|is|are|do|does)\s/i.test(kw);
+    const variations = suggestions.filter((r) => !isQuestion(r.keyword));
+
+    // Strategy = pillar (seed) + items from DataForSEO related_keywords
+    const strategy = { pillar: seed, items: suggestions };
+
+    res.json({
+      suggestions,
+      variations,
+      questions,
+      strategy,
+    });
   } catch (error: any) {
     console.error("Keyword research fetch error:", error);
     res.status(500).json({ message: "Failed to fetch keyword research suggestions" });
@@ -8908,6 +8999,7 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
       return res.status(200).json({ keyword: keyword.trim(), found: false, detail: null });
     }
 
+    // All fields below from DataForSEO keyword_overview/live response (keyword_info, keyword_properties, search_intent_info)
     const keywordInfo = item?.keyword_info || item?.keyword_data?.keyword_info || {};
     const keywordProps = item?.keyword_properties || item?.keyword_data?.keyword_properties || {};
     const monthlySearches = Array.isArray(keywordInfo?.monthly_searches) ? keywordInfo.monthly_searches : [];
@@ -8916,7 +9008,9 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
     const cpc = Number(keywordInfo?.cpc ?? keywordInfo?.cpc_v2 ?? 0);
     const competition = Number(keywordInfo?.competition ?? 0);
     const competitionLevel = (keywordInfo?.competition_level || "").toString().toLowerCase();
-    const intent = (keywordProps?.keyword_intent || keywordInfo?.keyword_intent || "commercial").toString().toLowerCase();
+    // Intent: prefer DataForSEO search_intent_info.main_intent, then keyword_properties/keyword_info
+    const intentRaw = (item?.search_intent_info?.main_intent || keywordProps?.keyword_intent || keywordInfo?.keyword_intent || "commercial").toString().toLowerCase();
+    const intent = intentRaw === "informational" ? "Informational" : intentRaw === "transactional" ? "Transactional" : intentRaw === "navigational" ? "Navigational" : "Commercial";
 
     // Country breakdown if available (keyword_info.country_data or similar)
     const countryData = item?.keyword_info?.country_data || item?.keyword_data?.keyword_info?.country_data || [];
@@ -8941,7 +9035,7 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
       cpc,
       competition,
       competitionLevel,
-      intent: intent === "informational" ? "Informational" : intent === "transactional" ? "Transactional" : "Commercial",
+      intent,
       monthlySearches: monthlySearches.map((m: any) => ({
         year: Number(m?.year ?? 0),
         month: Number(m?.month ?? 0),
@@ -9051,7 +9145,8 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
       }
     });
 
-    const rows = organic.slice(parsedOffset, parsedOffset + 10).map((item: any, idx: number) => {
+    const slice = organic.slice(parsedOffset, parsedOffset + 10);
+    const rows: { position: number; url: string; domain: string; title: string; pageAs: number | null; refDomains: number | null; backlinks: number | null; searchTraffic: number | null; urlKeywords: number | null }[] = slice.map((item: any, idx: number) => {
       const rank = parsedOffset + idx + 1;
       const url = item?.url || "";
       let domain = (item?.domain || "").replace(/^www\./, "");
@@ -9074,6 +9169,74 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
         urlKeywords: null,
       };
     });
+
+    // Enrich rows with DataForSEO Backlinks Summary (backlinks, referring_domains, rank) per URL
+    if (rows.length > 0 && base64Auth) {
+      try {
+        const backlinksBody = rows.slice(0, 10).map((r) => ({ target: r.url || r.domain }));
+        const blRes = await fetch("https://api.dataforseo.com/v3/backlinks/summary/live", {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${base64Auth}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(backlinksBody),
+        });
+        if (blRes.ok) {
+          const blData = await blRes.json();
+          const tasks = blData?.tasks || [];
+          tasks.forEach((task: any, i: number) => {
+            const result = task?.result?.[0];
+            const row = rows[i];
+            if (row && result) {
+              row.refDomains = result.referring_domains != null ? Number(result.referring_domains) : null;
+              row.backlinks = result.backlinks != null ? Number(result.backlinks) : null;
+              row.pageAs = result.rank != null ? Number(result.rank) : null;
+            }
+          });
+        }
+      } catch {
+        // keep rows with null metrics if backlinks call fails
+      }
+    }
+
+    // Enrich rows with DataForSEO Ranked Keywords (search traffic ETV, keyword count) per URL
+    if (rows.length > 0 && base64Auth) {
+      try {
+        const rankedKwBody = rows.slice(0, 10).map((r) => {
+          const target = r.url && (r.url.startsWith("http://") || r.url.startsWith("https://")) ? r.url : (r.url ? `https://${r.url}` : r.domain ? `https://${r.domain}` : r.domain || "");
+          return {
+            target: target || r.domain,
+            location_code: parsedLocationCode,
+            language_code: parsedLanguageCode,
+            limit: 1,
+          };
+        });
+        const rkRes = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live", {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${base64Auth}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(rankedKwBody),
+        });
+        if (rkRes.ok) {
+          const rkData = await rkRes.json();
+          const rkTasks = rkData?.tasks || [];
+          rkTasks.forEach((task: any, i: number) => {
+            const result = task?.result?.[0];
+            const row = rows[i];
+            if (row && result) {
+              row.urlKeywords = result.total_count != null ? Number(result.total_count) : null;
+              const etv = result.metrics?.organic?.etv;
+              row.searchTraffic = etv != null ? Math.round(Number(etv)) : null;
+            }
+          });
+        }
+      } catch {
+        // keep rows with null searchTraffic/urlKeywords if ranked_keywords call fails
+      }
+    }
 
     return res.json({
       keyword: keyword.trim(),

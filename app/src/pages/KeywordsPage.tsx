@@ -189,6 +189,11 @@ const KeywordsPage: React.FC = () => {
   } | null>(null);
   const [serpViewMode, setSerpViewMode] = useState<"url" | "domain">("url");
   const [keywordIdeasExpanded, setKeywordIdeasExpanded] = useState<{ variations: boolean; questions: boolean }>({ variations: false, questions: false });
+  const [keywordIdeas, setKeywordIdeas] = useState<{
+    variations: ResearchKeyword[];
+    questions: ResearchKeyword[];
+    strategy: { pillar: string; items: ResearchKeyword[] };
+  }>({ variations: [], questions: [], strategy: { pillar: "", items: [] } });
   const [serpFeatureExpanded, setSerpFeatureExpanded] = useState<{ local_pack: boolean; people_also_ask: boolean; things_to_know: boolean }>({ local_pack: false, people_also_ask: false, things_to_know: false });
   const [serpAnalysisLoading, setSerpAnalysisLoading] = useState(false);
   const [serpAnalysisOffset, setSerpAnalysisOffset] = useState(0);
@@ -259,6 +264,7 @@ const KeywordsPage: React.FC = () => {
       setResearchLoading(true);
       setResearchError(null);
       setResearchResults([]);
+      setKeywordIdeas({ variations: [], questions: [], strategy: { pillar: "", items: [] } });
       setSelectedSuggestions({});
       const res = await api.get("/seo/keyword-research", {
         params: {
@@ -269,14 +275,25 @@ const KeywordsPage: React.FC = () => {
         },
         timeout: 60000, // 60 seconds timeout for keyword research (can take longer)
       });
-      const suggestions: ResearchKeyword[] = Array.isArray(res.data) ? res.data : [];
+      const data = res.data as
+        | { suggestions?: ResearchKeyword[]; variations?: ResearchKeyword[]; questions?: ResearchKeyword[]; strategy?: { pillar: string; items: ResearchKeyword[] } }
+        | ResearchKeyword[];
+      const suggestions: ResearchKeyword[] = Array.isArray(data) ? data : (data?.suggestions ?? []);
       setResearchResults(suggestions);
+      if (data && !Array.isArray(data) && data.suggestions) {
+        setKeywordIdeas({
+          variations: data.variations ?? [],
+          questions: data.questions ?? [],
+          strategy: data.strategy ?? { pillar: researchSeed.trim(), items: suggestions },
+        });
+      }
       if (suggestions.length === 0) {
         setResearchError("No suggestions were found for this keyword. Try a different phrase.");
       }
     } catch (error: any) {
       console.error("Keyword research error", error);
       setResearchResults([]);
+      setKeywordIdeas({ variations: [], questions: [], strategy: { pillar: "", items: [] } });
       let errorMsg = "Unable to fetch keyword suggestions. Please try again.";
       if (error?.code === "ECONNABORTED" || error?.message?.includes("timeout")) {
         errorMsg = "Request timed out. The keyword research is taking longer than expected. Please try again.";
@@ -436,6 +453,7 @@ const KeywordsPage: React.FC = () => {
     setResearchSeed(keyword.trim());
     setResearchError(null);
     setResearchResults([]);
+    setKeywordIdeas({ variations: [], questions: [], strategy: { pillar: "", items: [] } });
     try {
       setResearchLoading(true);
       const res = await api.get("/seo/keyword-research", {
@@ -447,11 +465,22 @@ const KeywordsPage: React.FC = () => {
         },
         timeout: 60000,
       });
-      const suggestions: ResearchKeyword[] = Array.isArray(res.data) ? res.data : [];
+      const data = res.data as
+        | { suggestions?: ResearchKeyword[]; variations?: ResearchKeyword[]; questions?: ResearchKeyword[]; strategy?: { pillar: string; items: ResearchKeyword[] } }
+        | ResearchKeyword[];
+      const suggestions: ResearchKeyword[] = Array.isArray(data) ? data : (data?.suggestions ?? []);
       setResearchResults(suggestions);
+      if (data && !Array.isArray(data) && data.suggestions) {
+        setKeywordIdeas({
+          variations: data.variations ?? [],
+          questions: data.questions ?? [],
+          strategy: data.strategy ?? { pillar: keyword.trim(), items: suggestions },
+        });
+      }
       if (suggestions.length === 0) setResearchError("No suggestions found for this keyword.");
     } catch (err: any) {
       setResearchResults([]);
+      setKeywordIdeas({ variations: [], questions: [], strategy: { pillar: "", items: [] } });
       setResearchError(err?.response?.data?.message || "Unable to fetch suggestions.");
     } finally {
       setResearchLoading(false);
@@ -1073,7 +1102,7 @@ const KeywordsPage: React.FC = () => {
               </div>
             )}
 
-            {/* Keyword Ideas - screenshot 2: Variations, Questions, Keyword Strategy */}
+            {/* Keyword Ideas — all data from DataForSEO (variations, questions, strategy) */}
             {researchResults.length > 0 && (
               <div className="border-t border-gray-200 p-6 bg-white">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Keyword Ideas</h3>
@@ -1081,7 +1110,7 @@ const KeywordsPage: React.FC = () => {
                   <div className="rounded-xl border border-gray-200 p-5 shadow-sm bg-white">
                     <h4 className="font-semibold text-gray-900">Keyword Variations</h4>
                     {(() => {
-                      const variations = researchResults.filter((r) => !r.keyword.includes("?") && !/^(who|what|where|when|why|how|can|is|are|do|does)\s/i.test(r.keyword));
+                      const variations = keywordIdeas.variations;
                       const totalVol = variations.reduce((s, r) => s + (r.searchVolume || 0), 0);
                       const showCount = keywordIdeasExpanded.variations ? variations.length : 5;
                       return (
@@ -1125,7 +1154,7 @@ const KeywordsPage: React.FC = () => {
                   <div className="rounded-xl border border-gray-200 p-5 shadow-sm bg-white">
                     <h4 className="font-semibold text-gray-900">Questions</h4>
                     {(() => {
-                      const questions = researchResults.filter((r) => r.keyword.includes("?") || /^(who|what|where|when|why|how|can|is|are|do|does)\s/i.test(r.keyword));
+                      const questions = keywordIdeas.questions;
                       const totalVol = questions.reduce((s, r) => s + (r.searchVolume || 0), 0);
                       const showCount = keywordIdeasExpanded.questions ? questions.length : 5;
                       return (
@@ -1170,11 +1199,12 @@ const KeywordsPage: React.FC = () => {
                     <h4 className="font-semibold text-gray-900">Keyword Strategy</h4>
                     <p className="mt-1 text-sm text-gray-600">Get topics, pillar and subpages <strong>automatically</strong></p>
                     <div className="mt-4 flex flex-col items-center">
-                      <div className="rounded-full bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-800">{researchSeed || "seed"}</div>
+                      <div className="rounded-full bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-800">{keywordIdeas.strategy.pillar || researchSeed || "seed"}</div>
                       <div className="w-px h-4 bg-gray-300" />
                       <div className="flex flex-col gap-2 mt-2 w-full max-w-xs">
-                        {researchResults.slice(0, 6).map((r) => {
-                          const maxVol = Math.max(...researchResults.map((x) => x.searchVolume || 0), 1);
+                        {(keywordIdeas.strategy.items || []).slice(0, 6).map((r) => {
+                          const items = keywordIdeas.strategy.items || [];
+                          const maxVol = Math.max(...items.map((x) => x.searchVolume || 0), 1);
                           const pct = ((r.searchVolume || 0) / maxVol) * 100;
                           return (
                             <div key={r.keyword} className="flex items-center gap-2">
