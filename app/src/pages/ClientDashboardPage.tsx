@@ -3496,7 +3496,7 @@ const ClientDashboardPage: React.FC = () => {
                     { id: "dashboard", label: "Dashboard", icon: Users },
                     { id: "report", label: "Report", icon: FileText },
                     { id: "users", label: "Users", icon: UserPlus },
-                    { id: "integration", label: "Integration", icon: Plug },
+                    { id: "integration", label: "Integrations", icon: Plug },
                   ]
               ).map((tab) => (
                 <button

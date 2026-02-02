@@ -2492,7 +2492,9 @@ router.get('/:id/google-ads/customers', authenticateToken, async (req, res) => {
         res.json({ customers });
     } catch (error: any) {
         console.error('Google Ads customers list error:', error);
-        res.status(500).json({ message: error.message || 'Internal server error' });
+        const msg = error.message || 'Internal server error';
+        const isAuthError = /reconnect|authentication failed|token expired|token revoked|not connected|tokens not found/i.test(msg);
+        res.status(isAuthError ? 401 : 500).json({ message: msg });
     }
 });
 

@@ -11,6 +11,8 @@ function isGoogleAdsInvalidGrant(error: any): boolean {
   return (
     msg.includes("invalid_grant") ||
     respErr === "invalid_grant" ||
+    msg.includes("unauthorized_client") ||
+    respErr === "unauthorized_client" ||
     respDesc.toLowerCase().includes("expired") ||
     respDesc.toLowerCase().includes("revoked")
   );
@@ -177,8 +179,9 @@ export async function getGoogleAdsClient(clientId: string) {
 
     if (invalidGrant) {
       googleAdsRevokedClientCache.set(clientId, Date.now());
+      const respErr = error?.response?.data?.error;
       console.warn(
-        `[Google Ads] Refresh token invalid_grant for clientId=${clientId}. Marking Google Ads disconnected.`
+        `[Google Ads] Refresh token invalid (${respErr || errMsg}) for clientId=${clientId}. Marking Google Ads disconnected.`
       );
       try {
         await prisma.client.update({
@@ -186,6 +189,7 @@ export async function getGoogleAdsClient(clientId: string) {
           data: {
             googleAdsAccessToken: null,
             googleAdsRefreshToken: null,
+            googleAdsCustomerId: null,
             googleAdsConnectedAt: null,
           },
         });
@@ -237,6 +241,18 @@ export async function isGoogleAdsConnected(clientId: string): Promise<boolean> {
 }
 
 /**
+ * Normalize Google Ads searchStream response: can be a single object with results array
+ * or an array of batch objects each with a results array.
+ */
+function getSearchStreamResults(data: any): any[] {
+  if (!data) return [];
+  if (Array.isArray(data)) {
+    return data.flatMap((batch: any) => batch?.results || []);
+  }
+  return Array.isArray(data.results) ? data.results : [];
+}
+
+/**
  * Get Google Ads API client using REST API
  */
 async function getGoogleAdsApiClient(clientId: string) {
@@ -265,37 +281,19 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
   timeZone: string;
 }>> {
   try {
-    // Get tokens directly from database instead of using getGoogleAdsClient
-    // because getGoogleAdsClient requires customerId which we don't have yet
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      select: {
-        googleAdsAccessToken: true,
-        googleAdsRefreshToken: true,
-      },
-    });
-
-    if (!client?.googleAdsRefreshToken || !client?.googleAdsAccessToken) {
-      throw new Error('Google Ads tokens not found. Please complete OAuth flow first.');
-    }
-
-    // Create OAuth2 client and set credentials
-    const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials({
-      access_token: client.googleAdsAccessToken,
-      refresh_token: client.googleAdsRefreshToken,
-    });
-
+    // Use getGoogleAdsClient to get credentials with token refresh (same as other API calls).
+    // It only requires refresh_token; customerId can be null when we're listing accounts.
+    const { oauth2Client } = await getGoogleAdsClient(clientId);
     const accessToken = oauth2Client.credentials.access_token;
 
     if (!accessToken) {
       throw new Error('No access token available');
     }
 
-    // Use Google Ads API to list accessible customers
-    // Endpoint: GET https://googleads.googleapis.com/v16/customers:listAccessibleCustomers
+    // Use Google Ads API to list accessible customers (v20 - v16 deprecated)
+    // Endpoint: GET https://googleads.googleapis.com/v20/customers:listAccessibleCustomers
     // This endpoint doesn't require a customer ID or developer token
-    const apiUrl = 'https://googleads.googleapis.com/v16/customers:listAccessibleCustomers';
+    const apiUrl = 'https://googleads.googleapis.com/v20/customers:listAccessibleCustomers';
     
     const response = await fetch(apiUrl, {
       method: 'GET',
@@ -339,8 +337,8 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
       customerIds.map(async (customerId: string) => {
         try {
           // Try to fetch customer details using the CustomerService
-          // Endpoint: GET https://googleads.googleapis.com/v16/customers/{customerId}
-          const customerUrl = `https://googleads.googleapis.com/v16/customers/${customerId}`;
+          // Endpoint: GET https://googleads.googleapis.com/v20/customers/{customerId}
+          const customerUrl = `https://googleads.googleapis.com/v20/customers/${customerId}`;
           const customerResponse = await fetch(customerUrl, {
             method: 'GET',
             headers: {
@@ -435,8 +433,8 @@ export async function fetchGoogleAdsCampaigns(
       ORDER BY metrics.clicks DESC
     `;
 
-    // Use Google Ads API REST endpoint (v22 is current, but v16 should still work)
-    const apiUrl = `https://googleads.googleapis.com/v16/customers/${customerId}/googleAds:searchStream`;
+    // Use Google Ads API REST endpoint (v20 - v16 deprecated)
+    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
     
     // Build headers - developer token is optional
     const headers: Record<string, string> = {
@@ -474,7 +472,8 @@ export async function fetchGoogleAdsCampaigns(
     }
 
     const data = await response.json();
-    
+    const results = getSearchStreamResults(data);
+
     // Parse the response
     const campaigns: any[] = [];
     let totalClicks = 0;
@@ -482,11 +481,11 @@ export async function fetchGoogleAdsCampaigns(
     let totalCostMicros = 0;
     let totalConversions = 0;
 
-    if (data.results && Array.isArray(data.results)) {
+    if (results.length > 0) {
       // Group by campaign (since we're querying by date range, we may have multiple rows per campaign)
       const campaignMap = new Map<string, any>();
 
-      for (const row of data.results) {
+      for (const row of results) {
         const campaignId = row.campaign?.id?.toString() || 'unknown';
         const campaignName = row.campaign?.name || 'Unnamed Campaign';
         // Google Ads API returns metrics in camelCase format
@@ -607,7 +606,7 @@ export async function fetchGoogleAdsAdGroups(
 
     query += ` ORDER BY metrics.clicks DESC`;
 
-    const apiUrl = `https://googleads.googleapis.com/v16/customers/${customerId}/googleAds:searchStream`;
+    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
     
     // Build headers - developer token is optional
     const headers: Record<string, string> = {
@@ -632,11 +631,12 @@ export async function fetchGoogleAdsAdGroups(
     }
 
     const data = await response.json();
+    const results = getSearchStreamResults(data);
     const adGroups: any[] = [];
     const adGroupMap = new Map<string, any>();
 
-    if (data.results && Array.isArray(data.results)) {
-      for (const row of data.results) {
+    if (results.length > 0) {
+      for (const row of results) {
         const adGroupId = row.adGroup?.id?.toString() || 'unknown';
         const adGroupName = row.adGroup?.name || 'Unnamed Ad Group';
         const campaignName = row.campaign?.name || 'Unknown Campaign';
@@ -729,7 +729,7 @@ export async function fetchGoogleAdsKeywords(
 
     query += ` ORDER BY metrics.clicks DESC LIMIT 1000`;
 
-    const apiUrl = `https://googleads.googleapis.com/v16/customers/${customerId}/googleAds:searchStream`;
+    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
     
     // Build headers - developer token is optional
     const headers: Record<string, string> = {
@@ -754,11 +754,12 @@ export async function fetchGoogleAdsKeywords(
     }
 
     const data = await response.json();
+    const results = getSearchStreamResults(data);
     const keywords: any[] = [];
     const keywordMap = new Map<string, any>();
 
-    if (data.results && Array.isArray(data.results)) {
-      for (const row of data.results) {
+    if (results.length > 0) {
+      for (const row of results) {
         const keywordText = row.adGroupCriterion?.keyword?.text || row.ad_group_criterion?.keyword?.text || 'Unknown';
         const matchType = row.adGroupCriterion?.keyword?.matchType || row.ad_group_criterion?.keyword?.match_type || 'UNKNOWN';
         const key = `${keywordText}_${matchType}`;
@@ -839,7 +840,7 @@ export async function fetchGoogleAdsConversions(
       ORDER BY segments.date DESC, metrics.conversions DESC
     `;
 
-    const apiUrl = `https://googleads.googleapis.com/v16/customers/${customerId}/googleAds:searchStream`;
+    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
     
     // Build headers - developer token is optional
     const headers: Record<string, string> = {
@@ -864,14 +865,15 @@ export async function fetchGoogleAdsConversions(
     }
 
     const data = await response.json();
+    const results = getSearchStreamResults(data);
     const conversions: any[] = [];
     let totalConversions = 0;
     let totalConversionValue = 0;
     let totalClicks = 0;
     let totalCost = 0;
 
-    if (data.results && Array.isArray(data.results)) {
-      for (const row of data.results) {
+    if (results.length > 0) {
+      for (const row of results) {
         const conversionName = row.segments?.conversionActionName || row.segments?.conversion_action_name || 'Unknown Conversion';
         const date = row.segments?.date || '';
         const campaignName = row.campaign?.name || 'Unknown Campaign';
