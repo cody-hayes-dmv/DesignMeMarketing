@@ -204,11 +204,15 @@ const KeywordsPage: React.FC = () => {
         setClientsLoading(true);
         setClientsError(null);
         const res = await api.get("/clients");
-        const clientList: Client[] = Array.isArray(res.data) ? res.data : [];
-        setClients(clientList);
-        if (clientList.length > 0) {
-          setSelectedClientId(clientList[0].id);
-          setAssignClientId(clientList[0].id);
+        const raw: Client[] = Array.isArray(res.data) ? res.data : [];
+        const activeOnly = raw.filter((c) => c.status === "ACTIVE");
+        const sorted = [...activeOnly].sort((a, b) =>
+          (a.name || a.domain || "").localeCompare(b.name || b.domain || "", undefined, { sensitivity: "base" })
+        );
+        setClients(sorted);
+        if (sorted.length > 0) {
+          setSelectedClientId(sorted[0].id);
+          setAssignClientId(sorted[0].id);
         }
       } catch (error: any) {
         console.error("Failed to fetch clients", error);

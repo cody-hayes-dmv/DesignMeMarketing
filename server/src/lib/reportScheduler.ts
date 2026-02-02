@@ -911,7 +911,7 @@ export async function refreshAllGA4Data(): Promise<void> {
 
     console.log(`[GA4 Auto-Refresh] Starting Monday morning refresh at ${now.toISOString()}`);
     
-    // Find all clients with GA4 connected
+    // Find all clients with GA4 connected (includes Vendasta clients — they have full features)
     const connectedClients = await prisma.client.findMany({
       where: {
         ga4RefreshToken: { not: null },

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X } from "lucide-react";
 import { format } from "date-fns";
 import api from "@/lib/api";
@@ -83,6 +83,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   const [editDateValue, setEditDateValue] = useState<string>("");
   const [editPositionValue, setEditPositionValue] = useState<string>("");
   const [starredKeywordIds, setStarredKeywordIds] = useState<Set<string>>(new Set());
+  const initialRefreshDoneRef = useRef<Record<string, boolean>>({});
 
   const starredStorageKey = useMemo(() => {
     // Persist per-user, per-client
@@ -117,7 +118,24 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
       const res = shareToken
         ? await api.get(`/seo/share/${encodeURIComponent(shareToken)}/target-keywords`)
         : await api.get(`/seo/target-keywords/${clientId}`);
-      setKeywords(res.data || []);
+      const list: TargetKeyword[] = res.data || [];
+      setKeywords(list);
+      // On initial load, run refresh once (for ADMIN/SUPER_ADMIN) so GOOGLE/GOOGLE URL get populated
+      if (
+        !shareToken &&
+        clientId &&
+        (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") &&
+        list.length > 0 &&
+        !initialRefreshDoneRef.current[clientId]
+      ) {
+        initialRefreshDoneRef.current[clientId] = true;
+        api
+          .post(`/seo/target-keywords/${clientId}/refresh`)
+          .then(() => fetchKeywords())
+          .catch((err: any) => {
+            console.warn("Initial target keywords refresh failed:", err?.response?.data?.message || err);
+          });
+      }
     } catch (error: any) {
       console.error("Failed to load target keywords", error);
       const errorMsg = error?.response?.data?.message || "Unable to load target keywords";
@@ -125,7 +143,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [clientId, shareToken]);
+  }, [clientId, shareToken, user?.role]);
 
   const persistStarredIds = useCallback(
     (next: Set<string>) => {
@@ -183,7 +201,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   }, [clientId, fetchKeywords]);
 
   const handleRefresh = useCallback(async () => {
-    if (!clientId || user?.role !== "SUPER_ADMIN" || isReadOnly) return;
+    if (!clientId || (user?.role !== "SUPER_ADMIN" && user?.role !== "ADMIN") || isReadOnly) return;
     try {
       setRefreshing(true);
       await api.post(`/seo/target-keywords/${clientId}/refresh`);

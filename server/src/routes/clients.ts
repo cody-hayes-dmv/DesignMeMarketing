@@ -55,6 +55,8 @@ interface ClientWithUser {
     };
 }
 
+// Vendasta clients have full feature access: dashboard, report, keywords, rankings, integrations (GA4/Google Ads), PPC, etc.
+// The vendasta flag only affects list placement (Vendasta page vs Clients page); do not restrict API or dashboard access by vendasta.
 async function canStaffAccessClient(user: { userId: string; role: string }, clientId: string, includeGoogleAds: boolean = false): Promise<{ client: ClientWithUser | null; hasAccess: boolean }> {
     const client = await prisma.client.findUnique({
         where: { id: clientId },
@@ -175,12 +177,13 @@ function normalizeDomainInput(input: string): string {
 }
 
 // Get all clients
+// List clients (includes Vendasta clients; frontend splits display between Clients page and Vendasta page).
 router.get('/', authenticateToken, async (req, res) => {
     try {
         let clients;
 
         if (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN') {
-            // Global admins see all clients
+            // Global admins see all clients (no vendasta filter — Vendasta clients have full features)
             clients = await prisma.client.findMany({
                 include: {
                     user: {
