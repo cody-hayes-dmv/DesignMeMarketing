@@ -2340,14 +2340,13 @@ router.get('/google-ads/callback', async (req, res) => {
                     </head>
                     <body>
                         <div class="container">
-                            <div class="success">Google Ads connected successfully!</div>
+                            <div class="success">Google Ads connected! Closing...</div>
                         </div>
                         <script>
                             if (window.opener) {
-                                window.opener.postMessage({
-                                    type: 'GOOGLE_ADS_OAUTH_SUCCESS'
-                                }, '*');
-                                setTimeout(() => window.close(), 1000);
+                                window.opener.postMessage({ type: 'GOOGLE_ADS_OAUTH_SUCCESS' }, '*');
+                                try { window.opener.focus(); } catch (e) {}
+                                setTimeout(function() { window.close(); }, 150);
                             } else {
                                 window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients/${clientId}?google_ads_tokens_received=true';
                             }
@@ -2426,7 +2425,8 @@ router.get('/:id/google-ads/auth', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Access denied' });
         }
 
-        const authUrl = getGoogleAdsAuthUrl(clientId);
+        const isPopup = req.query.popup === 'true' || req.query.popup === '1';
+        const authUrl = getGoogleAdsAuthUrl(clientId, { popup: isPopup });
         res.json({ authUrl });
     } catch (error: any) {
         console.error('Google Ads auth URL error:', error);

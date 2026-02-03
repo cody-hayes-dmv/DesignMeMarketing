@@ -39,6 +39,21 @@ function getGoogleAdsRedirectUri(): string {
 }
 
 /**
+ * Google Ads API requires a developer token for all data endpoints (searchStream, customer details, etc.).
+ * Returns the token or throws a clear error if not set.
+ */
+function getGoogleAdsDeveloperToken(): string {
+  const token = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim();
+  if (!token) {
+    throw new Error(
+      'Google Ads API requires a developer token. Set GOOGLE_ADS_DEVELOPER_TOKEN in server/.env. ' +
+      'Get it from your Google Ads account: Tools & Settings → Setup → API Center.'
+    );
+  }
+  return token;
+}
+
+/**
  * Get OAuth2 client for Google Ads (uses same redirect_uri as auth URL for valid token exchange)
  */
 function getOAuth2Client() {
@@ -51,7 +66,7 @@ function getOAuth2Client() {
       'Required variables:\n' +
       '  GOOGLE_ADS_CLIENT_ID=your_client_id.apps.googleusercontent.com\n' +
       '  GOOGLE_ADS_CLIENT_SECRET=your_client_secret\n' +
-      '  GOOGLE_ADS_REDIRECT_URI=http://localhost:5000/api/clients/google-ads/callback\n\n' +
+      `  GOOGLE_ADS_REDIRECT_URI=${process.env.BACKEND_URL || 'http://localhost:5000'}/api/clients/google-ads/callback\n\n` +
       'See Google Ads API documentation for setup instructions.';
     throw new Error(errorMsg);
   }
@@ -60,20 +75,23 @@ function getOAuth2Client() {
 }
 
 /**
- * Get Google Ads authorization URL for OAuth flow
+ * Get Google Ads authorization URL for OAuth flow.
+ * @param clientId - Client ID to store tokens for
+ * @param options.popup - If true, state includes "popup" so callback sends postMessage + closes instead of redirecting
  */
-export function getGoogleAdsAuthUrl(clientId: string): string {
+export function getGoogleAdsAuthUrl(clientId: string, options?: { popup?: boolean }): string {
   const oauth2Client = getOAuth2Client();
   const scopes = [
     'https://www.googleapis.com/auth/adwords', // Google Ads API scope
     'https://www.googleapis.com/auth/userinfo.email', // Required to get user email
   ];
+  const state = options?.popup ? `${clientId}|popup` : clientId;
 
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
     prompt: 'consent', // Force consent to get refresh token
-    state: clientId,
+    state,
     redirect_uri: getGoogleAdsRedirectUri(),
   });
 }
@@ -290,30 +308,29 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
       throw new Error('No access token available');
     }
 
-    // Use Google Ads API to list accessible customers (v20 - v16 deprecated)
+    // Use Google Ads API to list accessible customers (v20)
     // Endpoint: GET https://googleads.googleapis.com/v20/customers:listAccessibleCustomers
-    // This endpoint doesn't require a customer ID or developer token
     const apiUrl = 'https://googleads.googleapis.com/v20/customers:listAccessibleCustomers';
-    
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
+        'developer-token': getGoogleAdsDeveloperToken(),
       },
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Google Ads] List customers API error:', response.status, errorText);
-      
-      // If API call fails, fall back to returning empty array
-      // User can still connect manually by entering customer ID
       if (response.status === 401 || response.status === 403) {
         throw new Error('Google Ads API authentication failed. Please reconnect Google Ads.');
       }
-      
-      // For other errors, return empty array so user can still connect manually
+      if (response.status === 400 && (errorText.includes('DEVELOPER_TOKEN_PARAMETER_MISSING') || errorText.includes('developer-token'))) {
+        throw new Error(
+          'Google Ads API requires a developer token. Set GOOGLE_ADS_DEVELOPER_TOKEN in server/.env and restart the server. Get the token from Google Ads: Tools & Settings → Setup → API Center.'
+        );
+      }
       return [];
     }
 
@@ -344,7 +361,7 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
             headers: {
               'Authorization': `Bearer ${accessToken}`,
               'Content-Type': 'application/json',
-              'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
+              'developer-token': getGoogleAdsDeveloperToken(),
             },
           });
 
@@ -436,17 +453,12 @@ export async function fetchGoogleAdsCampaigns(
     // Use Google Ads API REST endpoint (v20 - v16 deprecated)
     const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
     
-    // Build headers - developer token is optional
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
+      'developer-token': getGoogleAdsDeveloperToken(),
     };
-    
-    // Only add developer token if it's set
-    if (process.env.GOOGLE_ADS_DEVELOPER_TOKEN) {
-      headers['developer-token'] = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-    }
-    
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers,
@@ -458,16 +470,9 @@ export async function fetchGoogleAdsCampaigns(
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Google Ads] API error:', response.status, errorText);
-      
-      // Handle authentication errors
       if (response.status === 401 || response.status === 403) {
-        // Check if it's a developer token issue
-        if (!process.env.GOOGLE_ADS_DEVELOPER_TOKEN) {
-          throw new Error('Google Ads API requires a developer token. Please set GOOGLE_ADS_DEVELOPER_TOKEN in your .env file. You can get a developer token from your Google Ads account: Tools & Settings > API Center.');
-        }
-        throw new Error('Google Ads API authentication failed. Please check your OAuth credentials and developer token.');
+        throw new Error('Google Ads API authentication failed. Check OAuth credentials and GOOGLE_ADS_DEVELOPER_TOKEN in server/.env.');
       }
-      
       throw new Error(`Google Ads API error: ${response.status} ${errorText}`);
     }
 
@@ -607,18 +612,11 @@ export async function fetchGoogleAdsAdGroups(
     query += ` ORDER BY metrics.clicks DESC`;
 
     const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
-    
-    // Build headers - developer token is optional
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
+      'developer-token': getGoogleAdsDeveloperToken(),
     };
-    
-    // Only add developer token if it's set
-    if (process.env.GOOGLE_ADS_DEVELOPER_TOKEN) {
-      headers['developer-token'] = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-    }
-    
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers,
@@ -730,18 +728,11 @@ export async function fetchGoogleAdsKeywords(
     query += ` ORDER BY metrics.clicks DESC LIMIT 1000`;
 
     const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
-    
-    // Build headers - developer token is optional
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
+      'developer-token': getGoogleAdsDeveloperToken(),
     };
-    
-    // Only add developer token if it's set
-    if (process.env.GOOGLE_ADS_DEVELOPER_TOKEN) {
-      headers['developer-token'] = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-    }
-    
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers,
@@ -841,18 +832,11 @@ export async function fetchGoogleAdsConversions(
     `;
 
     const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
-    
-    // Build headers - developer token is optional
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
+      'developer-token': getGoogleAdsDeveloperToken(),
     };
-    
-    // Only add developer token if it's set
-    if (process.env.GOOGLE_ADS_DEVELOPER_TOKEN) {
-      headers['developer-token'] = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-    }
-    
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers,

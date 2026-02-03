@@ -2912,7 +2912,7 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setGoogleAdsConnecting(true);
-      const res = await api.get(`/clients/${clientId}/google-ads/auth`);
+      const res = await api.get(`/clients/${clientId}/google-ads/auth`, { params: { popup: '1' } });
       const authUrl = res.data?.authUrl;
       if (authUrl) {
         const width = 500;
@@ -2969,9 +2969,14 @@ const ClientDashboardPage: React.FC = () => {
           }
         };
 
+        let popupCheckIntervalId: ReturnType<typeof setInterval> | null = null;
         const cleanupPopup = () => {
           if (messageListener) {
             window.removeEventListener('message', messageListener);
+          }
+          if (popupCheckIntervalId !== null) {
+            clearInterval(popupCheckIntervalId);
+            popupCheckIntervalId = null;
           }
           if (manualCloseTimeout) {
             clearTimeout(manualCloseTimeout);
@@ -2980,10 +2985,14 @@ const ClientDashboardPage: React.FC = () => {
 
         window.addEventListener('message', messageListener);
 
-        // Handle manual popup close
-        const checkClosed = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(checkClosed);
+        // Handle manual popup close (wrap in try-catch: COOP can block access to popup.closed)
+        popupCheckIntervalId = setInterval(() => {
+          try {
+            if (popup.closed) {
+              cleanupPopup();
+              setGoogleAdsConnecting(false);
+            }
+          } catch (_e) {
             cleanupPopup();
             setGoogleAdsConnecting(false);
           }
@@ -2991,10 +3000,11 @@ const ClientDashboardPage: React.FC = () => {
 
         // Cleanup after 10 minutes
         manualCloseTimeout = window.setTimeout(() => {
-          clearInterval(checkClosed);
           cleanupPopup();
-          if (!popup.closed) {
-            closePopupSafely();
+          try {
+            if (!popup.closed) closePopupSafely();
+          } catch (_e) {
+            // COOP may block access; ignore
           }
           setGoogleAdsConnecting(false);
         }, 10 * 60 * 1000);
