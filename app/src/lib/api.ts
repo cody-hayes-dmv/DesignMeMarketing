@@ -1,6 +1,9 @@
 import axios from "axios";
 import toast from "react-hot-toast";
-const BASE = import.meta.env.VITE_API_URL;
+
+// Prefer VITE_API_URL; fallback to same origin (e.g. dev proxy or missing env)
+const BASE = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:5000");
+const baseURL = BASE ? new URL("/api", BASE).toString() : "/api";
 
 // Track recent errors to prevent duplicate toasts
 const recentErrors = new Map<string, number>();
@@ -8,8 +11,8 @@ const ERROR_DEBOUNCE_MS = 2000; // Show same error max once per 2 seconds
 
 // Create axios instance with base configuration
 const api = axios.create({
-  baseURL: new URL("/api", BASE).toString(),
-  timeout: 10000,
+  baseURL,
+  timeout: 30000, // 30s so client dashboard / heavy SEO requests don't time out
   headers: {
     "Content-Type": "application/json",
   },
@@ -68,8 +71,13 @@ api.interceptors.response.use(
         }
         
         if (!error.response) {
-          // Network error or timeout
-          toast.error("Network error. Please check your connection and try again.");
+          // Network error or timeout (e.g. server not running, wrong API URL, or slow response)
+          const isTimeout = error.code === "ECONNABORTED";
+          if (isTimeout) {
+            toast.error("Request timed out. The server may be slow—try again.");
+          } else {
+            toast.error("Cannot reach the server. Check that the backend is running and VITE_API_URL is correct.");
+          }
         } else if (status === 401) {
           localStorage.removeItem("token");
           toast.error("Session expired. Please login again.");

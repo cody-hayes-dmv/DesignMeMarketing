@@ -7,12 +7,16 @@ import {
   Bell,
   Shield,
   CreditCard,
-  Globe,
-  Mail,
   Save,
   Eye,
   EyeOff,
   Loader2,
+  FileText,
+  Plus,
+  Pencil,
+  Trash2,
+  X,
+  GripVertical,
 } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
@@ -48,13 +52,34 @@ const SettingsPage = () => {
     teamUpdates: true,
   });
 
+  // Templates (onboarding)
+  type TemplateTask = { id?: string; title: string; description: string | null; category: string | null; priority: string | null; estimatedHours: number | null; order: number };
+  type ManageableTemplate = {
+    id: string;
+    name: string;
+    description: string | null;
+    isDefault: boolean;
+    agencyId: string | null;
+    agency?: { id: string; name: string } | null;
+    tasks: TemplateTask[];
+  };
+  const [templates, setTemplates] = useState<ManageableTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [templateModalMode, setTemplateModalMode] = useState<"create" | "edit">("create");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [templateForm, setTemplateForm] = useState({ name: "", description: "", isDefault: false, agencyId: "" as string | null, tasks: [] as Array<{ title: string; description: string; category: string; priority: string; estimatedHours: string }> });
+  const [templateSaveLoading, setTemplateSaveLoading] = useState(false);
+  const [agenciesList, setAgenciesList] = useState<Array<{ id: string; name: string }>>([]);
+
   // Remove billing tab for SUPER_ADMIN, remove agency tab for SUPER_ADMIN (they don't have agencies)
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
-    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] }, // Removed SUPER_ADMIN
+    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
+    { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
     { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
-    { id: "billing", label: "Billing", icon: CreditCard, roles: ["ADMIN", "AGENCY", "WORKER"] }, // Removed SUPER_ADMIN
+    { id: "billing", label: "Billing", icon: CreditCard, roles: ["ADMIN", "AGENCY", "WORKER"] },
   ];
 
   // Fetch agency data on mount if user has agency access
@@ -74,6 +99,35 @@ const SettingsPage = () => {
       }));
     }
   }, [user]);
+
+  // Fetch manageable templates when Templates tab is active
+  const fetchManageableTemplates = async () => {
+    try {
+      setTemplatesLoading(true);
+      const res = await api.get("/onboarding/templates/manageable");
+      setTemplates(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      toast.error("Failed to load templates");
+      setTemplates([]);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (activeTab === "templates" && user && ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user.role || "")) {
+      fetchManageableTemplates();
+    }
+  }, [activeTab, user?.role]);
+
+  // Fetch agencies for super admin when opening template create modal
+  useEffect(() => {
+    if (templateModalOpen && templateModalMode === "create" && user?.role === "SUPER_ADMIN") {
+      api.get("/agencies").then((res) => {
+        const list = Array.isArray(res.data) ? res.data : [];
+        setAgenciesList(list.map((a: any) => ({ id: a.id, name: a.name || a.subdomain || a.id })));
+      }).catch(() => setAgenciesList([]));
+    }
+  }, [templateModalOpen, templateModalMode, user?.role]);
 
   const fetchAgencyData = async () => {
     try {
@@ -180,6 +234,115 @@ const SettingsPage = () => {
       toast.error(error.response?.data?.message || "Failed to update agency settings");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openCreateTemplate = () => {
+    setTemplateModalMode("create");
+    setEditingTemplateId(null);
+    setTemplateForm({
+      name: "",
+      description: "",
+      isDefault: false,
+      agencyId: user?.role === "SUPER_ADMIN" ? null : undefined as any,
+      tasks: [],
+    });
+    setTemplateModalOpen(true);
+  };
+
+  const openEditTemplate = (t: ManageableTemplate) => {
+    setTemplateModalMode("edit");
+    setEditingTemplateId(t.id);
+    setTemplateForm({
+      name: t.name,
+      description: t.description || "",
+      isDefault: t.isDefault,
+      agencyId: t.agencyId ?? "",
+      tasks: t.tasks.map((task) => ({
+        title: task.title,
+        description: task.description ?? "",
+        category: task.category ?? "",
+        priority: task.priority ?? "",
+        estimatedHours: task.estimatedHours != null ? String(task.estimatedHours) : "",
+      })),
+    });
+    setTemplateModalOpen(true);
+  };
+
+  const addTemplateTask = () => {
+    setTemplateForm((f) => ({
+      ...f,
+      tasks: [...f.tasks, { title: "", description: "", category: "", priority: "", estimatedHours: "" }],
+    }));
+  };
+
+  const updateTemplateTask = (index: number, field: string, value: string) => {
+    setTemplateForm((f) => ({
+      ...f,
+      tasks: f.tasks.map((t, i) => (i === index ? { ...t, [field]: value } : t)),
+    }));
+  };
+
+  const removeTemplateTask = (index: number) => {
+    setTemplateForm((f) => ({ ...f, tasks: f.tasks.filter((_, i) => i !== index) }));
+  };
+
+  const handleSaveTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!templateForm.name.trim()) {
+      toast.error("Template name is required");
+      return;
+    }
+    const tasksPayload = templateForm.tasks
+      .filter((t) => t.title.trim())
+      .map((t, i) => ({
+        title: t.title.trim(),
+        description: t.description.trim() || null,
+        category: t.category.trim() || null,
+        priority: t.priority.trim() || null,
+        estimatedHours: t.estimatedHours.trim() ? parseFloat(t.estimatedHours) : null,
+        order: i + 1,
+      }));
+    setTemplateSaveLoading(true);
+    try {
+      if (templateModalMode === "create") {
+        const body: any = {
+          name: templateForm.name.trim(),
+          description: templateForm.description.trim() || null,
+          isDefault: templateForm.isDefault,
+          tasks: tasksPayload,
+        };
+        if (user?.role === "SUPER_ADMIN" && templateForm.agencyId !== undefined) {
+          body.agencyId = templateForm.agencyId === "" ? null : templateForm.agencyId;
+        }
+        await api.post("/onboarding/templates", body);
+        toast.success("Template created");
+      } else if (editingTemplateId) {
+        await api.put(`/onboarding/templates/${editingTemplateId}`, {
+          name: templateForm.name.trim(),
+          description: templateForm.description.trim() || null,
+          isDefault: templateForm.isDefault,
+          tasks: tasksPayload,
+        });
+        toast.success("Template updated");
+      }
+      setTemplateModalOpen(false);
+      fetchManageableTemplates();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to save template");
+    } finally {
+      setTemplateSaveLoading(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (t: ManageableTemplate) => {
+    if (!window.confirm(`Delete template "${t.name}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/onboarding/templates/${t.id}`);
+      toast.success("Template deleted");
+      fetchManageableTemplates();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to delete template");
     }
   };
 
@@ -412,6 +575,96 @@ const SettingsPage = () => {
           </div>
         );
 
+      case "templates":
+        return (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Onboarding Templates</h3>
+              <button
+                type="button"
+                onClick={openCreateTemplate}
+                className="inline-flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Create template
+              </button>
+            </div>
+            <p className="text-sm text-gray-500">
+              Create and edit onboarding templates. When you add an onboarding task from a client’s Work Log, you choose one of these templates.
+            </p>
+            {templatesLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+              </div>
+            ) : templates.length === 0 ? (
+              <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-600">No templates yet.</p>
+                <p className="text-sm text-gray-500 mt-1">Create one to use when adding onboarding tasks for clients.</p>
+                <button
+                  type="button"
+                  onClick={openCreateTemplate}
+                  className="mt-4 inline-flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  Create template
+                </button>
+              </div>
+            ) : (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tasks</th>
+                      {user?.role === "SUPER_ADMIN" && (
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
+                      )}
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {templates.map((t) => (
+                      <tr key={t.id}>
+                        <td className="px-4 py-3">
+                          <span className="font-medium text-gray-900">{t.name}</span>
+                          {t.isDefault && (
+                            <span className="ml-2 text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded">Default</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{t.tasks?.length ?? 0} tasks</td>
+                        {user?.role === "SUPER_ADMIN" && (
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {t.agencyId == null ? "Global" : t.agency?.name ?? t.agencyId}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => openEditTemplate(t)}
+                            className="text-primary-600 hover:text-primary-800 p-1"
+                            title="Edit"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTemplate(t)}
+                            className="text-red-600 hover:text-red-800 p-1 ml-2"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+
       case "notifications":
         return (
           <div className="space-y-6">
@@ -628,6 +881,147 @@ const SettingsPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Create/Edit Template Modal */}
+      {templateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setTemplateModalOpen(false)} />
+          <div className="relative bg-white rounded-xl border border-gray-200 shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {templateModalMode === "create" ? "Create template" : "Edit template"}
+              </h3>
+              <button type="button" onClick={() => setTemplateModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveTemplate} className="flex flex-col flex-1 min-h-0">
+              <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={templateForm.name}
+                    onChange={(e) => setTemplateForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="e.g. Standard SEO Onboarding"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
+                  <input
+                    type="text"
+                    value={templateForm.description}
+                    onChange={(e) => setTemplateForm((f) => ({ ...f, description: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="Short description of this template"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="template-default"
+                    checked={templateForm.isDefault}
+                    onChange={(e) => setTemplateForm((f) => ({ ...f, isDefault: e.target.checked }))}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <label htmlFor="template-default" className="text-sm text-gray-700">Set as default template</label>
+                </div>
+                {user?.role === "SUPER_ADMIN" && templateModalMode === "create" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Scope</label>
+                    <select
+                      value={templateForm.agencyId ?? ""}
+                      onChange={(e) => setTemplateForm((f) => ({ ...f, agencyId: e.target.value || null }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="">Global (all agencies)</option>
+                      {agenciesList.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">Tasks</label>
+                    <button type="button" onClick={addTemplateTask} className="text-sm text-primary-600 hover:text-primary-800 flex items-center gap-1">
+                      <Plus className="h-4 w-4" /> Add task
+                    </button>
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                    {templateForm.tasks.length === 0 ? (
+                      <p className="text-sm text-gray-500 py-4 text-center">No tasks. Click &quot;Add task&quot; to add one.</p>
+                    ) : (
+                      templateForm.tasks.map((task, index) => (
+                        <div key={index} className="flex gap-2 items-start p-2 bg-gray-50 rounded-lg border border-gray-200">
+                          <span className="text-gray-400 mt-2 flex-shrink-0" title="Order"><GripVertical className="h-4 w-4" /></span>
+                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
+                            <input
+                              type="text"
+                              value={task.title}
+                              onChange={(e) => updateTemplateTask(index, "title", e.target.value)}
+                              placeholder="Task title"
+                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                            />
+                            <input
+                              type="text"
+                              value={task.description}
+                              onChange={(e) => updateTemplateTask(index, "description", e.target.value)}
+                              placeholder="Description (optional)"
+                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                            />
+                            <input
+                              type="text"
+                              value={task.category}
+                              onChange={(e) => updateTemplateTask(index, "category", e.target.value)}
+                              placeholder="Category (e.g. Onboarding)"
+                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                            />
+                            <div className="flex gap-2">
+                              <select
+                                value={task.priority}
+                                onChange={(e) => updateTemplateTask(index, "priority", e.target.value)}
+                                className="border border-gray-300 rounded px-2 py-1.5 text-sm flex-1"
+                              >
+                                <option value="">Priority</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                              </select>
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                value={task.estimatedHours}
+                                onChange={(e) => updateTemplateTask(index, "estimatedHours", e.target.value)}
+                                placeholder="Hrs"
+                                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-20"
+                              />
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => removeTemplateTask(index)} className="text-red-600 hover:text-red-800 p-1 flex-shrink-0 mt-1" title="Remove task">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+                <button type="button" onClick={() => setTemplateModalOpen(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={templateSaveLoading} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2">
+                  {templateSaveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {templateModalMode === "create" ? "Create" : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

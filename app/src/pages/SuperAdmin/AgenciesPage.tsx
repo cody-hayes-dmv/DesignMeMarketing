@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus, ArrowUp, ArrowDown, Search } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -80,6 +80,7 @@ const AgenciesPage = () => {
     const navigate = useNavigate();
     const [sortField, setSortField] = useState<"agency" | "subdomain" | "clients">("agency");
     const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+    const [agenciesSearch, setAgenciesSearch] = useState("");
     const [createForm, setCreateForm] = useState({
         name: "",
         subdomain: "",
@@ -420,6 +421,15 @@ const AgenciesPage = () => {
         return 0;
     });
 
+    const filteredAgencies = agenciesSearch.trim()
+        ? sortedAgencies.filter((agency) => {
+            const q = agenciesSearch.trim().toLowerCase();
+            const name = (agency.name || "").toLowerCase();
+            const subdomain = (agency.subdomain || "").toLowerCase();
+            return name.includes(q) || subdomain.includes(q);
+          })
+        : sortedAgencies;
+
     return (
         <div className="p-8">
             {/* Header */}
@@ -437,6 +447,20 @@ const AgenciesPage = () => {
                     <Plus className="h-5 w-5" />
                     <span>New Agency</span>
                 </button>
+            </div>
+
+            {/* Search */}
+            <div className="mb-4">
+                <div className="relative max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                        type="text"
+                        placeholder="Search by agency name or subdomain..."
+                        value={agenciesSearch}
+                        onChange={(e) => setAgenciesSearch(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                </div>
             </div>
 
             {/* Agencies Table */}
@@ -493,14 +517,14 @@ const AgenciesPage = () => {
                                         Loading agencies...
                                     </td>
                                 </tr>
-                            ) : sortedAgencies.length === 0 ? (
+                            ) : filteredAgencies.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
-                                        No agencies found. Create your first agency.
+                                        {agenciesSearch.trim() ? "No agencies match your search." : "No agencies found. Create your first agency."}
                                     </td>
                                 </tr>
                             ) : (
-                                sortedAgencies.map((agency) => (
+                                filteredAgencies.map((agency) => (
                                 <React.Fragment key={agency.id}>
                                     <tr
                                         className="hover:bg-gray-50 cursor-pointer"

@@ -35,6 +35,9 @@ import {
   Info,
   Target,
   Plug,
+  Image,
+  Video,
+  Link as LinkIcon,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -50,6 +53,7 @@ import { checkAuth } from "@/store/slices/authSlice";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import OnboardingTemplateModal from "@/components/OnboardingTemplateModal";
 
 interface TrafficSourceSlice {
   name: string;
@@ -92,6 +96,7 @@ type WorkLogTask = {
   description: string | null;
   category: string | null;
   status: TaskStatus;
+  proof?: string | null;
   createdAt: string;
   updatedAt: string;
   assignee?: { id: string; name?: string | null; email: string } | null;
@@ -510,22 +515,31 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogModalOpen, setWorkLogModalOpen] = useState(false);
   const [workLogModalMode, setWorkLogModalMode] = useState<"create" | "edit" | "view">("create");
   const [selectedWorkLogTaskId, setSelectedWorkLogTaskId] = useState<string | null>(null);
+  type WorkLogAttachment = { type: string; value: string; name?: string };
   const [workLogForm, setWorkLogForm] = useState<{
     title: string;
     description: string;
     category: string;
     status: TaskStatus;
+    attachments: WorkLogAttachment[];
   }>({
     title: "",
     description: "",
     category: "",
     status: "TODO",
+    attachments: [],
   });
   const [workLogDeleteConfirm, setWorkLogDeleteConfirm] = useState<{
     isOpen: boolean;
     taskId: string | null;
     taskTitle: string | null;
   }>({ isOpen: false, taskId: null, taskTitle: null });
+  const [workLogUploading, setWorkLogUploading] = useState(false);
+  const [workLogUrlInput, setWorkLogUrlInput] = useState("");
+  const [workLogUrlType, setWorkLogUrlType] = useState<"image" | "video" | "url">("url");
+  const [workLogAddMenuOpen, setWorkLogAddMenuOpen] = useState(false);
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const workLogAddMenuRef = useRef<HTMLDivElement | null>(null);
 
 
   // Client portal users (Users tab)
@@ -806,39 +820,71 @@ const ClientDashboardPage: React.FC = () => {
   };
 
   const openWorkLogCreate = () => {
+    setWorkLogAddMenuOpen(false);
     setWorkLogModalMode("create");
     setSelectedWorkLogTaskId(null);
-    setWorkLogForm({ title: "", description: "", category: "", status: "TODO" });
+    setWorkLogForm({ title: "", description: "", category: "", status: "TODO", attachments: [] });
+    setWorkLogUrlInput("");
+    setWorkLogUrlType("url");
     setWorkLogModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!workLogAddMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (workLogAddMenuRef.current && !workLogAddMenuRef.current.contains(e.target as Node)) {
+        setWorkLogAddMenuOpen(false);
+      }
+    };
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [workLogAddMenuOpen]);
+
+  const parseProofAttachments = (proof: string | null | undefined): WorkLogAttachment[] => {
+    if (!proof || typeof proof !== "string") return [];
+    try {
+      const arr = JSON.parse(proof);
+      return Array.isArray(arr) ? arr.filter((x: any) => x && typeof x.value === "string") : [];
+    } catch {
+      return [];
+    }
   };
 
   const openWorkLogView = (taskId: string) => {
     const task = workLogTasks.find((t) => t.id === taskId);
     if (task) {
+      const attachments = parseProofAttachments((task as any).proof);
       setWorkLogForm({
         title: task.title || "",
         description: task.description || "",
         category: task.category || "",
         status: task.status,
+        attachments,
       });
     }
     setWorkLogModalMode("view");
     setSelectedWorkLogTaskId(taskId);
+    setWorkLogUrlInput("");
+    setWorkLogUrlType("url");
     setWorkLogModalOpen(true);
   };
 
   const openWorkLogEdit = (taskId: string) => {
     const task = workLogTasks.find((t) => t.id === taskId);
     if (task) {
+      const attachments = parseProofAttachments((task as any).proof);
       setWorkLogForm({
         title: task.title || "",
         description: task.description || "",
         category: task.category || "",
         status: task.status,
+        attachments,
       });
     }
     setWorkLogModalMode("edit");
     setSelectedWorkLogTaskId(taskId);
+    setWorkLogUrlInput("");
+    setWorkLogUrlType("url");
     setWorkLogModalOpen(true);
   };
 
@@ -850,6 +896,7 @@ const ClientDashboardPage: React.FC = () => {
       category: workLogForm.category.trim() || undefined,
       status: workLogForm.status,
       clientId,
+      proof: workLogForm.attachments.length > 0 ? workLogForm.attachments : undefined,
     };
 
     if (!payload.title) {
@@ -898,6 +945,91 @@ const ClientDashboardPage: React.FC = () => {
         setWorkLogModalOpen(false);
         setSelectedWorkLogTaskId(null);
       }
+    }
+  };
+
+  const handleWorkLogFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    e.target.value = "";
+    const fileList = Array.from(files);
+    setWorkLogUploading(true);
+    const uploaded: WorkLogAttachment[] = [];
+    let failed = 0;
+    let firstError: string | null = null;
+    const apiOrigin =
+      typeof window !== "undefined"
+        ? api.defaults.baseURL
+          ? new URL(api.defaults.baseURL).origin
+          : window.location.origin
+        : "";
+    try {
+      for (const file of fileList) {
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          const res = await api.post("/upload/worklog", formData);
+          const raw = res.data as WorkLogAttachment;
+          if (!raw?.value) continue;
+          const value =
+            raw.value.startsWith("http://") || raw.value.startsWith("https://")
+              ? raw.value
+              : apiOrigin
+                ? `${apiOrigin}${raw.value.startsWith("/") ? "" : "/"}${raw.value}`
+                : raw.value;
+          uploaded.push({
+            type: "url",
+            value,
+            name: raw.name ?? file.name,
+          });
+        } catch (err: any) {
+          failed += 1;
+          const msg =
+            (err?.response?.data && typeof err.response.data === "object" && err.response.data.message) ||
+            err?.message ||
+            "Upload failed.";
+          if (!firstError) firstError = msg;
+        }
+      }
+      if (uploaded.length > 0) {
+        setWorkLogForm((prev) => ({ ...prev, attachments: [...prev.attachments, ...uploaded] }));
+        if (failed === 0) {
+          toast.success(uploaded.length === 1 ? "File attached." : `${uploaded.length} files attached.`);
+        } else {
+          toast.success(`${uploaded.length} file(s) attached. ${failed} failed.`);
+        }
+      }
+      if (failed > 0 && uploaded.length === 0) {
+        toast.error(firstError || "Failed to upload file(s).");
+      }
+    } finally {
+      setWorkLogUploading(false);
+    }
+  };
+
+  const removeWorkLogAttachment = (index: number) => {
+    setWorkLogForm((prev) => ({
+      ...prev,
+      attachments: prev.attachments.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleWorkLogAddUrl = () => {
+    const trimmed = workLogUrlInput.trim();
+    if (!trimmed) return;
+    try {
+      new URL(trimmed);
+      setWorkLogForm((prev) => ({
+        ...prev,
+        attachments: [
+          ...prev.attachments,
+          { type: workLogUrlType, value: trimmed, name: trimmed },
+        ],
+      }));
+      setWorkLogUrlInput("");
+      toast.success("URL added.");
+    } catch {
+      toast.error("Please enter a valid URL.");
     }
   };
 
@@ -3543,47 +3675,49 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="365">Last year</option>
                       <option value="custom">Custom</option>
                     </select>
-                    <select
-                      value={compareTo}
-                      onChange={(e) => {
-                        const v = e.target.value as "none" | "previous_period" | "previous_year" | "custom";
-                        setCompareTo(v);
-                        if (v === "custom") {
-                          const end = new Date();
-                          const start = new Date();
-                          start.setDate(start.getDate() - 30);
-                          setCompareEndDate(end.toISOString().split("T")[0]);
-                          setCompareStartDate(start.toISOString().split("T")[0]);
-                        }
-                      }}
-                      className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      title="Compare to a previous period"
-                    >
-                      <option value="none">No comparison</option>
-                      <option value="previous_period">Compare to previous period</option>
-                      <option value="previous_year">Compare to previous year</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                    {compareTo === "custom" && (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="date"
-                          value={compareStartDate}
-                          onChange={(e) => setCompareStartDate(e.target.value)}
-                          max={compareEndDate || new Date().toISOString().split("T")[0]}
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
-                        />
-                        <span className="text-gray-500 text-sm">to</span>
-                        <input
-                          type="date"
-                          value={compareEndDate}
-                          onChange={(e) => setCompareEndDate(e.target.value)}
-                          min={compareStartDate || undefined}
-                          max={new Date().toISOString().split("T")[0]}
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
-                        />
-                      </div>
-                    )}
+                    <div className="flex flex-col gap-2">
+                      <select
+                        value={compareTo}
+                        onChange={(e) => {
+                          const v = e.target.value as "none" | "previous_period" | "previous_year" | "custom";
+                          setCompareTo(v);
+                          if (v === "custom") {
+                            const end = new Date();
+                            const start = new Date();
+                            start.setDate(start.getDate() - 30);
+                            setCompareEndDate(end.toISOString().split("T")[0]);
+                            setCompareStartDate(start.toISOString().split("T")[0]);
+                          }
+                        }}
+                        className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        title="Compare to a previous period"
+                      >
+                        <option value="none">No comparison</option>
+                        <option value="previous_period">Compare to previous period</option>
+                        <option value="previous_year">Compare to previous year</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                      {compareTo === "custom" && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={compareStartDate}
+                            onChange={(e) => setCompareStartDate(e.target.value)}
+                            max={compareEndDate || new Date().toISOString().split("T")[0]}
+                            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                          />
+                          <span className="text-gray-500 text-sm">to</span>
+                          <input
+                            type="date"
+                            value={compareEndDate}
+                            onChange={(e) => setCompareEndDate(e.target.value)}
+                            min={compareStartDate || undefined}
+                            max={new Date().toISOString().split("T")[0]}
+                            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                          />
+                        </div>
+                      )}
+                    </div>
 
                     {user?.role === "SUPER_ADMIN" && (
                       <button
@@ -5760,14 +5894,39 @@ const ClientDashboardPage: React.FC = () => {
                       <div className="flex items-center justify-between">
                         <h2 className="text-xl font-semibold text-gray-900">Work Log</h2>
                         {!reportOnly && (
-                          <button
-                            type="button"
-                            onClick={openWorkLogCreate}
-                            className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center"
-                            title="Add entry"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </button>
+                          <div className="relative" ref={workLogAddMenuRef}>
+                            <button
+                              type="button"
+                              onClick={() => setWorkLogAddMenuOpen((o) => !o)}
+                              className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1"
+                              title="Add entry"
+                            >
+                              <Plus className="h-4 w-4" />
+                              <span className="text-sm font-medium">Add Entry</span>
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
+                            {workLogAddMenuOpen && (
+                              <div className="absolute right-0 mt-1 w-52 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-20">
+                                <button
+                                  type="button"
+                                  onClick={openWorkLogCreate}
+                                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                  Add a task
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWorkLogAddMenuOpen(false);
+                                    setShowOnboardingModal(true);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                  Add onboarding task
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -5779,6 +5938,7 @@ const ClientDashboardPage: React.FC = () => {
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Attachments</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                             </tr>
@@ -5786,19 +5946,19 @@ const ClientDashboardPage: React.FC = () => {
                           <tbody className="bg-white divide-y divide-gray-200">
                             {workLogLoading ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
                                   Loading work log...
                                 </td>
                               </tr>
                             ) : workLogError ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={5}>
+                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
                                   {workLogError}
                                 </td>
                               </tr>
                             ) : workLogTasks.length === 0 ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
                                   No work logged yet.
                                 </td>
                               </tr>
@@ -5814,11 +5974,35 @@ const ClientDashboardPage: React.FC = () => {
                                 })();
                                 const workType = (task.category || "General").trim() || "General";
                                 const description = (task.description || task.title || "").trim();
+                                const taskAttachments = parseProofAttachments(task.proof);
                                 return (
                                   <tr key={task.id} className="hover:bg-gray-50">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{date}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{description}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-500 whitespace-pre-wrap max-w-xs align-top">{description}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-500 align-top">
+                                      {taskAttachments.length === 0 ? (
+                                        <span className="text-gray-400">—</span>
+                                      ) : (
+                                        <ul className="list-none space-y-1">
+                                          {taskAttachments.map((att, i) => (
+                                            <li key={i}>
+                                              <a
+                                                href={att.value}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-primary-600 hover:text-primary-800 inline-flex items-center gap-1"
+                                              >
+                                                <FileText className="h-3.5 w-3.5 shrink-0" />
+                                                <span className="truncate max-w-[140px]" title={att.name || att.value}>
+                                                  {att.name || "Attachment"}
+                                                </span>
+                                              </a>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                       <span
                                         className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${taskStatusClass(task.status)}`}
@@ -5925,8 +6109,8 @@ const ClientDashboardPage: React.FC = () => {
                           value={workLogForm.description}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
                           disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                          rows={4}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 resize-y min-h-[100px]"
+                          rows={5}
                           placeholder="Details about the work performed..."
                         />
                       </div>
@@ -5944,6 +6128,108 @@ const ClientDashboardPage: React.FC = () => {
                           <option value="REVIEW">In Review</option>
                           <option value="DONE">Completed</option>
                         </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
+                        {workLogModalMode !== "view" && (
+                          <>
+                            <input
+                              id="work-log-file-input-1"
+                              type="file"
+                              multiple
+                              accept=".pdf,.doc,.docx,.xls,.xlsx,image/*,video/*,.txt,.csv"
+                              className="sr-only"
+                              aria-label="Upload work log attachment"
+                              onChange={handleWorkLogFileSelect}
+                            />
+                            <div className="mb-4">
+                              <label
+                                htmlFor="work-log-file-input-1"
+                                className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 transition-colors"
+                              >
+                                <div className="flex flex-col items-center">
+                                  {workLogUploading ? (
+                                    <Loader2 className="h-6 w-6 text-gray-400 mb-2 animate-spin" />
+                                  ) : (
+                                    <Upload className="h-6 w-6 text-gray-400 mb-2" />
+                                  )}
+                                  <span className="text-sm text-gray-600">
+                                    {workLogUploading ? "Uploading…" : "Click to upload files (PDF, Word, Excel, images, etc.)"}
+                                  </span>
+                                  <span className="text-xs text-gray-500 mt-1">max 25MB per file</span>
+                                </div>
+                              </label>
+                            </div>
+                            <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                              <select
+                                value={workLogUrlType}
+                                onChange={(e) => setWorkLogUrlType(e.target.value as "image" | "video" | "url")}
+                                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent sm:w-40"
+                              >
+                                <option value="url">URL</option>
+                                <option value="image">Image URL</option>
+                                <option value="video">Video URL</option>
+                              </select>
+                              <input
+                                type="url"
+                                value={workLogUrlInput}
+                                onChange={(e) => setWorkLogUrlInput(e.target.value)}
+                                placeholder="Enter URL (e.g., https://example.com/file.pdf)"
+                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleWorkLogAddUrl}
+                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1 sm:w-auto"
+                              >
+                                <Plus className="h-4 w-4" />
+                                <span>Add</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
+                        {workLogForm.attachments.length > 0 ? (
+                          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                            {workLogForm.attachments.map((att, i) => (
+                              <div
+                                key={i}
+                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
+                              >
+                                <div className="flex items-center space-x-3 flex-1 min-w-0">
+                                  {att.type === "image" && <Image className="h-5 w-5 text-blue-600 flex-shrink-0" />}
+                                  {att.type === "video" && <Video className="h-5 w-5 text-purple-600 flex-shrink-0" />}
+                                  {(att.type === "url" || !att.type) && <LinkIcon className="h-5 w-5 text-green-600 flex-shrink-0" />}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-medium text-gray-900 truncate">
+                                      {att.name || att.value || "Attachment"}
+                                    </div>
+                                    <a
+                                      href={att.value}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-primary-600 hover:text-primary-800 truncate block"
+                                    >
+                                      {att.value}
+                                    </a>
+                                  </div>
+                                </div>
+                                {workLogModalMode !== "view" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeWorkLogAttachment(i)}
+                                    className="ml-2 p-1 text-red-600 hover:text-red-800 flex-shrink-0"
+                                    title="Remove"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">No attachments</p>
+                        )}
                       </div>
                     </div>
 
@@ -5977,6 +6263,18 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>,
                 document.body
+              )}
+
+              {/* Onboarding tasks modal (from Work Log "Add onboarding task") */}
+              {!reportOnly && (
+                <OnboardingTemplateModal
+                  open={showOnboardingModal}
+                  setOpen={setShowOnboardingModal}
+                  onTasksCreated={() => {
+                    fetchWorkLog();
+                  }}
+                  initialClientId={clientId ?? undefined}
+                />
               )}
 
               {/* Add Backlink Modal */}
@@ -7466,8 +7764,8 @@ const ClientDashboardPage: React.FC = () => {
                       value={workLogForm.description}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
                       disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                      rows={4}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 resize-y min-h-[100px]"
+                      rows={5}
                       placeholder="Details about the work performed..."
                     />
                   </div>
@@ -7485,6 +7783,108 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="REVIEW">In Review</option>
                       <option value="DONE">Completed</option>
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
+                    {workLogModalMode !== "view" && (
+                      <>
+                        <input
+                          id="work-log-file-input-2"
+                          type="file"
+                          multiple
+                          accept=".pdf,.doc,.docx,.xls,.xlsx,image/*,video/*,.txt,.csv"
+                          className="sr-only"
+                          aria-label="Upload work log attachment"
+                          onChange={handleWorkLogFileSelect}
+                        />
+                        <div className="mb-4">
+                          <label
+                            htmlFor="work-log-file-input-2"
+                            className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 transition-colors"
+                          >
+                            <div className="flex flex-col items-center">
+                              {workLogUploading ? (
+                                <Loader2 className="h-6 w-6 text-gray-400 mb-2 animate-spin" />
+                              ) : (
+                                <Upload className="h-6 w-6 text-gray-400 mb-2" />
+                              )}
+                              <span className="text-sm text-gray-600">
+                                {workLogUploading ? "Uploading…" : "Click to upload files (PDF, Word, Excel, images, etc.)"}
+                              </span>
+                              <span className="text-xs text-gray-500 mt-1">max 25MB per file</span>
+                            </div>
+                          </label>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                          <select
+                            value={workLogUrlType}
+                            onChange={(e) => setWorkLogUrlType(e.target.value as "image" | "video" | "url")}
+                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent sm:w-40"
+                          >
+                            <option value="url">URL</option>
+                            <option value="image">Image URL</option>
+                            <option value="video">Video URL</option>
+                          </select>
+                          <input
+                            type="url"
+                            value={workLogUrlInput}
+                            onChange={(e) => setWorkLogUrlInput(e.target.value)}
+                            placeholder="Enter URL (e.g., https://example.com/file.pdf)"
+                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleWorkLogAddUrl}
+                            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1 sm:w-auto"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span>Add</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {workLogForm.attachments.length > 0 ? (
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {workLogForm.attachments.map((att, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
+                          >
+                            <div className="flex items-center space-x-3 flex-1 min-w-0">
+                              {att.type === "image" && <Image className="h-5 w-5 text-blue-600 flex-shrink-0" />}
+                              {att.type === "video" && <Video className="h-5 w-5 text-purple-600 flex-shrink-0" />}
+                              {(att.type === "url" || !att.type) && <LinkIcon className="h-5 w-5 text-green-600 flex-shrink-0" />}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium text-gray-900 truncate">
+                                  {att.name || att.value || "Attachment"}
+                                </div>
+                                <a
+                                  href={att.value}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs text-primary-600 hover:text-primary-800 truncate block"
+                                >
+                                  {att.value}
+                                </a>
+                              </div>
+                            </div>
+                            {workLogModalMode !== "view" && (
+                              <button
+                                type="button"
+                                onClick={() => removeWorkLogAttachment(i)}
+                                className="ml-2 p-1 text-red-600 hover:text-red-800 flex-shrink-0"
+                                title="Remove"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No attachments</p>
+                    )}
                   </div>
                 </div>
 

@@ -89,6 +89,59 @@ router.post("/", authenticateToken, upload.single("file"), (req, res) => {
   }
 });
 
+// File filter for work log attachments (PDF, docs, images, etc.)
+const workLogFileFilter = (req: express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const allowedMimes = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "video/mp4",
+    "video/mpeg",
+    "video/quicktime",
+    "video/webm",
+    "application/pdf",
+    "application/msword", // .doc
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+    "application/vnd.ms-excel", // .xls
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+    "text/plain",
+    "text/csv",
+  ];
+  if (allowedMimes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Invalid file type. Allowed: PDF, Word, Excel, images, videos, text, CSV."));
+  }
+};
+
+const uploadWorkLog = multer({
+  storage,
+  fileFilter: workLogFileFilter,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB per file
+});
+
+// Work log attachment upload (PDF, docs, images, etc.)
+router.post("/worklog", authenticateToken, uploadWorkLog.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    const baseUrl = process.env.API_URL || `${req.protocol}://${req.get("host")}`;
+    const fullUrl = `${baseUrl}${fileUrl}`;
+    res.json({
+      type: "url",
+      value: fullUrl,
+      name: req.file.originalname,
+    });
+  } catch (error: any) {
+    console.error("Work log upload error:", error);
+    res.status(500).json({ message: "Failed to upload file" });
+  }
+});
+
 // Upload multiple files
 router.post("/multiple", authenticateToken, upload.array("files", 10), (req, res) => {
   try {

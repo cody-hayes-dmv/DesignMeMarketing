@@ -1,6 +1,6 @@
 import { createTask, updateTask, ProofItem, fetchTasks } from "@/store/slices/taskSlice";
 import { Task, TaskStatus } from "@/utils/types";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
@@ -29,6 +29,13 @@ type TaskComment = {
 const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task }) => {
     const dispatch = useDispatch();
     const { clients } = useSelector((state: RootState) => state.client);
+    const sortedClients = useMemo(
+        () =>
+            [...clients].sort((a, b) =>
+                (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
+            ),
+        [clients]
+    );
     const { user } = useSelector((state: RootState) => state.auth);
     const [workers, setWorkers] = useState<Array<{ id: string; name: string; email: string }>>([]);
     const [form, setForm] = useState({
@@ -178,7 +185,19 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                     priority: (task as any).priority ?? "",
                     estimatedHours: (task as any).estimatedHours?.toString() ?? "",
                 });
-                setProof((task.proof as ProofItem[]) || []);
+                setProof((() => {
+                    const p = task.proof;
+                    if (Array.isArray(p)) return p as ProofItem[];
+                    if (typeof p === "string") {
+                        try {
+                            const parsed = JSON.parse(p);
+                            return Array.isArray(parsed) ? (parsed as ProofItem[]) : [];
+                        } catch {
+                            return [];
+                        }
+                    }
+                    return [];
+                })());
             } else {
                 setForm({
                     title: "",
@@ -370,7 +389,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         >
                             <option value="">No client</option>
-                            {clients.map((client) => (
+                            {sortedClients.map((client) => (
                                 <option key={client.id} value={client.id}>
                                     {client.name} ({client.domain})
                                 </option>

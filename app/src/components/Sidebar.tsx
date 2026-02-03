@@ -36,6 +36,19 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "AGENCY";
 
+  const panelLabel =
+    user?.role === "SUPER_ADMIN"
+      ? "Super Admin Panel"
+      : user?.role === "AGENCY"
+        ? "Agency Panel"
+        : user?.role === "ADMIN"
+          ? "Admin Panel"
+          : user?.role === "WORKER"
+            ? "Worker Panel"
+            : user?.role
+              ? `${user.role} Panel`
+              : "Panel";
+
   const handleLogout = () => {
     dispatch(logout() as any);
     navigate("/login");
@@ -210,34 +223,39 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
         </button>
       </div>
 
-      {/* Logo */}
+      {/* Logo & panel label: centered, logo prominent, label underneath */}
       <div
-        className={`${collapsed ? "p-4" : "p-6"
-          } border-b border-gray-700 transition-all duration-300`}
+        className={`${collapsed ? "px-3 py-5" : "px-4 py-6"
+          } border-b border-gray-700 transition-all duration-300 flex flex-col items-center justify-center text-center`}
       >
-        <div className="flex items-center space-x-3">
-          {showZoesiLogo ? (
+        {showZoesiLogo ? (
+          <>
             <img
               src={logoUrl}
               alt="Zoesi"
-              className={`${collapsed ? "h-6 w-6" : "h-10 max-w-[140px] w-auto"
+              className={`${collapsed ? "h-8 w-8" : "h-14 w-auto max-w-[180px]"
                 } object-contain transition-all duration-300`}
             />
-          ) : (
+            {!collapsed && (
+              <p className="mt-2 text-xs font-medium text-gray-400 tracking-wide">
+                {panelLabel}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
             <BarChart3
-              className={`${collapsed ? "h-6 w-6" : "h-8 w-8"
-                } text-primary-400 transition-all duration-300`}
+              className={`${collapsed ? "h-8 w-8" : "h-10 w-10"
+                } text-primary-400 transition-all duration-300 shrink-0`}
             />
-          )}
-          {!collapsed && (
-            <div className="transition-opacity duration-300">
-              {!showZoesiLogo && (
-                <h1 className="text-lg font-bold text-white">SEO Dashboard</h1>
-              )}
-              <p className="text-xs text-gray-400">{user?.role} Panel</p>
-            </div>
-          )}
-        </div>
+            {!collapsed && (
+              <div className="mt-2">
+                <h1 className="text-base font-bold text-white">SEO Dashboard</h1>
+                <p className="text-xs text-gray-400 mt-0.5">{panelLabel}</p>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Navigation */}

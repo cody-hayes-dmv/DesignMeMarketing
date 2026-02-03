@@ -92,18 +92,58 @@ router.get("/templates", authenticateToken, async (req, res) => {
       return res.json(templates);
     }
 
-    // Agency/Admin: onboarding is client-based – only show global template(s), not agency-specific
+    // Agency/Admin: show global templates + this agency's templates (for use in Create onboarding task)
     if (user.role === "AGENCY" || user.role === "ADMIN") {
-      const globalTemplates = await prisma.onboardingTemplate.findMany({
-        where: { agencyId: null },
+      const userAgency = await prisma.userAgency.findFirst({
+        where: { userId: user.userId },
+      });
+      const agencyId = userAgency?.agencyId ?? undefined;
+      const templates = await prisma.onboardingTemplate.findMany({
+        where: agencyId
+          ? { OR: [{ agencyId: null }, { agencyId }] }
+          : { agencyId: null },
         include: includeTasks,
       });
-      return res.json(globalTemplates);
+      return res.json(templates);
     }
 
     return res.status(403).json({ message: "Access denied" });
   } catch (error) {
     console.error("Error fetching templates:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Get templates the current user can manage (edit/delete). Used by Settings > Templates.
+// SUPER_ADMIN: all templates. AGENCY/ADMIN: only templates belonging to their agency.
+router.get("/templates/manageable", authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+
+    if (user.role === "SUPER_ADMIN") {
+      const templates = await prisma.onboardingTemplate.findMany({
+        include: { ...includeTasks, agency: { select: { id: true, name: true } } },
+      });
+      return res.json(templates);
+    }
+
+    if (user.role === "AGENCY" || user.role === "ADMIN") {
+      const userAgency = await prisma.userAgency.findFirst({
+        where: { userId: user.userId },
+      });
+      if (!userAgency) {
+        return res.json([]);
+      }
+      const templates = await prisma.onboardingTemplate.findMany({
+        where: { agencyId: userAgency.agencyId },
+        include: includeTasks,
+      });
+      return res.json(templates);
+    }
+
+    return res.status(403).json({ message: "Access denied" });
+  } catch (error) {
+    console.error("Error fetching manageable templates:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -117,16 +157,26 @@ router.post("/templates", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const { name, description, isDefault, tasks } = req.body;
+    const { name, description, isDefault, tasks, agencyId: bodyAgencyId } = req.body;
 
-    let agencyId;
+    let agencyId: string | null;
     if (user.role === "SUPER_ADMIN") {
-      // For super admin, use the first agency or create a default one
-      const agency = await prisma.agency.findFirst();
-      if (!agency) {
-        return res.status(400).json({ message: "No agency found" });
+      // Super admin can create global (null) or assign to an agency
+      if (bodyAgencyId === null || bodyAgencyId === "") {
+        agencyId = null;
+      } else if (typeof bodyAgencyId === "string") {
+        const agency = await prisma.agency.findUnique({ where: { id: bodyAgencyId } });
+        if (!agency) {
+          return res.status(400).json({ message: "Agency not found" });
+        }
+        agencyId = bodyAgencyId;
+      } else {
+        const agency = await prisma.agency.findFirst();
+        if (!agency) {
+          return res.status(400).json({ message: "No agency found" });
+        }
+        agencyId = agency.id;
       }
-      agencyId = agency.id;
     } else {
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId }

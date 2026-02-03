@@ -333,10 +333,24 @@ const TasksPage = () => {
                                                         {task.description}
                                                     </div>
                                                 )}
-                                                {/* Proof/Attachments */}
-                                                {task.proof && task.proof.length > 0 && (
-                                                    <div className="mt-2 flex flex-wrap gap-2">
-                                                        {task.proof.map((item: any, idx: number) => (
+                                                {/* Proof/Attachments (proof can be JSON string or array from API) */}
+                                                {(() => {
+                                                    const proofList = Array.isArray(task.proof)
+                                                        ? task.proof
+                                                        : typeof task.proof === "string"
+                                                            ? (() => {
+                                                                try {
+                                                                    const parsed = JSON.parse(task.proof);
+                                                                    return Array.isArray(parsed) ? parsed : [];
+                                                                } catch {
+                                                                    return [];
+                                                                }
+                                                            })()
+                                                            : [];
+                                                    if (proofList.length === 0) return null;
+                                                    return (
+                                                        <div className="mt-2 flex flex-wrap gap-2">
+                                                            {proofList.map((item: any, idx: number) => (
                                                             <a
                                                                 key={idx}
                                                                 href={item.value}
@@ -352,9 +366,10 @@ const TasksPage = () => {
                                                                 </span>
                                                                 <ExternalLink className="h-3 w-3" />
                                                             </a>
-                                                        ))}
-                                                    </div>
-                                                )}
+                                                            ))}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">

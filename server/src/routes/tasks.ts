@@ -101,7 +101,8 @@ function canAccessTask(user: any, task: any) {
   const inClient = Boolean(
     task?.client?.clientUsers?.some((m: any) => m.userId === user.userId && m.status === "ACTIVE")
   );
-  return isAdmin || inAgency || inClient;
+  const isClientOwner = task?.client?.userId === user.userId;
+  return isAdmin || inAgency || inClient || isClientOwner;
 }
 
 // Get tasks
@@ -196,6 +197,7 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
         description: true,
         category: true,
         status: true,
+        proof: true,
         createdAt: true,
         updatedAt: true,
         assignee: { select: { id: true, name: true, email: true } },
@@ -326,16 +328,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
 
     if (!task) return res.status(404).json({ message: "Task not found" });
 
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const inAgency = task.agency.members.some((m) => m.userId === req.user.userId);
-
-    if (!isAdmin && !inAgency) {
+    if (!canAccessTask(req.user, task)) {
       return res.status(403).json({ message: "Access denied" });
     }
 
     // strip heavy agency.members from response
     const { agency, ...rest } = task;
-    return res.json({ ...rest, agency: { id: agency.id, name: agency.name } });
+    return res.json({ ...rest, agency: agency ? { id: agency.id, name: agency.name } : null });
   } catch (error) {
     console.error("Get task error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -369,7 +368,7 @@ router.post("/", authenticateToken, async (req, res) => {
         return res.status(403).json({ message: "Access denied" });
       }
 
-      // Attach task to the owning user's first agency (so it appears in work logs/admin views)
+      // Attach task to the owning user's first agency if available
       const ownerMembership = await prisma.userAgency.findFirst({
         where: { userId: (await prisma.client.findUnique({ where: { id: parsed.clientId }, select: { userId: true } }))?.userId || "" },
         select: { agencyId: true },
@@ -377,8 +376,10 @@ router.post("/", authenticateToken, async (req, res) => {
       agencyId = ownerMembership?.agencyId;
     }
 
-    if (!agencyId) {
-      return res.status(400).json({ message: "No agency found" });
+    // Work log: when clientId is provided, allow creating without agency (client-only task).
+    const isWorkLogFromClient = Boolean(parsed.clientId);
+    if (!agencyId && !isWorkLogFromClient) {
+      return res.status(400).json({ message: "No agency found or provide a client for work log." });
     }
 
     const task = await prisma.task.create({
@@ -388,7 +389,7 @@ router.post("/", authenticateToken, async (req, res) => {
         category: parsed.category,
         status: parsed.status ?? "TODO",
         dueDate: parsed.dueDate,
-        agencyId,
+        agencyId: agencyId ?? undefined,
         createdById: req.user.userId,
         assigneeId: parsed.assigneeId,
         clientId: parsed.clientId,
@@ -400,8 +401,15 @@ router.post("/", authenticateToken, async (req, res) => {
     });
 
     res.status(201).json(task);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Create task error:", error);
+    if (error instanceof z.ZodError) {
+      const proofError = error.errors.find((e) => e.path.includes("proof"));
+      const message = proofError
+        ? "Invalid attachments: each attachment must have a valid URL."
+        : "Invalid data";
+      return res.status(400).json({ message, errors: error.errors });
+    }
     res.status(500).json({ message: "Failed to create task" });
   }
 });
@@ -431,8 +439,15 @@ router.put("/:id", authenticateToken, async (req, res) => {
     });
 
     res.json(updatedTask);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Update task error:", error);
+    if (error instanceof z.ZodError) {
+      const proofError = error.errors.find((e) => e.path.includes("proof"));
+      const message = proofError
+        ? "Invalid attachments: each attachment must have a valid URL."
+        : "Invalid data";
+      return res.status(400).json({ message, errors: error.errors });
+    }
     res.status(500).json({ message: "Failed to update task" });
   }
 });
@@ -443,15 +458,9 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { status } = z.object({ status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]) }).parse(req.body);
 
-    const task = await prisma.task.findUnique({
-      where: { id },
-      include: { agency: { include: { members: true } } },
-    });
+    const task = await getTaskForAccess(id);
     if (!task) return res.status(404).json({ message: "Task not found" });
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const inAgency = task.agency.members.some((m) => m.userId === req.user.userId);
-    if (!isAdmin && !inAgency) return res.status(403).json({ message: "Access denied" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
     const updated = await prisma.task.update({
       where: { id },

@@ -174,7 +174,7 @@ const SuperAdminDashboard = () => {
                         <div>
                           <p className="font-medium text-gray-900">{agency.name}</p>
                           <p className="text-sm text-gray-500">
-                            {agency.memberCount} member{agency.memberCount !== 1 ? "s" : ""}
+                            {agency.clientCount ?? 0} client{(agency.clientCount ?? 0) !== 1 ? "s" : ""}
                           </p>
                         </div>
                       </div>
