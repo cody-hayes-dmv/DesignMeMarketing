@@ -379,6 +379,7 @@ const ClientDashboardPage: React.FC = () => {
     meta?: {
       startDate: string;
       endDate: string;
+      lastUpdated?: string;
       dataForSeoConnected: boolean;
       locationCode: number;
       languageCode: string;
@@ -386,6 +387,10 @@ const ClientDashboardPage: React.FC = () => {
       hasDataForSeoCredentials?: boolean;
       targetDomain?: string;
       apiResponseStatus?: string;
+      scoreExplanation?: string;
+      dataSource?: string;
+      queriesFilteredByRelevance?: boolean;
+      industry?: string | null;
     };
   } | null>(null);
   const [aiIntelligenceLoading, setAiIntelligenceLoading] = useState(false);
@@ -4776,7 +4781,7 @@ const ClientDashboardPage: React.FC = () => {
                       <div>
                         <h2 className="text-xl font-semibold text-gray-900">AI Intelligence</h2>
                         <p className="text-sm text-gray-500 mt-0.5">
-                          Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms.
+                          Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data source: DataForSEO. Numbers here may differ from other dashboard widgets that use different sources.
                         </p>
                       </div>
                     </div>
@@ -4799,13 +4804,24 @@ const ClientDashboardPage: React.FC = () => {
                       <>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Visibility Score</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Visibility Score</p>
+                              <span
+                                className="text-gray-400 hover:text-gray-600 cursor-help"
+                                title={aiIntelligence.meta?.scoreExplanation || "Based on mentions, AI search volume, and platform diversity (ChatGPT, Google AI, Perplexity). Data from DataForSEO."}
+                              >
+                                <Info className="h-3.5 w-3.5" />
+                              </span>
+                            </div>
                             <p className="mt-1 text-2xl font-bold text-gray-900">
                               {aiIntelligence.kpis?.aiVisibilityScore ?? 0} <span className="text-base font-normal text-gray-500">/100</span>
                             </p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
                               <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0} pts
                             </span>
+                            {aiIntelligence.meta?.lastUpdated && (
+                              <p className="text-xs text-gray-400 mt-2">Updated {new Date(aiIntelligence.meta.lastUpdated).toLocaleDateString()}</p>
+                            )}
                           </div>
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total AI Mentions</p>
@@ -4833,52 +4849,60 @@ const ClientDashboardPage: React.FC = () => {
                         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                           <div className="px-6 py-4 border-b border-gray-200">
                             <h3 className="text-lg font-semibold text-gray-900">AI Platform Performance</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">Data from {aiIntelligence.meta?.dataSource || "DataForSEO"}. {aiIntelligence.meta?.lastUpdated && `Last updated ${new Date(aiIntelligence.meta.lastUpdated).toLocaleDateString()}.`}</p>
                           </div>
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200 text-sm">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Platform</th>
-                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Mentions</th>
-                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">AI Search Vol</th>
-                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Impressions</th>
-                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Trend</th>
-                                  <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Share</th>
-                                </tr>
-                              </thead>
-                              <tbody className="bg-white divide-y divide-gray-100">
-                                {(aiIntelligence.platforms ?? []).map((p) => (
-                                  <tr key={p.platform} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4">
-                                      <span className="inline-flex items-center gap-2">
-                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
-                                        <span className="font-medium text-gray-900">{p.platform}</span>
-                                      </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.mentions ?? 0}</td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{(p.aiSearchVol ?? 0).toLocaleString()}</td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{(p.impressions ?? 0).toLocaleString()}</td>
-                                    <td className="px-6 py-4">
-                                      {(p.trend ?? 0) > 0 && <span className="inline-flex items-center gap-1 text-green-600 font-medium"><TrendingUp className="h-4 w-4" />+{p.trend}%</span>}
-                                      {(p.trend ?? 0) === 0 && <span className="text-gray-400">—</span>}
-                                      {(p.trend ?? 0) < 0 && <span className="inline-flex items-center gap-1 text-red-600 font-medium">{p.trend}%</span>}
-                                    </td>
-                                    <td className="px-6 py-4 text-gray-700 font-medium">{p.share ?? 0}%</td>
+                          {(aiIntelligence.kpis?.totalAiMentions ?? 0) === 0 && (aiIntelligence.platforms ?? []).every((p) => (p.mentions ?? 0) === 0) ? (
+                            <div className="px-6 py-8 text-center text-sm text-gray-500 bg-gray-50/50">
+                              <p className="font-medium text-gray-600">No platform data yet</p>
+                              <p className="mt-1 text-xs">Mentions and volume will appear when DataForSEO has data for this domain. Check back after indexing or use Refresh if you have Super Admin access.</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Platform</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Mentions</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">AI Search Vol</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Impressions</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Trend</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Share</th>
                                   </tr>
-                                ))}
-                                <tr className="bg-gray-50 font-semibold">
-                                  <td className="px-6 py-4 text-gray-900">TOTAL</td>
-                                  <td className="px-6 py-4 text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</td>
-                                  <td className="px-6 py-4 text-gray-900">{(aiIntelligence.kpis?.aiSearchVolume ?? 0).toLocaleString()}</td>
-                                  <td className="px-6 py-4 text-gray-900">
-                                    {(aiIntelligence.platforms ?? []).reduce((s, p) => s + (p.impressions ?? 0), 0).toLocaleString()}
-                                  </td>
-                                  <td className="px-6 py-4 text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</td>
-                                  <td className="px-6 py-4 text-gray-900">100%</td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-100">
+                                  {(aiIntelligence.platforms ?? []).map((p) => (
+                                    <tr key={p.platform} className="hover:bg-gray-50">
+                                      <td className="px-6 py-4">
+                                        <span className="inline-flex items-center gap-2">
+                                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                                          <span className="font-medium text-gray-900">{p.platform}</span>
+                                        </span>
+                                      </td>
+                                      <td className="px-6 py-4 text-gray-700 font-medium">{p.mentions ?? 0}</td>
+                                      <td className="px-6 py-4 text-gray-700 font-medium">{(p.aiSearchVol ?? 0).toLocaleString()}</td>
+                                      <td className="px-6 py-4 text-gray-700 font-medium">{(p.impressions ?? 0).toLocaleString()}</td>
+                                      <td className="px-6 py-4">
+                                        {(p.trend ?? 0) > 0 && <span className="inline-flex items-center gap-1 text-green-600 font-medium"><TrendingUp className="h-4 w-4" />+{p.trend}%</span>}
+                                        {(p.trend ?? 0) === 0 && <span className="text-gray-400">—</span>}
+                                        {(p.trend ?? 0) < 0 && <span className="inline-flex items-center gap-1 text-red-600 font-medium">{p.trend}%</span>}
+                                      </td>
+                                      <td className="px-6 py-4 text-gray-700 font-medium">{p.share ?? 0}%</td>
+                                    </tr>
+                                  ))}
+                                  <tr className="bg-gray-50 font-semibold">
+                                    <td className="px-6 py-4 text-gray-900">TOTAL</td>
+                                    <td className="px-6 py-4 text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</td>
+                                    <td className="px-6 py-4 text-gray-900">{(aiIntelligence.kpis?.aiSearchVolume ?? 0).toLocaleString()}</td>
+                                    <td className="px-6 py-4 text-gray-900">
+                                      {(aiIntelligence.platforms ?? []).reduce((s, p) => s + (p.impressions ?? 0), 0).toLocaleString()}
+                                    </td>
+                                    <td className="px-6 py-4 text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</td>
+                                    <td className="px-6 py-4 text-gray-900">100%</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                         </div>
 
                         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
@@ -4886,7 +4910,7 @@ const ClientDashboardPage: React.FC = () => {
                             <div>
                               <div className="w-1 h-6 bg-green-500 rounded-full inline-block mr-2 align-middle" />
                               <h3 className="text-lg font-semibold text-gray-900 inline align-middle">Queries Where You Appear in AI</h3>
-                              <p className="text-sm text-gray-500 mt-1">Top performing queries triggering AI mentions</p>
+                              <p className="text-sm text-gray-500 mt-1">Top performing queries triggering AI mentions{aiIntelligence.meta?.queriesFilteredByRelevance ? " (filtered to your industry & target keywords)" : ""}</p>
                             </div>
                             <button 
                               type="button" 
@@ -4917,7 +4941,7 @@ const ClientDashboardPage: React.FC = () => {
                             <div>
                               <div className="w-1 h-6 bg-amber-500 rounded-full inline-block mr-2 align-middle" />
                               <h3 className="text-lg font-semibold text-gray-900 inline align-middle">AI Competitive Position</h3>
-                              <p className="text-sm text-gray-500 mt-1">Your AI visibility vs competitors</p>
+                              <p className="text-sm text-gray-500 mt-1">Your AI visibility vs competitors (from SERP). Same score formula as above. {aiIntelligence.meta?.industry && `Industry: ${aiIntelligence.meta.industry}.`}</p>
                             </div>
                             <button 
                               type="button" 
@@ -4979,22 +5003,32 @@ const ClientDashboardPage: React.FC = () => {
                             </button>
                           </div>
                           <div className="space-y-4">
-                            {(aiIntelligence.howAiMentionsYou ?? []).slice(0, 2).map((h, idx) => (
-                              <div key={idx} className="p-4 rounded-lg border border-gray-200 bg-gray-50/30">
-                                <p className="font-semibold text-gray-900">&quot;{h.query}&quot;</p>
-                                <div className="flex flex-wrap gap-2 mt-2">
-                                  <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">{h.platform}</span>
-                                  <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{(h.aiVolPerMo ?? 0).toLocaleString()} AI vol/mo</span>
+                            {(aiIntelligence.howAiMentionsYou ?? []).slice(0, 2).map((h, idx) => {
+                              const cleanUrl = (() => {
+                                try {
+                                  const raw = h.sourceUrl.replace(/^https?:\/\//, "").split("?")[0] || "";
+                                  return raw || h.sourceUrl.replace(/^https?:\/\//, "");
+                                } catch {
+                                  return h.sourceUrl.replace(/^https?:\/\//, "");
+                                }
+                              })();
+                              return (
+                                <div key={idx} className="p-4 rounded-lg border border-gray-200 bg-gray-50/30">
+                                  <p className="font-semibold text-gray-900">&quot;{h.query}&quot;</p>
+                                  <div className="flex flex-wrap gap-2 mt-2">
+                                    <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">{h.platform}</span>
+                                    <span className="px-2 py-1 rounded-md bg-gray-200 text-gray-700 text-xs font-medium">{(h.aiVolPerMo ?? 0).toLocaleString()} AI vol/mo</span>
+                                  </div>
+                                  <div className="mt-2 pl-3 border-l-2 border-primary-200 text-sm text-gray-600 italic">{h.snippet}</div>
+                                  <a href={h.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 block text-sm text-primary-600 hover:underline font-mono break-all" title={h.sourceUrl}>
+                                    {cleanUrl}
+                                  </a>
+                                  <div className="mt-2 flex justify-end">
+                                    <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">#{h.citationIndex} Citation</span>
+                                  </div>
                                 </div>
-                                <div className="mt-2 pl-3 border-l-2 border-primary-200 text-sm text-gray-600 italic">{h.snippet}</div>
-                                <a href={h.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm text-primary-600 hover:underline">
-                                  URL: {h.sourceUrl.replace(/^https?:\/\//, "")}
-                                </a>
-                                <div className="mt-2 flex justify-end">
-                                  <span className="px-2 py-1 rounded-md bg-green-100 text-green-800 text-xs font-medium">#{h.citationIndex} Citation</span>
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -5096,8 +5130,9 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="mt-4 rounded-lg bg-blue-50 border border-blue-200 p-4">
                             <div className="flex items-center gap-2 font-semibold text-gray-900 mb-2">
                               <Lightbulb className="h-4 w-4 text-amber-500" />
-                              Action Items:
+                              Action Items
                             </div>
+                            <p className="text-xs text-gray-600 mb-2">Based on competitor gap analysis. Validate that each suggestion fits your business and location before acting.</p>
                             <ul className="list-disc list-inside space-y-1 text-sm text-blue-900">
                               {(aiIntelligence.actionItems ?? []).map((item, i) => (
                                 <li key={i}>{item}</li>

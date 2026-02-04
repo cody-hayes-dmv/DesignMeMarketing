@@ -5537,12 +5537,9 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     // Calculate platform diversity (number of platforms with mentions > 0)
     const platformDiversity = Object.keys(platformMap).filter(k => (platformMap[k]?.mentions || 0) > 0).length;
 
-    // Calculate AI Visibility Score using the provided formula
-    const aiVisibilityScore = Math.min(100,
-      (totalMentions * 2) +
-      (totalAiSearchVolume / 100) +
-      (platformDiversity * 10)
-    );
+    // Calculate AI Visibility Score using the provided formula (capped at 99 to avoid "perfect" scores without justification)
+    const rawVisibilityScore = (totalMentions * 2) + (totalAiSearchVolume / 100) + (platformDiversity * 10);
+    const aiVisibilityScore = Math.min(99, Math.min(100, rawVisibilityScore));
 
     // Calculate AI Visibility Score trend (compare to previous period)
     const prevPlatformDiversity = Object.keys(prevPlatformMap).filter(k => (prevPlatformMap[k]?.mentions || 0) > 0).length;
@@ -5591,34 +5588,42 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       platforms[0].share = platforms[0].share + (100 - totalShare);
     }
 
+    // Build relevance filter: only show queries that match client's business (industry or target keywords)
+    // Avoids showing irrelevant queries (e.g. "breakfast near me", "Wells Fargo" for a landscaping client)
+    const industryLower = (client.industry || "").toLowerCase().trim();
+    const industryWords = industryLower ? industryLower.split(/\s+/).filter((w: string) => w.length > 2) : [];
+    const targetKeywordLower = targetKeywordStrings.map((k) => k.toLowerCase());
+    const hasRelevanceSignal = industryWords.length > 0 || targetKeywordLower.length > 0;
+
+    const isQueryRelevant = (queryText: string): boolean => {
+      if (!queryText || !hasRelevanceSignal) return true; // No filter when no signal
+      const q = queryText.toLowerCase();
+      if (targetKeywordLower.some((k) => q.includes(k))) return true;
+      if (industryWords.some((w) => q.includes(w))) return true;
+      return false;
+    };
+
     // Parse search mentions into queries array
     // API response structure: items[] with question, answer, sources[], ai_search_volume, platform
-    // Return all queries (not limited to 5) for "View All" functionality
-    // If no DataForSEO queries, create placeholder queries from target keywords
-    let queriesWhereYouAppear = searchMentions.map((item: any, idx: number) => {
-      const query = item?.question || "";
-      const platformStr = String(item?.platform || "google").toLowerCase();
-      let platformName = "GAI";
-      if (platformStr.includes("chatgpt") || platformStr.includes("chat_gpt")) {
-        platformName = "ChatGPT";
-      } else if (platformStr.includes("perplexity")) {
-        platformName = "Perplexity";
-      }
-      
-      // Count mentions from sources array (how many times domain appears)
-      const sources = Array.isArray(item?.sources) ? item.sources : [];
-      const mentions = sources.filter((s: any) => {
-        const sourceDomain = (s?.domain || "").toLowerCase();
-        return sourceDomain.includes(targetDomain.toLowerCase());
-      }).length;
-      
-      return {
-        query,
-        aiVolPerMo: Number(item?.ai_search_volume || 0),
-        platforms: platformName,
-        mentions: mentions || 1, // At least 1 if domain appears in response
-      };
-    });
+    // Filter by relevance to client industry/keywords to avoid irrelevant queries (e.g. "breakfast near me" for landscapers)
+    let queriesWhereYouAppear = searchMentions
+      .map((item: any) => {
+        const query = item?.question || "";
+        const platformStr = String(item?.platform || "google").toLowerCase();
+        let platformName = "GAI";
+        if (platformStr.includes("chatgpt") || platformStr.includes("chat_gpt")) {
+          platformName = "ChatGPT";
+        } else if (platformStr.includes("perplexity")) {
+          platformName = "Perplexity";
+        }
+        const sources = Array.isArray(item?.sources) ? item.sources : [];
+        const mentions = sources.filter((s: any) => {
+          const sourceDomain = (s?.domain || "").toLowerCase();
+          return sourceDomain.includes(targetDomain.toLowerCase());
+        }).length;
+        return { query, aiVolPerMo: Number(item?.ai_search_volume || 0), platforms: platformName, mentions: mentions || 1 };
+      })
+      .filter((item: { query: string }) => isQueryRelevant(item.query));
 
     // If no queries from DataForSEO, create placeholder queries from target keywords
     if (queriesWhereYouAppear.length === 0 && totalMentions > 0) {
@@ -5653,10 +5658,10 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 
     const totalQueriesCount = queriesWhereYouAppear.length || searchMentions.length || 0;
 
-    // Build "How AI Platforms Mention You" from search mentions
-    // Return all contexts (not limited to 2) for "View All Contexts" functionality
-    // If no DataForSEO contexts, create placeholder contexts from target keywords
-    let howAiMentionsYou = searchMentions.map((item: any, idx: number) => {
+    // Build "How AI Platforms Mention You" from search mentions (relevance-filtered)
+    let howAiMentionsYou = searchMentions
+      .filter((item: any) => isQueryRelevant(item?.question || ""))
+      .map((item: any, idx: number) => {
       const query = item?.question || "";
       const platformStr = String(item?.platform || "google").toLowerCase();
       let platform = "Google AI Overview";
@@ -5851,19 +5856,22 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       }
     }
 
-    // ===== ACTION ITEMS (Generated from competitor gap analysis) =====
+    // Filter competitor queries by relevance so we don't suggest irrelevant actions (e.g. "target Breakfast Near Me" for a landscaper)
+    const relevantCompetitorQueries = (competitorQueries as { query: string; priority: string; aiVol: number }[]).filter(
+      (q) => isQueryRelevant(q.query)
+    );
+
+    // ===== ACTION ITEMS (Only from relevance-filtered competitor queries; avoid harmful generic advice) =====
     const actionItems: string[] = [];
-    if (competitorQueries.length > 0) {
-      // Generate action items from top competitor queries
-      const topQueries = competitorQueries.slice(0, 3);
+    if (relevantCompetitorQueries.length > 0) {
+      const topQueries = relevantCompetitorQueries.slice(0, 3);
       for (const q of topQueries) {
         if (q.priority === "HIGH") {
-          // Extract location/keyword from query for actionable items
           const queryLower = q.query.toLowerCase();
           if (queryLower.includes("near me") || queryLower.includes("location")) {
-            actionItems.push(`Create location page targeting "${q.query}"`);
+            actionItems.push(`Consider a location page for "${q.query}" if it fits your services`);
           } else {
-            actionItems.push(`Create content targeting "${q.query}" (${q.aiVol} monthly AI volume)`);
+            actionItems.push(`Consider content for "${q.query}" (${q.aiVol} monthly AI volume)`);
           }
         }
       }
@@ -5873,8 +5881,10 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     }
     if (actionItems.length === 0) {
       actionItems.push("Continue optimizing existing AI mentions");
-      actionItems.push("Expand content coverage for high-volume AI queries");
+      actionItems.push("Expand content coverage for high-volume AI queries in your industry");
     }
+
+    const scoreExplanation = `Based on: mentions (×2), AI search volume (÷100), and platform diversity (ChatGPT, Google AI, Perplexity). Max 99. Data: DataForSEO.`;
 
     return res.json({
       kpis: {
@@ -5893,13 +5903,14 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       gapBehindLeader: gapBehind,
       howAiMentionsYou,
       totalContextsCount,
-      competitorQueries,
+      competitorQueries: relevantCompetitorQueries,
       actionItems,
       aiSearchVolumeTrend12Months,
       topContentTypes,
       meta: {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
+        lastUpdated: endDate.toISOString(),
         dataForSeoConnected: !!currentMetrics,
         locationCode,
         languageCode,
@@ -5907,6 +5918,10 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         hasDataForSeoCredentials: !!process.env.DATAFORSEO_BASE64,
         targetDomain,
         apiResponseStatus: (currentMetrics || totalMentions > 0) ? "success" : "no_data_or_error",
+        scoreExplanation,
+        dataSource: "DataForSEO",
+        queriesFilteredByRelevance: hasRelevanceSignal,
+        industry: client.industry || null,
       },
     });
   } catch (error: any) {
@@ -8920,13 +8935,16 @@ router.get("/keyword-research", authenticateToken, async (req, res) => {
       kw.includes("?") || /^(who|what|where|when|why|how|can|is|are|do|does)\s/i.test(kw);
     const variations = suggestions.filter((r) => !isQuestion(r.keyword));
 
+    // Only return actual question-shaped phrases in "questions" (API can return non-questions)
+    const questionsOnly = questions.filter((r) => isQuestion(r.keyword));
+
     // Strategy = pillar (seed) + items from DataForSEO related_keywords
     const strategy = { pillar: seed, items: suggestions };
 
     res.json({
       suggestions,
       variations,
-      questions,
+      questions: questionsOnly,
       strategy,
     });
   } catch (error: any) {
@@ -9053,7 +9071,8 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
     const result = data?.tasks?.[0]?.result?.[0];
     const items = result?.items || [];
     const organic = items.filter((i: any) => i.type === "organic");
-    const totalCount = Number(result?.total_count ?? 0);
+    // DataForSEO returns total SERP count in se_results_count (not total_count)
+    const totalCount = Number(result?.se_results_count ?? result?.total_count ?? 0) || organic.length;
     const serpFeatures: string[] = [];
     const featureMap: Record<string, string> = {
       organic: "organic",
@@ -9061,6 +9080,7 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
       images: "images",
       local_pack: "local_pack",
       featured_snippet: "featured_snippet",
+      found_on_web: "things_to_know",
       people_also_ask: "people_also_ask",
       related_searches: "related_searches",
     };
@@ -9094,12 +9114,12 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
           });
         });
       }
-      if (i.type === "featured_snippet" || (i.type === "knowledge_graph" && i?.items)) {
+      if (i.type === "featured_snippet" || i.type === "found_on_web" || (i.type === "knowledge_graph" && i?.items)) {
         const list = i?.items ? (Array.isArray(i.items) ? i.items : [i.items]) : [];
         list.forEach((e: any) => {
           thingsToKnowItems.push({
-            title: e?.title || e?.name,
-            snippet: e?.description || e?.snippet,
+            title: e?.title || e?.name || e?.featured_title,
+            snippet: e?.description || e?.snippet || e?.text,
           });
         });
       }
@@ -9145,9 +9165,10 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
         if (blRes.ok) {
           const blData = await blRes.json();
           const tasks = blData?.tasks || [];
-          tasks.forEach((task: any, i: number) => {
-            const result = task?.result?.[0];
-            const row = rows[i];
+          rows.forEach((row, i) => {
+            const task = tasks[i] ?? tasks[0];
+            const resultList = task?.result;
+            const result = Array.isArray(resultList) && resultList.length > 1 ? resultList[i] : resultList?.[0];
             if (row && result) {
               row.refDomains = result.referring_domains != null ? Number(result.referring_domains) : null;
               row.backlinks = result.backlinks != null ? Number(result.backlinks) : null;
@@ -9183,9 +9204,10 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
         if (rkRes.ok) {
           const rkData = await rkRes.json();
           const rkTasks = rkData?.tasks || [];
-          rkTasks.forEach((task: any, i: number) => {
-            const result = task?.result?.[0];
-            const row = rows[i];
+          rows.forEach((row, i) => {
+            const task = rkTasks[i] ?? rkTasks[0];
+            const resultList = task?.result;
+            const result = Array.isArray(resultList) && resultList.length > 1 ? resultList[i] : resultList?.[0];
             if (row && result) {
               row.urlKeywords = result.total_count != null ? Number(result.total_count) : null;
               const etv = result.metrics?.organic?.etv;

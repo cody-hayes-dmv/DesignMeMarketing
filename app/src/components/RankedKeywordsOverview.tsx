@@ -125,10 +125,17 @@ const RankedKeywordsTooltip = ({ active, label, payload }: any) => {
   });
 
   const total = sortedPayload.reduce((sum: number, p: any) => sum + (Number(p?.value) || 0), 0);
+  const only51Plus = total > 0 && sortedPayload.every((p: any) => {
+    const v = Number(p?.value) || 0;
+    return p?.dataKey === "pos51Plus" ? v === total : v === 0;
+  });
   return (
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow">
       <p className="text-xs font-medium text-gray-700">{label}</p>
       <p className="mt-1 text-sm font-semibold text-gray-900">Total: {total.toLocaleString()}</p>
+      {only51Plus && (
+        <p className="mt-1 text-xs text-amber-600">Rank breakdown not available for this month. Use Refresh to recalculate.</p>
+      )}
       <div className="mt-2 space-y-1">
         {sortedPayload.map((p: any) => (
           <div key={p.dataKey} className="flex items-center justify-between gap-4 text-xs">
@@ -477,15 +484,17 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
               )}
               <ResponsiveContainer width="100%" height="100%">
                 {chartType === "line" ? (
-                  <LineChart data={history}>
+                  <LineChart data={history} margin={{ top: 10, right: 10, left: 10, bottom: 72 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                     <XAxis
                       dataKey="month"
                       stroke="#6B7280"
-                      style={{ fontSize: "12px" }}
-                      angle={-35}
+                      tick={{ fontSize: 12, fill: "#374151" }}
+                      angle={-40}
                       textAnchor="end"
-                      height={60}
+                      height={72}
+                      interval={0}
+                      dy={8}
                     />
                     <YAxis
                       stroke="#6B7280"
@@ -514,15 +523,17 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                     ))}
                   </LineChart>
                 ) : (
-                  <BarChart data={history}>
+                  <BarChart data={history} margin={{ top: 10, right: 10, left: 10, bottom: 72 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                     <XAxis
                       dataKey="month"
                       stroke="#6B7280"
-                      style={{ fontSize: "12px" }}
-                      angle={-35}
+                      tick={{ fontSize: 12, fill: "#374151" }}
+                      angle={-40}
                       textAnchor="end"
-                      height={60}
+                      height={72}
+                      interval={0}
+                      dy={8}
                     />
                     <YAxis
                       stroke="#6B7280"
@@ -537,15 +548,18 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                       content={<RankedKeywordsLegend />}
                       wrapperStyle={{ width: "100%", display: "flex", justifyContent: "center" }}
                     />
-                    {/* Stacked bars: render bottom-to-top (yellow on top). */}
+                    {/* Stacked bars: render bottom-to-top (yellow on top). Each segment uses its own fill. */}
                     {BAR_STACK_SERIES.map((s, idx, arr) => (
                       <Bar
                         key={s.key}
                         dataKey={s.key}
                         name={s.name}
                         fill={s.color}
+                        stroke={s.color}
+                        strokeWidth={1}
                         stackId="a"
                         radius={idx === arr.length - 1 ? [6, 6, 0, 0] : [0, 0, 0, 0]}
+                        isAnimationActive={true}
                       />
                     ))}
                   </BarChart>
