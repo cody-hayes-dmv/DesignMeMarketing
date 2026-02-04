@@ -115,7 +115,7 @@ const createClientSchema = z.object({
     // Extended onboarding/account info blob
     accountInfo: z.record(z.any()).optional(),
     // Status is ignored - determined by user role (SUPER_ADMIN = ACTIVE, others = PENDING)
-    status: z.enum(['ACTIVE', 'PENDING', 'REJECTED']).optional(),
+    status: z.enum(['ACTIVE', 'PENDING', 'REJECTED', 'DASHBOARD_ONLY', 'CANCELED', 'SUSPENDED', 'ARCHIVED']).optional(),
 });
 
 const restrictedAccountInfoKeys = [
@@ -1080,7 +1080,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update a client
 router.put('/:id', authenticateToken, async (req, res) => {
     const clientId = req.params.id;
-    const { name, domain, status, industry, targets, loginUrl, username, password, accountInfo, vendasta } = req.body.data || req.body;
+    const { name, domain, status, industry, targets, loginUrl, username, password, accountInfo, vendasta, canceledEndDate } = req.body.data || req.body;
 
     try {
         if (req.user.role === 'USER') {
@@ -1156,6 +1156,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 updateData.status = status;
             } else {
                 return res.status(403).json({ message: 'Not allowed to update status' });
+            }
+        }
+        if (canceledEndDate !== undefined) {
+            if (isAdmin) {
+                updateData.canceledEndDate = canceledEndDate ? new Date(canceledEndDate) : null;
             }
         }
 

@@ -123,6 +123,15 @@ async function getLatestTopPagesUpdatedAt(clientId: string): Promise<Date | null
   return latest?.updatedAt ?? null;
 }
 
+async function getLatestGa4MetricsUpdatedAt(clientId: string): Promise<Date | null> {
+  const latest = await prisma.ga4Metrics.findFirst({
+    where: { clientId },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+  return latest?.updatedAt ?? null;
+}
+
 async function getLatestBacklinksUpdatedAt(clientId: string): Promise<Date | null> {
   // Backlink refresh writes backlinkTimeseries and (optionally) backlink list records.
   const latestTimeseries = await prisma.backlinkTimeseries.findFirst({
@@ -6429,6 +6438,17 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     const conversions = ga4Data?.conversions ??
       (latestReport?.conversions ?? null);
 
+    // Last updated timestamps for "Last updated X hours ago" in the UI
+    const [ga4LastUpdatedAt, trafficUpdatedAt, rankedUpdatedAt, backlinksUpdatedAt, topPagesUpdatedAt] = await Promise.all([
+      isGA4Connected ? getLatestGa4MetricsUpdatedAt(clientId) : Promise.resolve(null),
+      getLatestTrafficSourceUpdatedAt(clientId),
+      getLatestRankedKeywordsHistoryUpdatedAt(clientId),
+      getLatestBacklinksUpdatedAt(clientId),
+      getLatestTopPagesUpdatedAt(clientId),
+    ]);
+    const dataForSeoDates = [trafficUpdatedAt, rankedUpdatedAt, backlinksUpdatedAt, topPagesUpdatedAt].filter(Boolean) as Date[];
+    const dataForSeoLastUpdatedAt = dataForSeoDates.length > 0 ? new Date(Math.max(...dataForSeoDates.map((d) => d.getTime()))) : null;
+
     res.json({
       totalSessions,
       organicSessions,
@@ -6469,7 +6489,9 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
         dofollowCount: dofollowBacklinksCount,
       },
       topKeywords,
-      ga4Events: ga4EventsData?.events || null
+      ga4Events: ga4EventsData?.events || null,
+      ga4LastUpdated: ga4LastUpdatedAt?.toISOString() ?? null,
+      dataForSeoLastUpdated: dataForSeoLastUpdatedAt?.toISOString() ?? null,
     });
   } catch (error) {
     console.error("Fetch SEO dashboard error:", error);

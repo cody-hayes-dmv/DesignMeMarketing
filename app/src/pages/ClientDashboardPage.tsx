@@ -188,6 +188,8 @@ interface DashboardSummary {
     count: number;
     change?: string;
   }> | null;
+  ga4LastUpdated?: string | null;
+  dataForSeoLastUpdated?: string | null;
 }
 
 const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
@@ -213,6 +215,16 @@ const normalizeTrendPoints = (trend: any): TrendPoint[] => {
       value: Number(point?.value ?? 0) || 0,
     }))
     .filter((point) => Boolean(point.date));
+};
+
+/** Format ISO date as "Last updated X hours ago" for DataForSEO/GA4 timestamps */
+const formatLastUpdatedHours = (iso: string | null | undefined): string | null => {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (isNaN(ms) || ms < 0) return null;
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  if (hours === 0) return "Last updated less than 1 hour ago";
+  return `Last updated ${hours} hour${hours !== 1 ? "s" : ""} ago`;
 };
 
 /** Format percent change for "Compare To"; use decimals when |change| < 10% */
@@ -3994,7 +4006,12 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Web Visitors</p>
+                      <p className="text-sm font-medium text-gray-600">
+                        Web Visitors
+                        <span className="ml-1.5 inline-flex align-middle" title="Total number of people who visited your website this month.">
+                          <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                        </span>
+                      </p>
                       <p className="text-2xl font-bold text-gray-900">{websiteVisitorsDisplay}</p>
                       {dashboardSummaryCompare != null && (() => {
                         const curr = Number(dashboardSummary?.totalUsers ?? dashboardSummary?.activeUsers ?? 0);
@@ -4012,9 +4029,14 @@ const ClientDashboardPage: React.FC = () => {
                     <Users className="h-8 w-8 text-blue-500" />
                   </div>
                   {ga4Connected ? (
-                    <div className="mt-4 flex items-center space-x-2">
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">Real-time data from GA4</span>
+                    <div className="mt-4 space-y-0.5">
+                      <div className="flex items-center space-x-2">
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      </div>
+                      {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                      )}
                     </div>
                   ) : (
                     <div className="mt-4">
@@ -4026,7 +4048,12 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Organic Traffic</p>
+                      <p className="text-sm font-medium text-gray-600">
+                        Organic Traffic
+                        <span className="ml-1.5 inline-flex align-middle" title="Visitors who found you through Google search (not paid ads). This shows how well your SEO is working.">
+                          <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                        </span>
+                      </p>
                       <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
                       {dashboardSummaryCompare != null && (() => {
                         const curr = Number(dashboardSummary?.organicSearchEngagedSessions ?? 0);
@@ -4044,9 +4071,14 @@ const ClientDashboardPage: React.FC = () => {
                     <Search className="h-8 w-8 text-green-500" />
                   </div>
                   {ga4Connected ? (
-                    <div className="mt-4 flex items-center space-x-2">
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">Real-time data from GA4</span>
+                    <div className="mt-4 space-y-0.5">
+                      <div className="flex items-center space-x-2">
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      </div>
+                      {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                      )}
                     </div>
                   ) : (
                     <div className="mt-4">
@@ -4058,7 +4090,12 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">First Time Visitors</p>
+                      <p className="text-sm font-medium text-gray-600">
+                        First Time Visitors
+                        <span className="ml-1.5 inline-flex align-middle" title="Number of people visiting your website for the very first time this month.">
+                          <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                        </span>
+                      </p>
                       <p className="text-2xl font-bold text-gray-900">{firstTimeVisitorsDisplay}</p>
                       {dashboardSummaryCompare != null && (() => {
                         const curr = Number(dashboardSummary?.newUsers ?? 0);
@@ -4076,9 +4113,14 @@ const ClientDashboardPage: React.FC = () => {
                     <UserPlus className="h-8 w-8 text-purple-500" />
                   </div>
                   {ga4Connected ? (
-                    <div className="mt-4 flex items-center space-x-2">
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">Real-time data from GA4</span>
+                    <div className="mt-4 space-y-0.5">
+                      <div className="flex items-center space-x-2">
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      </div>
+                      {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                      )}
                     </div>
                   ) : (
                     <div className="mt-4">
@@ -4090,7 +4132,12 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">Engaged Visitors</p>
+                      <p className="text-sm font-medium text-gray-600">
+                        Engaged Visitors
+                        <span className="ml-1.5 inline-flex align-middle" title="Visitors who actively interacted with your site (spent time reading, clicked links, scrolled through pages).">
+                          <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                        </span>
+                      </p>
                       <p className="text-2xl font-bold text-gray-900">{engagedVisitorsDisplay}</p>
                       {dashboardSummaryCompare != null && (() => {
                         const curr = Number(dashboardSummary?.engagedVisitors ?? 0);
@@ -4108,9 +4155,14 @@ const ClientDashboardPage: React.FC = () => {
                     <Activity className="h-8 w-8 text-orange-500" />
                   </div>
                   {ga4Connected ? (
-                    <div className="mt-4 flex items-center space-x-2">
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">Real-time data from GA4</span>
+                    <div className="mt-4 space-y-0.5">
+                      <div className="flex items-center space-x-2">
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      </div>
+                      {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                      )}
                     </div>
                   ) : (
                     <div className="mt-4">
@@ -4123,8 +4175,16 @@ const ClientDashboardPage: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">New Users Trending</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      New Users Trending
+                      <span title="Daily chart showing how many first-time visitors you're getting. Helps spot growth patterns and traffic spikes.">
+                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                      </span>
+                    </h3>
                     {fetchingSummary && <span className="text-xs text-gray-400">Updating...</span>}
+                    {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                      <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                    )}
                   </div>
                   <div className="h-64">
                     {ga4Connected ? (
@@ -4156,7 +4216,15 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Users Trending</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                    Total Users Trending
+                    <span title="Daily chart showing all visitors (new + returning). Shows your overall website traffic momentum.">
+                      <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                    </span>
+                  </h3>
+                  {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                    <p className="text-xs text-gray-500 mt-0.5 mb-4">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                  )}
                   <div className="h-64">
                     {ga4Connected ? (
                       totalUsersTrendData.length > 0 ? (
@@ -4192,6 +4260,8 @@ const ClientDashboardPage: React.FC = () => {
                 clientName={client?.name}
                 title="Target Keywords"
                 subtitle="Keywords relevant to this client's website based on DataForSEO analysis."
+                titleTooltip="Your money keywords - the most important search terms that drive qualified leads to your business. We track these daily to monitor and improve your rankings."
+                lastUpdatedLabel={formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}
               />
 
               <RankedKeywordsOverview
@@ -4199,12 +4269,22 @@ const ClientDashboardPage: React.FC = () => {
                 clientName={client?.name}
                 title="Total Keywords Ranked"
                 subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
+                titleTooltip="Shows every keyword you're ranking for in Google, broken down by position. Track how your visibility grows as more keywords move from page 2-3 onto page 1."
+                lastUpdatedLabel={formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}
               />
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white p-4 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      Traffic Sources
+                      <span title="Shows where your website visitors are coming from: Google search, direct visits, other websites, social media, etc.">
+                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                      </span>
+                    </h3>
+                    {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
+                      <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}</p>
+                    )}
                   </div>
                   {trafficSourcesError && (
                     <p className="mb-3 text-sm text-rose-600">
@@ -4284,7 +4364,15 @@ const ClientDashboardPage: React.FC = () => {
 
                 <div className="bg-white p-4 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-gray-900">AI Search Visibility</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      AI Search Visibility
+                      <span title="How often your business appears when people ask AI tools (ChatGPT, Google AI, Perplexity) about services in your area.">
+                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                      </span>
+                    </h3>
+                    {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
+                      <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}</p>
+                    )}
                   </div>
 
                   {aiSearchError && <p className="mb-3 text-sm text-rose-600">{aiSearchError}</p>}
@@ -4333,7 +4421,15 @@ const ClientDashboardPage: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Visitor Sources</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      Visitor Sources
+                      <span title="Top websites and platforms sending people to your site.">
+                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                      </span>
+                    </h3>
+                    {ga4Connected && formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                      <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                    )}
                   </div>
                   {visitorSourcesError && (
                     <p className="mb-4 text-sm text-rose-600">
@@ -4376,7 +4472,15 @@ const ClientDashboardPage: React.FC = () => {
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Conversions</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      Conversions
+                      <span title="Important actions visitors take on your site: form submissions, phone calls, button clicks, etc.">
+                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                      </span>
+                    </h3>
+                    {ga4Connected && formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                      <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                    )}
                   </div>
                 {topEventsError && (
                   <p className="mb-4 text-sm text-rose-600">
@@ -4421,7 +4525,15 @@ const ClientDashboardPage: React.FC = () => {
               <div className="bg-white rounded-xl border border-gray-200">
                 <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                    <div>
-                   <h3 className="text-lg font-semibold text-gray-900">Top Pages</h3>
+                   <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                     Top Pages
+                     <span title="Your most popular website pages and how visitors interact with them. Click any page to see every keyword it ranks for in Google.">
+                       <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                     </span>
+                   </h3>
+                   {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
+                     <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}</p>
+                   )}
                    {topPagesError && (
                      <p className="mt-2 text-sm text-rose-600">
                        {topPagesError}
@@ -4698,8 +4810,16 @@ const ClientDashboardPage: React.FC = () => {
                     <div className="bg-white rounded-xl border border-gray-200">
                       <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
+                          <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                            New Links
+                            <span title="Total number of backlinks (other websites linking to yours) acquired each week. More quality backlinks help improve your Google rankings.">
+                              <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                            </span>
+                          </h3>
                           <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
+                          {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
+                            <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}</p>
+                          )}
                         </div>
                         {user?.role === "SUPER_ADMIN" && (
                           <button
@@ -4779,10 +4899,18 @@ const ClientDashboardPage: React.FC = () => {
                         <Sparkles className="h-5 w-5" />
                       </div>
                       <div>
-                        <h2 className="text-xl font-semibold text-gray-900">AI Intelligence</h2>
+                        <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                          AI Intelligence
+                          <span title="Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data from DataForSEO.">
+                            <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                          </span>
+                        </h2>
                         <p className="text-sm text-gray-500 mt-0.5">
                           Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data source: DataForSEO. Numbers here may differ from other dashboard widgets that use different sources.
                         </p>
+                        {aiIntelligence && formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
+                          <p className="text-xs text-gray-500 mt-1">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
+                        )}
                       </div>
                     </div>
 
@@ -4805,13 +4933,12 @@ const ClientDashboardPage: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                             <div className="flex items-center gap-1.5">
-                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Visibility Score</p>
-                              <span
-                                className="text-gray-400 hover:text-gray-600 cursor-help"
-                                title={aiIntelligence.meta?.scoreExplanation || "Based on mentions, AI search volume, and platform diversity (ChatGPT, Google AI, Perplexity). Data from DataForSEO."}
-                              >
-                                <Info className="h-3.5 w-3.5" />
-                              </span>
+                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                                AI Visibility Score
+                                <span className="ml-1 inline-flex align-middle" title="Overall score (0-100) measuring how often your business appears in AI search results. Higher is better.">
+                                  <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                                </span>
+                              </p>
                             </div>
                             <p className="mt-1 text-2xl font-bold text-gray-900">
                               {aiIntelligence.kpis?.aiVisibilityScore ?? 0} <span className="text-base font-normal text-gray-500">/100</span>
@@ -4819,19 +4946,29 @@ const ClientDashboardPage: React.FC = () => {
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
                               <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0} pts
                             </span>
-                            {aiIntelligence.meta?.lastUpdated && (
-                              <p className="text-xs text-gray-400 mt-2">Updated {new Date(aiIntelligence.meta.lastUpdated).toLocaleDateString()}</p>
+                            {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
+                              <p className="text-xs text-gray-500 mt-2">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
                             )}
                           </div>
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total AI Mentions</p>
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              Total AI Mentions
+                              <span className="ml-1 inline-flex align-middle" title="Number of times your business was mentioned or recommended by AI platforms this period.">
+                                <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                              </span>
+                            </p>
                             <p className="mt-1 text-2xl font-bold text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
                               <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.totalAiMentionsTrend ?? 0}
                             </span>
                           </div>
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Search Volume</p>
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              AI Search Volume
+                              <span className="ml-1 inline-flex align-middle" title="Total number of AI searches where your business could have appeared based on your industry and keywords.">
+                                <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                              </span>
+                            </p>
                             <p className="mt-1 text-2xl font-bold text-gray-900">
                               {(aiIntelligence.kpis?.aiSearchVolume ?? 0).toLocaleString()}
                             </p>
@@ -4840,7 +4977,12 @@ const ClientDashboardPage: React.FC = () => {
                             </span>
                           </div>
                           <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monthly Trend</p>
+                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              Monthly Trend
+                              <span className="ml-1 inline-flex align-middle" title="Percentage change in your AI visibility compared to last month.">
+                                <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                              </span>
+                            </p>
                             <p className="mt-1 text-2xl font-bold text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</p>
                             <p className="text-xs text-gray-500 mt-1">vs last month</p>
                           </div>
@@ -4848,8 +4990,13 @@ const ClientDashboardPage: React.FC = () => {
 
                         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                           <div className="px-6 py-4 border-b border-gray-200">
-                            <h3 className="text-lg font-semibold text-gray-900">AI Platform Performance</h3>
-                            <p className="text-xs text-gray-500 mt-0.5">Data from {aiIntelligence.meta?.dataSource || "DataForSEO"}. {aiIntelligence.meta?.lastUpdated && `Last updated ${new Date(aiIntelligence.meta.lastUpdated).toLocaleDateString()}.`}</p>
+                            <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                              AI Platform Performance
+                              <span title="Breakdown of how each AI platform (ChatGPT, Google AI, Perplexity) is mentioning your business.">
+                                <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                              </span>
+                            </h3>
+                            <p className="text-xs text-gray-500 mt-0.5">Data from {aiIntelligence.meta?.dataSource || "DataForSEO"}. {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) ?? ""}</p>
                           </div>
                           {(aiIntelligence.kpis?.totalAiMentions ?? 0) === 0 && (aiIntelligence.platforms ?? []).every((p) => (p.mentions ?? 0) === 0) ? (
                             <div className="px-6 py-8 text-center text-sm text-gray-500 bg-gray-50/50">
@@ -4861,12 +5008,42 @@ const ClientDashboardPage: React.FC = () => {
                               <table className="min-w-full divide-y divide-gray-200 text-sm">
                                 <thead className="bg-gray-50">
                                   <tr>
-                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Platform</th>
-                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Mentions</th>
-                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">AI Search Vol</th>
-                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Impressions</th>
-                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Trend</th>
-                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Share</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                                      <span className="inline-flex items-center gap-1">
+                                        Platform
+                                        <span title="The AI search tool being tracked."><Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden /></span>
+                                      </span>
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                                      <span className="inline-flex items-center gap-1">
+                                        Mentions
+                                        <span title="Number of times your business appeared in responses from this AI platform."><Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden /></span>
+                                      </span>
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                                      <span className="inline-flex items-center gap-1">
+                                        AI Search Vol
+                                        <span title="Total search volume on this platform for queries related to your industry."><Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden /></span>
+                                      </span>
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                                      <span className="inline-flex items-center gap-1">
+                                        Impressions
+                                        <span title="Estimated number of people who saw your business mentioned in AI responses."><Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden /></span>
+                                      </span>
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                                      <span className="inline-flex items-center gap-1">
+                                        Trend
+                                        <span title="Whether your visibility on this platform is increasing, decreasing, or staying flat."><Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden /></span>
+                                      </span>
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                                      <span className="inline-flex items-center gap-1">
+                                        Share
+                                        <span title="Your percentage of total AI mentions compared to all businesses in your industry."><Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden /></span>
+                                      </span>
+                                    </th>
                                   </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-100">
@@ -4909,7 +5086,12 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
                               <div className="w-1 h-6 bg-green-500 rounded-full inline-block mr-2 align-middle" />
-                              <h3 className="text-lg font-semibold text-gray-900 inline align-middle">Queries Where You Appear in AI</h3>
+                              <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5 align-middle">
+                                Queries Where You Appear in AI
+                                <span title="Real AI search queries where your business is being mentioned or recommended. These are actual questions people are asking.">
+                                  <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                                </span>
+                              </h3>
                               <p className="text-sm text-gray-500 mt-1">Top performing queries triggering AI mentions{aiIntelligence.meta?.queriesFilteredByRelevance ? " (filtered to your industry & target keywords)" : ""}</p>
                             </div>
                             <button 
@@ -4940,7 +5122,12 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
                               <div className="w-1 h-6 bg-amber-500 rounded-full inline-block mr-2 align-middle" />
-                              <h3 className="text-lg font-semibold text-gray-900 inline align-middle">AI Competitive Position</h3>
+                              <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5 align-middle">
+                                AI Competitive Position
+                                <span title="Your AI visibility score compared to competitors. Shows who's winning the AI search race in your industry.">
+                                  <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                                </span>
+                              </h3>
                               <p className="text-sm text-gray-500 mt-1">Your AI visibility vs competitors (from SERP). Same score formula as above. {aiIntelligence.meta?.industry && `Industry: ${aiIntelligence.meta.industry}.`}</p>
                             </div>
                             <button 
@@ -4991,7 +5178,12 @@ const ClientDashboardPage: React.FC = () => {
                         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
                           <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
-                              <h3 className="text-lg font-semibold text-gray-900">How AI Platforms Mention You</h3>
+                              <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                                How AI Platforms Mention You
+                                <span title="See the exact context and citations where AI tools are recommending your business to users.">
+                                  <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                                </span>
+                              </h3>
                               <p className="text-sm text-gray-500 mt-1">See exactly how AI tools are citing your business.</p>
                             </div>
                             <button 
@@ -5035,7 +5227,12 @@ const ClientDashboardPage: React.FC = () => {
                         {/* AI Search Volume Trend (12 months) */}
                         {(aiIntelligence.aiSearchVolumeTrend12Months ?? []).length > 0 && (
                           <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-                            <h3 className="text-lg font-semibold text-gray-900 mb-4">AI Search Volume Trend (12 Months)</h3>
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4 inline-flex items-center gap-1.5">
+                              AI Search Volume Trend (12 Months)
+                              <span title="Historical view of total AI search volume in your industry over the past year. Shows seasonal patterns and growth.">
+                                <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                              </span>
+                            </h3>
                             <div className="h-64">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart
@@ -5091,7 +5288,12 @@ const ClientDashboardPage: React.FC = () => {
                         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
                           <div className="mb-4">
                             <div className="w-1 h-6 bg-red-500 rounded-full inline-block mr-2 align-middle" />
-                            <h3 className="text-lg font-semibold text-gray-900 inline align-middle">Queries Where Competitors Appear But You Don&apos;t</h3>
+                            <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5 align-middle">
+                              Queries Where Competitors Appear But You Don&apos;t
+                              <span title="High-value opportunities - AI searches where your competitors are being mentioned but you're missing. Target these to increase visibility.">
+                                <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                              </span>
+                            </h3>
                           </div>
                           <div className="rounded-lg bg-red-50 border border-red-200 p-3 mb-4 flex items-center gap-2">
                             <Target className="h-4 w-4 text-red-600 flex-shrink-0" />
@@ -5130,7 +5332,12 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="mt-4 rounded-lg bg-blue-50 border border-blue-200 p-4">
                             <div className="flex items-center gap-2 font-semibold text-gray-900 mb-2">
                               <Lightbulb className="h-4 w-4 text-amber-500" />
-                              Action Items
+                              <span className="inline-flex items-center gap-1.5">
+                                Action Items
+                                <span title="Recommended steps to improve your AI visibility based on competitor gap analysis and search trends.">
+                                  <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                                </span>
+                              </span>
                             </div>
                             <p className="text-xs text-gray-600 mb-2">Based on competitor gap analysis. Validate that each suggestion fits your business and location before acting.</p>
                             <ul className="list-disc list-inside space-y-1 text-sm text-blue-900">
@@ -5691,7 +5898,12 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="space-y-6">
                     <div className="sticky top-0 z-10 bg-gray-50 pb-3">
                       <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-semibold text-gray-900">Backlinks Overview</h2>
+                        <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                          Backlinks Overview
+                          <span title="Total number of external websites currently linking to your site. Use the table below to see each link and its quality.">
+                            <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                          </span>
+                        </h2>
                         {!reportOnly && (
                           <div className="flex items-center space-x-3">
                             <button
@@ -5717,7 +5929,12 @@ const ClientDashboardPage: React.FC = () => {
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       <div className="bg-white p-6 rounded-xl border border-gray-200">
-                        <p className="text-sm font-medium text-gray-600">Total Backlinks</p>
+                        <p className="text-sm font-medium text-gray-600">
+                          Total Backlinks
+                          <span className="ml-1.5 inline-flex align-middle" title="Total number of external websites currently linking to your site.">
+                            <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                          </span>
+                        </p>
                         <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.totalBacklinks}</p>
                         <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
                           <TrendingUp className="h-4 w-4" />
@@ -5725,7 +5942,12 @@ const ClientDashboardPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="bg-white p-6 rounded-xl border border-gray-200">
-                        <p className="text-sm font-medium text-gray-600">New Backlinks</p>
+                        <p className="text-sm font-medium text-gray-600">
+                          New Backlinks
+                          <span className="ml-1.5 inline-flex align-middle" title="Backlinks acquired in the last 4 weeks. Fresh links signal to Google that your site is actively gaining authority.">
+                            <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                          </span>
+                        </p>
                         <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.newLast4Weeks}</p>
                         <div className="mt-3 flex items-center space-x-2 text-sm text-green-600">
                           <TrendingUp className="h-4 w-4" />
@@ -5733,7 +5955,12 @@ const ClientDashboardPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="bg-white p-6 rounded-xl border border-gray-200">
-                        <p className="text-sm font-medium text-gray-600">DoFollow Backlinks</p>
+                        <p className="text-sm font-medium text-gray-600">
+                          DoFollow Backlinks
+                          <span className="ml-1.5 inline-flex align-middle" title="Links that pass SEO value to your site. These directly improve your Google rankings (vs. NoFollow links which don't pass as much value).">
+                            <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                          </span>
+                        </p>
                         <p className="text-2xl font-bold text-gray-900 mt-2">{backlinksKpis.dofollowCount}</p>
                         <div className="mt-3 flex items-center space-x-2 text-sm text-gray-600">
                           <TrendingUp className="h-4 w-4" />
@@ -5745,7 +5972,12 @@ const ClientDashboardPage: React.FC = () => {
                     <div className="bg-white rounded-xl border border-gray-200">
                       <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Backlinks</h3>
+                          <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                            Backlinks Table
+                            <span title="Complete list of all websites linking to you, with quality metrics to help assess their value.">
+                              <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                            </span>
+                          </h3>
                           <p className="text-sm text-gray-500 mt-1">Monitor follow vs nofollow backlinks and their quality.</p>
                         </div>
                         <div className="flex items-center flex-wrap gap-2">
@@ -5800,11 +6032,11 @@ const ClientDashboardPage: React.FC = () => {
                           <thead className="bg-gray-50">
                             <tr>
                               {[
-                                { key: "sourceUrl" as const, label: "Source" },
-                                { key: "anchorText" as const, label: "Anchor Text" },
-                                { key: "domainRating" as const, label: "Domain Rating" },
-                                { key: "firstSeen" as const, label: "Publish Date" },
-                              ].map(({ key, label }) => (
+                                { key: "sourceUrl" as const, label: "Source", tooltip: "The website that's linking to you." },
+                                { key: "anchorText" as const, label: "Anchor Text", tooltip: "The clickable text used in the link. Relevant anchor text helps Google understand what your page is about." },
+                                { key: "domainRating" as const, label: "Domain Rating", tooltip: "Authority score of the linking website (0-100). Higher scores mean more valuable links. Links from DR 50+ sites carry significant weight." },
+                                { key: "firstSeen" as const, label: "Publish Date", tooltip: "When the backlink was first discovered or published." },
+                              ].map(({ key, label, tooltip }) => (
                                 <th
                                   key={key}
                                   className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
@@ -5815,13 +6047,23 @@ const ClientDashboardPage: React.FC = () => {
                                 >
                                   <span className="inline-flex items-center gap-1">
                                     {label}
+                                    <span title={tooltip} onClick={(e) => e.stopPropagation()}>
+                                      <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                                    </span>
                                     {backlinksSortBy === key && (
                                       <span className="text-primary-600" aria-hidden>{backlinksOrder === "desc" ? "↓" : "↑"}</span>
                                     )}
                                   </span>
                                 </th>
                               ))}
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <span className="inline-flex items-center gap-1">
+                                  Type
+                                  <span title="Whether the link was acquired naturally, manually built, or through other methods.">
+                                    <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
+                                  </span>
+                                </span>
+                              </th>
                               <th className="px-6 py-3"></th>
                             </tr>
                           </thead>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X } from "lucide-react";
+import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X, Info } from "lucide-react";
 import { format } from "date-fns";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
@@ -57,6 +57,8 @@ interface TargetKeywordsOverviewProps {
   className?: string;
   title?: string;
   subtitle?: string;
+  titleTooltip?: string;
+  lastUpdatedLabel?: string | null;
   showHeader?: boolean;
   headerActions?: React.ReactNode;
   shareToken?: string;
@@ -68,6 +70,8 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   className = "",
   title = "Target Keywords",
   subtitle = "Keywords relevant to this client's website based on DataForSEO analysis.",
+  titleTooltip,
+  lastUpdatedLabel,
   showHeader = true,
   headerActions,
   shareToken,
@@ -321,11 +325,19 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
       {showHeader && (
         <div className="p-6 border-b border-gray-200 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+            <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+              {title}
+              {titleTooltip && (
+                <span title={titleTooltip}>
+                  <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                </span>
+              )}
+            </h3>
             <p className="text-sm text-gray-500">
               {subtitle}
               {clientName ? ` Client: ${clientName}` : ""}
             </p>
+            {lastUpdatedLabel && <p className="text-xs text-gray-500 mt-0.5">{lastUpdatedLabel}</p>}
           </div>
           <div className="flex items-center space-x-2">
             {headerActions}

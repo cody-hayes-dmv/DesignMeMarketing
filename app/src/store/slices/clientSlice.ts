@@ -5,7 +5,8 @@ export interface Client {
   id: string;
   name: string;
   domain: string;
-  status: "ACTIVE" | "PENDING" | "REJECTED";
+  status: "ACTIVE" | "PENDING" | "REJECTED" | "DASHBOARD_ONLY" | "CANCELED" | "SUSPENDED" | "ARCHIVED";
+  canceledEndDate?: string | null;
   industry?: string;
   targets?: string[] | string | null;
   loginUrl?: string | null;

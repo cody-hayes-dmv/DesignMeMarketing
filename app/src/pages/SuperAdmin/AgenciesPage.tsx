@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus, ArrowUp, ArrowDown, Search } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -22,12 +22,24 @@ interface AgencyMember {
   joinedAt: string;
 }
 
+// Client status values for managed service display
+const CLIENT_STATUS = {
+  DASHBOARD_ONLY: "DASHBOARD_ONLY",
+  PENDING: "PENDING",
+  ACTIVE: "ACTIVE",
+  CANCELED: "CANCELED",
+  SUSPENDED: "SUSPENDED",
+  ARCHIVED: "ARCHIVED",
+  REJECTED: "REJECTED", // legacy, treat as Archived
+} as const;
+
 interface AgencyClient {
   id: string;
   name: string;
   domain: string;
   industry: string | null;
   status: string;
+  canceledEndDate?: string | null;
   createdAt: string;
   keywords: number;
   avgPosition: number | null;
@@ -299,12 +311,44 @@ const AgenciesPage = () => {
     };
 
     const getStatusBadge = (status: string) => {
-        return status === "ACTIVE"
-            ? "bg-green-100 text-green-800"
-            : "bg-gray-100 text-gray-800";
+        switch (status) {
+            case CLIENT_STATUS.ACTIVE:
+                return "bg-green-100 text-green-800";
+            case CLIENT_STATUS.PENDING:
+                return "bg-amber-100 text-amber-800";
+            case CLIENT_STATUS.CANCELED:
+            case CLIENT_STATUS.SUSPENDED:
+                return "bg-red-100 text-red-800";
+            case CLIENT_STATUS.ARCHIVED:
+            case CLIENT_STATUS.REJECTED:
+                return "bg-gray-100 text-gray-600 line-through";
+            case CLIENT_STATUS.DASHBOARD_ONLY:
+            default:
+                return "bg-gray-100 text-gray-700";
+        }
     };
 
-    const getStatusLabel = (status: string) => (status === "ACTIVE" ? "Active" : "Archived");
+    const getStatusLabel = (status: string) => {
+        switch (status) {
+            case CLIENT_STATUS.DASHBOARD_ONLY:
+                return "Dashboard Only";
+            case CLIENT_STATUS.PENDING:
+                return "Pending";
+            case CLIENT_STATUS.ACTIVE:
+                return "Active";
+            case CLIENT_STATUS.CANCELED:
+                return "Canceled";
+            case CLIENT_STATUS.SUSPENDED:
+                return "Suspended";
+            case CLIENT_STATUS.ARCHIVED:
+            case CLIENT_STATUS.REJECTED:
+                return "Archived";
+            default:
+                return "Dashboard Only";
+        }
+    };
+
+    const showStatusAlertIcon = (status: string) => status === CLIENT_STATUS.PENDING;
 
     // Close status dropdown when clicking outside
     useEffect(() => {
@@ -663,18 +707,24 @@ const AgenciesPage = () => {
                                                                                     }}
                                                                                 >
                                                                                     <button
-                                                                                        className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
+                                                                                        className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
                                                                                         onClick={(e) => {
                                                                                             e.stopPropagation();
                                                                                             setOpenStatusId(openStatusId === client.id ? "" : client.id);
                                                                                         }}
                                                                                     >
+                                                                                        {showStatusAlertIcon(client.status) && <AlertCircle className="h-3 w-3 shrink-0" />}
                                                                                         {getStatusLabel(client.status)}
                                                                                     </button>
+                                                                                    {client.status === CLIENT_STATUS.CANCELED && client.canceledEndDate && (
+                                                                                        <span className="ml-1 text-xs text-red-600">
+                                                                                            {format(new Date(client.canceledEndDate), "MMM d, yyyy")}
+                                                                                        </span>
+                                                                                    )}
                                                                                     {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
                                                                                         <div
                                                                                             data-status-dropdown-menu
-                                                                                            className="fixed bg-white border border-gray-200 rounded-md shadow-lg min-w-[120px]"
+                                                                                            className="fixed bg-white border border-gray-200 rounded-md shadow-lg min-w-[160px]"
                                                                                             style={{
                                                                                                 top: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().bottom + 4}px`,
                                                                                                 left: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().left}px`,
@@ -683,8 +733,12 @@ const AgenciesPage = () => {
                                                                                             onClick={(e) => e.stopPropagation()}
                                                                                         >
                                                                                             {[
+                                                                                                { label: "Dashboard Only", value: "DASHBOARD_ONLY" },
+                                                                                                { label: "Pending", value: "PENDING" },
                                                                                                 { label: "Active", value: "ACTIVE" },
-                                                                                                { label: "Archived", value: "REJECTED" },
+                                                                                                { label: "Canceled", value: "CANCELED" },
+                                                                                                { label: "Suspended", value: "SUSPENDED" },
+                                                                                                { label: "Archived", value: "ARCHIVED" },
                                                                                             ].map(({ label, value }) => (
                                                                                                 <div
                                                                                                     key={value}
@@ -692,7 +746,11 @@ const AgenciesPage = () => {
                                                                                                     onClick={async (e) => {
                                                                                                         e.stopPropagation();
                                                                                                         try {
-                                                                                                            await dispatch(updateClient({ id: client.id, data: { status: value } }) as any);
+                                                                                                            const data: { status: string; canceledEndDate?: string } = { status: value };
+                                                                                                            if (value === "CANCELED") {
+                                                                                                                data.canceledEndDate = new Date().toISOString();
+                                                                                                            }
+                                                                                                            await dispatch(updateClient({ id: client.id, data }) as any);
                                                                                                             setOpenStatusId("");
                                                                                                             toast.success("Status updated successfully!");
                                                                                                             await refreshAgencyClientsCache(agency.id);
@@ -1079,15 +1137,21 @@ const AgenciesPage = () => {
                                                         }}
                                                     >
                                                         <button
-                                                            className={`px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
+                                                            className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-bold rounded-full ${getStatusBadge(client.status)}`}
                                                             onClick={() => setOpenStatusId(openStatusId === client.id ? "" : client.id)}
                                                         >
+                                                            {showStatusAlertIcon(client.status) && <AlertCircle className="h-3 w-3 shrink-0" />}
                                                             {getStatusLabel(client.status)}
                                                         </button>
+                                                        {client.status === CLIENT_STATUS.CANCELED && client.canceledEndDate && (
+                                                            <span className="ml-1 text-xs text-red-600">
+                                                                {format(new Date(client.canceledEndDate), "MMM d, yyyy")}
+                                                            </span>
+                                                        )}
                                                         {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
                                                             <div 
                                                                 data-status-dropdown-menu
-                                                                className="fixed bg-white border border-gray-200 rounded-md shadow-lg min-w-[120px]"
+                                                                className="fixed bg-white border border-gray-200 rounded-md shadow-lg min-w-[160px]"
                                                                 style={{
                                                                     top: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().bottom + 4}px`,
                                                                     left: `${statusButtonRefs.current[client.id]!.getBoundingClientRect().left}px`,
@@ -1096,8 +1160,12 @@ const AgenciesPage = () => {
                                                                 onClick={(e) => e.stopPropagation()}
                                                             >
                                                                 {[
+                                                                    { label: "Dashboard Only", value: "DASHBOARD_ONLY" },
+                                                                    { label: "Pending", value: "PENDING" },
                                                                     { label: "Active", value: "ACTIVE" },
-                                                                    { label: "Archived", value: "REJECTED" },
+                                                                    { label: "Canceled", value: "CANCELED" },
+                                                                    { label: "Suspended", value: "SUSPENDED" },
+                                                                    { label: "Archived", value: "ARCHIVED" },
                                                                 ].map(({ label, value }) => (
                                                                     <div
                                                                         key={value}
@@ -1105,7 +1173,11 @@ const AgenciesPage = () => {
                                                                         onClick={async (e) => {
                                                                             e.stopPropagation();
                                                                             try {
-                                                                                await dispatch(updateClient({ id: client.id, data: { status: value } }) as any);
+                                                                                const data: { status: string; canceledEndDate?: string } = { status: value };
+                                                                                if (value === "CANCELED") {
+                                                                                    data.canceledEndDate = new Date().toISOString();
+                                                                                }
+                                                                                await dispatch(updateClient({ id: client.id, data }) as any);
                                                                                 setOpenStatusId("");
                                                                                 toast.success("Status updated successfully!");
                                                                                 if (selectedAgencyId) {

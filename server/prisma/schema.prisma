@@ -135,6 +135,7 @@ model Client {
   industry              String?
   targets               String?                 @db.LongText
   status                Status                  @default(PENDING)
+  canceledEndDate       DateTime?               // When status is CANCELED, optional end date to display
   loginUrl              String?
   username              String?
   password              String?
@@ -540,6 +541,10 @@ enum Status {
   ACTIVE
   PENDING
   REJECTED
+  DASHBOARD_ONLY   // No managed service
+  CANCELED         // Managed service canceled (use canceledEndDate for end date)
+  SUSPENDED        // Client suspended
+  ARCHIVED         // Past/deleted client (REJECTED kept for backward compatibility)
 }
 
 enum TokenType {
