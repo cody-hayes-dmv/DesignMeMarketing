@@ -7,6 +7,14 @@ import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 
+function escapeHtml(s: string): string {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 const inviteTeamMemberSchema = z.object({
     email: z.string().email(),
     name: z.string().min(1),
@@ -288,17 +296,33 @@ router.post('/invite', authenticateToken, async (req, res) => {
             },
         });
 
-        // Send invitation email
-        // await sendEmail({
-        //   to: email,
-        //   subject: `You've been invited to join ${targetAgency?.name || 'the team'}`,
-        //   html: `
-        //     <h1>You've been invited!</h1>
-        //     <p>${name}, you've been invited to join the team.</p>
-        //     <p>Click the link below to accept the invitation:</p>
-        //     <a href="${process.env.FRONTEND_URL}/invite?token=${inviteToken}">Accept Invitation</a>
-        //   `,
-        // });
+        // Send invitation email (invite still succeeds if email fails)
+        let agencyName = 'the team';
+        if (targetAgencyId) {
+            const agency = await prisma.agency.findUnique({
+                where: { id: targetAgencyId },
+                select: { name: true },
+            });
+            if (agency?.name) agencyName = agency.name;
+        }
+        const inviteUrl = `${process.env.FRONTEND_URL || ''}/invite?token=${encodeURIComponent(inviteToken)}`;
+        try {
+            await sendEmail({
+                to: email,
+                subject: `You've been invited to join ${agencyName}`,
+                html: `
+          <h1>You've been invited!</h1>
+          <p>${escapeHtml(name)}, you've been invited to join ${escapeHtml(agencyName)}.</p>
+          <p>Click the link below to accept the invitation (link expires in 7 days):</p>
+          <p><a href="${inviteUrl}">Accept Invitation</a></p>
+          <p>If the link doesn't work, copy and paste this URL into your browser:</p>
+          <p style="word-break:break-all">${inviteUrl}</p>
+        `,
+            });
+        } catch (emailErr: any) {
+            console.error('Team invite email failed:', emailErr);
+            // Invite is already created; do not fail the request
+        }
 
         res.status(201).json({
             message: 'Team member invited successfully',

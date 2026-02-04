@@ -11,6 +11,12 @@ type InviteInfo =
       email: string;
       clients: Array<{ id: string; name: string }>;
     }
+  | {
+      kind: "TEAM_INVITE";
+      email: string;
+      role?: string;
+      agencyName?: string;
+    }
   | null;
 
 function useQueryParam(name: string): string {
@@ -71,9 +77,10 @@ const InvitePage = () => {
       setSubmitting(true);
       const res = await api.post("/auth/invite/accept", { token, name: name.trim(), password });
       const jwt = res.data?.token as string | undefined;
-      const clientId = res.data?.redirect?.clientId as string | undefined;
+      const redirect = res.data?.redirect as { clientId?: string; type?: string } | undefined;
+      const userRole = res.data?.user?.role as string | undefined;
 
-      if (!jwt || !clientId) {
+      if (!jwt) {
         toast.error("Invite accepted, but login failed. Please try logging in.");
         navigate("/login", { replace: true });
         return;
@@ -81,7 +88,19 @@ const InvitePage = () => {
 
       localStorage.setItem("token", jwt);
       await dispatch(checkAuth() as any);
-      navigate(`/client/dashboard/${encodeURIComponent(clientId)}`, { replace: true });
+
+      if (redirect?.type === "TEAM") {
+        const dashboardPath = userRole === "WORKER" ? "/worker/dashboard" : "/agency/dashboard";
+        navigate(dashboardPath, { replace: true });
+        return;
+      }
+
+      const clientId = redirect?.clientId;
+      if (clientId) {
+        navigate(`/client/dashboard/${encodeURIComponent(clientId)}`, { replace: true });
+      } else {
+        navigate("/login", { replace: true });
+      }
     } catch (e: any) {
       toast.error(e?.response?.data?.message || "Failed to accept invite.");
     } finally {
@@ -107,6 +126,67 @@ const InvitePage = () => {
               </button>
             </div>
           </div>
+        ) : invite?.kind === "TEAM_INVITE" ? (
+          <>
+            <h1 className="text-3xl font-bold text-gray-900 text-center">Join the team</h1>
+            <p className="mt-3 text-sm text-gray-600 text-center">
+              Set your name and password to activate your account and access the team dashboard.
+              {invite.agencyName && (
+                <span className="block mt-1">You’re joining {invite.agencyName}.</span>
+              )}
+            </p>
+
+            <div className="mt-8">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+              <input
+                type="email"
+                value={invite.email}
+                disabled
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+              />
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Your name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Create password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="mt-8 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => navigate("/login")}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAccept()}
+                disabled={submitting}
+                className="px-6 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+              >
+                {submitting ? "Submitting..." : "Accept & sign in"}
+              </button>
+            </div>
+          </>
         ) : (
           <>
             <h1 className="text-3xl font-bold text-gray-900 text-center">Add Client User(s)</h1>
@@ -119,7 +199,7 @@ const InvitePage = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                 <input
                   type="email"
-                  value={invite?.email || ""}
+                  value={invite?.kind === "CLIENT_USER_INVITE" ? invite.email : ""}
                   disabled
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
                 />
@@ -127,10 +207,10 @@ const InvitePage = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Clients ({invite?.clients?.length || 0})
+                  Clients ({invite?.kind === "CLIENT_USER_INVITE" ? invite.clients.length : 0})
                 </label>
                 <div className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50">
-                  {invite?.clients?.length ? (
+                  {invite?.kind === "CLIENT_USER_INVITE" && invite.clients?.length ? (
                     <ul className="list-disc pl-5 space-y-1">
                       {invite.clients.map((c) => (
                         <li key={c.id}>{c.name}</li>

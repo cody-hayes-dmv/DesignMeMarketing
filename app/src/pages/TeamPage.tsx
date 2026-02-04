@@ -45,6 +45,7 @@ const TeamPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [submittingInvite, setSubmittingInvite] = useState(false);
   const [editForm, setEditForm] = useState({
     name: "",
     role: "WORKER" as "WORKER" | "AGENCY" | "ADMIN",
@@ -84,16 +85,22 @@ const TeamPage = () => {
 
   const handleInviteTeamMember = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmittingInvite(true);
     try {
-      await api.post("/team/invite", inviteForm);
+      await api.post("/team/invite", {
+        email: inviteForm.email.trim(),
+        name: inviteForm.name.trim(),
+        role: inviteForm.role,
+      });
       setInviteForm({ email: "", name: "", role: "WORKER" });
       setShowInviteModal(false);
       toast.success("Team member invited successfully!");
-      // Refresh team members
       fetchTeamMembers();
     } catch (error: any) {
       console.error("Failed to invite team member:", error);
       // Toast is already shown by API interceptor
+    } finally {
+      setSubmittingInvite(false);
     }
   };
 
@@ -401,8 +408,9 @@ const TeamPage = () => {
                   onChange={(e) =>
                     setInviteForm({ ...inviteForm, name: e.target.value })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
                   required
+                  disabled={submittingInvite}
                 />
               </div>
               <div>
@@ -415,8 +423,9 @@ const TeamPage = () => {
                   onChange={(e) =>
                     setInviteForm({ ...inviteForm, email: e.target.value })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
                   required
+                  disabled={submittingInvite}
                 />
               </div>
               <div>
@@ -426,9 +435,13 @@ const TeamPage = () => {
                 <select
                   value={inviteForm.role}
                   onChange={(e) =>
-                    setInviteForm({ ...inviteForm, role: e.target.value })
+                    setInviteForm({
+                      ...inviteForm,
+                      role: e.target.value as "WORKER" | "AGENCY" | "ADMIN",
+                    })
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  disabled={submittingInvite}
                 >
                   <option value="WORKER">Specialist</option>
                   <option value="AGENCY">Agency Admin</option>
@@ -438,15 +451,17 @@ const TeamPage = () => {
                 <button
                   type="button"
                   onClick={() => setShowInviteModal(false)}
-                  className="flex-1 bg-gray-200 text-gray-800 py-3 px-6 rounded-lg hover:bg-gray-300 transition-colors"
+                  disabled={submittingInvite}
+                  className="flex-1 bg-gray-200 text-gray-800 py-3 px-6 rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors"
+                  disabled={submittingInvite}
+                  className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
                 >
-                  Send Invite
+                  {submittingInvite ? "Sending…" : "Send Invite"}
                 </button>
               </div>
             </form>

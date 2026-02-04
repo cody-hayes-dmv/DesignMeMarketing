@@ -87,7 +87,16 @@ router.post("/register", async (req, res) => {
 // Login
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = loginSchema.parse(req.body);
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = loginSchema.safeParse({
+      email: typeof body.email === "string" ? body.email.trim() : body.email,
+      password: body.password,
+    });
+    if (!parsed.success) {
+      const msg = parsed.error.errors?.[0]?.message || "Email and password are required";
+      return res.status(400).json({ message: msg });
+    }
+    const { email, password } = parsed.data;
 
     // Find user
     const user = await prisma.user.findUnique({
@@ -115,7 +124,7 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Check if email is verified
+    // Check if email is verified (invited team members become verified when they accept)
     if (!user.verified) {
       return res
         .status(401)
@@ -135,6 +144,7 @@ router.post("/login", async (req, res) => {
       { expiresIn: "7d" }
     );
 
+    const clientUsers = user.clientUsers ?? [];
     res.json({
       token,
       user: {
@@ -145,7 +155,7 @@ router.post("/login", async (req, res) => {
         verified: user.verified,
         invited: user.invited,
         clientAccess: {
-          clients: user.clientUsers.map((c) => ({
+          clients: clientUsers.map((c: { clientId: string; clientRole: string; status: string }) => ({
             clientId: c.clientId,
             role: c.clientRole,
             status: c.status,
@@ -153,9 +163,12 @@ router.post("/login", async (req, res) => {
         },
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Login error:", error);
-    res.status(400).json({ message: "Login failed" });
+    if (error?.name === "ZodError") {
+      return res.status(400).json({ message: error?.errors?.[0]?.message || "Invalid input" });
+    }
+    res.status(500).json({ message: "Login failed" });
   }
 });
 
@@ -229,23 +242,40 @@ router.get("/invite", async (req, res) => {
         ? [String(metadata.clientId)]
         : [];
 
-    if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || clientIds.length === 0) {
-      return res.status(400).json({ message: "Unsupported invite token" });
+    // Client user invite: token has metadata.kind === "CLIENT_USER_INVITE" and clientIds
+    if (record.type === "INVITE" && metadata?.kind === "CLIENT_USER_INVITE" && clientIds.length > 0) {
+      const clients = await prisma.client.findMany({
+        where: { id: { in: clientIds } },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+      if (clients.length === 0) return res.status(404).json({ message: "Client not found" });
+      return res.json({
+        kind: "CLIENT_USER_INVITE",
+        email: record.email,
+        clients,
+      });
     }
 
-    const clients = await prisma.client.findMany({
-      where: { id: { in: clientIds } },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
-    });
+    // Team invite: token created by team invite (type INVITE, userId set, no client metadata)
+    if (record.type === "INVITE" && record.userId) {
+      let agencyName: string | null = null;
+      if (record.agencyId) {
+        const agency = await prisma.agency.findUnique({
+          where: { id: record.agencyId },
+          select: { name: true },
+        });
+        agencyName = agency?.name ?? null;
+      }
+      return res.json({
+        kind: "TEAM_INVITE",
+        email: record.email,
+        role: record.role || "WORKER",
+        agencyName: agencyName || undefined,
+      });
+    }
 
-    if (clients.length === 0) return res.status(404).json({ message: "Client not found" });
-
-    return res.json({
-      kind: "CLIENT_USER_INVITE",
-      email: record.email,
-      clients,
-    });
+    return res.status(400).json({ message: "Unsupported invite token" });
   } catch (error) {
     console.error("Invite lookup error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -284,6 +314,38 @@ router.post("/invite/accept", async (req, res) => {
         ? [String(metadata.clientId)]
         : [];
 
+    // Team invite: token created by team invite (type INVITE, userId set)
+    if (record.type === "INVITE" && record.userId) {
+      const teamUser = await prisma.user.findUnique({ where: { id: record.userId } });
+      if (!teamUser) return res.status(400).json({ message: "User not found" });
+      const passwordHash = await bcrypt.hash(password, 12);
+      const updated = await prisma.user.update({
+        where: { id: record.userId },
+        data: {
+          name,
+          passwordHash,
+          verified: true,
+          invited: false,
+          lastLoginAt: new Date(),
+        },
+      });
+      await prisma.token.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      });
+      const jwtToken = jwt.sign(
+        { userId: updated.id, email: updated.email, role: updated.role },
+        getJwtSecret(),
+        { expiresIn: "7d" }
+      );
+      return res.json({
+        token: jwtToken,
+        user: { id: updated.id, email: updated.email, name: updated.name, role: updated.role, verified: updated.verified, invited: updated.invited },
+        redirect: { type: "TEAM" },
+      });
+    }
+
+    // Client user invite
     if (record.type !== "INVITE" || metadata?.kind !== "CLIENT_USER_INVITE" || clientIds.length === 0) {
       return res.status(400).json({ message: "Unsupported invite token" });
     }
