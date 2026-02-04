@@ -44,7 +44,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
         : user?.role === "ADMIN"
           ? "Admin Panel"
           : user?.role === "WORKER"
-            ? "Worker Panel"
+            ? "Specialist Panel"
             : user?.role
               ? `${user.role} Panel`
               : "Panel";
@@ -68,7 +68,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   };
 
   const menuItems: MenuItem[] = [
-    // Dashboard, Agencies, Clients, Keywords, Rankings, Reports, Team, Settings
+    // Dashboard, Agencies, Clients, Research (keywords), Rankings, Reports, Team, Settings
     // Accessible by AGENCY, ADMIN, and SUPER_ADMIN
     {
       icon: Home,
@@ -106,13 +106,6 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       roles: ["ADMIN", "SUPER_ADMIN"],
     },
     {
-      icon: UserCog,
-      label: "Workers",
-      path: "/agency/workers",
-      hasSubMenu: false,
-      roles: ["ADMIN", "SUPER_ADMIN"],
-    },
-    {
       icon: FolderOpen,
       label: "Tasks",
       path: "/agency/tasks",
@@ -121,7 +114,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     },
     {
       icon: Search,
-      label: "Keywords",
+      label: "Research",
       path: "/agency/keywords",
       hasSubMenu: false,
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
@@ -162,7 +155,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
 
-    // Worker
+    // Specialist (WORKER role)
     {
       icon: Home,
       label: "Dashboard",

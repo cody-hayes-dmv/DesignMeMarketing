@@ -54,6 +54,7 @@ import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import OnboardingTemplateModal from "@/components/OnboardingTemplateModal";
+import ClientKeywordsManager from "@/components/ClientKeywordsManager";
 
 interface TrafficSourceSlice {
   name: string;
@@ -258,16 +259,17 @@ const ClientDashboardPage: React.FC = () => {
   const [clientPortalClients, setClientPortalClients] = useState<Array<{ id: string; name: string }>>([]);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [loading, setLoading] = useState(false);
-  type ClientDashboardTopTab = "dashboard" | "report" | "users" | "integration";
+  type ClientDashboardTopTab = "dashboard" | "report" | "users" | "keywords" | "integration";
   type ClientDashboardSection = "seo" | "ai-intelligence" | "ppc" | "backlinks" | "worklog";
 
   const initialNav = (() => {
     if (clientPortalMode) {
       return { tab: "dashboard" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     }
-    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "integration" } | null)?.tab;
+    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration" } | null)?.tab;
     if (requested === "report") return { tab: "report" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "users") return { tab: "users" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+    if (requested === "keywords") return { tab: "keywords" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "integration") return { tab: "integration" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "backlinks") return { tab: "dashboard" as ClientDashboardTopTab, section: "backlinks" as ClientDashboardSection };
     if (requested === "worklog") return { tab: "dashboard" as ClientDashboardTopTab, section: "worklog" as ClientDashboardSection };
@@ -1548,22 +1550,41 @@ const ClientDashboardPage: React.FC = () => {
     checkGA4Status();
   }, [clientId]); // Removed dateRange dependency - GA4 status doesn't change with date range
 
-  // Check Google Ads connection status and handle OAuth callback
+  // Fetch Google Ads status (used on mount and when popup posts OAuth success so current window stays in sync)
+  const fetchGoogleAdsStatus = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setGoogleAdsStatusLoading(true);
+      const res = await api.get(`/clients/${clientId}/google-ads/status`);
+      const isConnected = res.data?.connected || false;
+      const hasTokens = res.data?.hasTokens || false;
+      const accountEmail = res.data?.accountEmail || null;
+      setGoogleAdsConnected(isConnected);
+      setGoogleAdsHasTokens(hasTokens);
+      setGoogleAdsAccountEmail(accountEmail);
+    } catch (error: any) {
+      console.error("Failed to check Google Ads status:", error);
+      setGoogleAdsConnected(false);
+      setGoogleAdsHasTokens(false);
+      setGoogleAdsAccountEmail(null);
+    } finally {
+      setGoogleAdsStatusLoading(false);
+    }
+  }, [clientId]);
+
+  // Check Google Ads connection status and handle OAuth callback (URL params when redirect is used)
   useEffect(() => {
     if (!clientId) return;
-    
-    // Check for OAuth callback parameters
     const urlParams = new URLSearchParams(window.location.search);
     const googleAdsTokensReceived = urlParams.get('google_ads_tokens_received');
-    const googleAdsConnected = urlParams.get('google_ads_connected');
+    const googleAdsConnectedParam = urlParams.get('google_ads_connected');
     const googleAdsError = urlParams.get('google_ads_error');
-    
     if (googleAdsTokensReceived === 'true') {
       toast.success('OAuth successful! Please select your Google Ads account.');
       window.history.replaceState({}, '', window.location.pathname);
       setShowGoogleAdsModal(true);
       setGoogleAdsConnecting(false);
-    } else if (googleAdsConnected === 'true') {
+    } else if (googleAdsConnectedParam === 'true') {
       toast.success('Google Ads connected successfully!');
       window.history.replaceState({}, '', window.location.pathname);
       setGoogleAdsConnected(true);
@@ -1575,30 +1596,8 @@ const ClientDashboardPage: React.FC = () => {
       window.history.replaceState({}, '', window.location.pathname);
       setGoogleAdsConnecting(false);
     }
-    
-    // Always check Google Ads status on mount
-    const checkGoogleAdsStatus = async () => {
-      try {
-        setGoogleAdsStatusLoading(true);
-        const res = await api.get(`/clients/${clientId}/google-ads/status`);
-        const isConnected = res.data?.connected || false;
-        const hasTokens = res.data?.hasTokens || false;
-        const accountEmail = res.data?.accountEmail || null;
-        setGoogleAdsConnected(isConnected);
-        setGoogleAdsHasTokens(hasTokens);
-        setGoogleAdsAccountEmail(accountEmail);
-        // Do not auto-open Select Google Ads Account modal here; only open after OAuth redirect (google_ads_tokens_received). User can open it from Integration tab.
-      } catch (error: any) {
-        console.error("Failed to check Google Ads status:", error);
-        setGoogleAdsConnected(false);
-        setGoogleAdsHasTokens(false);
-        setGoogleAdsAccountEmail(null);
-      } finally {
-        setGoogleAdsStatusLoading(false);
-      }
-    };
-    checkGoogleAdsStatus();
-  }, [clientId]);
+    fetchGoogleAdsStatus();
+  }, [clientId, fetchGoogleAdsStatus]);
 
   // Set active tab from location state when component mounts or location changes
   useEffect(() => {
@@ -1608,7 +1607,7 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
     const state = location.state as {
-      tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "integration";
+      tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration";
       section?: ClientDashboardSection;
     };
     if (!state?.tab && !state?.section) return;
@@ -1620,6 +1619,11 @@ const ClientDashboardPage: React.FC = () => {
 
     if (state?.tab === "users") {
       setActiveTab("users");
+      return;
+    }
+
+    if (state?.tab === "keywords") {
+      setActiveTab("keywords");
       return;
     }
 
@@ -2948,10 +2952,13 @@ const ClientDashboardPage: React.FC = () => {
           if (event.data.type === 'GOOGLE_ADS_OAUTH_SUCCESS') {
             cleanupPopup();
             closePopupSafely();
-            toast.success('OAuth successful! Loading your Google Ads accounts...');
             setGoogleAdsConnecting(false);
             setGoogleAdsConnectionError(null);
-            handleFetchGoogleAdsCustomers();
+            // Refresh status in current window so Integrations shows "Select Google Ads account" or "Connected"
+            fetchGoogleAdsStatus().then(() => {
+              toast.success('OAuth successful! Loading your Google Ads accounts...');
+              handleFetchGoogleAdsCustomers();
+            });
           } else if (event.data.type === 'GOOGLE_ADS_OAUTH_ERROR') {
             cleanupPopup();
             closePopupSafely();
@@ -3638,6 +3645,7 @@ const ClientDashboardPage: React.FC = () => {
                     { id: "dashboard", label: "Dashboard", icon: Users },
                     { id: "report", label: "Report", icon: FileText },
                     { id: "users", label: "Users", icon: UserPlus },
+                    { id: "keywords", label: "Keywords", icon: Target },
                     { id: "integration", label: "Integrations", icon: Plug },
                   ]
               ).map((tab) => (
@@ -3844,6 +3852,8 @@ const ClientDashboardPage: React.FC = () => {
                 >
                   Create Report
                 </button>
+              ) : activeTab === "keywords" ? (
+                null
               ) : activeTab === "integration" ? (
                 null
               ) : (
@@ -6652,6 +6662,14 @@ const ClientDashboardPage: React.FC = () => {
             <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">Loading client data...</div>
           ) : (
             <>
+              {!reportOnly && activeTab === "keywords" && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Keywords</h2>
+                  </div>
+                  <ClientKeywordsManager clientId={clientId} />
+                </div>
+              )}
               {!reportOnly && activeTab === "integration" && (
                 <div className="space-y-8 max-w-3xl">
                   <h2 className="text-xl font-semibold text-gray-900">Integrations</h2>

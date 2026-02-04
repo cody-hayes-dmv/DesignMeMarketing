@@ -430,7 +430,7 @@ const TeamPage = () => {
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
-                  <option value="WORKER">Worker</option>
+                  <option value="WORKER">Specialist</option>
                   <option value="AGENCY">Agency Admin</option>
                 </select>
               </div>
@@ -498,7 +498,7 @@ const TeamPage = () => {
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
-                  <option value="WORKER">Worker</option>
+                  <option value="WORKER">Specialist</option>
                   <option value="AGENCY">Agency Admin</option>
                   {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") && (
                     <option value="ADMIN">Admin</option>

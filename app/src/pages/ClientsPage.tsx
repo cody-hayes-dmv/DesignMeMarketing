@@ -1802,57 +1802,56 @@ const ClientsPage = () => {
         </div>
       )}
 
-      {/* Share Link Modal */}
+      {/* Share Link Modal - same style as Share Client Dashboard (Vendasta) */}
       {showShareModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-gray-900">Share link generated</h2>
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Share Client Dashboard</h3>
               <button
                 onClick={() => {
                   setShowShareModal(false);
                   setShareLink("");
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="mb-6">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 break-all">
-                <a
-                  href={shareLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary-600 hover:text-primary-700 underline text-sm"
-                >
-                  {shareLink}
-                </a>
-              </div>
-            </div>
-            <div className="flex items-center justify-end space-x-3">
+            <p className="text-sm text-gray-600 mb-4">
+              Share this link to give others access to view the client dashboard. The link will expire in 7 days.
+            </p>
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                type="text"
+                value={shareLink}
+                readOnly
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm"
+              />
               <button
                 onClick={handleCopyLink}
-                className="bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+                className="p-2 text-gray-600 hover:text-primary-600 transition-colors"
+                title="Copy link"
               >
-                <Copy className="h-4 w-4" />
-                <span>Copy</span>
+                <Copy className="h-5 w-5" />
               </button>
-              <button
-                onClick={handleOpenLink}
-                className="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-              >
-                <ExternalLink className="h-4 w-4" />
-                <span>Open</span>
-              </button>
+            </div>
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => {
                   setShowShareModal(false);
                   setShareLink("");
                 }}
-                className="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+                className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
               >
                 Close
+              </button>
+              <button
+                onClick={handleOpenLink}
+                className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open Link
               </button>
             </div>
           </div>

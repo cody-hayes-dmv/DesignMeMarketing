@@ -710,12 +710,18 @@ async function fetchKeywordSuggestionsFromDataForSEO(
   // Request extra from API so that after deduplication we can return exactly `limit` items.
   const requestLimit = Math.min(Math.max(limit + 20, limit * 2), 100);
 
+  // DataForSEO related_keywords: depth controls how many keywords are available (depth 1 ≈ 8, 2 ≈ 72, 3 ≈ 584, 4 ≈ 4680).
+  // Without setting depth, default 1 caps results at ~8–9, so requests for >9 suggestions need higher depth.
+  const depth =
+    requestLimit <= 8 ? 1 : requestLimit <= 72 ? 2 : requestLimit <= 584 ? 3 : 4;
+
   const requestBody = [
     {
       keyword: seedKeyword,
       location_code: locationCode,
       language_code: languageCode,
       include_serp_info: false,
+      depth,
       limit: requestLimit,
     },
   ];
@@ -2575,6 +2581,9 @@ router.get("/share/:token/ranked-keywords/history", async (req, res) => {
 router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
+    if (!clientId || typeof clientId !== "string" || !clientId.trim()) {
+      return res.status(400).json({ message: "Client ID is required" });
+    }
     const { search, sortBy = "currentPosition", order = "asc" } = req.query;
 
     // Check if user has access to this client
@@ -9004,7 +9013,9 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
     const keywordProps = item?.keyword_properties || item?.keyword_data?.keyword_properties || {};
     const monthlySearches = Array.isArray(keywordInfo?.monthly_searches) ? keywordInfo.monthly_searches : [];
     const searchVolume = Number(keywordInfo?.search_volume ?? 0);
-    const keywordDifficulty = Number(keywordProps?.keyword_difficulty ?? keywordInfo?.competition_index != null ? Math.round(Number(keywordInfo.competition_index) * 100) : 0);
+    const keywordDifficultyRaw = keywordProps?.keyword_difficulty ?? (keywordInfo?.competition_index != null ? Number(keywordInfo.competition_index) * 100 : null);
+    const keywordDifficultyNum = Number(keywordDifficultyRaw);
+    const keywordDifficulty = Number.isFinite(keywordDifficultyNum) ? Math.max(0, Math.min(100, Math.round(keywordDifficultyNum))) : 0;
     const cpc = Number(keywordInfo?.cpc ?? keywordInfo?.cpc_v2 ?? 0);
     const competition = Number(keywordInfo?.competition ?? 0);
     const competitionLevel = (keywordInfo?.competition_level || "").toString().toLowerCase();
@@ -9030,7 +9041,7 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
       searchVolume,
       globalVolume,
       countryBreakdown: hasCountryBreakdown ? countryBreakdown : [{ countryCode: "US", searchVolume }],
-      keywordDifficulty: Math.max(0, Math.min(100, Math.round(keywordDifficulty))),
+      keywordDifficulty,
       difficultyLabel: keywordDifficulty >= 80 ? "Very hard" : keywordDifficulty >= 50 ? "Hard" : keywordDifficulty >= 25 ? "Medium" : "Easy",
       cpc,
       competition,

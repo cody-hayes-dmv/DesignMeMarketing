@@ -19,7 +19,6 @@ import TasksPage from "./pages/TasksPage";
 import AgencyDashboardPage from "./pages/Agency/AgencyDashboardPage";
 import AgenciesPage from "./pages/SuperAdmin/AgenciesPage";
 import SuperAdminDashboard from "./pages/SuperAdmin/SuperAdminDashboard";
-import WorkersPage from "./pages/WorkersPage";
 import VendastaPage from "./pages/VendastaPage";
 import ClientDashboardPage from "./pages/ClientDashboardPage";
 import ShareDashboardPage from "./pages/ShareDashboardPage";
@@ -91,7 +90,6 @@ function App() {
     { path: "/agency/reports", component: ReportsPage },
     { path: "/agency/users", component: ClientUsersPage },
     { path: "/agency/team", component: TeamPage },
-    { path: "/agency/workers", component: WorkersPage },
     { path: "/agency/clients/:clientId", component: ClientDashboardPage },
     { path: "/agency/settings", component: SettingsPage },
     { path: "/agency/tasks", component: TasksPage },
@@ -230,6 +228,9 @@ function App() {
           }
         />
       ))}
+
+      {/* Redirect old Workers path to Team (Workers combined into Team) */}
+      <Route path="/agency/workers" element={<Navigate to="/agency/team" replace />} />
 
       {/* Agency routes - accessible by AGENCY, ADMIN, and SUPER_ADMIN */}
       {agencyRoutes.map(({ path, component: Component }) => (

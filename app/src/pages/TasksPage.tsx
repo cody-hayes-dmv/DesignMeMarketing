@@ -52,7 +52,7 @@ const TasksPage = () => {
     const { tasks } = useSelector((state: RootState) => state.task)
     const { user } = useSelector((state: RootState) => state.auth);
 
-    // Only non-workers can create
+    // Only non-specialists can create
     const canCreate = (user?.role as ROLE | undefined) !== "WORKER";
     const canFilterByClient = (user?.role as ROLE | undefined) !== "USER";
 
@@ -144,7 +144,7 @@ const TasksPage = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">Tasks</h1>
                     <p className="text-gray-600 mt-2">
-                        Manage all tasks and assign to the workers
+                        Manage all tasks and assign to the specialists
                     </p>
                     {getOverdueCount() > 0 && (
                         <div className="mt-2 flex items-center text-red-600">

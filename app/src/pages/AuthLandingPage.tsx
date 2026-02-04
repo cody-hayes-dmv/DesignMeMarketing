@@ -27,7 +27,7 @@ const roleCards: Array<{
   { role: "ADMIN", title: "Admin", subtitle: "Manage agencies, clients, and reporting." },
   { role: "AGENCY", title: "Agency", subtitle: "View and manage your clients." },
   { role: "USER", title: "Client", subtitle: "Access your invited client dashboard." },
-  { role: "WORKER", title: "Worker", subtitle: "View your assigned tasks and logins." },
+  { role: "WORKER", title: "Specialist", subtitle: "View your assigned tasks and logins." },
 ];
 
 const AuthLandingPage: React.FC = () => {

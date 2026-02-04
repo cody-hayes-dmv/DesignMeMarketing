@@ -22,14 +22,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/agency/dashboard") return "Dashboard";
     if (path === "/agency/clients") return "Clients";
     if (path === "/agency/tasks") return "Tasks";
-    if (path === "/agency/keywords") return "Keywords";
+    if (path === "/agency/keywords") return "Research";
     if (path === "/agency/rankings") return "Rankings";
     if (path === "/agency/reports") return "Reports";
     if (path === "/agency/users") return "Users";
     if (path === "/agency/report") return "Report";
     if (path === "/agency/team") return "Team";
     if (path.startsWith("/agency/clients/")) return "Client Dashboard";
-    if (path === "/agency/workers") return "Workers";
+    if (path === "/agency/workers") return "Team";
     if (path === "/agency/settings") return "Settings";
 
     if (path === "/superadmin/dashboard") return "Dashboard";
