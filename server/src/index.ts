@@ -12,6 +12,7 @@ import seoRoutes from "./routes/seo.js";
 import onboardingRoutes from "./routes/onboarding.js";
 import teamRoutes from "./routes/team.js";
 import uploadRoutes from "./routes/upload.js";
+import financialRoutes from "./routes/financial.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
 // Load .env file from server directory
@@ -67,6 +68,7 @@ app.use("/api/seo", seoRoutes);
 app.use("/api/onboarding", onboardingRoutes);
 app.use("/api/team", teamRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/financial", financialRoutes);
 app.use("/uploads", express.static("uploads")); // Serve uploaded files
 
 // Health check

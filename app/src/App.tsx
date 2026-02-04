@@ -25,6 +25,7 @@ import ShareDashboardPage from "./pages/ShareDashboardPage";
 import ClientReportIndexPage from "./pages/ClientReportIndexPage";
 import InvitePage from "./pages/InvitePage";
 import ClientUsersPage from "./pages/ClientUsersPage";
+import FinancialOverviewPage from "./pages/FinancialOverviewPage";
 
 function App() {
   const dispatch = useDispatch();
@@ -82,6 +83,7 @@ function App() {
   // Agency routes with DashboardLayout - accessible by AGENCY, ADMIN, and SUPER_ADMIN
   const agencyRoutes = [
     { path: "/agency/dashboard", component: AgencyDashboardPage },
+    { path: "/agency/financial-overview", component: FinancialOverviewPage },
     { path: "/agency/agencies", component: AgenciesPage },
     { path: "/agency/clients", component: ClientsPage },
     { path: "/agency/vendasta", component: VendastaPage },
@@ -257,6 +259,29 @@ function App() {
           }
         />
       ))}
+
+      {/* Super Admin Financial Overview route */}
+      <Route
+        path="/superadmin/financial-overview"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : user.role !== "SUPER_ADMIN" ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : (
+            <DashboardLayout>
+              <FinancialOverviewPage />
+            </DashboardLayout>
+          )
+        }
+      />
 
       {/* Super Admin Dashboard route */}
       <Route

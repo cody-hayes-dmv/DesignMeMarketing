@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   PersonStanding,
   UserCog,
+  DollarSign,
   type LucideIcon,
 } from "lucide-react";
 
@@ -81,6 +82,20 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       icon: Home,
       label: "Dashboard",
       path: "/superadmin/dashboard",
+      hasSubMenu: false,
+      roles: ["SUPER_ADMIN"],
+    },
+    {
+      icon: DollarSign,
+      label: "Financial Overview",
+      path: "/agency/financial-overview",
+      hasSubMenu: false,
+      roles: ["AGENCY", "ADMIN"],
+    },
+    {
+      icon: DollarSign,
+      label: "Financial Overview",
+      path: "/superadmin/financial-overview",
       hasSubMenu: false,
       roles: ["SUPER_ADMIN"],
     },
