@@ -38,6 +38,7 @@ import {
   Image,
   Video,
   Link as LinkIcon,
+  Calendar,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
@@ -315,6 +316,7 @@ const ClientDashboardPage: React.FC = () => {
   const [compareTo, setCompareTo] = useState<"none" | "previous_period" | "previous_year" | "custom">("none");
   const [compareStartDate, setCompareStartDate] = useState<string>("");
   const [compareEndDate, setCompareEndDate] = useState<string>("");
+  const [calendarModalOpen, setCalendarModalOpen] = useState(false);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [dashboardSummaryCompare, setDashboardSummaryCompare] = useState<DashboardSummary | null>(null);
   const [visitorSourcesCompare, setVisitorSourcesCompare] = useState<Array<{ source: string; users: number }>>([]);
@@ -3668,74 +3670,38 @@ const ClientDashboardPage: React.FC = () => {
               {activeTab === "dashboard" ? (
                 <>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <select
-                      value={dateRange}
-                      onChange={(e) => {
-                        const newValue = e.target.value;
-                        setDateRange(newValue);
-                        if (newValue === "custom") {
-                          setShowCustomDatePicker(true);
-                          // Set default dates: last 30 days
-                          const endDate = new Date();
-                          const startDate = new Date();
-                          startDate.setDate(startDate.getDate() - 30);
-                          setCustomEndDate(endDate.toISOString().split("T")[0]);
-                          setCustomStartDate(startDate.toISOString().split("T")[0]);
-                        } else {
-                          setShowCustomDatePicker(false);
-                        }
-                      }}
-                      className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    <button
+                      type="button"
+                      onClick={() => setCalendarModalOpen(true)}
+                      className="border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent flex items-center gap-2 bg-white hover:bg-gray-50"
+                      title="Date range & comparison"
                     >
-                      <option value="7">Last 7 days</option>
-                      <option value="30">Last 30 days</option>
-                      <option value="90">Last 90 days</option>
-                      <option value="365">Last year</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                    <div className="flex flex-col gap-2">
-                      <select
-                        value={compareTo}
-                        onChange={(e) => {
-                          const v = e.target.value as "none" | "previous_period" | "previous_year" | "custom";
-                          setCompareTo(v);
-                          if (v === "custom") {
-                            const end = new Date();
-                            const start = new Date();
-                            start.setDate(start.getDate() - 30);
-                            setCompareEndDate(end.toISOString().split("T")[0]);
-                            setCompareStartDate(start.toISOString().split("T")[0]);
-                          }
-                        }}
-                        className="border border-gray-300 rounded-lg px-4 pr-10 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        title="Compare to a previous period"
-                      >
-                        <option value="none">No comparison</option>
-                        <option value="previous_period">Compare to previous period</option>
-                        <option value="previous_year">Compare to previous year</option>
-                        <option value="custom">Custom</option>
-                      </select>
-                      {compareTo === "custom" && (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="date"
-                            value={compareStartDate}
-                            onChange={(e) => setCompareStartDate(e.target.value)}
-                            max={compareEndDate || new Date().toISOString().split("T")[0]}
-                            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
-                          />
-                          <span className="text-gray-500 text-sm">to</span>
-                          <input
-                            type="date"
-                            value={compareEndDate}
-                            onChange={(e) => setCompareEndDate(e.target.value)}
-                            min={compareStartDate || undefined}
-                            max={new Date().toISOString().split("T")[0]}
-                            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
-                          />
-                        </div>
-                      )}
-                    </div>
+                      <Calendar className="h-4 w-4 text-gray-600" />
+                      <span className="text-gray-700">
+                        {dateRange === "custom" && customStartDate && customEndDate
+                          ? `${customStartDate} – ${customEndDate}`
+                          : dateRange === "7"
+                            ? "Last 7 days"
+                            : dateRange === "30"
+                              ? "Last 30 days"
+                              : dateRange === "90"
+                                ? "Last 90 days"
+                                : dateRange === "365"
+                                  ? "Last year"
+                                  : "Date range"}
+                        {" · "}
+                        {compareTo === "none"
+                          ? "No comparison"
+                          : compareTo === "previous_period"
+                            ? "Compare to previous period"
+                            : compareTo === "previous_year"
+                              ? "Compare to previous year"
+                              : compareTo === "custom" && compareStartDate && compareEndDate
+                                ? `${compareStartDate} – ${compareEndDate}`
+                                : "Comparison"}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    </button>
 
                     {user?.role === "SUPER_ADMIN" && (
                       <button
@@ -3799,49 +3765,148 @@ const ClientDashboardPage: React.FC = () => {
                     </button>
                   </div>
 
-                  {showCustomDatePicker && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="date"
-                        value={customStartDate}
-                        onChange={(e) => setCustomStartDate(e.target.value)}
-                        max={customEndDate || new Date().toISOString().split("T")[0]}
-                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <span className="text-gray-500">to</span>
-                      <input
-                        type="date"
-                        value={customEndDate}
-                        onChange={(e) => setCustomEndDate(e.target.value)}
-                        min={customStartDate || undefined}
-                        max={new Date().toISOString().split("T")[0]}
-                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (customStartDate && customEndDate) {
-                            try {
-                              setFetchingSummary(true);
-                              const res = await api.get(buildDashboardUrl(clientId!));
-                              const payload = res.data || {};
-                              setDashboardSummary(formatDashboardSummary(payload));
-                            } catch (error: any) {
-                              console.error("Failed to fetch dashboard summary", error);
-                              setDashboardSummary(null);
-                            } finally {
-                              setFetchingSummary(false);
-                            }
-                          } else {
-                            toast.error("Please select both start and end dates");
-                          }
-                        }}
-                        className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors text-sm"
-                      >
-                        {fetchingSummary ? "Applying..." : "Apply"}
-                      </button>
+                  {calendarModalOpen && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setCalendarModalOpen(false)}>
+                      <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                            <Calendar className="h-5 w-5 text-primary-600" />
+                            Date range & comparison
+                          </h3>
+                          <button type="button" onClick={() => setCalendarModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                            <X className="h-5 w-5" />
+                          </button>
+                        </div>
+                        <div className="space-y-6">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Date range</label>
+                            <select
+                              value={dateRange}
+                              onChange={(e) => {
+                                const newValue = e.target.value;
+                                setDateRange(newValue);
+                                if (newValue === "custom") {
+                                  const endDate = new Date();
+                                  const startDate = new Date();
+                                  startDate.setDate(startDate.getDate() - 30);
+                                  setCustomEndDate(endDate.toISOString().split("T")[0]);
+                                  setCustomStartDate(startDate.toISOString().split("T")[0]);
+                                }
+                              }}
+                              className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            >
+                              <option value="7">Last 7 days</option>
+                              <option value="30">Last 30 days</option>
+                              <option value="90">Last 90 days</option>
+                              <option value="365">Last year</option>
+                              <option value="custom">Custom range</option>
+                            </select>
+                            {dateRange === "custom" && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <input
+                                  type="date"
+                                  value={customStartDate}
+                                  onChange={(e) => setCustomStartDate(e.target.value)}
+                                  max={customEndDate || new Date().toISOString().split("T")[0]}
+                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
+                                />
+                                <span className="text-gray-500 text-sm">to</span>
+                                <input
+                                  type="date"
+                                  value={customEndDate}
+                                  onChange={(e) => setCustomEndDate(e.target.value)}
+                                  min={customStartDate || undefined}
+                                  max={new Date().toISOString().split("T")[0]}
+                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Comparison</label>
+                            <select
+                              value={compareTo}
+                              onChange={(e) => {
+                                const v = e.target.value as "none" | "previous_period" | "previous_year" | "custom";
+                                setCompareTo(v);
+                                if (v === "custom") {
+                                  const end = new Date();
+                                  const start = new Date();
+                                  start.setDate(start.getDate() - 30);
+                                  setCompareEndDate(end.toISOString().split("T")[0]);
+                                  setCompareStartDate(start.toISOString().split("T")[0]);
+                                }
+                              }}
+                              className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            >
+                              <option value="none">No comparison</option>
+                              <option value="previous_period">Compare to previous period</option>
+                              <option value="previous_year">Compare to previous year</option>
+                              <option value="custom">Custom comparison range</option>
+                            </select>
+                            {compareTo === "custom" && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <input
+                                  type="date"
+                                  value={compareStartDate}
+                                  onChange={(e) => setCompareStartDate(e.target.value)}
+                                  max={compareEndDate || new Date().toISOString().split("T")[0]}
+                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
+                                />
+                                <span className="text-gray-500 text-sm">to</span>
+                                <input
+                                  type="date"
+                                  value={compareEndDate}
+                                  onChange={(e) => setCompareEndDate(e.target.value)}
+                                  min={compareStartDate || undefined}
+                                  max={new Date().toISOString().split("T")[0]}
+                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-6 flex justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setCalendarModalOpen(false)}
+                            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (dateRange === "custom" && (!customStartDate || !customEndDate)) {
+                                toast.error("Please select both start and end dates for the date range.");
+                                return;
+                              }
+                              if (compareTo === "custom" && (!compareStartDate || !compareEndDate)) {
+                                toast.error("Please select both start and end dates for the comparison range.");
+                                return;
+                              }
+                              setCalendarModalOpen(false);
+                              try {
+                                setFetchingSummary(true);
+                                const res = await api.get(buildDashboardUrl(clientId!));
+                                const payload = res.data || {};
+                                setDashboardSummary(formatDashboardSummary(payload));
+                              } catch (error: any) {
+                                console.error("Failed to fetch dashboard summary", error);
+                                setDashboardSummary(null);
+                              } finally {
+                                setFetchingSummary(false);
+                              }
+                            }}
+                            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
+
                 </>
               ) : activeTab === "report" ? (
                 <button
