@@ -75,130 +75,140 @@ const SuperAdminDashboard = () => {
 
   return (
     <Layout title="Super Admin Dashboard">
-      <div className="space-y-8">
+      <div className="space-y-10">
         {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">
+        <div className="pb-2 border-b border-gray-100">
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
             Super Admin Dashboard
           </h1>
-          <p className="text-gray-600 mt-2">
+          <p className="text-gray-500 mt-2 text-base">
             Overview of agencies, clients, and platform activity
           </p>
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Agencies</p>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {agenciesLoading ? "..." : totalAgencies}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-600">agencies</span>
-                </div>
-                {!agenciesLoading && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {newAgenciesLast30Days} new in last 30 days
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6 lg:gap-8">
+          {/* Total Agencies */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
+            <div className="h-1 w-full bg-primary-500" aria-hidden />
+            <div className="p-6 lg:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Total Agencies</p>
+                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                    {agenciesLoading ? "—" : totalAgencies}
                   </p>
-                )}
-              </div>
-              <div className="bg-primary-100 p-3 rounded-lg">
-                <Building2 className="h-6 w-6 text-primary-600" />
+                  <p className="text-sm text-gray-500 mt-1">agencies</p>
+                  {!agenciesLoading && (
+                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
+                      {newAgenciesLast30Days} new in last 30 days
+                    </p>
+                  )}
+                </div>
+                <div className="bg-primary-50 p-3.5 rounded-xl shrink-0 group-hover:bg-primary-100 transition-colors" aria-hidden>
+                  <Building2 className="h-7 w-7 text-primary-600" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Active Agencies</p>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {agenciesLoading ? "..." : activeAgencies}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-600">active</span>
-                </div>
-                {!agenciesLoading && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {totalAgencies > 0 ? Math.round((activeAgencies / totalAgencies) * 100) : 0}% of total
+          {/* Active Agencies */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
+            <div className="h-1 w-full bg-green-500" aria-hidden />
+            <div className="p-6 lg:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Active Agencies</p>
+                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                    {agenciesLoading ? "—" : activeAgencies}
                   </p>
-                )}
-              </div>
-              <div className="bg-green-100 p-3 rounded-lg">
-                <CheckCircle className="h-6 w-6 text-green-600" />
+                  <p className="text-sm text-gray-500 mt-1">active</p>
+                  {!agenciesLoading && (
+                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
+                      {totalAgencies > 0 ? Math.round((activeAgencies / totalAgencies) * 100) : 0}% of total
+                    </p>
+                  )}
+                </div>
+                <div className="bg-green-50 p-3.5 rounded-xl shrink-0 group-hover:bg-green-100 transition-colors" aria-hidden>
+                  <CheckCircle className="h-7 w-7 text-green-600" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Active Clients</p>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {clientsLoading ? "..." : activeManagedClients}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-600">active clients</span>
-                </div>
-                {!clientsLoading && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Managed services only
+          {/* Active Clients */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
+            <div className="h-1 w-full bg-indigo-500" aria-hidden />
+            <div className="p-6 lg:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Active Clients</p>
+                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                    {clientsLoading ? "—" : activeManagedClients}
                   </p>
-                )}
-              </div>
-              <div className="bg-secondary-100 p-3 rounded-lg">
-                <Users className="h-6 w-6 text-secondary-600" />
+                  <p className="text-sm text-gray-500 mt-1">active clients</p>
+                  {!clientsLoading && (
+                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
+                      Managed services only
+                    </p>
+                  )}
+                </div>
+                <div className="bg-indigo-50 p-3.5 rounded-xl shrink-0 group-hover:bg-indigo-100 transition-colors" aria-hidden>
+                  <Users className="h-7 w-7 text-indigo-600" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Dashboards</p>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {clientsLoading ? "..." : totalDashboards}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-600">dashboards</span>
-                </div>
-                {!clientsLoading && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {newClientsLast30Days} new in last 30 days
+          {/* Total Dashboards */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
+            <div className="h-1 w-full bg-blue-500" aria-hidden />
+            <div className="p-6 lg:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Total Dashboards</p>
+                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                    {clientsLoading ? "—" : totalDashboards}
                   </p>
-                )}
-              </div>
-              <div className="bg-blue-100 p-3 rounded-lg">
-                <Activity className="h-6 w-6 text-blue-600" />
+                  <p className="text-sm text-gray-500 mt-1">dashboards</p>
+                  {!clientsLoading && (
+                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
+                      {newClientsLast30Days} new in last 30 days
+                    </p>
+                  )}
+                </div>
+                <div className="bg-blue-50 p-3.5 rounded-xl shrink-0 group-hover:bg-blue-100 transition-colors" aria-hidden>
+                  <Activity className="h-7 w-7 text-blue-600" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Pending Requests</p>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-gray-900">
-                    {clientsLoading ? "..." : pendingRequests}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-600">pending</span>
-                </div>
-                {!clientsLoading && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Managed service activations
+          {/* Pending Requests */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
+            <div className="h-1 w-full bg-rose-500" aria-hidden />
+            <div className="p-6 lg:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Pending Requests</p>
+                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                    {clientsLoading ? "—" : pendingRequests}
                   </p>
-                )}
-              </div>
-              <div className="relative bg-red-100 p-3 rounded-lg">
-                <AlertCircle className="h-6 w-6 text-red-600" />
-                {pendingRequests > 0 && (
-                  <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
-                    {pendingRequests}
-                  </span>
-                )}
+                  <p className="text-sm text-gray-500 mt-1">pending</p>
+                  {!clientsLoading && (
+                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
+                      Managed service activations
+                    </p>
+                  )}
+                </div>
+                <div className="relative bg-rose-50 p-3.5 rounded-xl shrink-0 group-hover:bg-rose-100 transition-colors" aria-hidden>
+                  <AlertCircle className="h-7 w-7 text-rose-600" />
+                  {pendingRequests > 0 && (
+                    <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-rose-600 px-1 text-xs font-bold text-white ring-2 ring-white">
+                      {pendingRequests}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
