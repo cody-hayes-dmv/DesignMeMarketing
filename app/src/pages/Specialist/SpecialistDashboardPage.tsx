@@ -68,7 +68,7 @@ const getStatusBadgeClasses = (status: TaskStatus) => {
   }
 };
 
-const WorkerDashboardPage = () => {
+const SpecialistDashboardPage = () => {
   const dispatch = useDispatch();
   const { tasks, loading } = useSelector((state: RootState) => state.task);
   const { user } = useSelector((state: RootState) => state.auth);
@@ -257,7 +257,7 @@ const WorkerDashboardPage = () => {
         </div>
         <div className="flex items-center gap-3">
           <Link
-            to="/worker/tasks"
+            to="/specialist/tasks"
             className="inline-flex items-center space-x-2 rounded-lg border border-primary-200 px-4 py-2 text-sm font-medium text-primary-600 hover:bg-primary-50"
           >
             <span>Go to task board</span>
@@ -300,7 +300,7 @@ const WorkerDashboardPage = () => {
               </p>
             </div>
             <Link
-              to="/worker/tasks"
+              to="/specialist/tasks"
               className="text-sm font-medium text-primary-600 hover:text-primary-700"
             >
               View all
@@ -454,7 +454,7 @@ const WorkerDashboardPage = () => {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">Team Snapshot</h2>
               <Link
-                to="/worker/team"
+                to="/specialist/team"
                 className="text-xs font-medium text-primary-600 hover:text-primary-700"
               >
                 View team
@@ -505,4 +505,4 @@ const WorkerDashboardPage = () => {
   );
 };
 
-export default WorkerDashboardPage;
+export default SpecialistDashboardPage;

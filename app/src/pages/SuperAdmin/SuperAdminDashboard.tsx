@@ -4,7 +4,7 @@ import { RootState } from "@/store";
 import { fetchAgencies } from "@/store/slices/agencySlice";
 import { fetchClients } from "@/store/slices/clientSlice";
 import Layout from "@/components/Layout";
-import { Building2, Users, Activity, Globe, CheckCircle } from "lucide-react";
+import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 
@@ -19,11 +19,37 @@ const SuperAdminDashboard = () => {
     dispatch(fetchClients() as any);
   }, [dispatch]);
 
+  const safeParseObject = (raw: any): Record<string, any> => {
+    if (!raw) return {};
+    if (typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, any>;
+    if (typeof raw !== "string") return {};
+    try {
+      const v = JSON.parse(raw);
+      return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const isManagedServiceClient = (client: (typeof clients)[number]) => {
+    const info = safeParseObject((client as any)?.accountInfo);
+    return Boolean(
+      info.seoRoadmapStartMonth ||
+      info.pagesPerMonth ||
+      info.technicalHoursPerMonth ||
+      info.campaignDurationMonths
+    );
+  };
+
   // Calculate metrics
   const totalAgencies = agencies.length;
   const totalClients = clients.length;
-  const activeAgencies = agencies.filter(agency => agency.memberCount > 0).length;
-  const activeClients = clients.filter(client => client.status === "ACTIVE").length;
+  const totalDashboards = totalClients;
+  const activeAgencies = agencies.filter((agency) => (agency.clientCount ?? 0) > 0).length;
+  const activeManagedClients = clients.filter(
+    (client) => client.status === "ACTIVE" && isManagedServiceClient(client)
+  ).length;
+  const pendingRequests = clients.filter((client) => client.status === "PENDING").length;
 
   // Recent agencies (last 5)
   const recentAgencies = [...agencies]
@@ -61,14 +87,17 @@ const SuperAdminDashboard = () => {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Total Agencies</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">
-                  {agenciesLoading ? "..." : totalAgencies}
-                </p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {agenciesLoading ? "..." : totalAgencies}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-600">agencies</span>
+                </div>
                 {!agenciesLoading && (
                   <p className="text-xs text-gray-500 mt-1">
                     {newAgenciesLast30Days} new in last 30 days
@@ -85,9 +114,12 @@ const SuperAdminDashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Active Agencies</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">
-                  {agenciesLoading ? "..." : activeAgencies}
-                </p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {agenciesLoading ? "..." : activeAgencies}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-600">active</span>
+                </div>
                 {!agenciesLoading && (
                   <p className="text-xs text-gray-500 mt-1">
                     {totalAgencies > 0 ? Math.round((activeAgencies / totalAgencies) * 100) : 0}% of total
@@ -103,13 +135,16 @@ const SuperAdminDashboard = () => {
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Total Clients</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">
-                  {clientsLoading ? "..." : totalClients}
-                </p>
+                <p className="text-sm font-medium text-gray-600">Active Clients</p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {clientsLoading ? "..." : activeManagedClients}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-600">active clients</span>
+                </div>
                 {!clientsLoading && (
                   <p className="text-xs text-gray-500 mt-1">
-                    {newClientsLast30Days} new in last 30 days
+                    Managed services only
                   </p>
                 )}
               </div>
@@ -122,18 +157,48 @@ const SuperAdminDashboard = () => {
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Active Clients</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">
-                  {clientsLoading ? "..." : activeClients}
-                </p>
+                <p className="text-sm font-medium text-gray-600">Total Dashboards</p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {clientsLoading ? "..." : totalDashboards}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-600">dashboards</span>
+                </div>
                 {!clientsLoading && (
                   <p className="text-xs text-gray-500 mt-1">
-                    {totalClients > 0 ? Math.round((activeClients / totalClients) * 100) : 0}% of total
+                    {newClientsLast30Days} new in last 30 days
                   </p>
                 )}
               </div>
               <div className="bg-blue-100 p-3 rounded-lg">
                 <Activity className="h-6 w-6 text-blue-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Pending Requests</p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {clientsLoading ? "..." : pendingRequests}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-600">pending</span>
+                </div>
+                {!clientsLoading && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Managed service activations
+                  </p>
+                )}
+              </div>
+              <div className="relative bg-red-100 p-3 rounded-lg">
+                <AlertCircle className="h-6 w-6 text-red-600" />
+                {pendingRequests > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
+                    {pendingRequests}
+                  </span>
+                )}
               </div>
             </div>
           </div>

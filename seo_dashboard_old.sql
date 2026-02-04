@@ -822,7 +822,7 @@ CREATE TABLE `tokens`  (
   `expiresAt` datetime(3) NOT NULL,
   `userId` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `agencyId` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
-  `role` enum('SUPER_ADMIN','ADMIN','AGENCY','WORKER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `role` enum('SUPER_ADMIN','ADMIN','AGENCY','SPECIALIST') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `metadata` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `tokens_token_key`(`token` ASC) USING BTREE,
@@ -973,7 +973,7 @@ CREATE TABLE `user_agencies`  (
   `id` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `userId` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `agencyId` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `agencyRole` enum('WORKER','MANAGER','OWNER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'WORKER',
+  `agencyRole` enum('SPECIALIST','MANAGER','OWNER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'SPECIALIST',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `user_agencies_userId_agencyId_key`(`userId` ASC, `agencyId` ASC) USING BTREE,
   INDEX `user_agencies_agencyId_idx`(`agencyId` ASC) USING BTREE,
@@ -987,9 +987,9 @@ CREATE TABLE `user_agencies`  (
 -- ----------------------------
 INSERT INTO `user_agencies` VALUES ('cmitr0nyf0006g2jvs3xd8aco', 'cmitr0ny50000g2jvdz2vef3t', 'cmitr0nyd0004g2jvj23hxvpx', 'OWNER');
 INSERT INTO `user_agencies` VALUES ('cmitr0nyh0008g2jvx71zct55', 'cmitr0nya0002g2jvus0bjn9m', 'cmitr0nyc0003g2jvwoyp644x', 'OWNER');
-INSERT INTO `user_agencies` VALUES ('cmitr0nyr000dg2jvq6a247se', 'cmitr0nyn0009g2jv45iwsos1', 'cmitr0nyc0003g2jvwoyp644x', 'WORKER');
-INSERT INTO `user_agencies` VALUES ('cmitr0nys000fg2jvchivjbhl', 'cmitr0nyp000ag2jv3itzh91y', 'cmitr0nyc0003g2jvwoyp644x', 'WORKER');
-INSERT INTO `user_agencies` VALUES ('cmitr0nyt000hg2jvfoux9r2g', 'cmitr0nyq000bg2jvg763rido', 'cmitr0nyd0004g2jvj23hxvpx', 'WORKER');
+INSERT INTO `user_agencies` VALUES ('cmitr0nyr000dg2jvq6a247se', 'cmitr0nyn0009g2jv45iwsos1', 'cmitr0nyc0003g2jvwoyp644x', 'SPECIALIST');
+INSERT INTO `user_agencies` VALUES ('cmitr0nys000fg2jvchivjbhl', 'cmitr0nyp000ag2jv3itzh91y', 'cmitr0nyc0003g2jvwoyp644x', 'SPECIALIST');
+INSERT INTO `user_agencies` VALUES ('cmitr0nyt000hg2jvfoux9r2g', 'cmitr0nyq000bg2jvg763rido', 'cmitr0nyd0004g2jvj23hxvpx', 'SPECIALIST');
 
 -- ----------------------------
 -- Table structure for users
@@ -1002,7 +1002,7 @@ CREATE TABLE `users`  (
   `email` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `passwordHash` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
-  `role` enum('SUPER_ADMIN','ADMIN','AGENCY','WORKER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'AGENCY',
+  `role` enum('SUPER_ADMIN','ADMIN','AGENCY','SPECIALIST') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'AGENCY',
   `verified` tinyint(1) NOT NULL DEFAULT 0,
   `invited` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE,
@@ -1015,9 +1015,9 @@ CREATE TABLE `users`  (
 INSERT INTO `users` VALUES ('cmitr0ny50000g2jvdz2vef3t', '2025-12-06 03:43:11.933', '2025-12-06 03:43:11.933', 'super@super.com', 'SuperAdmin', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'SUPER_ADMIN', 1, 0);
 INSERT INTO `users` VALUES ('cmitr0ny80001g2jv0hp8krck', '2025-12-06 03:43:11.936', '2025-12-06 03:43:11.936', 'admin@admin.com', 'Admin', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'ADMIN', 1, 0);
 INSERT INTO `users` VALUES ('cmitr0nya0002g2jvus0bjn9m', '2025-12-06 03:43:11.938', '2025-12-06 03:43:11.938', 'acme@acme.com', 'Acme Agency', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'AGENCY', 1, 0);
-INSERT INTO `users` VALUES ('cmitr0nyn0009g2jv45iwsos1', '2025-12-06 03:43:11.952', '2025-12-06 03:43:11.952', 'worker@acme.com', 'Worker', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'WORKER', 1, 1);
-INSERT INTO `users` VALUES ('cmitr0nyp000ag2jv3itzh91y', '2025-12-06 03:43:11.953', '2025-12-06 03:43:11.953', 'worker1@acme.com', 'Worker1', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'WORKER', 1, 1);
-INSERT INTO `users` VALUES ('cmitr0nyq000bg2jvg763rido', '2025-12-06 03:43:11.954', '2025-12-06 03:43:11.954', 'superworker@super.com', 'Worker3', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'WORKER', 1, 1);
+INSERT INTO `users` VALUES ('cmitr0nyn0009g2jv45iwsos1', '2025-12-06 03:43:11.952', '2025-12-06 03:43:11.952', 'specialist@acme.com', 'Specialist', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'SPECIALIST', 1, 1);
+INSERT INTO `users` VALUES ('cmitr0nyp000ag2jv3itzh91y', '2025-12-06 03:43:11.953', '2025-12-06 03:43:11.953', 'specialist1@acme.com', 'Specialist1', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'SPECIALIST', 1, 1);
+INSERT INTO `users` VALUES ('cmitr0nyq000bg2jvg763rido', '2025-12-06 03:43:11.954', '2025-12-06 03:43:11.954', 'superspecialist@super.com', 'Specialist3', '$2a$12$fg0ev/J/WFfYiw524aBHIOD9E7dsec9ne0/GC1N07iwB9g65gY04S', 'SPECIALIST', 1, 1);
 INSERT INTO `users` VALUES ('cmj2qubsy000043ql7ah0y02t', '2025-12-12 10:48:11.842', '2025-12-12 10:48:11.842', 'aaa@gmail.com', 'aa', NULL, 'AGENCY', 0, 1);
 
 SET FOREIGN_KEY_CHECKS = 1;

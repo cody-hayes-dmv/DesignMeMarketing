@@ -108,7 +108,7 @@ type ClientFormState = {
   latitude: string;
   longitude: string;
 
-  // SEO Roadmap (SUPER_ADMIN + WORKER only)
+  // SEO Roadmap (SUPER_ADMIN + SPECIALIST only)
   seoRoadmapStartMonth: string;
   pagesPerMonth: string;
   technicalHoursPerMonth: string;
@@ -180,7 +180,7 @@ const ClientsPage = () => {
     }
   }, [dispatch, user?.role]);
 
-  const canSeeSeoRoadmapFields = user?.role === "SUPER_ADMIN" || user?.role === "WORKER";
+  const canSeeSeoRoadmapFields = user?.role === "SUPER_ADMIN" || user?.role === "SPECIALIST";
 
   const parseKeywordsText = (raw: string): string[] => {
     return String(raw || "")

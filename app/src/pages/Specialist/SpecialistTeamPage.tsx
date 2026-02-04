@@ -20,7 +20,7 @@ interface TeamMember {
   createdAt: string;
 }
 
-const WorkerTeamPage = () => {
+const SpecialistTeamPage = () => {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -234,5 +234,5 @@ const WorkerTeamPage = () => {
   );
 };
 
-export default WorkerTeamPage;
+export default SpecialistTeamPage;
 

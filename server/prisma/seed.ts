@@ -91,66 +91,66 @@ async function main() {
   console.log("✅ Created Agency:", acmeAgency.name, ",", superAdminAgency.name);
   console.log("✅ Created Agency user:", agencyUser.email);
 
-  // 3. Create Worker User
-  const acmeWorker = await prisma.user.create({
+  // 3. Create Specialist User
+  const acmeSpecialist = await prisma.user.create({
     data: {
-      name: "Worker",
-      email: "worker@acme.com",
+      name: "Specialist",
+      email: "specialist@acme.com",
       passwordHash: hashedPassword,
-      role: "WORKER",
+      role: "SPECIALIST",
       verified: true, // All users should be verified
-      invited: true, // Worker was invited
+      invited: true, // Specialist was invited
     },
   });
 
-  const acmeWorker1 = await prisma.user.create({
+  const acmeSpecialist1 = await prisma.user.create({
     data: {
-      name: "Worker1",
-      email: "worker1@acme.com",
+      name: "Specialist1",
+      email: "specialist1@acme.com",
       passwordHash: hashedPassword,
-      role: "WORKER",
+      role: "SPECIALIST",
       verified: true, // All users should be verified
-      invited: true, // Worker was invited
+      invited: true, // Specialist was invited
     },
   });
 
-  const superAdminWorker = await prisma.user.create({
+  const superAdminSpecialist = await prisma.user.create({
     data: {
-      name: "Worker3",
-      email: "superworker@super.com",
+      name: "Specialist3",
+      email: "superspecialist@super.com",
       passwordHash: hashedPassword,
-      role: "WORKER",
+      role: "SPECIALIST",
       verified: true, // All users should be verified
-      invited: true, // Worker was invited
+      invited: true, // Specialist was invited
     },
   });
 
-  // Link worker to agency
+  // Link specialist to agency
   await prisma.userAgency.create({
     data: {
-      userId: acmeWorker.id,
+      userId: acmeSpecialist.id,
       agencyId: acmeAgency.id,
-      agencyRole: "WORKER",
+      agencyRole: "SPECIALIST",
     },
   });
 
   await prisma.userAgency.create({
     data: {
-      userId: acmeWorker1.id,
+      userId: acmeSpecialist1.id,
       agencyId: acmeAgency.id,
-      agencyRole: "WORKER",
+      agencyRole: "SPECIALIST",
     },
   });
 
   await prisma.userAgency.create({
     data: {
-      userId: superAdminWorker.id,
+      userId: superAdminSpecialist.id,
       agencyId: superAdminAgency.id,
-      agencyRole: "WORKER",
+      agencyRole: "SPECIALIST",
     },
   });
 
-  console.log("✅ Created Worker users:", acmeWorker.email, acmeWorker1.email, superAdminWorker.email);
+  console.log("✅ Created Specialist users:", acmeSpecialist.email, acmeSpecialist1.email, superAdminSpecialist.email);
 
   // Create sample client
   const superAdminClient = await prisma.client.create({
@@ -392,7 +392,7 @@ async function main() {
       status: "TODO",
       agencyId: acmeAgency.id,
       createdById: agencyUser.id,
-      assigneeId: acmeWorker.id,
+      assigneeId: acmeSpecialist.id,
       clientId: acmeClient.id
     },
   });
@@ -406,7 +406,7 @@ async function main() {
       status: "IN_PROGRESS",
       agencyId: acmeAgency.id,
       createdById: agencyUser.id,
-      assigneeId: acmeWorker.id,
+      assigneeId: acmeSpecialist.id,
       clientId: acmeClient1.id
     },
   });
@@ -419,7 +419,7 @@ async function main() {
       status: "DONE",
       agencyId: acmeAgency.id,
       createdById: agencyUser.id,
-      assigneeId: acmeWorker1.id,
+      assigneeId: acmeSpecialist1.id,
       clientId: acmeClient1.id
     },
   });
@@ -432,7 +432,7 @@ async function main() {
       status: "TODO",
       agencyId: acmeAgency.id,
       createdById: agencyUser.id,
-      assigneeId: acmeWorker1.id,
+      assigneeId: acmeSpecialist1.id,
       clientId: acmeClient.id
     },
   });
@@ -445,7 +445,7 @@ async function main() {
       status: "IN_PROGRESS",
       agencyId: superAdminAgency.id,
       createdById: superAdminUser.id,
-      assigneeId: superAdminWorker.id,
+      assigneeId: superAdminSpecialist.id,
       clientId: superAdminClient.id
     },
   });
@@ -458,7 +458,7 @@ async function main() {
       status: "TODO",
       agencyId: superAdminAgency.id,
       createdById: superAdminUser.id,
-      assigneeId: superAdminWorker.id,
+      assigneeId: superAdminSpecialist.id,
       clientId: superAdminClient.id
     },
   });
@@ -651,8 +651,8 @@ async function main() {
   console.log("👤 SuperAdmin: super@super.com / 123123");
   console.log("👤 Admin: admin@admin.com / 123123");
   console.log("🏢 Agency: acme@acme.com / 123123");
-  console.log("👷 Worker: worker@worker.com / 123123");
-  console.log("👷 Worker: worker1@worker1.com / 123123");
+  console.log("👷 Specialist: specialist@acme.com / 123123");
+  console.log("👷 Specialist: specialist1@acme.com / 123123");
 }
 
 main()

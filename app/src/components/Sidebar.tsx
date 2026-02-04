@@ -44,7 +44,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
         ? "Agency Panel"
         : user?.role === "ADMIN"
           ? "Admin Panel"
-          : user?.role === "WORKER"
+          : user?.role === "SPECIALIST"
             ? "Specialist Panel"
             : user?.role
               ? `${user.role} Panel`
@@ -170,41 +170,41 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
 
-    // Specialist (WORKER role)
+    // Specialist role
     {
       icon: Home,
       label: "Dashboard",
-      path: "/worker/dashboard",
+      path: "/specialist/dashboard",
       hasSubMenu: false,
-      roles: ["WORKER"],
+      roles: ["SPECIALIST"],
     },
     {
       icon: Building2,
       label: "My Agency",
-      path: "/worker/myagency",
+      path: "/specialist/myagency",
       hasSubMenu: false,
-      roles: ["WORKER"],
+      roles: ["SPECIALIST"],
     },
     {
       icon: FolderOpen,
       label: "Tasks",
-      path: "/worker/tasks",
+      path: "/specialist/tasks",
       hasSubMenu: false,
-      roles: ["WORKER"],
+      roles: ["SPECIALIST"],
     },
     {
       icon: Users,
       label: "Team",
-      path: "/worker/team",
+      path: "/specialist/team",
       hasSubMenu: false,
-      roles: ["WORKER"],
+      roles: ["SPECIALIST"],
     },
     {
       icon: Settings,
       label: "Settings",
-      path: "/worker/settings",
+      path: "/specialist/settings",
       hasSubMenu: false,
-      roles: ["WORKER"],
+      roles: ["SPECIALIST"],
     },
   ];
 

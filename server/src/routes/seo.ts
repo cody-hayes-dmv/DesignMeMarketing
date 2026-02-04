@@ -5721,18 +5721,12 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 
     const totalContextsCount = howAiMentionsYou.length || searchMentions.length || 0;
 
-    // ===== AI SEARCH VOLUME TREND, TOP PAGES (CONTENT TYPES), PLATFORM DOMINANCE =====
+    // ===== AI SEARCH VOLUME TREND, TOP PAGES (CONTENT TYPES) =====
     let aiSearchVolumeTrend12Months: { year: number; month: number; searchVolume: number }[] = [];
     let topContentTypes: { contentType: string; exampleUrls: string[]; mentionPercent: number }[] = [];
-    let platformDominance: {
-      chatgpt: { domain: string; label: string; mentions: number; isYou: boolean }[];
-      google_ai: { domain: string; label: string; mentions: number; isYou: boolean }[];
-      perplexity: { domain: string; label: string; mentions: number; isYou: boolean }[];
-    } = { chatgpt: [], google_ai: [], perplexity: [] };
 
-    const [topPagesResult, topDomainsResult, keywordVolumeResult] = await Promise.allSettled([
+    const [topPagesResult, keywordVolumeResult] = await Promise.allSettled([
       fetchAiTopPages(seedKeyword, locationCode, languageCode, 100),
-      fetchAiTopDomains(seedKeyword, locationCode, languageCode, 50),
       fetchAiKeywordSearchVolume(targetKeywordStrings.slice(0, 200), locationCode, languageCode),
     ]);
 
@@ -5779,50 +5773,6 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
           mentionPercent: Math.round((mentions / totalMentionsPages) * 100),
         }))
         .sort((a, b) => b.mentionPercent - a.mentionPercent);
-    }
-
-    if (topDomainsResult.status === "fulfilled" && topDomainsResult.value.length > 0) {
-      const domains = topDomainsResult.value;
-      const norm = (d: string) => d.toLowerCase().replace(/^www\./, "");
-      const targetNorm = norm(targetDomain);
-      const platformKey = (id: string): "chatgpt" | "google_ai" | "perplexity" | null => {
-        const lower = (id || "").toLowerCase();
-        if (lower.includes("chatgpt")) return "chatgpt";
-        if (lower.includes("google") || lower.includes("ai_overview")) return "google_ai";
-        if (lower.includes("perplexity")) return "perplexity";
-        return null;
-      };
-      for (const platform of ["chatgpt", "google_ai", "perplexity"] as const) {
-        const list: { domain: string; label: string; mentions: number; isYou: boolean }[] = [];
-        const clientMentions = platformMap[platform]?.mentions || 0;
-        if (clientMentions > 0) {
-          list.push({
-            domain: targetDomain,
-            label: clientName,
-            mentions: clientMentions,
-            isYou: true,
-          });
-        }
-        for (const d of domains) {
-          if (norm(d.domain) === targetNorm) continue;
-          const grouping = d.platformBasedGrouping || [];
-          let mentions = 0;
-          for (const g of grouping) {
-            const key = platformKey(g?.grouping_identifier || "");
-            if (key === platform) mentions += Number(g?.total_mentions || 0);
-          }
-          if (mentions > 0) {
-            list.push({
-              domain: d.domain,
-              label: d.domain.replace(/^www\./, "").split(".")[0].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-              mentions,
-              isYou: false,
-            });
-          }
-        }
-        list.sort((a, b) => b.mentions - a.mentions);
-        platformDominance[platform] = list.slice(0, 10);
-      }
     }
 
     // ===== COMPETITOR ANALYSIS (Real Data) =====
@@ -5947,7 +5897,6 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       actionItems,
       aiSearchVolumeTrend12Months,
       topContentTypes,
-      platformDominance,
       meta: {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),

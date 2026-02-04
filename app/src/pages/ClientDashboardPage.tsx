@@ -5054,46 +5054,6 @@ const ClientDashboardPage: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Platform Dominance */}
-                        {aiIntelligence.platformDominance && (
-                          <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Platform Dominance</h3>
-                            <p className="text-sm text-gray-500 mb-6">Who leads in mentions per AI platform</p>
-                            <div className="space-y-8">
-                              {[
-                                { key: "chatgpt" as const, label: "ChatGPT", color: "#22c55e" },
-                                { key: "google_ai" as const, label: "Google AI Overview", color: "#3b82f6" },
-                                { key: "perplexity" as const, label: "Perplexity", color: "#8b5cf6" },
-                              ].map(({ key, label, color }) => {
-                                const list = aiIntelligence.platformDominance![key] ?? [];
-                                const maxM = Math.max(...list.map((d) => d.mentions), 1);
-                                return (
-                                  <div key={key}>
-                                    <h4 className="text-sm font-semibold text-gray-700 mb-3">{label}</h4>
-                                    <div className="space-y-2">
-                                      {list.slice(0, 5).map((d) => (
-                                        <div key={d.domain} className="flex items-center gap-3">
-                                          <span className="w-32 text-sm font-medium text-gray-900 truncate" title={d.domain}>
-                                            {d.isYou ? "YOU" : d.label}
-                                          </span>
-                                          <div className="flex-1 h-6 bg-gray-100 rounded overflow-hidden max-w-xs">
-                                            <div
-                                              className="h-full rounded transition-all"
-                                              style={{ width: `${(d.mentions / maxM) * 100}%`, backgroundColor: color }}
-                                            />
-                                          </div>
-                                          <span className="text-sm font-semibold text-gray-700 w-12 text-right">{d.mentions}</span>
-                                        </div>
-                                      ))}
-                                      {list.length === 0 && <p className="text-sm text-gray-400">No data</p>}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
                         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
                           <div className="mb-4">
                             <div className="w-1 h-6 bg-red-500 rounded-full inline-block mr-2 align-middle" />

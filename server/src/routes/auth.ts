@@ -270,7 +270,7 @@ router.get("/invite", async (req, res) => {
       return res.json({
         kind: "TEAM_INVITE",
         email: record.email,
-        role: record.role || "WORKER",
+        role: record.role || "SPECIALIST",
         agencyName: agencyName || undefined,
       });
     }
@@ -483,8 +483,8 @@ router.post("/verify", async (req, res) => {
   }
 });
 
-// Get workers for task assignment
-router.get("/workers", authenticateToken, async (req, res) => {
+// Get specialists for task assignment
+router.get("/specialists", authenticateToken, async (req, res) => {
   try {
     const user = req.user;
     
@@ -492,15 +492,15 @@ router.get("/workers", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    let workers;
+    let specialists;
     if (user.role === "SUPER_ADMIN") {
-      // Super admin can see all workers
-      workers = await prisma.user.findMany({
-        where: { role: "WORKER" },
+      // Super admin can see all specialists
+      specialists = await prisma.user.findMany({
+        where: { role: "SPECIALIST" },
         select: { id: true, name: true, email: true }
       });
     } else {
-      // Get workers from user's agency
+      // Get specialists from user's agency
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId },
         select: { agencyId: true }
@@ -510,9 +510,9 @@ router.get("/workers", authenticateToken, async (req, res) => {
         return res.status(404).json({ message: "Agency not found" });
       }
 
-      workers = await prisma.user.findMany({
+      specialists = await prisma.user.findMany({
         where: {
-          role: "WORKER",
+          role: "SPECIALIST",
           // agencies: {
           //   some: { agencyId: userAgency.agencyId }
           // }
@@ -521,9 +521,9 @@ router.get("/workers", authenticateToken, async (req, res) => {
       });
     }
 
-    res.json(workers);
+    res.json(specialists);
   } catch (error) {
-    console.error("Error fetching workers:", error);
+    console.error("Error fetching specialists:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

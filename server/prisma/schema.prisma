@@ -17,6 +17,7 @@ model User {
   role           Role         @default(AGENCY)
   verified       Boolean      @default(false)
   invited        Boolean      @default(false)
+  specialties    String?      @db.Text
   lastLoginAt    DateTime?
   clients        Client[]
   assignedTaksks Task[]       @relation("TaskAssignee")
@@ -48,7 +49,7 @@ model UserAgency {
   id         String     @id @default(cuid())
   userId     String
   agencyId   String
-  agencyRole AgencyRole @default(WORKER)
+  agencyRole AgencyRole @default(SPECIALIST)
   agency     Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -508,7 +509,7 @@ enum Role {
   SUPER_ADMIN
   ADMIN
   AGENCY
-  WORKER
+  SPECIALIST
   USER
 }
 
@@ -523,7 +524,7 @@ enum ClientUserStatus {
 }
 
 enum AgencyRole {
-  WORKER
+  SPECIALIST
   MANAGER
   OWNER
 }

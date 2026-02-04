@@ -90,7 +90,7 @@ const InvitePage = () => {
       await dispatch(checkAuth() as any);
 
       if (redirect?.type === "TEAM") {
-        const dashboardPath = userRole === "WORKER" ? "/worker/dashboard" : "/agency/dashboard";
+        const dashboardPath = userRole === "SPECIALIST" ? "/specialist/dashboard" : "/agency/dashboard";
         navigate(dashboardPath, { replace: true });
         return;
       }

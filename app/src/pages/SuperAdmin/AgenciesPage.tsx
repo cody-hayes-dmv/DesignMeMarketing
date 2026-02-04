@@ -291,7 +291,7 @@ const AgenciesPage = () => {
     const getRoleBadge = (role: string) => {
         const styles = {
             AGENCY: "bg-primary-100 text-primary-800",
-            WORKER: "bg-secondary-100 text-secondary-800",
+            SPECIALIST: "bg-secondary-100 text-secondary-800",
             ADMIN: "bg-accent-100 text-accent-800",
             SUPER_ADMIN: "bg-purple-100 text-purple-800",
         };

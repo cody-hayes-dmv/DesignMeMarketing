@@ -74,12 +74,12 @@ const SettingsPage = () => {
 
   // Remove billing tab for SUPER_ADMIN, remove agency tab for SUPER_ADMIN (they don't have agencies)
   const tabs = [
-    { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
+    { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
-    { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
-    { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "WORKER"] },
-    { id: "billing", label: "Billing", icon: CreditCard, roles: ["ADMIN", "AGENCY", "WORKER"] },
+    { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
+    { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
+    { id: "billing", label: "Billing", icon: CreditCard, roles: ["ADMIN", "AGENCY", "SPECIALIST"] },
   ];
 
   // Fetch agency data on mount if user has agency access

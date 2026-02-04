@@ -1,11 +1,16 @@
 import express from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
+import { Prisma, Role } from "@prisma/client";
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { sendEmail } from '../lib/email.js';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
+
+type UserWithMemberships = Prisma.UserGetPayload<{
+    include: { memberships: { include: { agency: { select: { id: true; name: true } } } } };
+}>;
 
 function escapeHtml(s: string): string {
     return String(s)
@@ -15,17 +20,21 @@ function escapeHtml(s: string): string {
         .replace(/"/g, '&quot;');
 }
 
+const SPECIALTY_KEYS = ['ON_PAGE_SEO', 'LINK_BUILDING', 'CONTENT_WRITING', 'TECHNICAL_SEO'] as const;
+
 const inviteTeamMemberSchema = z.object({
     email: z.string().email(),
     name: z.string().min(1),
-    role: z.enum(['WORKER', 'AGENCY', 'ADMIN']).default('WORKER'),
-    agencyId: z.string().optional(), // Optional: invite to specific agency
+    role: z.enum(['SPECIALIST', 'AGENCY', 'ADMIN']).default('SPECIALIST'),
+    agencyId: z.string().optional(),
+    specialties: z.array(z.enum(SPECIALTY_KEYS)).optional().default([]),
+    sendInvitationEmail: z.boolean().optional().default(true),
 });
 
 const updateTeamMemberSchema = z.object({
     name: z.string().min(1).optional(),
-    role: z.enum(['WORKER', 'AGENCY', 'ADMIN', 'SUPER_ADMIN']).optional(),
-    agencyRole: z.enum(['WORKER', 'MANAGER', 'OWNER']).optional(),
+    role: z.enum(['SPECIALIST', 'AGENCY', 'ADMIN', 'SUPER_ADMIN']).optional(),
+    agencyRole: z.enum(['SPECIALIST', 'MANAGER', 'OWNER']).optional(),
 });
 
 // Get team members (for the current user's agency)
@@ -36,10 +45,15 @@ router.get('/', authenticateToken, async (req, res) => {
         let teamMembers;
 
         if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
+            const scope = String(req.query.scope || "");
+            const includeAll = scope === "all";
+            const roles: Role[] = includeAll
+                ? [Role.SPECIALIST, Role.AGENCY, Role.ADMIN, Role.SUPER_ADMIN, Role.USER]
+                : [Role.SPECIALIST, Role.AGENCY, Role.ADMIN, Role.SUPER_ADMIN];
             // Super admin and admin can see all users
-            const users = await prisma.user.findMany({
+            const users: UserWithMemberships[] = await prisma.user.findMany({
                 where: {
-                    role: { in: ['WORKER', 'AGENCY', 'ADMIN'] }, // Exclude SUPER_ADMIN from list
+                    role: { in: roles },
                 },
                 include: {
                     memberships: {
@@ -149,7 +163,7 @@ router.get('/', authenticateToken, async (req, res) => {
                 })
             );
         } else {
-            // Workers can see members of their agencies
+            // Specialists can see members of their agencies
             const memberships = await prisma.userAgency.findMany({
                 where: { userId: user.userId },
                 select: { agencyId: true },
@@ -228,7 +242,7 @@ router.post('/invite', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Access denied' });
         }
 
-        const { email, name, role, agencyId } = inviteTeamMemberSchema.parse(req.body);
+        const { email, name, role, agencyId, specialties, sendInvitationEmail } = inviteTeamMemberSchema.parse(req.body);
 
         // Check if user already exists
         let existingUser = await prisma.user.findUnique({
@@ -255,14 +269,15 @@ router.post('/invite', authenticateToken, async (req, res) => {
             targetAgencyId = membership.agencyId;
         }
 
-        // Create user (invited, not verified)
+        // Create user (invited, not verified — status effectively 'pending')
         const newUser = await prisma.user.create({
             data: {
                 email,
                 name,
-                role: role || 'WORKER',
+                role: role || 'SPECIALIST',
                 invited: true,
                 verified: false,
+                specialties: specialties?.length ? JSON.stringify(specialties) : null,
             },
         });
 
@@ -272,7 +287,7 @@ router.post('/invite', authenticateToken, async (req, res) => {
                 data: {
                     userId: newUser.id,
                     agencyId: targetAgencyId,
-                    agencyRole: 'WORKER',
+                    agencyRole: 'SPECIALIST',
                 },
             });
         }
@@ -292,7 +307,7 @@ router.post('/invite', authenticateToken, async (req, res) => {
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
                 userId: newUser.id,
                 agencyId: targetAgencyId || null,
-                role: role || 'WORKER',
+                role: role || 'SPECIALIST',
             },
         });
 
@@ -306,11 +321,12 @@ router.post('/invite', authenticateToken, async (req, res) => {
             if (agency?.name) agencyName = agency.name;
         }
         const inviteUrl = `${process.env.FRONTEND_URL || ''}/invite?token=${encodeURIComponent(inviteToken)}`;
-        try {
-            await sendEmail({
-                to: email,
-                subject: `You've been invited to join ${agencyName}`,
-                html: `
+        if (sendInvitationEmail !== false) {
+            try {
+                await sendEmail({
+                    to: email,
+                    subject: `You've been invited to join ${agencyName}`,
+                    html: `
           <h1>You've been invited!</h1>
           <p>${escapeHtml(name)}, you've been invited to join ${escapeHtml(agencyName)}.</p>
           <p>Click the link below to accept the invitation (link expires in 7 days):</p>
@@ -318,10 +334,11 @@ router.post('/invite', authenticateToken, async (req, res) => {
           <p>If the link doesn't work, copy and paste this URL into your browser:</p>
           <p style="word-break:break-all">${inviteUrl}</p>
         `,
-            });
-        } catch (emailErr: any) {
-            console.error('Team invite email failed:', emailErr);
-            // Invite is already created; do not fail the request
+                });
+            } catch (emailErr: any) {
+                console.error('Team invite email failed:', emailErr);
+                // Invite is already created; do not fail the request
+            }
         }
 
         res.status(201).json({

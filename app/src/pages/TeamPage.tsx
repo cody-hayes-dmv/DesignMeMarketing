@@ -2,11 +2,8 @@ import React, { useState, useEffect } from "react";
 import {
   Users,
   Plus,
-  Mail,
-  MoreVertical,
-  Shield,
-  UserCheck,
-  UserX,
+  Building2,
+  Globe,
   Edit,
   Trash2,
   X,
@@ -35,20 +32,31 @@ interface TeamMember {
 const TeamPage = () => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const SPECIALTY_OPTIONS = [
+    { value: "ON_PAGE_SEO", label: "On-Page SEO" },
+    { value: "LINK_BUILDING", label: "Link Building" },
+    { value: "CONTENT_WRITING", label: "Content Writing" },
+    { value: "TECHNICAL_SEO", label: "Technical SEO" },
+  ] as const;
   const [inviteForm, setInviteForm] = useState({
     email: "",
     name: "",
-    role: "WORKER" as "WORKER" | "AGENCY" | "ADMIN",
+    role: "SPECIALIST" as "SPECIALIST" | "ADMIN",
+    specialties: [] as string[],
+    sendInvitationEmail: true,
   });
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingAllUsers, setLoadingAllUsers] = useState(false);
+  const [allUsers, setAllUsers] = useState<TeamMember[] | null>(null);
+  const [activeView, setActiveView] = useState<"myTeam" | "agencyAccess" | "totalUsers">("myTeam");
   const [error, setError] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [submittingInvite, setSubmittingInvite] = useState(false);
   const [editForm, setEditForm] = useState({
     name: "",
-    role: "WORKER" as "WORKER" | "AGENCY" | "ADMIN",
+    role: "SPECIALIST" as "SPECIALIST" | "AGENCY" | "ADMIN",
   });
 
   useEffect(() => {
@@ -83,6 +91,25 @@ const TeamPage = () => {
     }
   };
 
+  const fetchAllUsers = async () => {
+    if (!(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN")) return;
+    try {
+      setLoadingAllUsers(true);
+      const response = await api.get("/team", { params: { scope: "all" } });
+      setAllUsers(response.data);
+    } catch (error: any) {
+      console.error("Failed to fetch all users:", error);
+    } finally {
+      setLoadingAllUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeView === "totalUsers" && allUsers === null) {
+      fetchAllUsers();
+    }
+  }, [activeView, allUsers]);
+
   const handleInviteTeamMember = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmittingInvite(true);
@@ -91,24 +118,40 @@ const TeamPage = () => {
         email: inviteForm.email.trim(),
         name: inviteForm.name.trim(),
         role: inviteForm.role,
+        specialties: inviteForm.specialties,
+        sendInvitationEmail: inviteForm.sendInvitationEmail,
       });
-      setInviteForm({ email: "", name: "", role: "WORKER" });
+      setInviteForm({
+        email: "",
+        name: "",
+        role: "SPECIALIST",
+        specialties: [],
+        sendInvitationEmail: true,
+      });
       setShowInviteModal(false);
-      toast.success("Team member invited successfully!");
+      toast.success("Invitation sent successfully!");
       fetchTeamMembers();
     } catch (error: any) {
-      console.error("Failed to invite team member:", error);
-      // Toast is already shown by API interceptor
+      console.error("Failed to invite specialist:", error);
     } finally {
       setSubmittingInvite(false);
     }
+  };
+
+  const toggleSpecialty = (value: string) => {
+    setInviteForm((prev) => ({
+      ...prev,
+      specialties: prev.specialties.includes(value)
+        ? prev.specialties.filter((s) => s !== value)
+        : [...prev.specialties, value],
+    }));
   };
 
   const handleEditTeamMember = (member: TeamMember) => {
     setSelectedMember(member);
     setEditForm({
       name: member.name,
-      role: member.role as "WORKER" | "AGENCY" | "ADMIN",
+      role: member.role as "SPECIALIST" | "AGENCY" | "ADMIN",
     });
     setShowEditModal(true);
   };
@@ -164,7 +207,7 @@ const TeamPage = () => {
   const getRoleBadge = (role: string) => {
     const styles = {
       AGENCY: "bg-primary-100 text-primary-800",
-      WORKER: "bg-secondary-100 text-secondary-800",
+      SPECIALIST: "bg-secondary-100 text-secondary-800",
       ADMIN: "bg-accent-100 text-accent-800",
     };
     return styles[role as keyof typeof styles] || "bg-gray-100 text-gray-800";
@@ -184,6 +227,20 @@ const TeamPage = () => {
     return member.verified ? "Active" : member.invited ? "Invited" : "Inactive";
   };
 
+  const myTeamMembers = teamMembers.filter((member) =>
+    ["ADMIN", "SUPER_ADMIN", "SPECIALIST"].includes(member.role)
+  );
+  const agencyAdmins = teamMembers.filter((member) => member.role === "AGENCY");
+  const totalUsers = allUsers ?? teamMembers;
+  const isTableLoading = loading || (activeView === "totalUsers" && loadingAllUsers);
+
+  const visibleMembers =
+    activeView === "myTeam"
+      ? myTeamMembers
+      : activeView === "agencyAccess"
+        ? agencyAdmins
+        : totalUsers;
+
   return (
     <div className="p-8">
       {/* Header */}
@@ -200,57 +257,69 @@ const TeamPage = () => {
             className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
           >
             <Plus className="h-5 w-5" />
-            <span>Invite Member</span>
+            <span>Invite Specialist</span>
           </button>
         )}
       </div>
 
-      {/* Team Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+      {/* Team Views */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <button
+          type="button"
+          onClick={() => setActiveView("myTeam")}
+          className={`bg-white p-6 rounded-xl border shadow-sm text-left transition-all ${
+            activeView === "myTeam" ? "border-primary-500 ring-2 ring-primary-100" : "border-gray-200 hover:shadow-md"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Members</p>
-              <p className="text-2xl font-bold text-primary-600">
-                {loading ? "..." : teamMembers.length}
+              <p className="text-sm font-medium text-gray-600">My Team</p>
+              <p className="text-2xl font-bold text-primary-600 mt-1">
+                {loading ? "..." : myTeamMembers.length}
               </p>
+              <p className="text-xs text-gray-500 mt-1">Admins + Specialists</p>
             </div>
             <Users className="h-8 w-8 text-primary-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveView("agencyAccess")}
+          className={`bg-white p-6 rounded-xl border shadow-sm text-left transition-all ${
+            activeView === "agencyAccess" ? "border-primary-500 ring-2 ring-primary-100" : "border-gray-200 hover:shadow-md"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Active</p>
-              <p className="text-2xl font-bold text-secondary-600">
-                {loading ? "..." : teamMembers.filter((m) => m.verified).length}
+              <p className="text-sm font-medium text-gray-600">Agency Access</p>
+              <p className="text-2xl font-bold text-blue-600 mt-1">
+                {loading ? "..." : agencyAdmins.length}
               </p>
+              <p className="text-xs text-gray-500 mt-1">Agency admin logins</p>
             </div>
-            <UserCheck className="h-8 w-8 text-secondary-600" />
+            <Building2 className="h-8 w-8 text-blue-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveView("totalUsers")}
+          className={`bg-white p-6 rounded-xl border shadow-sm text-left transition-all ${
+            activeView === "totalUsers" ? "border-primary-500 ring-2 ring-primary-100" : "border-gray-200 hover:shadow-md"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Pending</p>
-              <p className="text-2xl font-bold text-accent-600">
-                {loading ? "..." : teamMembers.filter((m) => m.invited && !m.verified).length}
+              <p className="text-sm font-medium text-gray-600">Total Users</p>
+              <p className="text-2xl font-bold text-emerald-600 mt-1">
+                {isTableLoading ? "..." : totalUsers.length}
               </p>
+              <p className="text-xs text-gray-500 mt-1">All platform users</p>
             </div>
-            <Mail className="h-8 w-8 text-accent-600" />
+            <Globe className="h-8 w-8 text-emerald-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Admins</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {loading ? "..." : teamMembers.filter((m) => m.role === "AGENCY" || m.role === "ADMIN" || m.role === "SUPER_ADMIN").length}
-              </p>
-            </div>
-            <Shield className="h-8 w-8 text-gray-600" />
-          </div>
-        </div>
+        </button>
       </div>
 
       {error && (
@@ -289,20 +358,20 @@ const TeamPage = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
+              {isTableLoading ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
                     Loading team members...
                   </td>
                 </tr>
-              ) : teamMembers.length === 0 ? (
+              ) : visibleMembers.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
                     No team members found
                   </td>
                 </tr>
               ) : (
-                teamMembers.map((member) => (
+                visibleMembers.map((member) => (
                   <tr key={member.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-3">
@@ -390,17 +459,17 @@ const TeamPage = () => {
         </div>
       </div>
 
-      {/* Invite Team Member Modal */}
+      {/* Invite New Specialist Modal */}
       {showInviteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4">
+          <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold text-gray-900 mb-6">
-              Invite Team Member
+              Invite New Specialist
             </h2>
             <form onSubmit={handleInviteTeamMember} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name
+                  Full Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -415,7 +484,7 @@ const TeamPage = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email Address
+                  Email <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="email"
@@ -430,22 +499,59 @@ const TeamPage = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Role
+                  Role <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={inviteForm.role}
                   onChange={(e) =>
                     setInviteForm({
                       ...inviteForm,
-                      role: e.target.value as "WORKER" | "AGENCY" | "ADMIN",
+                      role: e.target.value as "SPECIALIST" | "ADMIN",
                     })
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   disabled={submittingInvite}
+                  required
                 >
-                  <option value="WORKER">Specialist</option>
-                  <option value="AGENCY">Agency Admin</option>
+                  <option value="SPECIALIST">Specialist</option>
+                  <option value="ADMIN">Admin</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Specialty <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <div className="space-y-2">
+                  {SPECIALTY_OPTIONS.map((opt) => (
+                    <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={inviteForm.specialties.includes(opt.value)}
+                        onChange={() => toggleSpecialty(opt.value)}
+                        disabled={submittingInvite}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-gray-700">{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={inviteForm.sendInvitationEmail}
+                    onChange={(e) =>
+                      setInviteForm({
+                        ...inviteForm,
+                        sendInvitationEmail: e.target.checked,
+                      })
+                    }
+                    disabled={submittingInvite}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className="text-sm text-gray-700">Send invitation email</span>
+                </label>
               </div>
               <div className="flex space-x-4 pt-4">
                 <button
@@ -461,7 +567,7 @@ const TeamPage = () => {
                   disabled={submittingInvite}
                   className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
                 >
-                  {submittingInvite ? "Sending…" : "Send Invite"}
+                  {submittingInvite ? "Sending…" : "Send Invitation"}
                 </button>
               </div>
             </form>
@@ -509,11 +615,11 @@ const TeamPage = () => {
                 <select
                   value={editForm.role}
                   onChange={(e) =>
-                    setEditForm({ ...editForm, role: e.target.value as "WORKER" | "AGENCY" | "ADMIN" })
+                    setEditForm({ ...editForm, role: e.target.value as "SPECIALIST" | "AGENCY" | "ADMIN" })
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
-                  <option value="WORKER">Specialist</option>
+                  <option value="SPECIALIST">Specialist</option>
                   <option value="AGENCY">Agency Admin</option>
                   {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") && (
                     <option value="ADMIN">Admin</option>

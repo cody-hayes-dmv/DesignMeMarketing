@@ -319,8 +319,8 @@ router.post('/invite', authenticateToken, async (req, res) => {
   }
 });
 
-// Invite worker (Agency owners only)
-router.post('/:agencyId/invite-worker', authenticateToken, async (req, res) => {
+// Invite specialist (Agency owners only)
+router.post('/:agencyId/invite-specialist', authenticateToken, async (req, res) => {
   try {
     const { agencyId } = req.params;
     const { email, name } = inviteSchema.parse(req.body);
@@ -330,7 +330,7 @@ router.post('/:agencyId/invite-worker', authenticateToken, async (req, res) => {
       where: {
         userId: req.user.userId,
         agencyId,
-        agencyRole: { in: ['WORKER', 'OWNER', 'MANAGER'] },
+        agencyRole: { in: ['SPECIALIST', 'OWNER', 'MANAGER'] },
       },
       include: { agency: true },
     });
@@ -341,7 +341,7 @@ router.post('/:agencyId/invite-worker', authenticateToken, async (req, res) => {
 
     // Generate invitation token
     const inviteToken = jwt.sign(
-      { email, agencyId, role: 'WORKER' },
+      { email, agencyId, role: 'SPECIALIST' },
       getJwtSecret(),
       { expiresIn: '7d' }
     );
@@ -354,7 +354,7 @@ router.post('/:agencyId/invite-worker', authenticateToken, async (req, res) => {
         token: inviteToken,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
         agencyId,
-        role: 'WORKER',
+        role: 'SPECIALIST',
       },
     });
 
@@ -370,9 +370,9 @@ router.post('/:agencyId/invite-worker', authenticateToken, async (req, res) => {
       `,
     });
 
-    res.json({ message: 'Worker invitation sent successfully' });
+    res.json({ message: 'Specialist invitation sent successfully' });
   } catch (error) {
-    console.error('Invite worker error:', error);
+    console.error('Invite specialist error:', error);
     res.status(500).json({ message: 'Failed to send invitation' });
   }
 });

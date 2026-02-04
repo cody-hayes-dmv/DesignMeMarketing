@@ -20,7 +20,7 @@ Usage:
 Optional:
   --name "Client User"
   --industry "SaaS"
-  --agencyId "<agencyId>"   (links the user to an agency as WORKER; optional)
+  --agencyId "<agencyId>"   (links the user to an agency as SPECIALIST; optional)
 `);
 }
 
@@ -100,7 +100,7 @@ async function main() {
       data: {
         userId: user.id,
         agencyId,
-        agencyRole: "WORKER",
+        agencyRole: "SPECIALIST",
       },
     });
   }

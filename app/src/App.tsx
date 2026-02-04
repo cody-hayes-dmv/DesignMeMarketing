@@ -6,8 +6,8 @@ import { checkAuth } from "./store/slices/authSlice";
 import { Toaster } from "react-hot-toast";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
-import WorkerDashboard from "./pages/Worker/WorkerDashboardPage";
-import WorkerTeamPage from "./pages/Worker/WorkerTeamPage";
+import SpecialistDashboard from "./pages/Specialist/SpecialistDashboardPage";
+import SpecialistTeamPage from "./pages/Specialist/SpecialistTeamPage";
 import DashboardLayout from "./components/DashboardLayout";
 import ClientsPage from "./pages/ClientsPage";
 import KeywordsPage from "./pages/KeywordsPage";
@@ -74,8 +74,8 @@ function App() {
     ADMIN: "/agency/dashboard",
     // Restore previous agency portal landing
     AGENCY: "/agency/dashboard",
-    // Restore previous worker portal landing
-    WORKER: "/worker/dashboard",
+    // Restore previous specialist portal landing
+    SPECIALIST: "/specialist/dashboard",
     // Client-portal user: redirect handled dynamically (see getRedirectUrl)
     USER: "/client/dashboard",
   };
@@ -97,13 +97,13 @@ function App() {
     { path: "/agency/tasks", component: TasksPage },
   ];
 
-  // Worker routes (restore previous version)
-  const workerRoutes = [
-    { path: "/worker/dashboard", component: WorkerDashboard },
-    { path: "/worker/myagency", component: AgencyDashboardPage },
-    { path: "/worker/tasks", component: TasksPage },
-    { path: "/worker/team", component: WorkerTeamPage },
-    { path: "/worker/settings", component: SettingsPage },
+  // Specialist routes (restore previous version)
+  const specialistRoutes = [
+    { path: "/specialist/dashboard", component: SpecialistDashboard },
+    { path: "/specialist/myagency", component: AgencyDashboardPage },
+    { path: "/specialist/tasks", component: TasksPage },
+    { path: "/specialist/team", component: SpecialistTeamPage },
+    { path: "/specialist/settings", component: SettingsPage },
   ];
 
   // Client portal routes (client users)
@@ -179,8 +179,8 @@ function App() {
       />
 
 
-      {/* Worker routes */}
-      {workerRoutes.map(({ path, component: Component }) => (
+      {/* Specialist routes */}
+      {specialistRoutes.map(({ path, component: Component }) => (
         <Route
           key={path}
           path={path}
@@ -194,7 +194,7 @@ function App() {
               </div>
             ) : !user || !user.verified ? (
               <Navigate to="/login" replace />
-            ) : user.role !== "WORKER" ? (
+            ) : user.role !== "SPECIALIST" ? (
               <Navigate to={getRedirectUrl()} replace />
             ) : (
               <DashboardLayout>
@@ -233,6 +233,8 @@ function App() {
 
       {/* Redirect old Workers path to Team (Workers combined into Team) */}
       <Route path="/agency/workers" element={<Navigate to="/agency/team" replace />} />
+      {/* Redirect legacy worker portal paths */}
+      <Route path="/worker/*" element={<Navigate to="/specialist/dashboard" replace />} />
 
       {/* Agency routes - accessible by AGENCY, ADMIN, and SUPER_ADMIN */}
       {agencyRoutes.map(({ path, component: Component }) => (

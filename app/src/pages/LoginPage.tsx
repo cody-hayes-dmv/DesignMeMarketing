@@ -22,7 +22,7 @@ const LoginPage = () => {
     switch (loginAs) {
       case "USER":
         return "Client portal — invited access";
-      case "WORKER":
+      case "SPECIALIST":
         return "Specialist portal — tasks and logins";
       case "AGENCY":
         return "Agency portal — client access";

@@ -87,8 +87,8 @@ async function canStaffAccessClient(user: { userId: string; role: string }, clie
 
     if (isAdmin || isOwner) return { client, hasAccess: true };
 
-    // Agency/Worker users: check if in same agency
-    if (user.role === 'AGENCY' || user.role === 'WORKER') {
+  // Agency/Specialist users: check if in same agency
+  if (user.role === 'AGENCY' || user.role === 'SPECIALIST') {
         const userMemberships = await prisma.userAgency.findMany({
             where: { userId: user.userId },
             select: { agencyId: true },
@@ -211,7 +211,7 @@ router.get('/', authenticateToken, async (req, res) => {
                 orderBy: { createdAt: 'desc' },
             });
         } else {
-            // Worker/Agency users → get clients of their agency
+      // Specialist/Agency users → get clients of their agency
             const memberships = await prisma.userAgency.findMany({
                 where: { userId: req.user.userId },
                 select: { agencyId: true },
@@ -300,7 +300,7 @@ router.get('/users', authenticateToken, async (req, res) => {
         let clientIds: string[] | null = null; // null => all
         const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
         if (!isAdmin) {
-            if (req.user.role === 'AGENCY' || req.user.role === 'WORKER') {
+      if (req.user.role === 'AGENCY' || req.user.role === 'SPECIALIST') {
                 const memberships = await prisma.userAgency.findMany({
                     where: { userId: req.user.userId },
                     select: { agencyId: true },
@@ -1028,7 +1028,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
         // Determine status: SUPER_ADMIN always creates ACTIVE, others always create PENDING
         const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
-        const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'WORKER';
+        const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'SPECIALIST';
         // SUPER_ADMIN always creates ACTIVE, ignore status parameter
         // Other roles always create PENDING, ignore status parameter
         const clientStatus = isSuperAdmin ? 'ACTIVE' : 'PENDING';
@@ -1138,9 +1138,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
         if (username !== undefined) updateData.username = username || null;
         if (password !== undefined) updateData.password = password || null;
 
-        // accountInfo merge (do not allow non-super-admin/worker to modify SEO roadmap fields)
+        // accountInfo merge (do not allow non-super-admin/specialist to modify SEO roadmap fields)
         if (accountInfo !== undefined) {
-            const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'WORKER';
+            const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'SPECIALIST';
             const incoming = sanitizeAccountInfo(accountInfo, canEditRestricted);
             if (incoming === null) {
                 updateData.accountInfo = null;

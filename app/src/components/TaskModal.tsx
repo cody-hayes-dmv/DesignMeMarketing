@@ -37,7 +37,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         [clients]
     );
     const { user } = useSelector((state: RootState) => state.auth);
-    const [workers, setWorkers] = useState<Array<{ id: string; name: string; email: string }>>([]);
+    const [specialists, setSpecialists] = useState<Array<{ id: string; name: string; email: string }>>([]);
     const [form, setForm] = useState({
         title: "",
         description: "",
@@ -69,17 +69,17 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             if (clients.length === 0) {
                 dispatch(fetchClients() as any);
             }
-            // Fetch workers
-            fetchWorkers();
+            // Fetch specialists
+            fetchSpecialists();
         }
     }, [open]);
 
-    const fetchWorkers = async () => {
+    const fetchSpecialists = async () => {
         try {
-            const response = await api.get("/auth/workers");
-            setWorkers(response.data);
+            const response = await api.get("/auth/specialists");
+            setSpecialists(response.data);
         } catch (error) {
-            console.error("Error fetching workers:", error);
+            console.error("Error fetching specialists:", error);
         }
     };
 
@@ -372,9 +372,9 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             >
                                 <option value="">Unassigned</option>
-                                {workers.map((worker) => (
-                                    <option key={worker.id} value={worker.id}>
-                                        {worker.name || worker.email}
+                                {specialists.map((specialist) => (
+                                    <option key={specialist.id} value={specialist.id}>
+                                        {specialist.name || specialist.email}
                                     </option>
                                 ))}
                             </select>

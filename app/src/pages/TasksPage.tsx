@@ -53,7 +53,7 @@ const TasksPage = () => {
     const { user } = useSelector((state: RootState) => state.auth);
 
     // Only non-specialists can create
-    const canCreate = (user?.role as ROLE | undefined) !== "WORKER";
+    const canCreate = (user?.role as ROLE | undefined) !== "SPECIALIST";
     const canFilterByClient = (user?.role as ROLE | undefined) !== "USER";
 
     const handleCreateClick = () => {
