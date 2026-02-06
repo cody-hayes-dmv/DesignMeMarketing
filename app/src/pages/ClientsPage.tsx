@@ -26,6 +26,10 @@ import {
   ArrowDown,
   Store,
   ArrowRight,
+  LayoutDashboard,
+  Clock,
+  XCircle,
+  Archive,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -77,10 +81,12 @@ type ClientFormState = {
 
   // Business Information
   businessNiche: string;
+  businessNicheOther: string;
   businessDescription: string;
   businessAddress: string;
   primaryLocationCity: string;
   primaryLocationState: string;
+  serviceRadius: string;
   serviceAreasServed: string;
   phoneNumber: string;
   emailAddress: string;
@@ -113,7 +119,62 @@ type ClientFormState = {
   pagesPerMonth: string;
   technicalHoursPerMonth: string;
   campaignDurationMonths: string;
+
+  // SUPER_ADMIN only (Edit modal)
+  totalKeywordsToTarget: string;
+  seoRoadmapSection: string;
+  managedServicePackage: string;
+  serviceStartDate: string;
+  clientStatus: string;
+  canceledEndDate: string;
 };
+
+const BUSINESS_NICHE_OPTIONS = [
+  "Health & Wellness",
+  "Emergency Locksmith",
+  "Legal Services",
+  "Home Services",
+  "Retail",
+  "Restaurants",
+  "Financial Services",
+  "Real Estate",
+  "Professional Services",
+  "Automotive",
+  "Beauty & Personal Care",
+  "Other",
+] as const;
+
+const SERVICE_RADIUS_OPTIONS = [
+  "5 miles",
+  "10 miles",
+  "15 miles",
+  "20 miles",
+  "25 miles",
+  "50 miles",
+  "Statewide",
+  "National",
+  "Custom",
+] as const;
+
+const US_STATES = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+];
+
+const MANAGED_SERVICE_STATUS_OPTIONS = [
+  { value: "DASHBOARD_ONLY", label: "Dashboard Only" },
+  { value: "PENDING", label: "Pending" },
+  { value: "ACTIVE", label: "Active" },
+  { value: "CANCELED", label: "Canceled" },
+  { value: "SUSPENDED", label: "Suspended" },
+  { value: "ARCHIVED", label: "Archived" },
+] as const;
+
+const MANAGED_SERVICE_PACKAGE_OPTIONS = [
+  { value: "foundation", label: "Foundation ($750/mo)" },
+  { value: "growth", label: "Growth ($1,500/mo)" },
+  { value: "domination", label: "Domination ($3,000/mo)" },
+  { value: "custom", label: "Custom" },
+] as const;
 
 const EMPTY_CLIENT_FORM: ClientFormState = {
   name: "",
@@ -121,10 +182,12 @@ const EMPTY_CLIENT_FORM: ClientFormState = {
   industry: "",
   industryOther: "",
   businessNiche: "",
+  businessNicheOther: "",
   businessDescription: "",
   businessAddress: "",
   primaryLocationCity: "",
   primaryLocationState: "",
+  serviceRadius: "",
   serviceAreasServed: "",
   phoneNumber: "",
   emailAddress: "",
@@ -145,6 +208,12 @@ const EMPTY_CLIENT_FORM: ClientFormState = {
   pagesPerMonth: "",
   technicalHoursPerMonth: "",
   campaignDurationMonths: "",
+  totalKeywordsToTarget: "",
+  seoRoadmapSection: "",
+  managedServicePackage: "",
+  serviceStartDate: "",
+  clientStatus: "",
+  canceledEndDate: "",
 };
 
 const ClientsPage = () => {
@@ -161,7 +230,8 @@ const ClientsPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [openStatusId, setOpenStatusId] = useState("")
   const [enabled, setEnabled] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("all");
+  type ClientListFilter = "active" | "total" | "pending" | "dashboard_only" | "canceled" | "archived";
+  const [statusFilter, setStatusFilter] = useState<ClientListFilter>("active");
   const [clientForm, setClientForm] = useState<ClientFormState>(EMPTY_CLIENT_FORM);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState("");
@@ -181,6 +251,8 @@ const ClientsPage = () => {
   }, [dispatch, user?.role]);
 
   const canSeeSeoRoadmapFields = user?.role === "SUPER_ADMIN" || user?.role === "SPECIALIST";
+  /** Agency panel: show only Sections A–F (no keywords allocation, lat/long, roadmap, etc.) */
+  const isAgencyCreateForm = user?.role === "AGENCY" || user?.role === "ADMIN";
 
   const parseKeywordsText = (raw: string): string[] => {
     return String(raw || "")
@@ -240,29 +312,59 @@ const ClientsPage = () => {
       return;
     }
 
-    try {
-      const targets = parseKeywordsText(clientForm.keywords);
-      const accountInfo: Record<string, any> = {
-        businessNiche: clientForm.businessNiche || "",
-        businessDescription: clientForm.businessDescription || "",
-        businessAddress: clientForm.businessAddress || "",
-        primaryLocationCity: clientForm.primaryLocationCity || "",
-        primaryLocationState: clientForm.primaryLocationState || "",
-        serviceAreasServed: clientForm.serviceAreasServed || "",
-        phoneNumber: clientForm.phoneNumber || "",
-        emailAddress: clientForm.emailAddress || "",
-        campaignType: clientForm.campaignType || "",
-        gbpPrimaryCategory: clientForm.gbpPrimaryCategory || "",
-        gbpSecondaryCategories: clientForm.gbpSecondaryCategories || "",
-        primaryServicesList: clientForm.primaryServicesList || "",
-        secondaryServicesList: clientForm.secondaryServicesList || "",
-        servicesMarkedPrimary: clientForm.servicesMarkedPrimary || "",
-        targetKeywordCount: clientForm.targetKeywordCount || "",
-        latitude: clientForm.latitude || "",
-        longitude: clientForm.longitude || "",
-      };
+    const selectedBusinessNiche = clientForm.businessNiche === "Other"
+      ? clientForm.businessNicheOther.trim()
+      : (clientForm.businessNiche || "").trim();
 
-      if (canSeeSeoRoadmapFields) {
+    if (isAgencyCreateForm && !selectedBusinessNiche) {
+      toast.error("Please select or enter a business niche.");
+      return;
+    }
+
+    try {
+      let domain = (clientForm.domain || "").trim();
+      if (domain && !/^https?:\/\//i.test(domain)) {
+        domain = `https://${domain}`;
+      }
+
+      const targets = isAgencyCreateForm ? [] : parseKeywordsText(clientForm.keywords);
+      const accountInfo: Record<string, any> = isAgencyCreateForm
+        ? {
+            businessNiche: selectedBusinessNiche,
+            businessDescription: clientForm.businessDescription || "",
+            businessAddress: clientForm.businessAddress || "",
+            primaryLocationCity: clientForm.primaryLocationCity || "",
+            primaryLocationState: clientForm.primaryLocationState || "",
+            serviceRadius: clientForm.serviceRadius || "",
+            serviceAreasServed: clientForm.serviceAreasServed || "",
+            phoneNumber: clientForm.phoneNumber || "",
+            emailAddress: clientForm.emailAddress || "",
+            campaignType: clientForm.campaignType || "",
+            gbpPrimaryCategory: clientForm.gbpPrimaryCategory || "",
+            gbpSecondaryCategories: clientForm.gbpSecondaryCategories || "",
+          }
+        : {
+            businessNiche: clientForm.businessNiche || "",
+            businessDescription: clientForm.businessDescription || "",
+            businessAddress: clientForm.businessAddress || "",
+            primaryLocationCity: clientForm.primaryLocationCity || "",
+            primaryLocationState: clientForm.primaryLocationState || "",
+            serviceRadius: clientForm.serviceRadius || "",
+            serviceAreasServed: clientForm.serviceAreasServed || "",
+            phoneNumber: clientForm.phoneNumber || "",
+            emailAddress: clientForm.emailAddress || "",
+            campaignType: clientForm.campaignType || "",
+            gbpPrimaryCategory: clientForm.gbpPrimaryCategory || "",
+            gbpSecondaryCategories: clientForm.gbpSecondaryCategories || "",
+            primaryServicesList: clientForm.primaryServicesList || "",
+            secondaryServicesList: clientForm.secondaryServicesList || "",
+            servicesMarkedPrimary: clientForm.servicesMarkedPrimary || "",
+            targetKeywordCount: clientForm.targetKeywordCount || "",
+            latitude: clientForm.latitude || "",
+            longitude: clientForm.longitude || "",
+          };
+
+      if (!isAgencyCreateForm && canSeeSeoRoadmapFields) {
         accountInfo.seoRoadmapStartMonth = clientForm.seoRoadmapStartMonth || "";
         accountInfo.pagesPerMonth = clientForm.pagesPerMonth || "";
         accountInfo.technicalHoursPerMonth = clientForm.technicalHoursPerMonth || "";
@@ -270,23 +372,21 @@ const ClientsPage = () => {
       }
 
       await dispatch(createClient({ data: {
-        name: clientForm.name,
-        domain: clientForm.domain,
+        name: clientForm.name.trim(),
+        domain,
         industry: selectedIndustry,
         targets,
-        loginUrl: clientForm.loginUrl,
-        username: clientForm.loginUsername,
-        password: clientForm.loginPassword,
+        loginUrl: clientForm.loginUrl || undefined,
+        username: clientForm.loginUsername || undefined,
+        password: clientForm.loginPassword || undefined,
         accountInfo,
       } }) as any);
       setClientForm(EMPTY_CLIENT_FORM);
       setShowCreateModal(false);
-      toast.success("Client created successfully! Please connect GA4 to view analytics data.");
-      // Refresh clients list
+      toast.success(isAgencyCreateForm ? "Client created. You can add keywords and set up tracking." : "Client created successfully! Please connect GA4 to view analytics data.");
       dispatch(fetchClients() as any);
     } catch (error: any) {
       console.error("Failed to create client:", error);
-      // Toast is already shown by API interceptor
     }
   };
 
@@ -375,11 +475,13 @@ const ClientsPage = () => {
       loginUrl: String((client as any)?.loginUrl ?? ""),
       loginUsername: String((client as any)?.username ?? ""),
       loginPassword: String((client as any)?.password ?? ""),
-      businessNiche: String(info.businessNiche ?? ""),
+      businessNiche: (BUSINESS_NICHE_OPTIONS as readonly string[]).includes(String(info.businessNiche ?? "")) ? String(info.businessNiche ?? "") : "Other",
+      businessNicheOther: (BUSINESS_NICHE_OPTIONS as readonly string[]).includes(String(info.businessNiche ?? "")) ? "" : String(info.businessNiche ?? ""),
       businessDescription: String(info.businessDescription ?? ""),
       businessAddress: String(info.businessAddress ?? ""),
       primaryLocationCity: String(info.primaryLocationCity ?? ""),
       primaryLocationState: String(info.primaryLocationState ?? ""),
+      serviceRadius: String(info.serviceRadius ?? ""),
       serviceAreasServed: String(info.serviceAreasServed ?? ""),
       phoneNumber: String(info.phoneNumber ?? ""),
       emailAddress: String(info.emailAddress ?? ""),
@@ -396,6 +498,12 @@ const ClientsPage = () => {
       pagesPerMonth: String(info.pagesPerMonth ?? ""),
       technicalHoursPerMonth: String(info.technicalHoursPerMonth ?? ""),
       campaignDurationMonths: String(info.campaignDurationMonths ?? ""),
+      totalKeywordsToTarget: String(info.totalKeywordsToTarget ?? ""),
+      seoRoadmapSection: String(info.seoRoadmapSection ?? ""),
+      managedServicePackage: String(info.managedServicePackage ?? ""),
+      serviceStartDate: info.serviceStartDate ? String(info.serviceStartDate).slice(0, 10) : "",
+      clientStatus: String((client as any).status ?? ""),
+      canceledEndDate: (client as any).canceledEndDate ? String((client as any).canceledEndDate).slice(0, 10) : "",
     });
     setShowEditModal(true);
   };
@@ -417,6 +525,28 @@ const ClientsPage = () => {
     } catch (error: any) {
       console.error("Failed to move client to Vendasta:", error);
       toast.error(error?.response?.data?.message || "Failed to move client to Vendasta");
+    }
+  };
+
+  const handleApproveAndActivate = async (client: Client) => {
+    try {
+      await dispatch(updateClient({ id: client.id, data: { status: "ACTIVE" } }) as any);
+      toast.success(`${client.name} approved and activated. Agency has been notified.`);
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Approve & Activate failed:", error);
+      toast.error(error?.response?.data?.message || "Failed to approve client");
+    }
+  };
+
+  const handleRejectToDashboardOnly = async (client: Client) => {
+    try {
+      await dispatch(updateClient({ id: client.id, data: { status: "DASHBOARD_ONLY" } }) as any);
+      toast.success(`${client.name} set to Dashboard Only. Agency has been notified.`);
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Reject failed:", error);
+      toast.error(error?.response?.data?.message || "Failed to reject client");
     }
   };
 
@@ -447,12 +577,14 @@ const ClientsPage = () => {
 
     try {
       const targets = parseKeywordsText(clientForm.keywords);
+      const selectedBusinessNicheEdit = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther.trim() : (clientForm.businessNiche || "").trim();
       const accountInfo: Record<string, any> = {
-        businessNiche: clientForm.businessNiche || "",
+        businessNiche: selectedBusinessNicheEdit,
         businessDescription: clientForm.businessDescription || "",
         businessAddress: clientForm.businessAddress || "",
         primaryLocationCity: clientForm.primaryLocationCity || "",
         primaryLocationState: clientForm.primaryLocationState || "",
+        serviceRadius: clientForm.serviceRadius || "",
         serviceAreasServed: clientForm.serviceAreasServed || "",
         phoneNumber: clientForm.phoneNumber || "",
         emailAddress: clientForm.emailAddress || "",
@@ -474,18 +606,31 @@ const ClientsPage = () => {
         accountInfo.campaignDurationMonths = clientForm.campaignDurationMonths || "";
       }
 
+      if (user?.role === "SUPER_ADMIN") {
+        accountInfo.totalKeywordsToTarget = clientForm.totalKeywordsToTarget || "";
+        accountInfo.seoRoadmapSection = clientForm.seoRoadmapSection || "";
+        accountInfo.managedServicePackage = clientForm.managedServicePackage || "";
+        accountInfo.serviceStartDate = clientForm.serviceStartDate || "";
+      }
+
+      const updatePayload: Record<string, any> = {
+        name: clientForm.name,
+        domain: clientForm.domain,
+        industry: selectedIndustry,
+        targets,
+        loginUrl: clientForm.loginUrl,
+        username: clientForm.loginUsername,
+        password: clientForm.loginPassword,
+        accountInfo,
+      };
+      if (user?.role === "SUPER_ADMIN") {
+        if (clientForm.clientStatus) updatePayload.status = clientForm.clientStatus;
+        if (clientForm.canceledEndDate !== undefined) updatePayload.canceledEndDate = clientForm.canceledEndDate || null;
+      }
+
       await dispatch(updateClient({
         id: editingClient.id,
-        data: {
-          name: clientForm.name,
-          domain: clientForm.domain,
-          industry: selectedIndustry,
-          targets,
-          loginUrl: clientForm.loginUrl,
-          username: clientForm.loginUsername,
-          password: clientForm.loginPassword,
-          accountInfo,
-        },
+        data: updatePayload,
       }) as any);
 
       toast.success("Client updated successfully!");
@@ -502,14 +647,33 @@ const ClientsPage = () => {
   // Clients already have statistics from the database
   const modifiedClients = clients
 
-  const isArchivedStatus = (status: string) => status !== "ACTIVE";
-  const getStatusBadge = (status: string) =>
-    isArchivedStatus(status) ? "bg-gray-100 text-gray-800" : "bg-green-100 text-green-800";
-  const getStatusLabel = (status: string) => (isArchivedStatus(status) ? "Archived" : "Active");
+  const isArchivedStatus = (status: string) => status === "ARCHIVED" || status === "REJECTED";
+  const getStatusBadge = (status: string) => {
+    if (status === "ACTIVE") return "bg-green-100 text-green-800";
+    if (status === "PENDING") return "bg-amber-100 text-amber-800";
+    if (status === "DASHBOARD_ONLY") return "bg-blue-100 text-blue-800";
+    if (status === "CANCELED") return "bg-orange-100 text-orange-800";
+    if (status === "SUSPENDED") return "bg-red-100 text-red-800";
+    if (status === "ARCHIVED" || status === "REJECTED") return "bg-gray-100 text-gray-800";
+    return "bg-gray-100 text-gray-800";
+  };
+  const getStatusLabel = (status: string) => {
+    if (status === "ACTIVE") return "Active";
+    if (status === "PENDING") return "Pending";
+    if (status === "DASHBOARD_ONLY") return "Dashboard Only";
+    if (status === "CANCELED") return "Canceled";
+    if (status === "SUSPENDED") return "Suspended";
+    if (status === "ARCHIVED" || status === "REJECTED") return "Archived";
+    return status || "—";
+  };
 
-  const totalCount = modifiedClients.length;
-  const activeCount = modifiedClients.filter((m) => m.status === "ACTIVE").length;
-  const archivedCount = modifiedClients.filter((m) => isArchivedStatus(m.status)).length;
+  const nonVendasta = modifiedClients.filter((c) => !c.vendasta);
+  const activeCount = nonVendasta.filter((m) => m.status === "ACTIVE").length;
+  const totalCount = nonVendasta.length;
+  const pendingCount = nonVendasta.filter((m) => m.status === "PENDING").length;
+  const dashboardOnlyCount = nonVendasta.filter((m) => m.status === "DASHBOARD_ONLY").length;
+  const canceledCount = nonVendasta.filter((m) => m.status === "CANCELED").length;
+  const archivedCount = nonVendasta.filter((m) => isArchivedStatus(m.status)).length;
 
   const handleSort = (field: "name" | "domain" | "industry") => {
     if (sortField === field) {
@@ -520,21 +684,39 @@ const ClientsPage = () => {
     }
   };
 
+  /** Service package label from accountInfo (Foundation, Growth, Domination, or None). */
+  const getServicePackageLabel = (client: Client): string => {
+    const raw = client.accountInfo;
+    if (!raw) return "None";
+    const obj = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch { return {}; } })() : raw;
+    const pkg = (obj?.servicePackage ?? obj?.managedTier ?? obj?.stripePriceId ?? "").toString().toLowerCase();
+    if (pkg.includes("foundation")) return "Foundation";
+    if (pkg.includes("growth")) return "Growth";
+    if (pkg.includes("domination")) return "Domination";
+    return "None";
+  };
+
   const filteredClients = modifiedClients
     .filter((client) => {
-      // Exclude vendasta clients from regular clients page
       if (client.vendasta) return false;
       if (statusFilter === "active") return client.status === "ACTIVE";
+      if (statusFilter === "total") return true;
+      if (statusFilter === "pending") return client.status === "PENDING";
+      if (statusFilter === "dashboard_only") return client.status === "DASHBOARD_ONLY";
+      if (statusFilter === "canceled") return client.status === "CANCELED";
       if (statusFilter === "archived") return isArchivedStatus(client.status);
       return true;
     })
     .filter((client) => {
       if (!searchTerm) return true;
       const searchLower = searchTerm.toLowerCase();
+      const matchesAgency = client.agencyNames?.some((name) =>
+        name.toLowerCase().includes(searchLower)
+      );
       return (
         client.name.toLowerCase().includes(searchLower) ||
         client.domain.toLowerCase().includes(searchLower) ||
-        (client.industry && client.industry.toLowerCase().includes(searchLower))
+        !!matchesAgency
       );
     })
     .sort((a, b) => {
@@ -577,52 +759,106 @@ const ClientsPage = () => {
         </button>
       </div>
 
-      {/* Client */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+      {/* Filter cards: default view = Active Clients (managed services) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <button
           type="button"
-          onClick={() => setStatusFilter("all")}
-          className={`bg-white p-6 rounded-xl border transition-colors text-left ${statusFilter === "all" ? "border-primary-300 ring-2 ring-primary-100" : "border-gray-200 hover:bg-gray-50"}`}
-          title="Show all clients"
+          onClick={() => setStatusFilter("active")}
+          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "active" ? "border-green-300 ring-2 ring-green-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="Managed services active"
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Total Clients</p>
-              <p className="text-2xl font-bold text-primary-600">{totalCount}</p>
-            </div>
-            <Users className="h-8 w-8 text-primary-600" />
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setStatusFilter((prev) => (prev === "active" ? "all" : "active"))}
-          className={`bg-white p-6 rounded-xl border transition-colors text-left ${statusFilter === "active" ? "border-secondary-300 ring-2 ring-secondary-100" : "border-gray-200 hover:bg-gray-50"}`}
-          title="Show active clients"
-        >
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
               <p className="text-sm font-medium text-gray-600">Active Clients</p>
-              <p className="text-2xl font-bold text-secondary-600">{activeCount}</p>
+              <p className="text-xl font-bold text-green-600">{activeCount}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Managed services active</p>
             </div>
-            <UserCheck className="h-8 w-8 text-secondary-600" />
+            <UserCheck className="h-8 w-8 text-green-600 shrink-0" />
           </div>
         </button>
 
         <button
           type="button"
-          onClick={() => setStatusFilter((prev) => (prev === "archived" ? "all" : "archived"))}
-          className={`bg-white p-6 rounded-xl border transition-colors text-left ${statusFilter === "archived" ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200 hover:bg-gray-50"}`}
-          title="Show archived clients"
+          onClick={() => setStatusFilter("total")}
+          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "total" ? "border-primary-300 ring-2 ring-primary-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="All client dashboards"
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Archived Clients</p>
-              <p className="text-2xl font-bold text-gray-900">{archivedCount}</p>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-600">Total Dashboards</p>
+              <p className="text-xl font-bold text-primary-600">{totalCount}</p>
+              <p className="text-xs text-gray-500 mt-0.5">All client dashboards</p>
             </div>
-            <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-semibold">
-              A
+            <LayoutDashboard className="h-8 w-8 text-primary-600 shrink-0" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter("pending")}
+          className={`relative bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "pending" ? "border-amber-300 ring-2 ring-amber-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="Awaiting approval"
+        >
+          {pendingCount > 0 && (
+            <span className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">
+              {pendingCount}
+            </span>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-600">Pending Requests</p>
+              <p className="text-xl font-bold text-amber-600">{pendingCount}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Awaiting approval</p>
             </div>
+            <Clock className="h-8 w-8 text-amber-600 shrink-0" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter("dashboard_only")}
+          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "dashboard_only" ? "border-blue-300 ring-2 ring-blue-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="No managed services"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-600">Dashboard Only</p>
+              <p className="text-xl font-bold text-blue-600">{dashboardOnlyCount}</p>
+              <p className="text-xs text-gray-500 mt-0.5">No managed services</p>
+            </div>
+            <LayoutDashboard className="h-8 w-8 text-blue-600 shrink-0" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter("canceled")}
+          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "canceled" ? "border-orange-300 ring-2 ring-orange-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="Services ending"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-600">Canceled</p>
+              <p className="text-xl font-bold text-orange-600">{canceledCount}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Services ending</p>
+            </div>
+            <XCircle className="h-8 w-8 text-orange-600 shrink-0" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter("archived")}
+          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "archived" ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200 hover:bg-gray-50"}`}
+          title="Past clients"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-600">Archived</p>
+              <p className="text-xl font-bold text-gray-700">{archivedCount}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Past clients</p>
+            </div>
+            <Archive className="h-8 w-8 text-gray-500 shrink-0" />
           </div>
         </button>
       </div>
@@ -636,7 +872,7 @@ const ClientsPage = () => {
               <Search className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search name, domain, industry ..."
+                placeholder="Search name, domain, agency ..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -670,39 +906,26 @@ const ClientsPage = () => {
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th 
+                  <th
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
                     onClick={() => handleSort("name")}
                   >
                     <div className="flex items-center gap-2">
-                      Name
-                      {sortField === "name" && (
-                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
-                      )}
+                      Client Name
+                      {sortField === "name" && (sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
                     </div>
                   </th>
-                  <th 
+                  <th
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
                     onClick={() => handleSort("domain")}
                   >
                     <div className="flex items-center gap-2">
                       Domain
-                      {sortField === "domain" && (
-                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
-                      )}
+                      {sortField === "domain" && (sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
                     </div>
                   </th>
-                  <th 
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                    onClick={() => handleSort("industry")}
-                  >
-                    <div className="flex items-center gap-2">
-                      Industry
-                      {sortField === "industry" && (
-                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
-                      )}
-                    </div>
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Service Package</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -724,7 +947,12 @@ const ClientsPage = () => {
                         {client.domain}
                       </a>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-xs">{client.industry ?? "-"}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-600">
+                      {client.agencyNames?.length ? client.agencyNames.join(", ") : "—"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-700">
+                      {getServicePackageLabel(client)}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {user?.role === "SUPER_ADMIN" ? (
                         <div 
@@ -753,8 +981,12 @@ const ClientsPage = () => {
                               onClick={(e) => e.stopPropagation()}
                             >
                               {[
+                                { label: "Dashboard Only", value: "DASHBOARD_ONLY" },
+                                { label: "Pending", value: "PENDING" },
                                 { label: "Active", value: "ACTIVE" },
-                                { label: "Archived", value: "REJECTED" },
+                                { label: "Canceled", value: "CANCELED" },
+                                { label: "Suspended", value: "SUSPENDED" },
+                                { label: "Archived", value: "ARCHIVED" },
                               ].map(({ label, value }) => (
                                 <div
                                   key={value}
@@ -784,10 +1016,29 @@ const ClientsPage = () => {
                       {client.createdAt ? format(new Date(client.createdAt), "yyyy-MM-dd") : "-"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center flex-wrap gap-2">
+                        {client.status === "PENDING" && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleApproveAndActivate(client)}
+                              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700"
+                            >
+                              Approve & Activate
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRejectToDashboardOnly(client)}
+                              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-200 text-gray-800 hover:bg-gray-300"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        ) : null}
                         <button
                           className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
                           onClick={() => handleViewClick(client)}
+                          title="View"
                         >
                           <Eye className="h-4 w-4" />
                         </button>
@@ -819,12 +1070,14 @@ const ClientsPage = () => {
                         <button
                           className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
                           onClick={() => handleEditClick(client)}
+                          title="Edit"
                         >
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
                           className="p-1 text-gray-400 hover:text-red-600 transition-colors"
                           onClick={() => handleDeleteClient(client.id)}
+                          title="Delete"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -874,8 +1127,12 @@ const ClientsPage = () => {
                           {openStatusId === client.id && (
                           <div className="absolute mt-1 left-0 bg-white border border-gray-200 rounded-md shadow-lg z-10 min-w-[120px]">
                               {[
+                                { label: "Dashboard Only", value: "DASHBOARD_ONLY" },
+                                { label: "Pending", value: "PENDING" },
                                 { label: "Active", value: "ACTIVE" },
-                                { label: "Archived", value: "REJECTED" },
+                                { label: "Canceled", value: "CANCELED" },
+                                { label: "Suspended", value: "SUSPENDED" },
+                                { label: "Archived", value: "ARCHIVED" },
                               ].map(({ label, value }) => (
                                 <div
                                   key={value}
@@ -934,6 +1191,28 @@ const ClientsPage = () => {
                           }}
                           onClick={(e) => e.stopPropagation()}
                         >
+                          {client.status === "PENDING" && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
+                            <>
+                              <button
+                                className="w-full text-left px-4 py-2 text-xs hover:bg-green-50 text-green-700 first:rounded-t-md"
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handleApproveAndActivate(client);
+                                }}
+                              >
+                                Approve & Activate
+                              </button>
+                              <button
+                                className="w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handleRejectToDashboardOnly(client);
+                                }}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
                           <button
                             className="w-full text-left px-4 py-2 text-xs hover:bg-gray-100 first:rounded-t-md"
                             onClick={() => {
@@ -1054,345 +1333,322 @@ const ClientsPage = () => {
 
             <form onSubmit={handleCreateClient} className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
-                {/* Business Information */}
-                <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Business Information</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Business Name</label>
-                      <input
-                        type="text"
-                        value={clientForm.name}
-                        onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Company name"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche</label>
-                      <input
-                        type="text"
-                        value={clientForm.businessNiche}
-                        onChange={(e) => setClientForm({ ...clientForm, businessNiche: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="e.g. Emergency locksmith"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Business Description</label>
-                      <textarea
-                        value={clientForm.businessDescription}
-                        onChange={(e) => setClientForm({ ...clientForm, businessDescription: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={3}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain</label>
-                      <input
-                        type="text"
-                        value={clientForm.domain}
-                        onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="example.com or https://example.com"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Industry</label>
-                      <select
-                        value={clientForm.industry}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setClientForm((prev) => ({
-                            ...prev,
-                            industry: value,
-                            industryOther: value === "Other" ? prev.industryOther : "",
-                          }));
-                        }}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                        required
-                      >
-                        <option value="" disabled>
-                          Select industry
-                        </option>
-                        {INDUSTRY_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-
-                      {clientForm.industry === "Other" && (
-                        <input
-                          type="text"
-                          value={clientForm.industryOther}
-                          onChange={(e) => setClientForm((prev) => ({ ...prev, industryOther: e.target.value }))}
-                          className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                          placeholder="Enter industry"
-                          required
-                        />
-                      )}
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Business Address</label>
-                      <input
-                        type="text"
-                        value={clientForm.businessAddress}
-                        onChange={(e) => setClientForm({ ...clientForm, businessAddress: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Street address"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Primary Location – City</label>
-                      <input
-                        type="text"
-                        value={clientForm.primaryLocationCity}
-                        onChange={(e) => setClientForm({ ...clientForm, primaryLocationCity: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Primary Location – State</label>
-                      <input
-                        type="text"
-                        value={clientForm.primaryLocationState}
-                        onChange={(e) => setClientForm({ ...clientForm, primaryLocationState: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Service Radius / Areas Served</label>
-                      <textarea
-                        value={clientForm.serviceAreasServed}
-                        onChange={(e) => setClientForm({ ...clientForm, serviceAreasServed: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={3}
-                        placeholder="List cities/areas served (comma or newline separated)"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
-                      <input
-                        type="tel"
-                        value={clientForm.phoneNumber}
-                        onChange={(e) => setClientForm({ ...clientForm, phoneNumber: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
-                      <input
-                        type="email"
-                        value={clientForm.emailAddress}
-                        onChange={(e) => setClientForm({ ...clientForm, emailAddress: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                {/* Website Info */}
-                <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Website Info</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Login URL</label>
-                      <input
-                        type="url"
-                        value={clientForm.loginUrl}
-                        onChange={(e) => setClientForm({ ...clientForm, loginUrl: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Login Username</label>
-                      <input
-                        type="text"
-                        value={clientForm.loginUsername}
-                        onChange={(e) => setClientForm({ ...clientForm, loginUsername: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                      <input
-                        type="password"
-                        value={clientForm.loginPassword}
-                        onChange={(e) => setClientForm({ ...clientForm, loginPassword: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                {/* Campaign Type */}
-                <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Campaign Type</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Type</label>
-                      <select
-                        value={clientForm.campaignType}
-                        onChange={(e) => setClientForm({ ...clientForm, campaignType: e.target.value as CampaignType })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                      >
-                        <option value="">Select</option>
-                        <option value="Local">Local</option>
-                        <option value="National">National</option>
-                      </select>
-                    </div>
-                  </div>
-                </section>
-
-                {/* GBP Categories */}
-                <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile (GBP) Categories</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Primary GBP Category</label>
-                      <input
-                        type="text"
-                        value={clientForm.gbpPrimaryCategory}
-                        onChange={(e) => setClientForm({ ...clientForm, gbpPrimaryCategory: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Secondary GBP Categories</label>
-                      <textarea
-                        value={clientForm.gbpSecondaryCategories}
-                        onChange={(e) => setClientForm({ ...clientForm, gbpSecondaryCategories: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={3}
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                {/* Services */}
-                <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile Services</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Services List</label>
-                      <textarea
-                        value={clientForm.primaryServicesList}
-                        onChange={(e) => setClientForm({ ...clientForm, primaryServicesList: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={3}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Services Marked as Primary</label>
-                      <textarea
-                        value={clientForm.servicesMarkedPrimary}
-                        onChange={(e) => setClientForm({ ...clientForm, servicesMarkedPrimary: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={2}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Target Number of Keywords for Campaign</label>
-                      <input
-                        type="text"
-                        value={clientForm.targetKeywordCount}
-                        onChange={(e) => setClientForm({ ...clientForm, targetKeywordCount: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                {/* Keywords + Location */}
-                <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Keywords</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">What are the keywords you want to target?</label>
-                      <textarea
-                        value={clientForm.keywords}
-                        onChange={(e) => setClientForm({ ...clientForm, keywords: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={5}
-                        placeholder="One per line"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={clientForm.latitude}
-                        onChange={(e) => setClientForm({ ...clientForm, latitude: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={clientForm.longitude}
-                        onChange={(e) => setClientForm({ ...clientForm, longitude: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                {/* SEO Roadmap (role-restricted) */}
-                {canSeeSeoRoadmapFields && (
-                  <section>
-                    <h3 className="text-sm font-semibold text-gray-900 mb-4">SEO Roadmap</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Start Month</label>
-                        <input
-                          type="month"
-                          value={clientForm.seoRoadmapStartMonth}
-                          onChange={(e) => setClientForm({ ...clientForm, seoRoadmapStartMonth: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
+                {isAgencyCreateForm ? (
+                  <>
+                    {/* SECTION A: BUSINESS INFORMATION (Required) */}
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">BUSINESS INFORMATION (Required)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Name *</label>
+                          <input type="text" required value={clientForm.name} onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Island Salt & Spa" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche *</label>
+                          <select value={clientForm.businessNiche} onChange={(e) => setClientForm((prev) => ({ ...prev, businessNiche: e.target.value, businessNicheOther: e.target.value === "Other" ? prev.businessNicheOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
+                            <option value="">Select or enter below</option>
+                            {BUSINESS_NICHE_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {clientForm.businessNiche === "Other" && (
+                            <input type="text" value={clientForm.businessNicheOther} onChange={(e) => setClientForm({ ...clientForm, businessNicheOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter niche" required />
+                          )}
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Description *</label>
+                          <textarea required value={clientForm.businessDescription} onChange={(e) => setClientForm({ ...clientForm, businessDescription: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={3} placeholder="Brief description of what the business does" />
+                          <p className="mt-1 text-xs text-gray-500">Brief description of what the business does</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain *</label>
+                          <input type="url" required value={clientForm.domain} onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="https://islandsaltandspa.com" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Industry *</label>
+                          <select value={clientForm.industry} onChange={(e) => setClientForm((prev) => ({ ...prev, industry: e.target.value, industryOther: e.target.value === "Other" ? prev.industryOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
+                            <option value="">Select industry</option>
+                            {INDUSTRY_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {clientForm.industry === "Other" && (
+                            <input type="text" value={clientForm.industryOther} onChange={(e) => setClientForm({ ...clientForm, industryOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter industry" required />
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Pages Per Month</label>
-                        <input
-                          type="number"
-                          value={clientForm.pagesPerMonth}
-                          onChange={(e) => setClientForm({ ...clientForm, pagesPerMonth: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
+                    </section>
+
+                    {/* SECTION B: LOCATION INFORMATION (Required) */}
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">LOCATION INFORMATION (Required)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Address *</label>
+                          <input type="text" required value={clientForm.businessAddress} onChange={(e) => setClientForm({ ...clientForm, businessAddress: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. 123 Main Street" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Primary Location City *</label>
+                          <input type="text" required value={clientForm.primaryLocationCity} onChange={(e) => setClientForm({ ...clientForm, primaryLocationCity: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Huntington" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Primary Location State *</label>
+                          <select value={clientForm.primaryLocationState} onChange={(e) => setClientForm({ ...clientForm, primaryLocationState: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
+                            <option value="">Select state</option>
+                            {US_STATES.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Service Radius</label>
+                          <select value={clientForm.serviceRadius} onChange={(e) => setClientForm({ ...clientForm, serviceRadius: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white">
+                            <option value="">Select...</option>
+                            {SERVICE_RADIUS_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <p className="mt-1 text-xs text-gray-500">How far do you serve from your primary location?</p>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Areas Served</label>
+                          <textarea value={clientForm.serviceAreasServed} onChange={(e) => setClientForm({ ...clientForm, serviceAreasServed: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={2} placeholder="e.g. Huntington, Northport, Centerport, Cold Spring Harbor, Dix Hills" />
+                          <p className="mt-1 text-xs text-gray-500">List cities, towns, or regions you serve (comma-separated)</p>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Technical Hours Per Month</label>
-                        <input
-                          type="number"
-                          value={clientForm.technicalHoursPerMonth}
-                          onChange={(e) => setClientForm({ ...clientForm, technicalHoursPerMonth: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
+                    </section>
+
+                    {/* SECTION C: CONTACT INFORMATION (Required) */}
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">CONTACT INFORMATION (Required)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
+                          <input type="tel" required value={clientForm.phoneNumber} onChange={(e) => setClientForm({ ...clientForm, phoneNumber: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="+1 (631) 555-1234" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                          <input type="email" required value={clientForm.emailAddress} onChange={(e) => setClientForm({ ...clientForm, emailAddress: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="info@islandsaltandspa.com" />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Duration in Months</label>
-                        <input
-                          type="number"
-                          value={clientForm.campaignDurationMonths}
-                          onChange={(e) => setClientForm({ ...clientForm, campaignDurationMonths: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
+                    </section>
+
+                    {/* SECTION D: WEBSITE LOGIN INFO (Optional) */}
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">WEBSITE LOGIN INFO (Optional)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Website Login URL</label>
+                          <input type="url" value={clientForm.loginUrl} onChange={(e) => setClientForm({ ...clientForm, loginUrl: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="https://islandsaltandspa.com/wp-admin" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Website Username</label>
+                          <input type="text" value={clientForm.loginUsername} onChange={(e) => setClientForm({ ...clientForm, loginUsername: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="admin" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Website Password</label>
+                          <input type="password" value={clientForm.loginPassword} onChange={(e) => setClientForm({ ...clientForm, loginPassword: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="••••••••" />
+                          <p className="mt-1 text-xs text-gray-500">Stored securely</p>
+                        </div>
                       </div>
-                    </div>
-                  </section>
+                    </section>
+
+                    {/* SECTION E: CAMPAIGN TYPE (Required) */}
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SECTION E: CAMPAIGN TYPE (Required)</h3>
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Type *</label>
+                        <div className="flex flex-wrap gap-4">
+                          <label className="flex items-center gap-2">
+                            <input type="radio" name="campaignType" value="Local" checked={clientForm.campaignType === "Local"} onChange={(e) => setClientForm({ ...clientForm, campaignType: e.target.value as CampaignType })} className="text-primary-600" required={isAgencyCreateForm} />
+                            <span>Local (targeting specific geographic area)</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input type="radio" name="campaignType" value="National" checked={clientForm.campaignType === "National"} onChange={(e) => setClientForm({ ...clientForm, campaignType: e.target.value as CampaignType })} className="text-primary-600" />
+                            <span>National (targeting entire country/multiple regions)</span>
+                          </label>
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* SECTION F: GOOGLE BUSINESS PROFILE (Optional) */}
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">GOOGLE BUSINESS PROFILE (Optional)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Google Business Profile Category</label>
+                          <input type="text" value={clientForm.gbpPrimaryCategory} onChange={(e) => setClientForm({ ...clientForm, gbpPrimaryCategory: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Day Spa" />
+                          <p className="mt-1 text-xs text-gray-500">Your primary GBP category (exact match)</p>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Secondary GBP Categories</label>
+                          <input type="text" value={clientForm.gbpSecondaryCategories} onChange={(e) => setClientForm({ ...clientForm, gbpSecondaryCategories: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Massage Therapist, Wellness Center" />
+                          <p className="mt-1 text-xs text-gray-500">Additional GBP categories (comma-separated)</p>
+                        </div>
+                      </div>
+                    </section>
+                  </>
+                ) : (
+                  <>
+                    {/* Full form for Super Admin / Specialist */}
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Business Information</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Name</label>
+                          <input type="text" value={clientForm.name} onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="Company name" required />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche</label>
+                          <input type="text" value={clientForm.businessNiche} onChange={(e) => setClientForm({ ...clientForm, businessNiche: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Emergency locksmith" />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Description</label>
+                          <textarea value={clientForm.businessDescription} onChange={(e) => setClientForm({ ...clientForm, businessDescription: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={3} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain</label>
+                          <input type="text" value={clientForm.domain} onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="example.com or https://example.com" required />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Industry</label>
+                          <select value={clientForm.industry} onChange={(e) => setClientForm((prev) => ({ ...prev, industry: e.target.value, industryOther: e.target.value === "Other" ? prev.industryOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
+                            <option value="" disabled>Select industry</option>
+                            {INDUSTRY_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {clientForm.industry === "Other" && (
+                            <input type="text" value={clientForm.industryOther} onChange={(e) => setClientForm({ ...clientForm, industryOther: e.target.value })} className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter industry" required />
+                          )}
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Address</label>
+                          <input type="text" value={clientForm.businessAddress} onChange={(e) => setClientForm({ ...clientForm, businessAddress: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="Street address" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Primary Location – City</label>
+                          <input type="text" value={clientForm.primaryLocationCity} onChange={(e) => setClientForm({ ...clientForm, primaryLocationCity: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Primary Location – State</label>
+                          <input type="text" value={clientForm.primaryLocationState} onChange={(e) => setClientForm({ ...clientForm, primaryLocationState: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Service Radius / Areas Served</label>
+                          <textarea value={clientForm.serviceAreasServed} onChange={(e) => setClientForm({ ...clientForm, serviceAreasServed: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={3} placeholder="List cities/areas served (comma or newline separated)" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                          <input type="tel" value={clientForm.phoneNumber} onChange={(e) => setClientForm({ ...clientForm, phoneNumber: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                          <input type="email" value={clientForm.emailAddress} onChange={(e) => setClientForm({ ...clientForm, emailAddress: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Website Info</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Login URL</label>
+                          <input type="url" value={clientForm.loginUrl} onChange={(e) => setClientForm({ ...clientForm, loginUrl: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Login Username</label>
+                          <input type="text" value={clientForm.loginUsername} onChange={(e) => setClientForm({ ...clientForm, loginUsername: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                          <input type="password" value={clientForm.loginPassword} onChange={(e) => setClientForm({ ...clientForm, loginPassword: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Campaign Type</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Type</label>
+                          <select value={clientForm.campaignType} onChange={(e) => setClientForm({ ...clientForm, campaignType: e.target.value as CampaignType })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white">
+                            <option value="">Select</option>
+                            <option value="Local">Local</option>
+                            <option value="National">National</option>
+                          </select>
+                        </div>
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile (GBP) Categories</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Primary GBP Category</label>
+                          <input type="text" value={clientForm.gbpPrimaryCategory} onChange={(e) => setClientForm({ ...clientForm, gbpPrimaryCategory: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Secondary GBP Categories</label>
+                          <textarea value={clientForm.gbpSecondaryCategories} onChange={(e) => setClientForm({ ...clientForm, gbpSecondaryCategories: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={3} />
+                        </div>
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile Services</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Services List</label>
+                          <textarea value={clientForm.primaryServicesList} onChange={(e) => setClientForm({ ...clientForm, primaryServicesList: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={3} />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Services Marked as Primary</label>
+                          <textarea value={clientForm.servicesMarkedPrimary} onChange={(e) => setClientForm({ ...clientForm, servicesMarkedPrimary: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={2} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Target Number of Keywords for Campaign</label>
+                          <input type="text" value={clientForm.targetKeywordCount} onChange={(e) => setClientForm({ ...clientForm, targetKeywordCount: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Keywords</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">What are the keywords you want to target?</label>
+                          <textarea value={clientForm.keywords} onChange={(e) => setClientForm({ ...clientForm, keywords: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={5} placeholder="One per line" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
+                          <input type="number" step="any" value={clientForm.latitude} onChange={(e) => setClientForm({ ...clientForm, latitude: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
+                          <input type="number" step="any" value={clientForm.longitude} onChange={(e) => setClientForm({ ...clientForm, longitude: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                        </div>
+                      </div>
+                    </section>
+                    {canSeeSeoRoadmapFields && (
+                      <section>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-4">SEO Roadmap</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Start Month</label>
+                            <input type="month" value={clientForm.seoRoadmapStartMonth} onChange={(e) => setClientForm({ ...clientForm, seoRoadmapStartMonth: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Pages Per Month</label>
+                            <input type="number" value={clientForm.pagesPerMonth} onChange={(e) => setClientForm({ ...clientForm, pagesPerMonth: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Technical Hours Per Month</label>
+                            <input type="number" value={clientForm.technicalHoursPerMonth} onChange={(e) => setClientForm({ ...clientForm, technicalHoursPerMonth: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Duration in Months</label>
+                            <input type="number" value={clientForm.campaignDurationMonths} onChange={(e) => setClientForm({ ...clientForm, campaignDurationMonths: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
+                          </div>
+                        </div>
+                      </section>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -1685,95 +1941,141 @@ const ClientsPage = () => {
                         rows={2}
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Target Number of Keywords for Campaign</label>
-                      <input
-                        type="text"
-                        value={clientForm.targetKeywordCount}
-                        onChange={(e) => setClientForm({ ...clientForm, targetKeywordCount: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
                   </div>
                 </section>
 
-                <section>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Keywords</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">What are the keywords you want to target?</label>
-                      <textarea
-                        value={clientForm.keywords}
-                        onChange={(e) => setClientForm({ ...clientForm, keywords: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        rows={5}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={clientForm.latitude}
-                        onChange={(e) => setClientForm({ ...clientForm, latitude: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={clientForm.longitude}
-                        onChange={(e) => setClientForm({ ...clientForm, longitude: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                </section>
+                {user?.role === "SUPER_ADMIN" && (
+                  <>
+                    <section className="border-t border-gray-200 pt-6">
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION A: KEYWORD ALLOCATION</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Number of Keywords for Campaign</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={clientForm.targetKeywordCount}
+                            onChange={(e) => setClientForm({ ...clientForm, targetKeywordCount: e.target.value })}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            placeholder="e.g. 50"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">Sets the keyword limit for this specific client</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Total Keywords to Target</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={clientForm.totalKeywordsToTarget}
+                            onChange={(e) => setClientForm({ ...clientForm, totalKeywordsToTarget: e.target.value })}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            placeholder="e.g. 200"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">Long-term goal/roadmap keywords</p>
+                        </div>
+                      </div>
+                    </section>
 
-                {canSeeSeoRoadmapFields && (
-                  <section>
-                    <h3 className="text-sm font-semibold text-gray-900 mb-4">SEO Roadmap</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Start Month</label>
-                        <input
-                          type="month"
-                          value={clientForm.seoRoadmapStartMonth}
-                          onChange={(e) => setClientForm({ ...clientForm, seoRoadmapStartMonth: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION B: GEOLOCATION DATA</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={clientForm.latitude}
+                            onChange={(e) => setClientForm({ ...clientForm, latitude: e.target.value })}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            placeholder="e.g. 40.8682"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">Used for precise local ranking tracking</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={clientForm.longitude}
+                            onChange={(e) => setClientForm({ ...clientForm, longitude: e.target.value })}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            placeholder="e.g. -73.4357"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">Used for precise local ranking tracking</p>
+                        </div>
                       </div>
+                    </section>
+
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION C: SEO ROADMAP</h3>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Pages Per Month</label>
-                        <input
-                          type="number"
-                          value={clientForm.pagesPerMonth}
-                          onChange={(e) => setClientForm({ ...clientForm, pagesPerMonth: e.target.value })}
+                        <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Section</label>
+                        <textarea
+                          value={clientForm.seoRoadmapSection}
+                          onChange={(e) => setClientForm({ ...clientForm, seoRoadmapSection: e.target.value })}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          rows={4}
+                          placeholder="e.g. Month 1: Technical audit + on-page optimization. Month 2: Content hub creation. Month 3: Link building campaign."
                         />
+                        <p className="mt-1 text-xs text-gray-500">Super Admin&apos;s internal notes/strategy for this client. NOT visible to agency or client.</p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Technical Hours Per Month</label>
-                        <input
-                          type="number"
-                          value={clientForm.technicalHoursPerMonth}
-                          onChange={(e) => setClientForm({ ...clientForm, technicalHoursPerMonth: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
+                    </section>
+
+                    <section>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION D: MANAGED SERVICE STATUS</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Managed Service Status</label>
+                          <select
+                            value={clientForm.clientStatus}
+                            onChange={(e) => setClientForm({ ...clientForm, clientStatus: e.target.value })}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                          >
+                            {MANAGED_SERVICE_STATUS_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {(clientForm.clientStatus === "ACTIVE" || clientForm.clientStatus === "PENDING" || clientForm.clientStatus === "CANCELED") && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Managed Service Package</label>
+                            <select
+                              value={clientForm.managedServicePackage}
+                              onChange={(e) => setClientForm({ ...clientForm, managedServicePackage: e.target.value })}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                            >
+                              <option value="">Select...</option>
+                              {MANAGED_SERVICE_PACKAGE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {clientForm.clientStatus === "ACTIVE" && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Service Start Date</label>
+                            <input
+                              type="date"
+                              value={clientForm.serviceStartDate}
+                              onChange={(e) => setClientForm({ ...clientForm, serviceStartDate: e.target.value })}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                          </div>
+                        )}
+                        {clientForm.clientStatus === "CANCELED" && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Service End Date</label>
+                            <input
+                              type="date"
+                              value={clientForm.canceledEndDate}
+                              onChange={(e) => setClientForm({ ...clientForm, canceledEndDate: e.target.value })}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Duration in Months</label>
-                        <input
-                          type="number"
-                          value={clientForm.campaignDurationMonths}
-                          onChange={(e) => setClientForm({ ...clientForm, campaignDurationMonths: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
-                      </div>
-                    </div>
-                  </section>
+                    </section>
+                  </>
                 )}
               </div>
 

@@ -103,6 +103,7 @@ server.on("listening", async () => {
   // Start report scheduler cron job (runs every hour)
   const { processScheduledReports, refreshAllGA4Data } = await import("./lib/reportScheduler.js");
   const { autoSyncBacklinksForStaleClients } = await import("./routes/seo.js");
+  const { archiveCanceledClientsPastEndDate } = await import("./lib/clientStatusWorkflow.js");
 
   // Run immediately on startup (for testing)
   processScheduledReports().catch(console.error);
@@ -119,6 +120,13 @@ server.on("listening", async () => {
 
   console.log("Report scheduler started (runs every hour)");
   console.log("GA4 auto-refresh scheduler started (runs Monday mornings)");
+
+  // Client status: archive CANCELED clients when canceledEndDate has passed (run daily)
+  archiveCanceledClientsPastEndDate().catch(console.error);
+  setInterval(() => {
+    archiveCanceledClientsPastEndDate().catch(console.error);
+  }, 24 * 60 * 60 * 1000);
+  console.log("Client status workflow started (archives canceled clients daily)");
 
   // DataForSEO Backlinks auto-sync: run periodically, respecting 48h throttle per client.
   const backlinksAutoSyncEnabled =

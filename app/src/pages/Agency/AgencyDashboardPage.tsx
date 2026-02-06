@@ -1,24 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
 import {
-  TrendingUp,
-  Search,
   BarChart3,
   Users,
-  UserPlus,
   Activity,
-  ArrowUpRight,
-  ArrowDownRight,
-  Minus,
-  Globe,
-  Eye,
   Target,
   Loader2,
   RefreshCw,
+  CreditCard,
+  ChevronRight,
 } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 
@@ -50,6 +44,8 @@ interface DashboardStats {
     change: number;
     url: string;
     volume: number;
+    clientId?: string;
+    clientName?: string;
   }>;
   topPages: Array<{
     url: string;
@@ -67,6 +63,22 @@ interface DashboardStats {
     traffic: number;
   }>;
   ga4Summary: AgencyGa4Summary;
+  quickWins?: Array<{ clientId: string; clientName: string; keyword: string; position: number }>;
+  numberOneRankings?: { total: number; byClient: Array<{ clientId: string; clientName: string; count: number }> };
+  clientPerformance?: Array<{
+    clientId: string;
+    clientName: string;
+    trafficChangePercent: number;
+    trafficChangeVisits: number;
+    organicEtv?: number;
+  }>;
+  researchCredits?: { used: number; limit: number; resetsInDays: number };
+  recentActivity?: Array<{ text: string; date: string }>;
+  tierLimit?: number;
+  keywordLimit?: number;
+  currentTier?: string;
+  monthlySpend?: string;
+  nextBillingDate?: string;
 }
 
 const defaultGa4Summary: AgencyGa4Summary = {
@@ -115,6 +127,16 @@ const mapDashboardResponse = (payload: any): DashboardStats => ({
       }))
       .filter((point: TrendPoint) => Boolean(point.date)),
   },
+  quickWins: payload?.quickWins ?? [],
+  numberOneRankings: payload?.numberOneRankings ?? { total: 0, byClient: [] },
+  clientPerformance: payload?.clientPerformance ?? [],
+  researchCredits: payload?.researchCredits ?? { used: 0, limit: 150, resetsInDays: 30 },
+  recentActivity: payload?.recentActivity ?? [],
+  tierLimit: payload?.tierLimit ?? 10,
+  keywordLimit: payload?.keywordLimit ?? 500,
+  currentTier: payload?.currentTier ?? "Growth",
+  monthlySpend: payload?.monthlySpend ?? "0",
+  nextBillingDate: payload?.nextBillingDate ?? "",
 });
 
 const defaultDashboardStats: DashboardStats = mapDashboardResponse({});
@@ -122,7 +144,6 @@ const defaultDashboardStats: DashboardStats = mapDashboardResponse({});
 const AgencyDashboardPage = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
-  const { clients } = useSelector((state: RootState) => state.client);
   const [selectedPeriod, setSelectedPeriod] = useState("30");
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -167,75 +188,6 @@ const AgencyDashboardPage = () => {
       setRefreshing(false);
     }
   };
-
-  const getChangeIcon = (change: number) => {
-    if (change > 0) return <ArrowUpRight className="h-4 w-4 text-green-500" />;
-    if (change < 0) return <ArrowDownRight className="h-4 w-4 text-red-500" />;
-    return <Minus className="h-4 w-4 text-gray-400" />;
-  };
-
-  const getChangeColor = (change: number) => {
-    if (change > 0) return "text-green-600";
-    if (change < 0) return "text-red-600";
-    return "text-gray-500";
-  };
-
-  const hasGa4Data = stats.ga4Summary.connectedClients > 0;
-  const ga4TotalClients = stats.ga4Summary.totalClients || stats.totalProjects || 0;
-
-  const formatGa4Value = (value: number) => {
-    if (!hasGa4Data) return "—";
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return "—";
-    return Math.round(numeric).toLocaleString();
-  };
-
-  const ga4Cards = [
-    {
-      key: "websiteVisitors",
-      title: "Website Visitors",
-      value: stats.ga4Summary.websiteVisitors,
-      icon: Users,
-      accent: "text-blue-500",
-    },
-    {
-      key: "organicTraffic",
-      title: "Organic Traffic",
-      value: stats.ga4Summary.organicSessions,
-      icon: Search,
-      accent: "text-green-500",
-    },
-    {
-      key: "firstTimeVisitors",
-      title: "First Time Visitors",
-      value: stats.ga4Summary.firstTimeVisitors,
-      icon: UserPlus,
-      accent: "text-purple-500",
-    },
-    {
-      key: "engagedVisitors",
-      title: "Engaged Visitors",
-      value: stats.ga4Summary.engagedVisitors,
-      icon: Activity,
-      accent: "text-orange-500",
-    },
-  ];
-
-  const ga4ConnectionSummary = hasGa4Data
-    ? `GA4 connected for ${stats.ga4Summary.connectedClients}/${ga4TotalClients} client${
-        ga4TotalClients === 1 ? "" : "s"
-      }`
-    : "No GA4-connected clients yet";
-
-  const newUsersTrendData = useMemo(
-    () => stats.ga4Summary.newUsersTrend.map((point) => ({ ...point })),
-    [stats.ga4Summary.newUsersTrend]
-  );
-
-  const totalUsersTrendData = useMemo(
-    () => stats.ga4Summary.totalUsersTrend.map((point) => ({ ...point })),
-    [stats.ga4Summary.totalUsersTrend]
-  );
 
   return (
     <div className="p-8">
@@ -283,304 +235,342 @@ const AgencyDashboardPage = () => {
         </div>
       </div>
 
-      {/* GA4 Overview */}
+      {/* SECTION 1: Top metrics cards (same card design as Client Dashboard "Website Visitors" etc.) */}
       <section className="mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">GA4 Performance Overview</h2>
-          <span className="text-sm text-gray-500">{ga4ConnectionSummary}</span>
-        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {ga4Cards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <div
-                key={card.key}
-                className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg transition-shadow"
+          {/* Card 1 - Active Clients */}
+          <Link
+            to="/agency/clients"
+            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Active Clients</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {stats.totalProjects} / {stats.tierLimit ?? 10}
+                </p>
+                {(() => {
+                  const limit = stats.tierLimit ?? 10;
+                  const used = stats.totalProjects;
+                  const slotsLeft = limit - used;
+                  if (slotsLeft <= 0) {
+                    return (
+                      <p className="mt-1 text-sm font-medium text-red-600">
+                        At capacity — upgrade to add more clients
+                      </p>
+                    );
+                  }
+                  if (slotsLeft === 1) {
+                    return (
+                      <p className="mt-1 text-sm font-medium text-amber-600">
+                        {slotsLeft} slot left — consider upgrading
+                      </p>
+                    );
+                  }
+                  return <p className="mt-1 text-xs text-gray-500">{slotsLeft} slots left</p>;
+                })()}
+              </div>
+              <Users className="h-8 w-8 text-primary-600" />
+            </div>
+            <p className="mt-3 text-xs text-primary-600 font-medium flex items-center gap-1">
+              View clients <ChevronRight className="h-3 w-3" />
+            </p>
+          </Link>
+
+          {/* Card 2 - Total Keywords Tracked */}
+          <Link
+            to="/agency/keywords"
+            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Total Keywords Tracked</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {stats.totalKeywords.toLocaleString()} / {(stats.keywordLimit ?? 500).toLocaleString()}
+                </p>
+                {(() => {
+                  const limit = stats.keywordLimit ?? 500;
+                  const used = stats.totalKeywords;
+                  const pct = limit ? (used / limit) * 100 : 0;
+                  if (pct >= 100) {
+                    return (
+                      <p className="mt-1 text-sm font-medium text-red-600">
+                        At limit — upgrade for more keywords
+                      </p>
+                    );
+                  }
+                  if (pct >= 90) {
+                    return (
+                      <p className="mt-1 text-sm font-medium text-amber-600">
+                        Approaching limit — consider upgrading
+                      </p>
+                    );
+                  }
+                  return (
+                    <p className="mt-1 text-xs text-gray-500">
+                      {Math.max(0, limit - used).toLocaleString()} remaining
+                    </p>
+                  );
+                })()}
+              </div>
+              <Target className="h-8 w-8 text-green-600" />
+            </div>
+            <p className="mt-3 text-xs text-primary-600 font-medium flex items-center gap-1">
+              Keyword breakdown <ChevronRight className="h-3 w-3" />
+            </p>
+          </Link>
+
+          {/* Card 3 - Your Plan */}
+          <Link
+            to="/agency/subscription"
+            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Your Plan</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.currentTier ?? "Growth"}</p>
+              </div>
+              <BarChart3 className="h-8 w-8 text-amber-600" />
+            </div>
+            <span className="mt-3 inline-block px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm">
+              Manage Plan
+            </span>
+          </Link>
+
+          {/* Card 4 - Monthly Spend */}
+          <Link
+            to="/agency/subscription"
+            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Monthly Spend</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {(() => {
+                    const val = stats.monthlySpend;
+                    if (val == null) return "$0.00";
+                    const num = typeof val === "string" ? parseFloat(val) : Number(val);
+                    return Number.isFinite(num) ? `$${num.toFixed(2)}` : `$${String(val)}`;
+                  })()}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {stats.nextBillingDate
+                    ? `Next billing: ${new Date(stats.nextBillingDate).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}`
+                    : "—"}
+                </p>
+              </div>
+              <CreditCard className="h-8 w-8 text-gray-600" />
+            </div>
+            <p className="mt-3 text-xs text-primary-600 font-medium flex items-center gap-1">
+              Invoice history <ChevronRight className="h-3 w-3" />
+            </p>
+          </Link>
+        </div>
+      </section>
+
+      {/* SECTION 2: Main content area - two columns */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+        {/* LEFT COLUMN - 60% (3/5) */}
+        <div className="lg:col-span-3 space-y-8">
+          {/* Panel 1 - Client Performance Overview */}
+          <div className="bg-white rounded-xl border border-gray-200">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Client Performance Overview</h2>
+            </div>
+            <div className="p-6">
+              {loading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                </div>
+              ) : (stats.clientPerformance?.length ?? 0) === 0 ? (
+                <p className="text-sm text-gray-500 py-4">No client performance data yet.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {(stats.clientPerformance ?? [])
+                    .sort((a, b) => (b.trafficChangePercent ?? 0) - (a.trafficChangePercent ?? 0))
+                    .slice(0, 5)
+                    .map((row) => {
+                      const pct = row.trafficChangePercent ?? 0;
+                      const dot =
+                        pct >= 10 ? "bg-green-500" : pct >= 0 ? "bg-yellow-500" : "bg-red-500";
+                      return (
+                        <li key={row.clientId} className="flex items-center justify-between py-2">
+                          <div className="flex items-center gap-3">
+                            <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${dot}`} />
+                            <span className="text-sm font-medium text-gray-900">{row.clientName}</span>
+                          </div>
+                          <div className="text-right">
+                            <span
+                              className={
+                                pct >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"
+                              }
+                            >
+                              {pct >= 0 ? "+" : ""}
+                              {pct}% traffic
+                            </span>
+                            <span className="block text-xs text-gray-500">
+                              {row.trafficChangeVisits >= 0 ? "↑" : "↓"}{" "}
+                              {Math.abs(row.trafficChangeVisits).toLocaleString()} visits
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    })}
+                </ul>
+              )}
+              <Link
+                to="/agency/clients"
+                className="mt-4 inline-block text-sm font-medium text-primary-600 hover:text-primary-700"
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">{card.title}</p>
-                    <p className="text-2xl font-bold text-gray-900">{formatGa4Value(card.value)}</p>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <Icon className={`h-6 w-6 ${card.accent}`} />
-                  </div>
-                </div>
-                {hasGa4Data ? (
-                  <div className="mt-4 flex items-center space-x-2">
-                    <TrendingUp className="h-4 w-4 text-green-500" />
-                    <span className="text-sm text-green-600">Real-time aggregate from GA4</span>
-                  </div>
-                ) : (
-                  <div className="mt-4">
-                    <span className="text-xs text-gray-500">Connect GA4 for your clients to view data</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        {!hasGa4Data && (
-          <div className="mt-4 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3">
-            Connect at least one client's GA4 property to populate this section.
-          </div>
-        )}
-      </section>
-
-      {/* GA4 Trends */}
-      <section className="mb-10">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-white p-6 rounded-xl border border-gray-200">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">New Users Trending</h2>
+                View All Clients →
+              </Link>
             </div>
-            <div className="h-64">
-              {hasGa4Data ? (
-                newUsersTrendData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={newUsersTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime())
-                            ? value
-                            : `${date.getMonth() + 1}/${date.getDate()}`;
-                        }}
-                      />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip
-                        labelFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-                        }}
-                        formatter={(value: number) => Math.round(value).toLocaleString()}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#3B82F6"
-                        strokeWidth={2}
-                        name="New Users"
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                    Not enough GA4 data for this date range
-                  </div>
-                )
+          </div>
+
+          {/* Panel 2 - Quick Wins Across Clients */}
+          <div className="bg-white rounded-xl border border-gray-200">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Quick Wins Across Clients</h2>
+              <p className="text-sm text-gray-500 mt-0.5">Keywords in Position 4-10 (easy wins)</p>
+            </div>
+            <div className="p-6">
+              {loading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                </div>
+              ) : (stats.quickWins?.length ?? 0) === 0 ? (
+                <p className="text-sm text-gray-500 py-4">No quick win keywords in position 4-10.</p>
               ) : (
-                <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                  Connect GA4 to view this chart
-                </div>
+                <ul className="space-y-2">
+                  {(stats.quickWins ?? []).slice(0, 5).map((row, i) => (
+                    <li key={i} className="text-sm text-gray-700 py-1.5">
+                      <span className="font-medium text-gray-900">{row.clientName}</span>
+                      {" – "}
+                      <span className="text-gray-600">&apos;{row.keyword}&apos;</span>
+                      <span className="text-gray-500"> (pos {row.position})</span>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl border border-gray-200">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Total Users Trending</h2>
-            </div>
-            <div className="h-64">
-              {hasGa4Data ? (
-                totalUsersTrendData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={totalUsersTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime())
-                            ? value
-                            : `${date.getMonth() + 1}/${date.getDate()}`;
-                        }}
-                      />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip
-                        labelFormatter={(value) => {
-                          const date = new Date(value);
-                          return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-                        }}
-                        formatter={(value: number) => Math.round(value).toLocaleString()}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#10B981"
-                        strokeWidth={2}
-                        name="Total Users"
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                    Not enough GA4 data for this date range
-                  </div>
-                )
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                  Connect GA4 to view this chart
-                </div>
-              )}
+              <Link
+                to="/agency/keywords"
+                className="mt-4 inline-block text-sm font-medium text-primary-600 hover:text-primary-700"
+              >
+                View All Opportunities →
+              </Link>
             </div>
           </div>
         </div>
-      </section>
 
-
-      {/* Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Rankings */}
-        <div className="bg-white rounded-xl border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Recent Ranking Changes
-              </h2>
-              <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">
-                View all rankings
-              </button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Keyword
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Position
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Change
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Volume
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {loading ? (
-                  <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center">
-                      <Loader2 className="h-5 w-5 animate-spin text-primary-600 mx-auto" />
-                    </td>
-                  </tr>
-                ) : stats.recentRankings.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500">
-                      No recent ranking changes
-                    </td>
-                  </tr>
-                ) : (
-                  stats.recentRankings.map((ranking, index) => (
-                  <tr key={index} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {ranking.keyword}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-bold text-gray-900">
-                        #{ranking.position}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div
-                        className={`flex items-center space-x-1 text-sm ${getChangeColor(
-                          ranking.change
-                        )}`}
-                      >
-                        {getChangeIcon(ranking.change)}
-                        <span>
-                          {ranking.change > 0 ? "+" : ""}
-                          {ranking.change}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {ranking.volume.toLocaleString()}
-                      </div>
-                    </td>
-                  </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Top Pages */}
-        <div className="bg-white rounded-xl border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Top Performing Pages
-              </h2>
-              <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">
-                View all pages
-              </button>
-            </div>
-          </div>
-          <div className="p-6">
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
-              </div>
-            ) : stats.topPages.length === 0 ? (
-              <div className="text-center py-8 text-sm text-gray-500">
-                No top pages data available
-              </div>
-            ) : (
-            <div className="space-y-4">
-                {stats.topPages.map((page, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        {/* RIGHT COLUMN - 40% (2/5) */}
+        <div className="lg:col-span-2 space-y-8">
+          {/* Panel 1 - Keyword Research Credits */}
+          <div className="bg-white rounded-xl border border-gray-200">
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-gray-900">Keyword Research Credits</h2>
+              <div className="mt-4">
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-600">
+                    {(stats.researchCredits?.used ?? 0)} / {(stats.researchCredits?.limit ?? 150)} used
+                  </span>
+                </div>
+                <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        ((stats.researchCredits?.used ?? 0) / (stats.researchCredits?.limit ?? 150)) * 100
+                      )}%`,
+                      backgroundColor:
+                        (stats.researchCredits?.used ?? 0) >= (stats.researchCredits?.limit ?? 150)
+                          ? "rgb(220 38 38)"
+                          : (stats.researchCredits?.used ?? 0) / (stats.researchCredits?.limit ?? 150) >= 0.9
+                            ? "rgb(217 119 6)"
+                            : "var(--tw-gradient-from, rgb(59 130 246))",
+                    }}
+                  />
+                </div>
+                {(() => {
+                  const used = stats.researchCredits?.used ?? 0;
+                  const limit = stats.researchCredits?.limit ?? 150;
+                  if (used >= limit) {
+                    return (
+                      <p className="mt-2 text-sm font-medium text-red-600">
+                        At limit — buy more credits to continue research
+                      </p>
+                    );
+                  }
+                  if (limit && used >= limit * 0.9) {
+                    return (
+                      <p className="mt-2 text-sm font-medium text-amber-600">
+                        Approaching limit — consider buying a credit pack
+                      </p>
+                    );
+                  }
+                  return (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Resets in {(stats.researchCredits?.resetsInDays ?? 30)} days
+                    </p>
+                  );
+                })()}
+                <Link
+                  to="/agency/add-ons"
+                  className="mt-3 inline-block px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <Globe className="h-4 w-4 text-gray-400" />
-                      <span className="text-sm font-medium text-gray-900">
-                        {page.url}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 text-xs text-gray-600">
-                      <div>
-                        <span className="font-medium">
-                          {page.clicks.toLocaleString()}
-                        </span>{" "}
-                        clicks
-                      </div>
-                      <div>
-                        <span className="font-medium">{page.ctr}%</span> CTR
-                      </div>
-                      <div>
-                        <span className="font-medium">
-                          #{page.position.toFixed(1)}
-                        </span>{" "}
-                        avg pos
-                      </div>
-                    </div>
-                  </div>
-                  <button className="p-2 text-gray-400 hover:text-primary-600 transition-colors">
-                    <Eye className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
+                  Buy Credit Pack
+                </Link>
+              </div>
             </div>
-            )}
+          </div>
+
+          {/* Panel 2 - Recent Activity */}
+          <div className="bg-white rounded-xl border border-gray-200">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
+            </div>
+            <div className="p-6">
+              {(stats.recentActivity?.length ?? 0) === 0 ? (
+                <p className="text-sm text-gray-500">No recent activity.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {(stats.recentActivity ?? []).slice(0, 4).map((item, i) => (
+                    <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                      <Activity className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+                      <span>{item.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Link
+                to="/agency/settings"
+                className="mt-4 inline-block text-sm font-medium text-primary-600 hover:text-primary-700"
+              >
+                View All Activity →
+              </Link>
+            </div>
+          </div>
+
+          {/* Panel 3 - Number 1 Rankings Portfolio */}
+          <div className="bg-white rounded-xl border border-gray-200">
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-gray-900">Number 1 Rankings Across Portfolio</h2>
+              <p className="mt-2 text-2xl font-bold text-gray-900">
+                Total #1 Rankings: {(stats.numberOneRankings?.total ?? 0).toLocaleString()}
+              </p>
+              <ul className="mt-4 space-y-2">
+                {(stats.numberOneRankings?.byClient ?? []).slice(0, 4).map((row) => (
+                  <li key={row.clientId} className="flex items-center gap-2 text-sm">
+                    <span className="text-lg">🏆</span>
+                    <span className="font-medium text-gray-900">{row.clientName}</span>
+                    <span className="text-gray-500">({row.count})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
       </div>

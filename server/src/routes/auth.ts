@@ -492,34 +492,38 @@ router.get("/specialists", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    let specialists;
+    let rawSpecialists: { id: string; name: string | null; email: string; specialties: string | null }[];
     if (user.role === "SUPER_ADMIN") {
-      // Super admin can see all specialists
-      specialists = await prisma.user.findMany({
+      rawSpecialists = await prisma.user.findMany({
         where: { role: "SPECIALIST" },
-        select: { id: true, name: true, email: true }
+        select: { id: true, name: true, email: true, specialties: true }
       });
     } else {
-      // Get specialists from user's agency
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId },
         select: { agencyId: true }
       });
-      
       if (!userAgency) {
         return res.status(404).json({ message: "Agency not found" });
       }
-
-      specialists = await prisma.user.findMany({
-        where: {
-          role: "SPECIALIST",
-          // agencies: {
-          //   some: { agencyId: userAgency.agencyId }
-          // }
-        },
-        select: { id: true, name: true, email: true }
+      rawSpecialists = await prisma.user.findMany({
+        where: { role: "SPECIALIST" },
+        select: { id: true, name: true, email: true, specialties: true }
       });
     }
+
+    const specialists = rawSpecialists.map((u) => {
+      let specialties: string[] = [];
+      if (u.specialties) {
+        try {
+          const parsed = JSON.parse(u.specialties);
+          specialties = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          // ignore invalid JSON
+        }
+      }
+      return { id: u.id, name: u.name, email: u.email, specialties };
+    });
 
     res.json(specialists);
   } catch (error) {

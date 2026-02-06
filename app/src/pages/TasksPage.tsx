@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import { RootState } from "@/store";
 
@@ -33,13 +34,15 @@ import { getStatusBadge } from "@/utils";
 import KanbanBoard from "./KanbanBoard";
 import TaskModal from "@/components/TaskModal";
 import OnboardingTemplateModal from "@/components/OnboardingTemplateModal";
-import { fetchTasks, patchTaskStatus, deleteTask } from "@/store/slices/taskSlice";
+import { fetchTasks, patchTaskStatus, deleteTask, updateTask } from "@/store/slices/taskSlice";
 import { ROLE, Task } from "@/utils/types";
 import toast from "react-hot-toast";
 import ConfirmDialog from "../components/ConfirmDialog";
+import api from "@/lib/api";
 
 const TasksPage = () => {
     const dispatch = useDispatch();
+    const [searchParams] = useSearchParams();
     const [open, setOpen] = useState(false);
     const [mode, setMode] = useState<Number>(0);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -49,12 +52,59 @@ const TasksPage = () => {
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [filterClientId, setFilterClientId] = useState<string>("all");
     const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+    const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+    const [specialists, setSpecialists] = useState<Array<{ id: string; name: string | null; email: string }>>([]);
+    const [assignSelectedOpen, setAssignSelectedOpen] = useState(false);
+    const [assignSelectedSpecialistId, setAssignSelectedSpecialistId] = useState<string>("");
+    const [bulkAssigning, setBulkAssigning] = useState(false);
     const { tasks } = useSelector((state: RootState) => state.task)
     const { user } = useSelector((state: RootState) => state.auth);
 
-    // Only non-specialists can create
+    useEffect(() => {
+        const clientId = searchParams.get("clientId");
+        if (clientId) setFilterClientId(clientId);
+    }, [searchParams]);
+
+    // Only non-specialists can create and bulk-assign
     const canCreate = (user?.role as ROLE | undefined) !== "SPECIALIST";
     const canFilterByClient = (user?.role as ROLE | undefined) !== "USER";
+
+    useEffect(() => {
+        if (canCreate) {
+            api.get("/auth/specialists").then((res) => setSpecialists(res.data || [])).catch(() => {});
+        }
+    }, [canCreate]);
+
+    const toggleTaskSelection = (taskId: string) => {
+        setSelectedTaskIds((prev) =>
+            prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+        );
+    };
+    const selectAllFiltered = () => {
+        const ids = filtered.map((t) => t.id);
+        setSelectedTaskIds((prev) => (prev.length === ids.length ? [] : ids));
+    };
+    const clearSelection = () => setSelectedTaskIds([]);
+
+    const handleBulkAssign = async () => {
+        if (selectedTaskIds.length === 0) return;
+        setBulkAssigning(true);
+        try {
+            const assigneeId = assignSelectedSpecialistId || null;
+            for (const id of selectedTaskIds) {
+                await dispatch(updateTask({ id, assigneeId }) as any);
+            }
+            toast.success(`${selectedTaskIds.length} task(s) assigned successfully.`);
+            clearSelection();
+            setAssignSelectedOpen(false);
+            setAssignSelectedSpecialistId("");
+            dispatch(fetchTasks() as any);
+        } catch (e: any) {
+            toast.error(e?.message || "Failed to assign tasks");
+        } finally {
+            setBulkAssigning(false);
+        }
+    };
 
     const handleCreateClick = () => {
         setSelectedTask(null);
@@ -309,10 +359,72 @@ const TasksPage = () => {
             {/* Task View */}
             {(!enabled) ? (
                 <div className="bg-white rounded-xl border border-gray-200">
+                    {canCreate && selectedTaskIds.length > 0 && (
+                        <div className="px-6 py-3 bg-primary-50 border-b border-primary-100 flex flex-wrap items-center gap-3">
+                            <span className="text-sm font-medium text-primary-800">
+                                {selectedTaskIds.length} task(s) selected
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setAssignSelectedOpen(true)}
+                                className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+                            >
+                                Assign Selected
+                            </button>
+                            <button
+                                type="button"
+                                onClick={clearSelection}
+                                className="text-sm text-gray-600 hover:text-gray-900"
+                            >
+                                Clear selection
+                            </button>
+                            {assignSelectedOpen && (
+                                <div className="flex items-center gap-2 ml-2 flex-wrap">
+                                    <select
+                                        value={assignSelectedSpecialistId}
+                                        onChange={(e) => setAssignSelectedSpecialistId(e.target.value)}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                    >
+                                        <option value="">Unassigned</option>
+                                        {specialists.map((s) => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.name || s.email} (Specialist)
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        type="button"
+                                        onClick={handleBulkAssign}
+                                        disabled={bulkAssigning}
+                                        className="rounded-lg bg-gray-800 px-3 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-50"
+                                    >
+                                        {bulkAssigning ? "Assigning…" : "Assign"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAssignSelectedOpen(false)}
+                                        className="text-sm text-gray-600 hover:text-gray-900"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <div className="overflow-x-auto">
                         <table className="w-full">
                             <thead className="bg-gray-50">
                                 <tr>
+                                    {canCreate && (
+                                        <th className="px-4 py-3 text-left">
+                                            <input
+                                                type="checkbox"
+                                                checked={filtered.length > 0 && selectedTaskIds.length === filtered.length}
+                                                onChange={selectAllFiltered}
+                                                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                            />
+                                        </th>
+                                    )}
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -324,6 +436,16 @@ const TasksPage = () => {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {filtered.map((task) => (
                                     <tr key={task.id} className={`hover:bg-gray-50 ${isOverdue(task.dueDate) ? 'bg-red-50' : ''}`}>
+                                        {canCreate && (
+                                            <td className="px-4 py-4">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedTaskIds.includes(task.id)}
+                                                    onChange={() => toggleTaskSelection(task.id)}
+                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                                />
+                                            </td>
+                                        )}
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col">
                                                 <div className="text-sm font-medium text-gray-900">{task.title}</div>

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
+import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 
 const router = express.Router();
 
@@ -94,14 +95,42 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Create agency directly (Super Admin only)
+// Create agency directly (Super Admin only). Contact email required; no password — we send "Set your password" link.
 const createAgencySchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, 'Agency name is required'),
+  website: z.string().min(1, 'Agency website is required'),
+  industry: z.string().optional(),
+  agencySize: z.string().optional(),
+  numberOfClients: z.coerce.number().int().min(0).optional().nullable(),
+  contactName: z.string().min(1, 'Primary contact name is required'),
+  contactEmail: z.string().email('Valid contact email is required'),
+  contactPhone: z.string().optional(),
+  contactJobTitle: z.string().optional(),
+  streetAddress: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zip: z.string().optional(),
+  country: z.string().optional(),
   subdomain: z.string().optional(),
-  email: z.string().email().optional(),
-  password: z.string().min(6).optional(),
-  username: z.string().min(1).optional(),
-});
+  billingOption: z.enum(['charge', 'no_charge', 'manual_invoice']),
+  tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise']).optional(),
+  customPricing: z.coerce.number().optional().nullable(),
+  internalNotes: z.string().optional(),
+  referralSource: z.string().optional(),
+  referralSourceOther: z.string().optional(),
+  primaryGoals: z.array(z.string()).optional(),
+  primaryGoalsOther: z.string().optional(),
+  currentTools: z.string().optional(),
+}).refine((data) => {
+  const w = data.website?.trim();
+  if (!w) return false;
+  try {
+    new URL(w.startsWith('http') ? w : `https://${w}`);
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: 'Agency website must be a valid URL', path: ['website'] });
 
 router.post('/', authenticateToken, async (req, res) => {
   try {
@@ -109,87 +138,153 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can create agencies directly.' });
     }
 
-    const { name, subdomain, email, password, username } = createAgencySchema.parse(req.body);
+    const body = createAgencySchema.parse(req.body);
+    const {
+      name,
+      website,
+      industry,
+      agencySize,
+      numberOfClients,
+      contactName,
+      contactEmail,
+      contactPhone,
+      contactJobTitle,
+      streetAddress,
+      city,
+      state,
+      zip,
+      country,
+      subdomain,
+      billingOption,
+      tier,
+      customPricing,
+      internalNotes,
+      referralSource,
+      referralSourceOther,
+      primaryGoals,
+      primaryGoalsOther,
+      currentTools,
+    } = body;
 
-    // Check if agency with this name already exists
-    const existingAgency = await prisma.agency.findFirst({
-      where: { name },
-    });
+    if (!tier && billingOption !== 'manual_invoice') {
+      return res.status(400).json({ message: 'Subscription tier is required' });
+    }
 
+    const existingAgency = await prisma.agency.findFirst({ where: { name } });
     if (existingAgency) {
       return res.status(400).json({ message: 'Agency with this name already exists' });
     }
 
-    // Check if subdomain is already taken
-    if (subdomain) {
-      const existingSubdomain = await prisma.agency.findUnique({
-        where: { subdomain },
-      });
-
+    if (subdomain && subdomain.trim()) {
+      const existingSubdomain = await prisma.agency.findUnique({ where: { subdomain: subdomain.trim() } });
       if (existingSubdomain) {
         return res.status(400).json({ message: 'Subdomain already taken' });
       }
     }
 
-    // Check if email already exists (if provided)
-    if (email) {
-      const existingUser = await prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (existingUser) {
-        return res.status(400).json({ message: 'User with this email already exists' });
-      }
+    const existingUser = await prisma.user.findUnique({ where: { email: contactEmail } });
+    if (existingUser) {
+      return res.status(400).json({ message: 'A user with this contact email already exists' });
     }
 
-    // Create agency
+    const billingType = billingOption === 'charge' ? 'paid' : billingOption === 'no_charge' ? 'free' : 'custom';
+    const onboardingData = (referralSource || (primaryGoals && primaryGoals.length) || currentTools || referralSourceOther || primaryGoalsOther)
+      ? JSON.stringify({
+          referralSource: referralSource === 'referral' ? referralSourceOther : referralSource,
+          primaryGoals: primaryGoals || [],
+          primaryGoalsOther: primaryGoalsOther || undefined,
+          currentTools: currentTools || undefined,
+        })
+      : null;
+
     const agency = await prisma.agency.create({
       data: {
         name,
-        subdomain: subdomain || null,
+        subdomain: subdomain?.trim() || null,
+        billingType,
+        website: website || null,
+        industry: industry || null,
+        agencySize: agencySize || null,
+        numberOfClients: numberOfClients ?? null,
+        contactName: contactName || null,
+        contactEmail: contactEmail || null,
+        contactPhone: contactPhone || null,
+        contactJobTitle: contactJobTitle || null,
+        streetAddress: streetAddress || null,
+        city: city || null,
+        state: state || null,
+        zip: zip || null,
+        country: country || null,
+        subscriptionTier: tier || null,
+        customPricing: customPricing ?? null,
+        internalNotes: internalNotes || null,
+        onboardingData,
       },
-      include: {
-        _count: {
-          select: { members: true },
-        },
+      include: { _count: { select: { members: true } } },
+    });
+
+    const agencyUser = await prisma.user.create({
+      data: {
+        email: contactEmail,
+        name: contactName,
+        passwordHash: null,
+        role: 'AGENCY',
+        verified: false,
+        invited: true,
       },
     });
 
-    // If email and password provided, create agency owner user
-    if (email && password) {
-      const bcrypt = await import('bcryptjs');
-      const passwordHash = await bcrypt.default.hash(password, 12);
-      
-      const agencyUser = await prisma.user.create({
-        data: {
-          email,
-          name: username || name,
-          passwordHash,
-          role: 'AGENCY',
-          verified: true,
-          invited: false,
-        },
-      });
+    await prisma.userAgency.create({
+      data: {
+        userId: agencyUser.id,
+        agencyId: agency.id,
+        agencyRole: 'OWNER',
+      },
+    });
 
-      // Link user to agency as OWNER
-      await prisma.userAgency.create({
-        data: {
-          userId: agencyUser.id,
-          agencyId: agency.id,
-          agencyRole: 'OWNER',
-        },
+    const inviteToken = jwt.sign(
+      { userId: agencyUser.id, email: agencyUser.email },
+      getJwtSecret(),
+      { expiresIn: '24h' }
+    );
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await prisma.token.create({
+      data: {
+        type: 'INVITE',
+        email: agencyUser.email,
+        token: inviteToken,
+        expiresAt,
+        userId: agencyUser.id,
+        agencyId: agency.id,
+        role: 'AGENCY',
+      },
+    });
+
+    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/invite?token=${encodeURIComponent(inviteToken)}`;
+    try {
+      await sendEmail({
+        to: contactEmail,
+        subject: `Set your password – ${name}`,
+        html: `
+          <h1>Your agency account is ready</h1>
+          <p>Hi ${contactName || 'there'},</p>
+          <p>An agency account for <strong>${name}</strong> has been created. Set your password using the link below (expires in 24 hours):</p>
+          <p><a href="${inviteUrl}">Set your password</a></p>
+          <p>If the link doesn't work, copy and paste this URL into your browser:</p>
+          <p style="word-break:break-all">${inviteUrl}</p>
+        `,
       });
+    } catch (emailErr: any) {
+      console.warn('Set-password email failed:', emailErr?.message);
     }
 
-    const formattedAgency = {
+    res.status(201).json({
       id: agency.id,
       name: agency.name,
       subdomain: agency.subdomain,
       createdAt: agency.createdAt,
       memberCount: agency._count.members,
-    };
-
-    res.status(201).json(formattedAgency);
+    });
   } catch (error: any) {
     if (error.name === 'ZodError') {
       return res.status(400).json({ message: 'Invalid input', errors: error.errors });
@@ -377,6 +472,38 @@ router.post('/:agencyId/invite-specialist', authenticateToken, async (req, res) 
   }
 });
 
+// Create Stripe billing portal session (for Subscription page: Manage Billing / Upgrade / Downgrade)
+router.post('/billing-portal', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const returnUrl = (req.body && req.body.returnUrl) || `${req.body?.origin || req.get('origin') || 'http://localhost:3000'}/agency/subscription`;
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ url: null, message: 'Billing is not configured. Contact support.' });
+    }
+    const customerId = process.env.STRIPE_AGENCY_CUSTOMER_ID || (req.body && req.body.stripeCustomerId);
+    if (!customerId) {
+      return res.status(400).json({
+        url: null,
+        message: 'No billing account linked. Contact support to set up billing.',
+      });
+    }
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl,
+    });
+    res.json({ url: session.url });
+  } catch (err: any) {
+    console.error('Billing portal error:', err);
+    res.status(500).json({
+      url: null,
+      message: err?.message || 'Failed to open billing portal',
+    });
+  }
+});
+
 // Get current user's agency
 router.get('/me', authenticateToken, async (req, res) => {
   try {
@@ -481,6 +608,575 @@ router.put('/me', authenticateToken, async (req, res) => {
     }
     console.error('Update agency error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Managed Services: list active for current user's agency (AGENCY, ADMIN, SUPER_ADMIN only; no SPECIALIST)
+router.get('/managed-services', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    if (user.role === 'SPECIALIST') {
+      return res.status(403).json({ message: 'Access denied. Specialists cannot view managed services.' });
+    }
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId },
+      select: { agencyId: true },
+    });
+    if (!membership && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+      return res.json([]);
+    }
+    const pendingOnly = req.query.pendingOnly === 'true' && user.role === 'SUPER_ADMIN';
+    const agencyId = membership?.agencyId;
+
+    if (pendingOnly) {
+      const list = await prisma.managedService.findMany({
+        where: { status: 'PENDING' },
+        include: {
+          client: { select: { id: true, name: true } },
+          agency: { select: { id: true, name: true } },
+        },
+        orderBy: { startDate: 'desc' },
+      });
+      return res.json(list.map((m) => ({
+        id: m.id,
+        clientId: m.clientId,
+        clientName: m.client.name,
+        packageId: m.packageId,
+        packageName: m.packageName,
+        monthlyPrice: m.monthlyPrice,
+        commissionPercent: m.commissionPercent,
+        monthlyCommission: m.monthlyCommission,
+        startDate: m.startDate,
+        status: m.status,
+        agencyId: m.agency.id,
+        agencyName: m.agency.name,
+      })));
+    }
+
+    if (!agencyId && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')) {
+      return res.json([]);
+    }
+    const list = await prisma.managedService.findMany({
+      where: { agencyId, status: { in: ['ACTIVE', 'PENDING'] } },
+      include: { client: { select: { id: true, name: true, status: true } } },
+      orderBy: [{ status: 'asc' }, { startDate: 'desc' }], // ACTIVE before PENDING (asc), then newest first
+    });
+    // One row per client: prefer ACTIVE over PENDING so approved status always shows after Super Admin approval
+    const byClient = new Map<string, typeof list[0]>();
+    for (const m of list) {
+      const existing = byClient.get(m.clientId);
+      if (!existing || m.status === 'ACTIVE') byClient.set(m.clientId, m);
+    }
+    const deduped = Array.from(byClient.values());
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(deduped.map((m) => {
+      const client = m.client as { id: string; name: string; status?: string };
+      const clientActive = client.status === 'ACTIVE';
+      const status = (m.status === 'ACTIVE' || clientActive) ? 'ACTIVE' : m.status;
+      return {
+        id: m.id,
+        clientId: m.clientId,
+        clientName: m.client.name,
+        packageId: m.packageId,
+        packageName: m.packageName,
+        monthlyPrice: m.monthlyPrice,
+        commissionPercent: m.commissionPercent,
+        monthlyCommission: m.monthlyCommission,
+        startDate: m.startDate,
+        status,
+      };
+    }));
+  } catch (err: any) {
+    console.error('List managed services error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to list managed services' });
+  }
+});
+
+const activateManagedServiceSchema = z.object({
+  packageId: z.enum(['foundation', 'growth', 'domination', 'custom']),
+  clientId: z.string().min(1),
+  clientAgreed: z.boolean().refine((v) => v === true, { message: 'Client must have agreed to this service' }),
+});
+
+const PACKAGES: Record<string, { name: string; priceCents: number }> = {
+  foundation: { name: 'Foundation', priceCents: 75000 },
+  growth: { name: 'Growth', priceCents: 150000 },
+  domination: { name: 'Domination', priceCents: 300000 },
+  custom: { name: 'Custom', priceCents: 500000 },
+};
+
+const COMMISSION_BY_TIER: Record<string, number> = {
+  solo: 20,
+  starter: 25,
+  growth: 30,
+  pro: 35,
+  enterprise: 40,
+};
+
+// Managed Services: activate → Status PENDING, email Super Admin. Billing starts only after Super Admin approves.
+router.post('/managed-services', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    if (user.role === 'SPECIALIST') {
+      return res.status(403).json({ message: 'Access denied. Specialists cannot activate managed services.' });
+    }
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId },
+      include: { agency: true },
+    });
+    if (!membership && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. No agency.' });
+    }
+    const agencyId = membership!.agencyId;
+    const agencyName = membership!.agency.name;
+    const agencyContactEmail = membership!.agency.contactEmail ?? null;
+    const activatingUser = await prisma.user.findUnique({
+      where: { id: user.userId },
+      select: { email: true },
+    });
+    const agencyEmail = agencyContactEmail ?? activatingUser?.email ?? null;
+    const body = activateManagedServiceSchema.parse(req.body);
+
+    const tier = (req.body.tier as string) || 'starter';
+    const commissionPercent = COMMISSION_BY_TIER[tier.toLowerCase()] ?? 25;
+    const pkg = PACKAGES[body.packageId];
+    if (!pkg) return res.status(400).json({ message: 'Invalid package' });
+
+    const client = await prisma.client.findUnique({
+      where: { id: body.clientId },
+      include: { user: { select: { memberships: { select: { agencyId: true } } } } },
+    });
+    if (!client) return res.status(404).json({ message: 'Client not found' });
+    const clientAgencyIds = (client as any).user?.memberships?.map((m: any) => m.agencyId) ?? [];
+    if (!clientAgencyIds.includes(agencyId)) {
+      return res.status(403).json({ message: 'Client does not belong to your agency' });
+    }
+
+    const existingActive = await prisma.managedService.findFirst({
+      where: { agencyId, clientId: body.clientId, status: 'ACTIVE' },
+    });
+    if (existingActive) {
+      return res.status(400).json({ message: 'This client already has an active managed service' });
+    }
+    const existingPending = await prisma.managedService.findFirst({
+      where: { agencyId, clientId: body.clientId, status: 'PENDING' },
+    });
+    if (existingPending) {
+      return res.status(400).json({ message: 'This client already has a pending managed service request' });
+    }
+
+    const monthlyCommission = Math.round((pkg.priceCents * commissionPercent) / 100);
+    const startDate = new Date();
+    // Stripe billing is added only when Super Admin approves (PATCH /managed-services/:id/approve).
+
+    const created = await prisma.$transaction(async (tx) => {
+      const ms = await tx.managedService.create({
+        data: {
+          agencyId,
+          clientId: body.clientId,
+          packageId: body.packageId,
+          packageName: pkg.name,
+          monthlyPrice: pkg.priceCents,
+          commissionPercent,
+          monthlyCommission: monthlyCommission,
+          startDate,
+          status: 'PENDING',
+        },
+        include: { client: { select: { name: true } } },
+      });
+      await tx.client.update({
+        where: { id: body.clientId },
+        data: {
+          status: 'PENDING',
+          managedServiceStatus: 'pending',
+          managedServiceRequestedDate: startDate,
+          managedServicePackage: body.packageId as any,
+          managedServicePrice: pkg.priceCents / 100,
+          // managedServiceActivatedDate set when Super Admin approves
+        },
+      });
+      await (tx as any).managedServiceRequest.create({
+        data: {
+          agencyId,
+          agencyName,
+          agencyEmail,
+          clientId: body.clientId,
+          clientName: client.name,
+          packageId: body.packageId,
+          packageName: pkg.name,
+          monthlyPriceCents: pkg.priceCents,
+          startDate,
+          managedServiceId: ms.id,
+        },
+      });
+      return ms;
+    });
+
+    const notifyEmail = process.env.MANAGED_SERVICE_NOTIFY_EMAIL || process.env.JOHNNY_EMAIL; // Super Admin notification email
+    if (notifyEmail) {
+      sendEmail({
+        to: notifyEmail,
+        subject: `Managed service pending approval: ${agencyName} – ${client.name} – ${pkg.name}`,
+        html: `
+          <p>Agency <strong>${agencyName}</strong> requested a managed service (pending your approval).</p>
+          <ul>
+            <li><strong>Agency name:</strong> ${agencyName}</li>
+            <li><strong>Agency email:</strong> ${agencyEmail ?? '(not set)'}</li>
+            <li><strong>Client selected:</strong> ${client.name}</li>
+            <li><strong>Package chosen:</strong> ${pkg.name} ($${(pkg.priceCents / 100).toFixed(2)}/mo)</li>
+            <li><strong>Requested start date:</strong> ${startDate.toISOString().split('T')[0]}</li>
+          </ul>
+          <p>Approve in the Super Admin panel to activate and start billing.</p>
+        `,
+      }).catch((e) => console.warn('Notify managed service email failed:', e));
+    }
+
+    const slackWebhook = process.env.MANAGED_SERVICE_SLACK_WEBHOOK || process.env.SLACK_WEBHOOK_URL;
+    if (slackWebhook && typeof fetch === 'function') {
+      fetch(slackWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `Managed service pending approval: ${agencyName} – ${client.name} – ${pkg.name} ($${(pkg.priceCents / 100).toFixed(2)}/mo). Start: ${startDate.toISOString().split('T')[0]}`,
+          blocks: [
+            { type: 'section', text: { type: 'mrkdwn', text: '*Managed service – pending Super Admin approval*' } },
+            { type: 'section', fields: [
+              { type: 'mrkdwn', text: `*Agency:*\n${agencyName}` },
+              { type: 'mrkdwn', text: `*Agency email:*\n${agencyEmail ?? '(not set)'}` },
+              { type: 'mrkdwn', text: `*Client:*\n${client.name}` },
+              { type: 'mrkdwn', text: `*Package:*\n${pkg.name} ($${(pkg.priceCents / 100).toFixed(2)}/mo)` },
+              { type: 'mrkdwn', text: `*Start date:*\n${startDate.toISOString().split('T')[0]}` },
+            ] },
+          ],
+        }),
+      }).catch((e) => console.warn('Slack managed service notify failed:', e));
+    }
+
+    res.status(201).json({
+      id: created.id,
+      clientId: created.clientId,
+      clientName: created.client.name,
+      packageId: created.packageId,
+      packageName: created.packageName,
+      monthlyPrice: created.monthlyPrice,
+      commissionPercent: created.commissionPercent,
+      monthlyCommission: created.monthlyCommission,
+      startDate: created.startDate,
+      status: created.status,
+    });
+  } catch (err: any) {
+    if (err.name === 'ZodError') {
+      return res.status(400).json({ message: err.errors?.[0]?.message || 'Invalid input', errors: err.errors });
+    }
+    console.error('Activate managed service error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to activate managed service' });
+  }
+});
+
+// Managed Services: approve (SUPER_ADMIN only). Sets client ACTIVE, starts billing, notifies agency.
+router.patch('/managed-services/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can approve managed services.' });
+    }
+    const { id } = req.params;
+    const row = await prisma.managedService.findUnique({
+      where: { id },
+      include: { client: true, agency: { include: { members: { select: { user: { select: { email: true, name: true } } } } } } },
+    });
+    if (!row) return res.status(404).json({ message: 'Managed service not found' });
+    if (row.status !== 'PENDING') {
+      return res.status(400).json({ message: 'This managed service is not pending approval' });
+    }
+
+    let stripeSubscriptionItemId: string | null = null;
+    const stripe = getStripe();
+    const customerId = process.env.STRIPE_AGENCY_CUSTOMER_ID;
+    if (stripe && isStripeConfigured() && customerId) {
+      try {
+        const priceId = (process.env as any)[`STRIPE_PRICE_MANAGED_${row.packageId.toUpperCase()}`];
+        if (priceId) {
+          const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
+          if (subs.data.length > 0) {
+            const item = await stripe.subscriptionItems.create({
+              subscription: subs.data[0].id,
+              price: priceId,
+              quantity: 1,
+            });
+            stripeSubscriptionItemId = item.id;
+          }
+        }
+      } catch (stripeErr: any) {
+        console.warn('Stripe managed service approve failed:', stripeErr?.message);
+      }
+    }
+
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.managedService.update({
+        where: { id },
+        data: { status: 'ACTIVE', stripeSubscriptionItemId: stripeSubscriptionItemId ?? undefined },
+      }),
+      prisma.client.update({
+        where: { id: row.clientId },
+        data: {
+          status: 'ACTIVE',
+          managedServiceStatus: 'active',
+          managedServiceActivatedDate: now,
+        },
+      }),
+    ]);
+
+    const agencyName = row.agency.name;
+    const clientName = row.client.name;
+    const packageName = row.packageName;
+    const seen = new Set<string>();
+    for (const m of row.agency.members) {
+      const email = (m as any).user?.email;
+      if (email && !seen.has(email)) {
+        seen.add(email);
+        sendEmail({
+          to: email,
+          subject: `Managed service approved: ${clientName}`,
+          html: `
+            <p>The managed service for <strong>${clientName}</strong> has been approved. Billing has started.</p>
+            <p>Package: ${packageName}. You can now provide full managed services for this client.</p>
+            <p>— SEO Dashboard</p>
+          `,
+        }).catch((e) => console.warn('Notify agency approval email failed:', e));
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Managed service approved; agency notified and billing started.',
+    });
+  } catch (err: any) {
+    console.error('Approve managed service error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to approve' });
+  }
+});
+
+// Managed Services: cancel (AGENCY, ADMIN, SUPER_ADMIN only)
+const cancelManagedServiceSchema = z.object({
+  endDate: z.string().optional(), // YYYY-MM-DD or ISO date string
+  keepDashboard: z.boolean().optional(), // If true, after end date client becomes DASHBOARD_ONLY instead of ARCHIVED
+});
+
+router.patch('/managed-services/:id/cancel', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'SPECIALIST') {
+      return res.status(403).json({ message: 'Access denied. Specialists cannot cancel managed services.' });
+    }
+    const { id } = req.params;
+    const body = cancelManagedServiceSchema.safeParse(req.body || {});
+    const endDateStr = body.success && body.data.endDate ? body.data.endDate : null;
+    const keepDashboard = body.success && body.data.keepDashboard === true; // Set on client after migrate deploy + prisma generate
+    const endDate = endDateStr ? new Date(endDateStr) : (() => {
+      const d = new Date();
+      d.setMonth(d.getMonth() + 1);
+      d.setDate(0);
+      return d;
+    })();
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin && !membership) return res.status(403).json({ message: 'Access denied' });
+    const row = await prisma.managedService.findFirst({
+      where: isSuperAdmin
+        ? { id, status: { in: ['ACTIVE', 'PENDING'] } }
+        : { id, agencyId: membership!.agencyId, status: { in: ['ACTIVE', 'PENDING'] } },
+    });
+    if (!row) return res.status(404).json({ message: 'Managed service not found' });
+
+    const now = new Date();
+    const wasActive = row.status === 'ACTIVE';
+    await prisma.$transaction([
+      prisma.managedService.update({
+        where: { id },
+        data: { status: 'CANCELED' },
+      }),
+      prisma.client.update({
+        where: { id: row.clientId },
+        data: wasActive
+          ? {
+              status: 'CANCELED',
+              canceledEndDate: endDate,
+              managedServiceStatus: 'canceled',
+              managedServiceCanceledDate: now,
+              managedServiceEndDate: endDate,
+              // keepDashboardAfterEndDate: keepDashboard — add after: npx prisma migrate deploy && npx prisma generate
+            }
+          : {
+              status: 'DASHBOARD_ONLY',
+              managedServiceStatus: 'none',
+              managedServiceRequestedDate: null,
+              managedServicePackage: null,
+              managedServicePrice: null,
+            },
+      }),
+    ]);
+    res.json({ success: true, endDate: wasActive ? endDate.toISOString().split('T')[0] : undefined });
+  } catch (err: any) {
+    console.error('Cancel managed service error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to cancel' });
+  }
+});
+
+// Add-Ons: list active for current user's agency
+router.get('/add-ons', authenticateToken, async (req, res) => {
+  try {
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    if (!membership && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.json([]);
+    }
+    const agencyId = membership?.agencyId;
+    if (!agencyId && (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN')) {
+      return res.json([]);
+    }
+    const list = await prisma.agencyAddOn.findMany({
+      where: { agencyId },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(list.map((a) => ({
+      id: a.id,
+      addOnType: a.addOnType,
+      addOnOption: a.addOnOption,
+      displayName: a.displayName,
+      details: a.details,
+      priceCents: a.priceCents,
+      billingInterval: a.billingInterval,
+      createdAt: a.createdAt,
+    })));
+  } catch (err: any) {
+    console.error('List add-ons error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to list add-ons' });
+  }
+});
+
+const addAddOnSchema = z.object({
+  addOnType: z.enum(['credit_pack', 'extra_slots', 'map_pack']),
+  addOnOption: z.string().min(1),
+});
+
+const ADDON_OPTIONS: Record<string, Record<string, { displayName: string; details: string; priceCents: number; billingInterval: string }>> = {
+  credit_pack: {
+    '100': { displayName: 'Keyword Credit Pack (100 credits)', details: '100 research credits, one-time', priceCents: 3500, billingInterval: 'one_time' },
+    '500': { displayName: 'Keyword Credit Pack (500 credits)', details: '500 research credits, one-time', priceCents: 15000, billingInterval: 'one_time' },
+  },
+  extra_slots: {
+    '5_slots': { displayName: 'Extra Client Slots (+5)', details: '+5 client dashboards', priceCents: 9900, billingInterval: 'monthly' },
+  },
+  map_pack: {
+    starter: { displayName: 'Local Map Pack – Starter', details: '1 keyword per client, bi-weekly updates', priceCents: 4900, billingInterval: 'monthly' },
+    growth: { displayName: 'Local Map Pack – Growth', details: '3 keywords per client, weekly updates', priceCents: 14900, billingInterval: 'monthly' },
+    pro: { displayName: 'Local Map Pack – Pro', details: '5 keywords per client, weekly updates', priceCents: 24900, billingInterval: 'monthly' },
+  },
+};
+
+// Add-Ons: add (Stripe + DB, update limits in app when applicable)
+router.post('/add-ons', authenticateToken, async (req, res) => {
+  try {
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const agencyId = membership!.agencyId;
+    const body = addAddOnSchema.parse(req.body);
+    const options = ADDON_OPTIONS[body.addOnType];
+    if (!options) return res.status(400).json({ message: 'Invalid add-on type' });
+    const option = options[body.addOnOption];
+    if (!option) return res.status(400).json({ message: 'Invalid add-on option' });
+
+    let stripeSubscriptionItemId: string | null = null;
+    const stripe = getStripe();
+    const customerId = process.env.STRIPE_AGENCY_CUSTOMER_ID;
+    if (stripe && isStripeConfigured() && customerId) {
+      try {
+        const priceKey = `STRIPE_PRICE_ADDON_${body.addOnType.toUpperCase()}_${body.addOnOption.toUpperCase().replace('-', '_')}`;
+        const priceId = (process.env as any)[priceKey];
+        if (priceId) {
+          const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
+          if (subs.data.length > 0) {
+            const item = await stripe.subscriptionItems.create({
+              subscription: subs.data[0].id,
+              price: priceId,
+              quantity: 1,
+            });
+            stripeSubscriptionItemId = item.id;
+          }
+        }
+      } catch (stripeErr: any) {
+        console.warn('Stripe add-on attach failed:', stripeErr?.message);
+      }
+    }
+
+    const created = await prisma.agencyAddOn.create({
+      data: {
+        agencyId,
+        addOnType: body.addOnType,
+        addOnOption: body.addOnOption,
+        displayName: option.displayName,
+        details: option.details,
+        priceCents: option.priceCents,
+        billingInterval: option.billingInterval,
+        stripeSubscriptionItemId: stripeSubscriptionItemId ?? undefined,
+      },
+    });
+    res.status(201).json({
+      id: created.id,
+      addOnType: created.addOnType,
+      addOnOption: created.addOnOption,
+      displayName: created.displayName,
+      details: created.details,
+      priceCents: created.priceCents,
+      billingInterval: created.billingInterval,
+      createdAt: created.createdAt,
+    });
+  } catch (err: any) {
+    if (err.name === 'ZodError') {
+      return res.status(400).json({ message: err.errors?.[0]?.message || 'Invalid input', errors: err.errors });
+    }
+    console.error('Add add-on error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to add add-on' });
+  }
+});
+
+// Add-Ons: remove
+router.delete('/add-ons/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    if (!membership) return res.status(403).json({ message: 'Access denied' });
+    const row = await prisma.agencyAddOn.findFirst({
+      where: { id, agencyId: membership.agencyId },
+    });
+    if (!row) return res.status(404).json({ message: 'Add-on not found' });
+    const stripe = getStripe();
+    if (stripe && row.stripeSubscriptionItemId) {
+      try {
+        await stripe.subscriptionItems.del(row.stripeSubscriptionItemId);
+      } catch (e) {
+        console.warn('Stripe subscription item delete failed:', e);
+      }
+    }
+    await prisma.agencyAddOn.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Remove add-on error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to remove add-on' });
   }
 });
 

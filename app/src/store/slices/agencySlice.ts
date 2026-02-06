@@ -52,21 +52,84 @@ export const inviteAgency = createAsyncThunk(
 
 export const createAgency = createAsyncThunk(
   "agency/createAgency",
-  async ({ 
-    name, 
-    subdomain, 
-    email, 
-    password, 
-    username 
-  }: { 
-    name: string; 
+  async ({
+    name,
+    website,
+    industry,
+    agencySize,
+    numberOfClients,
+    contactName,
+    contactEmail,
+    contactPhone,
+    contactJobTitle,
+    streetAddress,
+    city,
+    state,
+    zip,
+    country,
+    subdomain,
+    billingOption,
+    tier,
+    customPricing,
+    internalNotes,
+    referralSource,
+    referralSourceOther,
+    primaryGoals,
+    primaryGoalsOther,
+    currentTools,
+  }: {
+    name: string;
+    website?: string;
+    industry?: string;
+    agencySize?: string;
+    numberOfClients?: number | null;
+    contactName: string;
+    contactEmail: string;
+    contactPhone?: string;
+    contactJobTitle?: string;
+    streetAddress?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    country?: string;
     subdomain?: string;
-    email?: string;
-    password?: string;
-    username?: string;
+    billingOption: "charge" | "no_charge" | "manual_invoice";
+    tier?: "solo" | "starter" | "growth" | "pro" | "enterprise";
+    customPricing?: number | null;
+    internalNotes?: string;
+    referralSource?: string;
+    referralSourceOther?: string;
+    primaryGoals?: string[];
+    primaryGoalsOther?: string;
+    currentTools?: string;
   }) => {
     try {
-      const response = await api.post("/agencies", { name, subdomain, email, password, username });
+      const response = await api.post("/agencies", {
+        name,
+        website,
+        industry,
+        agencySize,
+        numberOfClients,
+        contactName,
+        contactEmail,
+        contactPhone,
+        contactJobTitle,
+        streetAddress,
+        city,
+        state,
+        zip,
+        country,
+        subdomain,
+        billingOption,
+        tier,
+        customPricing,
+        internalNotes,
+        referralSource,
+        referralSourceOther,
+        primaryGoals,
+        primaryGoalsOther,
+        currentTools,
+      });
       return response.data;
     } catch (error: any) {
       throw new Error(

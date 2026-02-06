@@ -21,6 +21,9 @@ import {
   PersonStanding,
   UserCog,
   DollarSign,
+  Briefcase,
+  Package,
+  CreditCard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -88,13 +91,6 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     {
       icon: DollarSign,
       label: "Financial Overview",
-      path: "/agency/financial-overview",
-      hasSubMenu: false,
-      roles: ["AGENCY", "ADMIN"],
-    },
-    {
-      icon: DollarSign,
-      label: "Financial Overview",
       path: "/superadmin/financial-overview",
       hasSubMenu: false,
       roles: ["SUPER_ADMIN"],
@@ -149,6 +145,27 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
     {
+      icon: Briefcase,
+      label: "Managed Services",
+      path: "/agency/managed-services",
+      hasSubMenu: false,
+      roles: ["AGENCY", "ADMIN"],
+    },
+    {
+      icon: Package,
+      label: "Add-Ons",
+      path: "/agency/add-ons",
+      hasSubMenu: false,
+      roles: ["AGENCY", "ADMIN"],
+    },
+    {
+      icon: CreditCard,
+      label: "Subscription",
+      path: "/agency/subscription",
+      hasSubMenu: false,
+      roles: ["AGENCY", "ADMIN"],
+    },
+    {
       icon: UserPlus,
       label: "Users",
       path: "/agency/users",
@@ -179,9 +196,9 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       roles: ["SPECIALIST"],
     },
     {
-      icon: Building2,
-      label: "My Agency",
-      path: "/specialist/myagency",
+      icon: PersonStanding,
+      label: "My Clients",
+      path: "/specialist/clients",
       hasSubMenu: false,
       roles: ["SPECIALIST"],
     },
@@ -189,13 +206,6 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       icon: FolderOpen,
       label: "Tasks",
       path: "/specialist/tasks",
-      hasSubMenu: false,
-      roles: ["SPECIALIST"],
-    },
-    {
-      icon: Users,
-      label: "Team",
-      path: "/specialist/team",
       hasSubMenu: false,
       roles: ["SPECIALIST"],
     },

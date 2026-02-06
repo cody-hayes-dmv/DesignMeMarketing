@@ -26,6 +26,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/agency/keywords") return "Research";
     if (path === "/agency/rankings") return "Rankings";
     if (path === "/agency/reports") return "Reports";
+    if (path === "/agency/managed-services") return "Managed Services";
+    if (path === "/agency/add-ons") return "Add-Ons";
+    if (path === "/agency/subscription") return "Subscription";
     if (path === "/agency/users") return "Users";
     if (path === "/agency/report") return "Report";
     if (path === "/agency/team") return "Team";
@@ -42,9 +45,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/superadmin/tasks") return "Tasks";
 
     if (path === "/specialist/dashboard") return "Dashboard";
-    if (path === "/specialist/myagency") return "My Agency";
+    if (path === "/specialist/clients") return "My Clients";
     if (path === "/specialist/tasks") return "Tasks";
-    if (path === "/specialist/team") return "Team";
     if (path === "/specialist/settings") return "Settings";
 
     if (path === "/client/report" || path.startsWith("/client/report/")) return "Report";

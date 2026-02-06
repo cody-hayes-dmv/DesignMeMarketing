@@ -23,6 +23,8 @@ export interface Client {
   topRankings?: number;
   traffic?: number;
   traffic30d?: number | null;
+  /** Agency names for this client (SUPER_ADMIN list only, e.g. Archived view). */
+  agencyNames?: string[];
 }
 
 export interface Keyword {

@@ -320,19 +320,34 @@ router.post('/invite', authenticateToken, async (req, res) => {
             });
             if (agency?.name) agencyName = agency.name;
         }
+        const inviter = await prisma.user.findUnique({
+            where: { id: user.userId },
+            select: { name: true },
+        });
+        const inviterName = inviter?.name?.trim() || 'A team admin';
+
         const inviteUrl = `${process.env.FRONTEND_URL || ''}/invite?token=${encodeURIComponent(inviteToken)}`;
         if (sendInvitationEmail !== false) {
             try {
                 await sendEmail({
                     to: email,
-                    subject: `You've been invited to join ${agencyName}`,
+                    subject: `You've been invited to join ${agencyName}'s team`,
                     html: `
           <h1>You've been invited!</h1>
-          <p>${escapeHtml(name)}, you've been invited to join ${escapeHtml(agencyName)}.</p>
-          <p>Click the link below to accept the invitation (link expires in 7 days):</p>
-          <p><a href="${inviteUrl}">Accept Invitation</a></p>
-          <p>If the link doesn't work, copy and paste this URL into your browser:</p>
-          <p style="word-break:break-all">${inviteUrl}</p>
+          <p>Hi ${escapeHtml(name)},</p>
+          <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(agencyName)} team as a Specialist.</p>
+          <p>Click the link below to set your password and access your dashboard:</p>
+          <p><a href="${inviteUrl}">Secure Setup Link – expires in 7 days</a></p>
+          <p>Once you're in, you'll be able to:</p>
+          <ul>
+            <li>View tasks assigned to you</li>
+            <li>Mark tasks complete</li>
+            <li>Track your progress</li>
+          </ul>
+          <p>Questions? Reply to this email.</p>
+          <p>– ${escapeHtml(agencyName)} Team</p>
+          <p style="color:#6b7280;font-size:12px;margin-top:24px;">If the link doesn't work, copy and paste this URL into your browser:</p>
+          <p style="word-break:break-all;font-size:12px;color:#6b7280;">${inviteUrl}</p>
         `,
                 });
             } catch (emailErr: any) {

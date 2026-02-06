@@ -1,23 +1,54 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchAgencies } from "@/store/slices/agencySlice";
 import { fetchClients } from "@/store/slices/clientSlice";
 import Layout from "@/components/Layout";
-import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle } from "lucide-react";
+import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
+import api from "@/lib/api";
+import toast from "react-hot-toast";
+
+interface PendingManagedService {
+  id: string;
+  clientId: string;
+  clientName: string;
+  agencyId: string;
+  agencyName: string;
+  packageId: string;
+  packageName: string;
+  monthlyPrice: number;
+  startDate: string;
+}
 
 const SuperAdminDashboard = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { agencies, loading: agenciesLoading } = useSelector((state: RootState) => state.agency);
   const { clients, loading: clientsLoading } = useSelector((state: RootState) => state.client);
+  const [pendingManagedServices, setPendingManagedServices] = useState<PendingManagedService[]>([]);
+  const [loadingPending, setLoadingPending] = useState(true);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(fetchAgencies() as any);
     dispatch(fetchClients() as any);
   }, [dispatch]);
+
+  useEffect(() => {
+    const fetchPending = async () => {
+      try {
+        const res = await api.get<PendingManagedService[]>("/agencies/managed-services?pendingOnly=true");
+        setPendingManagedServices(Array.isArray(res.data) ? res.data : []);
+      } catch {
+        setPendingManagedServices([]);
+      } finally {
+        setLoadingPending(false);
+      }
+    };
+    fetchPending();
+  }, []);
 
   const safeParseObject = (raw: any): Record<string, any> => {
     if (!raw) return {};
@@ -213,6 +244,74 @@ const SuperAdminDashboard = () => {
             </div>
           </div>
         </div>
+
+        {/* Pending managed service approvals */}
+        {(loadingPending || pendingManagedServices.length > 0) && (
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Pending managed service approvals</h2>
+              <p className="text-sm text-gray-500 mt-1">Approve to activate and start billing; agency will be notified.</p>
+            </div>
+            <div className="p-6">
+              {loadingPending ? (
+                <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
+                  <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+                </div>
+              ) : pendingManagedServices.length === 0 ? (
+                <div className="text-center py-6 text-gray-500">No pending requests</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-500 border-b border-gray-200">
+                        <th className="pb-3 pr-4">Agency</th>
+                        <th className="pb-3 pr-4">Client</th>
+                        <th className="pb-3 pr-4">Package</th>
+                        <th className="pb-3 pr-4">Price</th>
+                        <th className="pb-3 pr-4">Start date</th>
+                        <th className="pb-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {pendingManagedServices.map((ms) => (
+                        <tr key={ms.id} className="hover:bg-gray-50">
+                          <td className="py-3 pr-4 font-medium text-gray-900">{ms.agencyName}</td>
+                          <td className="py-3 pr-4 text-gray-700">{ms.clientName}</td>
+                          <td className="py-3 pr-4 text-gray-700">{ms.packageName}</td>
+                          <td className="py-3 pr-4 text-gray-700">${(ms.monthlyPrice / 100).toFixed(2)}/mo</td>
+                          <td className="py-3 pr-4 text-gray-600">{format(new Date(ms.startDate), "MMM d, yyyy")}</td>
+                          <td className="py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setApprovingId(ms.id);
+                                try {
+                                  await api.patch(`/agencies/managed-services/${ms.id}/approve`);
+                                  toast.success(`${ms.clientName} approved; agency notified, billing started.`);
+                                  setPendingManagedServices((prev) => prev.filter((s) => s.id !== ms.id));
+                                  dispatch(fetchClients() as any);
+                                } catch (e: any) {
+                                  toast.error(e?.response?.data?.message || "Failed to approve");
+                                } finally {
+                                  setApprovingId(null);
+                                }
+                              }}
+                              disabled={approvingId !== null}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-60"
+                            >
+                              {approvingId === ms.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                              Approve
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Recent Agencies and Clients */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

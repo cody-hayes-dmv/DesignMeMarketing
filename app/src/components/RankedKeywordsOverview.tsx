@@ -7,7 +7,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
   BarChart,
   Bar,
 } from "recharts";
@@ -91,6 +90,12 @@ const formatHistory = (history: RankedKeywordsHistoryPoint[]): ChartDatum[] => {
     .map(({ sortKey, ...rest }) => rest);
 };
 
+// Shorten "Feb 2026" to "Feb '26" for X-axis so month and year are visible without clipping
+const formatAxisMonth = (value: string) =>
+  typeof value === "string" && value.length >= 8
+    ? value.replace(/\s+(\d{4})$/, (_, y) => " '" + y.slice(-2))
+    : value;
+
 const SERIES = [
   { key: "top3" as const, name: "1–3 (Top 3)", color: "#FACC15" }, // yellow
   { key: "top10" as const, name: "4–10 (Top 10)", color: "#1E40AF" }, // dark blue
@@ -127,17 +132,10 @@ const RankedKeywordsTooltip = ({ active, label, payload }: any) => {
   });
 
   const total = sortedPayload.reduce((sum: number, p: any) => sum + (Number(p?.value) || 0), 0);
-  const only51Plus = total > 0 && sortedPayload.every((p: any) => {
-    const v = Number(p?.value) || 0;
-    return p?.dataKey === "pos51Plus" ? v === total : v === 0;
-  });
   return (
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow">
       <p className="text-xs font-medium text-gray-700">{label}</p>
       <p className="mt-1 text-sm font-semibold text-gray-900">Total: {total.toLocaleString()}</p>
-      {only51Plus && (
-        <p className="mt-1 text-xs text-amber-600">Rank breakdown not available for this month. Use Refresh to recalculate.</p>
-      )}
       <div className="mt-2 space-y-1">
         {sortedPayload.map((p: any) => (
           <div key={p.dataKey} className="flex items-center justify-between gap-4 text-xs">
@@ -348,9 +346,9 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
   return (
     <div className={`bg-white rounded-xl border border-gray-200 ${className}`}>
       {showHeader && (
-        <div className="p-6 border-b border-gray-200 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="py-4 px-5 border-b border-gray-200 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+            <h3 className="text-base font-semibold text-gray-900 inline-flex items-center gap-1.5">
               {title}
               {titleTooltip && (
                 <span title={titleTooltip}>
@@ -381,14 +379,14 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
         </div>
       )}
 
-      <div className={`space-y-6 ${showHeader ? "p-6 pt-4" : "p-6"}`}>
+      <div className={`space-y-4 ${showHeader ? "py-4 px-5 pt-3" : "py-4 px-5"}`}>
         {summaryError && (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
             {summaryError}
           </div>
         )}
 
-        <div className="bg-gradient-to-r from-primary-50 via-blue-50 to-blue-100/40 rounded-lg p-5 flex flex-col gap-3">
+        <div className="bg-gradient-to-r from-primary-50 via-blue-50 to-blue-100/40 rounded-lg py-4 px-5 flex flex-col gap-2">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-medium text-gray-700">Current total keywords ranked</p>
@@ -430,7 +428,7 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
           </div>
         </div>
 
-        <div className="space-y-4 rounded-lg border border-gray-200 p-4">
+        <div className="space-y-3 rounded-lg border border-gray-200 px-4 pt-3 pb-2">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h4 className="text-sm font-semibold text-gray-900">
@@ -487,96 +485,98 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="relative h-72">
+            <div className="relative flex flex-col">
               {historyLoading && (
                 <div className="absolute right-2 top-2 z-10 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white/90 px-2 py-1 text-xs text-gray-600 shadow-sm">
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-primary-600" />
                   Updating…
                 </div>
               )}
-              <ResponsiveContainer width="100%" height="100%">
-                {chartType === "line" ? (
-                  <LineChart data={history} margin={{ top: 10, right: 10, left: 10, bottom: 72 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis
-                      dataKey="month"
-                      stroke="#6B7280"
-                      tick={{ fontSize: 12, fill: "#374151" }}
-                      angle={-40}
-                      textAnchor="end"
-                      height={72}
-                      interval={0}
-                      dy={8}
-                    />
-                    <YAxis
-                      stroke="#6B7280"
-                      style={{ fontSize: "12px" }}
-                      label={{ value: "Keywords", angle: -90, position: "insideLeft" }}
-                      allowDecimals={false}
-                    />
-                    <Tooltip
-                      content={<RankedKeywordsTooltip />}
-                    />
-                    <Legend
-                      content={<RankedKeywordsLegend />}
-                      wrapperStyle={{ width: "100%", display: "flex", justifyContent: "center" }}
-                    />
-                    {SERIES.map((s) => (
-                      <Line
-                        key={s.key}
-                        type="monotone"
-                        dataKey={s.key}
-                        stroke={s.color}
-                        strokeWidth={2.5}
-                        dot={{ r: 3, strokeWidth: 0, fill: s.color }}
-                        activeDot={{ r: 5, fill: s.color }}
-                        name={s.name}
+              {/* 1. Chart area (first in column) */}
+              <div className="h-[19rem] w-full min-h-[17.5rem] shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  {chartType === "line" ? (
+                    <LineChart
+                      data={history}
+                      margin={{ top: 16, right: 32, left: 16, bottom: 30 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                      <XAxis
+                        dataKey="month"
+                        stroke="#6B7280"
+                        tick={{ fontSize: 11, fill: "#374151" }}
+                        tickFormatter={formatAxisMonth}
+                        angle={-35}
+                        textAnchor="end"
+                        height={30}
+                        interval={0}
+                        dy={4}
                       />
-                    ))}
-                  </LineChart>
-                ) : (
-                  <BarChart data={history} margin={{ top: 10, right: 10, left: 10, bottom: 72 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis
-                      dataKey="month"
-                      stroke="#6B7280"
-                      tick={{ fontSize: 12, fill: "#374151" }}
-                      angle={-40}
-                      textAnchor="end"
-                      height={72}
-                      interval={0}
-                      dy={8}
-                    />
-                    <YAxis
-                      stroke="#6B7280"
-                      style={{ fontSize: "12px" }}
-                      label={{ value: "Keywords", angle: -90, position: "insideLeft" }}
-                      allowDecimals={false}
-                    />
-                    <Tooltip
-                      content={<RankedKeywordsTooltip />}
-                    />
-                    <Legend
-                      content={<RankedKeywordsLegend />}
-                      wrapperStyle={{ width: "100%", display: "flex", justifyContent: "center" }}
-                    />
-                    {/* Stacked bars: render bottom-to-top (yellow on top). Each segment uses its own fill. */}
-                    {BAR_STACK_SERIES.map((s, idx, arr) => (
-                      <Bar
-                        key={s.key}
-                        dataKey={s.key}
-                        name={s.name}
-                        fill={s.color}
-                        stroke={s.color}
-                        strokeWidth={1}
-                        stackId="a"
-                        radius={idx === arr.length - 1 ? [6, 6, 0, 0] : [0, 0, 0, 0]}
-                        isAnimationActive={true}
+                      <YAxis
+                        stroke="#6B7280"
+                        tick={{ fontSize: 11 }}
+                        label={{ value: "Keywords", angle: -90, position: "insideLeft", style: { fontSize: 11 } }}
+                        allowDecimals={false}
                       />
-                    ))}
-                  </BarChart>
-                )}
-              </ResponsiveContainer>
+                      <Tooltip content={<RankedKeywordsTooltip />} />
+                      {SERIES.map((s) => (
+                        <Line
+                          key={s.key}
+                          type="monotone"
+                          dataKey={s.key}
+                          stroke={s.color}
+                          strokeWidth={2.5}
+                          dot={{ r: 3, strokeWidth: 0, fill: s.color }}
+                          activeDot={{ r: 5, fill: s.color }}
+                          name={s.name}
+                        />
+                      ))}
+                    </LineChart>
+                  ) : (
+                    <BarChart
+                      data={history}
+                      margin={{ top: 16, right: 32, left: 16, bottom: 30 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                      <XAxis
+                        dataKey="month"
+                        stroke="#6B7280"
+                        tick={{ fontSize: 11, fill: "#374151" }}
+                        tickFormatter={formatAxisMonth}
+                        angle={-35}
+                        textAnchor="end"
+                        height={30}
+                        interval={0}
+                        dy={4}
+                      />
+                      <YAxis
+                        stroke="#6B7280"
+                        tick={{ fontSize: 11 }}
+                        label={{ value: "Keywords", angle: -90, position: "insideLeft", style: { fontSize: 11 } }}
+                        allowDecimals={false}
+                      />
+                      <Tooltip content={<RankedKeywordsTooltip />} />
+                      {BAR_STACK_SERIES.map((s, idx, arr) => (
+                        <Bar
+                          key={s.key}
+                          dataKey={s.key}
+                          name={s.name}
+                          fill={s.color}
+                          stroke={s.color}
+                          strokeWidth={1}
+                          stackId="a"
+                          radius={idx === arr.length - 1 ? [6, 6, 0, 0] : [0, 0, 0, 0]}
+                          isAnimationActive={true}
+                        />
+                      ))}
+                    </BarChart>
+                  )}
+                </ResponsiveContainer>
+              </div>
+              {/* 2. Legend directly under chart (minimal gap) */}
+              <div className="mt-0.5 pt-1 border-t border-gray-200 shrink-0">
+                <RankedKeywordsLegend />
+              </div>
             </div>
           )}
         </div>

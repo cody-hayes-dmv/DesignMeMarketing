@@ -23,7 +23,7 @@ import {
   Users,
 } from "lucide-react";
 import { format } from "date-fns";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -325,6 +325,7 @@ const VendastaPage = () => {
                       )}
                     </div>
                   </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
                   <th 
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
                     onClick={() => handleSort("industry")}
@@ -344,7 +345,7 @@ const VendastaPage = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredClients.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
                       {searchTerm ? "No Vendasta clients found matching your search." : "No Vendasta clients yet. Move clients from the Clients page."}
                     </td>
                   </tr>
@@ -364,6 +365,23 @@ const VendastaPage = () => {
                         >
                           {client.domain}
                         </a>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-xs">
+                        {client.agencyNames?.length ? (
+                          client.agencyNames.map((name, i) => (
+                            <span key={name}>
+                              {i > 0 && ", "}
+                              <Link
+                                to="/agency/agencies"
+                                className="text-primary-600 hover:text-primary-700 underline"
+                              >
+                                {name}
+                              </Link>
+                            </span>
+                          ))
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-xs">{client.industry ?? "-"}</td>
                       <td className="px-6 py-4 whitespace-nowrap">

@@ -96,6 +96,10 @@ async function getTaskForAccess(taskId: string) {
 }
 
 function canAccessTask(user: any, task: any) {
+  // Specialist: only tasks assigned to them (receive, not assign)
+  if (user.role === "SPECIALIST") {
+    return task?.assigneeId === user.userId;
+  }
   const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
   const inAgency = Boolean(task?.agency?.members?.some((m: any) => m.userId === user.userId));
   const inClient = Boolean(
@@ -109,8 +113,21 @@ function canAccessTask(user: any, task: any) {
 router.get("/", authenticateToken, async (req, res) => {
   try {
     const clientIdParam = typeof req.query.clientId === "string" ? req.query.clientId : undefined;
-    let tasks;
 
+    // Specialist: only tasks assigned to them (own task list)
+    if (req.user.role === "SPECIALIST") {
+      const tasks = await prisma.task.findMany({
+        where: {
+          assigneeId: req.user.userId,
+          ...(clientIdParam ? { clientId: clientIdParam } : {}),
+        },
+        include: taskInclude,
+        orderBy: { createdAt: "desc" },
+      });
+      return res.json(tasks);
+    }
+
+    let tasks;
     if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
       tasks = await prisma.task.findMany({
         where: clientIdParam ? { clientId: clientIdParam } : undefined,
@@ -341,9 +358,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// Create task
+// Create task (Specialists receive tasks; only AGENCY, ADMIN, SUPER_ADMIN can create/assign)
 router.post("/", authenticateToken, async (req, res) => {
   try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied. Specialists cannot create or assign tasks." });
+    }
+
     const parsed = createTaskSchema.parse(req.body);
 
     // For MVP, create under the first agency the user belongs to,
@@ -414,9 +435,13 @@ router.post("/", authenticateToken, async (req, res) => {
   }
 });
 
-// Update task (PUT = replace fields you send)
+// Update task (PUT = replace fields you send). Specialists cannot edit task details (only status via PATCH).
 router.put("/:id", authenticateToken, async (req, res) => {
   try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied. Specialists cannot edit task details." });
+    }
+
     const { id } = req.params;
     const updates = updateTaskSchema.parse(req.body);
 
@@ -475,9 +500,13 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
   }
 });
 
-// Delete task
+// Delete task. Specialists cannot delete tasks.
 router.delete("/:id", authenticateToken, async (req, res) => {
   try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied. Specialists cannot delete tasks." });
+    }
+
     const { id } = req.params;
 
     const task = await getTaskForAccess(id);

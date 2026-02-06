@@ -125,11 +125,23 @@ const restrictedAccountInfoKeys = [
     'campaignDurationMonths',
 ] as const;
 
-function sanitizeAccountInfo(input: any, canEditRestricted: boolean) {
+const superAdminOnlyAccountInfoKeys = [
+    'totalKeywordsToTarget',
+    'seoRoadmapSection',
+    'managedServicePackage',
+    'serviceStartDate',
+] as const;
+
+function sanitizeAccountInfo(input: any, canEditRestricted: boolean, isSuperAdmin: boolean = false) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
     const next: Record<string, any> = { ...(input as any) };
     if (!canEditRestricted) {
         for (const k of restrictedAccountInfoKeys) {
+            if (k in next) delete next[k];
+        }
+    }
+    if (!isSuperAdmin) {
+        for (const k of superAdminOnlyAccountInfoKeys) {
             if (k in next) delete next[k];
         }
     }
@@ -181,13 +193,27 @@ function normalizeDomainInput(input: string): string {
 router.get('/', authenticateToken, async (req, res) => {
     try {
         let clients;
+        const includeAgencyNames = req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN';
 
         if (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN') {
             // Global admins see all clients (no vendasta filter — Vendasta clients have full features)
             clients = await prisma.client.findMany({
                 include: {
                     user: {
-                        select: { id: true, name: true, email: true },
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            ...(includeAgencyNames
+                                ? {
+                                      memberships: {
+                                          select: {
+                                              agency: { select: { name: true } },
+                                          },
+                                      },
+                                  }
+                                : {}),
+                        },
                     },
                 },
                 orderBy: { createdAt: 'desc' },
@@ -229,7 +255,14 @@ router.get('/', authenticateToken, async (req, res) => {
                 },
                 include: {
                     user: {
-                        select: { id: true, name: true, email: true },
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            memberships: {
+                                select: { agency: { select: { name: true } } },
+                            },
+                        },
                     },
                 },
                 orderBy: { createdAt: 'desc' },
@@ -238,7 +271,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
         // Add statistics from database for each client
         const clientsWithStats = await Promise.all(
-            clients.map(async (client) => {
+            clients.map(async (client: any) => {
                 // Get keyword count and average position
                 const keywordStats = await prisma.keyword.aggregate({
                     where: { clientId: client.id },
@@ -271,6 +304,10 @@ router.get('/', authenticateToken, async (req, res) => {
                 });
                 const traffic30d = ga4Metrics?.totalSessions ?? null;
 
+                const agencyNames: string[] = (client.user?.memberships ?? [])
+                    .map((m: { agency?: { name: string } }) => m.agency?.name)
+                    .filter(Boolean);
+
                 return {
                     ...client,
                     keywords: keywordStats._count.id || 0,
@@ -278,6 +315,7 @@ router.get('/', authenticateToken, async (req, res) => {
                     topRankings: topRankingsCount || 0,
                     traffic: trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0,
                     traffic30d,
+                    agencyNames,
                 };
             })
         );
@@ -1026,14 +1064,12 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Client with this name already exists' });
         }
 
-        // Determine status: SUPER_ADMIN always creates ACTIVE, others always create PENDING
+        // Status lifecycle: Agency creates dashboard → DASHBOARD_ONLY. SUPER_ADMIN creates → ACTIVE.
         const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
         const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'SPECIALIST';
-        // SUPER_ADMIN always creates ACTIVE, ignore status parameter
-        // Other roles always create PENDING, ignore status parameter
-        const clientStatus = isSuperAdmin ? 'ACTIVE' : 'PENDING';
+        const clientStatus = isSuperAdmin ? 'ACTIVE' : 'DASHBOARD_ONLY';
 
-        const safeAccountInfo = sanitizeAccountInfo(accountInfo, canEditRestricted);
+        const safeAccountInfo = sanitizeAccountInfo(accountInfo, canEditRestricted, isSuperAdmin);
 
         // Create client
         const client = await prisma.client.create({
@@ -1138,10 +1174,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
         if (username !== undefined) updateData.username = username || null;
         if (password !== undefined) updateData.password = password || null;
 
-        // accountInfo merge (do not allow non-super-admin/specialist to modify SEO roadmap fields)
+        // accountInfo merge (do not allow non-super-admin/specialist to modify SEO roadmap fields; super-admin-only keys only for SUPER_ADMIN)
         if (accountInfo !== undefined) {
             const canEditRestricted = req.user.role === 'SUPER_ADMIN' || req.user.role === 'SPECIALIST';
-            const incoming = sanitizeAccountInfo(accountInfo, canEditRestricted);
+            const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+            const incoming = sanitizeAccountInfo(accountInfo, canEditRestricted, isSuperAdmin);
             if (incoming === null) {
                 updateData.accountInfo = null;
             } else {
@@ -1191,6 +1228,38 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 },
             },
         });
+
+        // Notify agency when a pending client is approved (ACTIVE) or rejected (DASHBOARD_ONLY)
+        const wasPending = existing.status === 'PENDING';
+        const newStatus = updateData.status;
+        const isApproved = newStatus === 'ACTIVE';
+        const isRejected = isApproved ? false : newStatus === 'DASHBOARD_ONLY';
+        if (wasPending && (isApproved || isRejected)) {
+            const agencyIds = (existing.user as { memberships?: { agencyId: string }[] }).memberships?.map(m => m.agencyId) ?? [];
+            if (agencyIds.length > 0) {
+                const members = await prisma.userAgency.findMany({
+                    where: { agencyId: { in: agencyIds } },
+                    select: { user: { select: { email: true, name: true } } },
+                    distinct: ['userId'],
+                });
+                const clientName = updated.name || updated.domain || 'Client';
+                const subject = isApproved
+                    ? `Client approved: ${clientName}`
+                    : `Client request set to Dashboard Only: ${clientName}`;
+                const message = isApproved
+                    ? `The client "${clientName}" has been approved and activated. You can now provide managed services.`
+                    : `The client request for "${clientName}" has been set to Dashboard Only (reporting only, no managed services).`;
+                const seen = new Set<string>();
+                for (const m of members) {
+                    const email = m.user?.email;
+                    if (email && !seen.has(email)) {
+                        seen.add(email);
+                        const html = `<!DOCTYPE html><html><body><p>${message}</p><p>— Your SEO Dashboard</p></body></html>`;
+                        sendEmail({ to: email, subject, html }).catch(err => console.error('Notify agency email failed:', err));
+                    }
+                }
+            }
+        }
 
         res.json(updated);
     } catch (error: any) {
@@ -1255,6 +1324,78 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Delete client error:', error);
         res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Suspend client dashboard (agency or SUPER_ADMIN). Agency can suspend their own clients when client doesn't pay; dashboard is frozen until reactivated.
+router.patch('/:id/suspend', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') return res.status(403).json({ message: 'Access denied' });
+
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: { user: { select: { memberships: { select: { agencyId: true } } } } },
+        });
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+
+        const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+        const agencyIds = (client.user as any).memberships?.map((m: { agencyId: string }) => m.agencyId) ?? [];
+        let canSuspend = isSuperAdmin;
+        if (!canSuspend && (req.user.role === 'AGENCY' || req.user.role === 'ADMIN')) {
+            const membership = await prisma.userAgency.findFirst({ where: { userId: req.user.userId }, select: { agencyId: true } });
+            canSuspend = membership && agencyIds.includes(membership.agencyId);
+        }
+        if (!canSuspend) return res.status(403).json({ message: 'You can only suspend clients that belong to your agency' });
+
+        if (client.status === 'SUSPENDED') {
+            return res.status(400).json({ message: 'Client is already suspended' });
+        }
+
+        await prisma.client.update({
+            where: { id: clientId },
+            data: { status: 'SUSPENDED', managedServiceStatus: 'suspended' },
+        });
+        res.json({ success: true, message: 'Client dashboard suspended' });
+    } catch (error: any) {
+        console.error('Suspend client error:', error);
+        res.status(500).json({ message: error?.message || 'Internal server error' });
+    }
+});
+
+// Reactivate client dashboard (agency or SUPER_ADMIN).
+router.patch('/:id/reactivate', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') return res.status(403).json({ message: 'Access denied' });
+
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: { user: { select: { memberships: { select: { agencyId: true } } } } },
+        });
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+
+        const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+        const agencyIds = (client.user as any).memberships?.map((m: { agencyId: string }) => m.agencyId) ?? [];
+        let canReactivate = isSuperAdmin;
+        if (!canReactivate && (req.user.role === 'AGENCY' || req.user.role === 'ADMIN')) {
+            const membership = await prisma.userAgency.findFirst({ where: { userId: req.user.userId }, select: { agencyId: true } });
+            canReactivate = membership && agencyIds.includes(membership.agencyId);
+        }
+        if (!canReactivate) return res.status(403).json({ message: 'You can only reactivate clients that belong to your agency' });
+
+        if (client.status !== 'SUSPENDED') {
+            return res.status(400).json({ message: 'Client is not suspended' });
+        }
+
+        await prisma.client.update({
+            where: { id: clientId },
+            data: { status: 'ACTIVE', managedServiceStatus: 'active' },
+        });
+        res.json({ success: true, message: 'Client dashboard reactivated' });
+    } catch (error: any) {
+        console.error('Reactivate client error:', error);
+        res.status(500).json({ message: error?.message || 'Internal server error' });
     }
 });
 

@@ -6135,6 +6135,13 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
+    if (client.status === "SUSPENDED") {
+      return res.status(403).json({
+        message: "This client's dashboard is suspended.",
+        code: "DASHBOARD_SUSPENDED",
+      });
+    }
+
     // Handle custom date range or period
     let startDate: Date;
     let endDate: Date;
@@ -9268,7 +9275,8 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
 
     // Get user's accessible clients
     let accessibleClientIds: string[] = [];
-    
+    let agencyIds: string[] = [];
+
     if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
       // Admins see all clients
       const allClients = await prisma.client.findMany({
@@ -9281,8 +9289,8 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
         where: { userId: req.user.userId },
         select: { agencyId: true },
       });
-      const agencyIds = userMemberships.map(m => m.agencyId);
-      
+      agencyIds = userMemberships.map(m => m.agencyId);
+
       const clients = await prisma.client.findMany({
         where: {
           user: {
@@ -9432,6 +9440,8 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
         googleUrl: true,
         client: {
           select: {
+            id: true,
+            name: true,
             domain: true,
           },
         },
@@ -9466,7 +9476,107 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       change: kw.previousPosition ? kw.currentPosition! - kw.previousPosition : 0,
       url: onlyRankingWebsiteUrl(kw.googleUrl) || "",
       volume: kw.searchVolume || 0,
+      clientId: (kw as any).client?.id,
+      clientName: (kw as any).client?.name,
     }));
+
+    // Quick wins: keywords in position 4-10 (easy wins) with client name
+    const quickWinsKeywords = await prisma.keyword.findMany({
+      where: {
+        clientId: { in: accessibleClientIds },
+        currentPosition: { not: null, gte: 4, lte: 10 },
+      },
+      orderBy: { currentPosition: "asc" },
+      take: 10,
+      select: {
+        keyword: true,
+        currentPosition: true,
+        client: { select: { id: true, name: true } },
+      },
+    });
+    const quickWins = quickWinsKeywords.map((kw) => ({
+      clientId: kw.client.id,
+      clientName: kw.client.name,
+      keyword: kw.keyword,
+      position: kw.currentPosition!,
+    }));
+
+    // Number 1 rankings: total and per client
+    const numberOneTotal = await prisma.keyword.count({
+      where: {
+        clientId: { in: accessibleClientIds },
+        currentPosition: 1,
+      },
+    });
+    const numberOneByClient = await prisma.keyword.groupBy({
+      by: ["clientId"],
+      where: {
+        clientId: { in: accessibleClientIds },
+        currentPosition: 1,
+      },
+      _count: { id: true },
+    });
+    const clientIdsForOne = numberOneByClient.map((r) => r.clientId);
+    const clientsForOne = await prisma.client.findMany({
+      where: { id: { in: clientIdsForOne } },
+      select: { id: true, name: true },
+    });
+    const clientNameMap = new Map(clientsForOne.map((c) => [c.id, c.name]));
+    const numberOneRankings = {
+      total: numberOneTotal,
+      byClient: numberOneByClient
+        .map((r) => ({ clientId: r.clientId, clientName: clientNameMap.get(r.clientId) || "Unknown", count: r._count.id }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 8),
+    };
+
+    // Client performance overview: top clients by traffic (from top pages organic ETV)
+    const trafficByClient = await prisma.topPage.groupBy({
+      by: ["clientId"],
+      where: { clientId: { in: accessibleClientIds } },
+      _sum: { organicEtv: true },
+    });
+    const clientIdsWithTraffic = trafficByClient.map((r) => r.clientId);
+    const clientsWithTraffic = await prisma.client.findMany({
+      where: { id: { in: clientIdsWithTraffic } },
+      select: { id: true, name: true },
+    });
+    const nameMap = new Map(clientsWithTraffic.map((c) => [c.id, c.name]));
+    const clientPerformance = trafficByClient
+      .map((r) => ({
+        clientId: r.clientId,
+        clientName: nameMap.get(r.clientId) || "Unknown",
+        trafficChangePercent: Math.round((Math.random() - 0.2) * 80), // Placeholder until we have historical
+        trafficChangeVisits: Math.round((Math.random() - 0.2) * 2000),
+        organicEtv: Math.round(r._sum.organicEtv || 0),
+      }))
+      .sort((a, b) => b.organicEtv - a.organicEtv)
+      .slice(0, 6);
+
+    // Limits from base plan + agency add-ons
+    let tierLimit = 10;
+    const keywordLimit = 500;
+    let researchLimit = 150;
+    if (agencyIds.length > 0) {
+      const addOns = await prisma.agencyAddOn.findMany({
+        where: { agencyId: { in: agencyIds } },
+        select: { addOnType: true, addOnOption: true },
+      });
+      for (const a of addOns) {
+        if (a.addOnType === "extra_slots" && a.addOnOption === "5_slots") tierLimit += 5;
+        if (a.addOnType === "credit_pack" && a.addOnOption === "100") researchLimit += 100;
+        if (a.addOnType === "credit_pack" && a.addOnOption === "500") researchLimit += 500;
+      }
+    }
+    const researchCredits = { used: 87, limit: researchLimit, resetsInDays: 26 };
+
+    // Recent activity (placeholder: from activity log when available)
+    const recentActivity = [
+      { text: "New ranking data available (3 clients)", date: new Date().toISOString() },
+      { text: "You created report for a client", date: new Date(Date.now() - 86400000).toISOString() },
+      { text: "Task completed: Meta tags update", date: new Date(Date.now() - 172800000).toISOString() },
+      { text: "Keywords added to a client", date: new Date(Date.now() - 259200000).toISOString() },
+    ];
 
     // Generate mock trends data (in a real app, you'd fetch historical data)
     const rankingTrends = Array.from({ length: 30 }, (_, i) => {
@@ -9498,10 +9608,97 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       rankingTrends,
       trafficTrends,
       ga4Summary,
+      quickWins,
+      numberOneRankings,
+      clientPerformance,
+      researchCredits,
+      recentActivity,
+      tierLimit,
+      keywordLimit,
+      currentTier: "Growth",
+      monthlySpend: "297.00",
+      nextBillingDate: new Date(Date.now() + 26 * 86400000).toISOString().split("T")[0],
     });
   } catch (error: any) {
     console.error("Agency dashboard fetch error:", error);
     res.status(500).json({ message: error?.message || "Failed to fetch agency dashboard data" });
+  }
+});
+
+// Get agency subscription overview (current plan, usage, next billing)
+router.get("/agency/subscription", authenticateToken, async (req, res) => {
+  try {
+    let accessibleClientIds: string[] = [];
+    let agencyIds: string[] = [];
+
+    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
+      const allClients = await prisma.client.findMany({ select: { id: true } });
+      accessibleClientIds = allClients.map((c) => c.id);
+    } else {
+      const userMemberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      agencyIds = userMemberships.map((m) => m.agencyId);
+      const clients = await prisma.client.findMany({
+        where: {
+          user: {
+            memberships: {
+              some: { agencyId: { in: agencyIds } },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      accessibleClientIds = clients.map((c) => c.id);
+    }
+
+    const keywordCount = await prisma.keyword.count({
+      where: { clientId: { in: accessibleClientIds } },
+    });
+
+    let tierLimit = 10;
+    const keywordLimit = 500;
+    let researchLimit = 150;
+    let teamMemberCount = 0;
+    let teamMemberLimit = 2;
+
+    if (agencyIds.length > 0) {
+      teamMemberCount = await prisma.userAgency.count({
+        where: { agencyId: { in: agencyIds } },
+      });
+      const addOns = await prisma.agencyAddOn.findMany({
+        where: { agencyId: { in: agencyIds } },
+        select: { addOnType: true, addOnOption: true },
+      });
+      for (const a of addOns) {
+        if (a.addOnType === "extra_slots" && a.addOnOption === "5_slots") tierLimit += 5;
+        if (a.addOnType === "credit_pack" && a.addOnOption === "100") researchLimit += 100;
+        if (a.addOnType === "credit_pack" && a.addOnOption === "500") researchLimit += 500;
+      }
+    } else if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
+      teamMemberCount = await prisma.userAgency.count({});
+      teamMemberLimit = 10;
+    }
+
+    const nextBilling = new Date();
+    nextBilling.setDate(nextBilling.getDate() + 26);
+
+    res.json({
+      currentPlan: "starter",
+      currentPlanPrice: 297,
+      nextBillingDate: nextBilling.toISOString().split("T")[0],
+      paymentMethod: { last4: "4242", brand: "Visa" },
+      usage: {
+        clientDashboards: { used: accessibleClientIds.length, limit: tierLimit },
+        keywordsTracked: { used: keywordCount, limit: keywordLimit },
+        researchCredits: { used: 87, limit: researchLimit },
+        teamMembers: { used: teamMemberCount, limit: teamMemberLimit },
+      },
+    });
+  } catch (error: any) {
+    console.error("Agency subscription fetch error:", error);
+    res.status(500).json({ message: error?.message || "Failed to fetch subscription" });
   }
 });
 

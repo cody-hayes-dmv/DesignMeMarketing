@@ -14,7 +14,9 @@ export interface Task {
   category?: string | null;
   status: TaskStatus;
   createdAt: string;
+  updatedAt?: string | null;
   dueDate?: string | null;
+  priority?: string | null;
   proof?: ProofItem[] | null; // Array of proof items
   assignee?: {
     id: string;

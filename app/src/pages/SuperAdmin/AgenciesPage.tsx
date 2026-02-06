@@ -93,13 +93,34 @@ const AgenciesPage = () => {
     const [sortField, setSortField] = useState<"agency" | "subdomain" | "clients">("agency");
     const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
     const [agenciesSearch, setAgenciesSearch] = useState("");
-    const [createForm, setCreateForm] = useState({
+    const initialCreateForm = {
         name: "",
+        website: "",
+        industry: "",
+        agencySize: "",
+        numberOfClients: "" as string | number,
+        contactName: "",
+        contactEmail: "",
+        contactPhone: "",
+        contactJobTitle: "",
+        streetAddress: "",
+        city: "",
+        state: "",
+        zip: "",
+        country: "United States",
         subdomain: "",
-        email: "",
-        password: "",
-        username: "",
-    });
+        billingOption: "" as "" | "charge" | "no_charge" | "manual_invoice",
+        tier: "" as "" | "solo" | "starter" | "growth" | "pro" | "enterprise",
+        customPricing: "" as string | number,
+        internalNotes: "",
+        referralSource: "",
+        referralSourceOther: "",
+        primaryGoals: [] as string[],
+        primaryGoalsOther: "",
+        currentTools: "",
+    };
+    const [createForm, setCreateForm] = useState(initialCreateForm);
+    const hasPaymentMethod = true; // TODO: from platform billing API when available
 
     useEffect(() => {
         dispatch(fetchAgencies() as any);
@@ -107,23 +128,66 @@ const AgenciesPage = () => {
 
     const handleCreateAgency = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!createForm.name.trim()) {
+            toast.error("Agency name is required.");
+            return;
+        }
+        if (!createForm.website.trim()) {
+            toast.error("Agency website is required.");
+            return;
+        }
+        if (!createForm.contactName.trim()) {
+            toast.error("Primary contact name is required.");
+            return;
+        }
+        if (!createForm.contactEmail.trim()) {
+            toast.error("Contact email is required.");
+            return;
+        }
+        if (!createForm.billingOption) {
+            toast.error("Please select a billing type.");
+            return;
+        }
+        if (createForm.billingOption !== "manual_invoice" && !createForm.tier) {
+            toast.error("Please select a subscription tier.");
+            return;
+        }
+        const website = createForm.website.trim().startsWith("http") ? createForm.website.trim() : `https://${createForm.website.trim()}`;
         try {
             await dispatch(createAgency({
-                name: createForm.name,
-                subdomain: createForm.subdomain || undefined,
-                email: createForm.email || undefined,
-                password: createForm.password || undefined,
-                username: createForm.username || undefined,
+                name: createForm.name.trim(),
+                website,
+                industry: createForm.industry || undefined,
+                agencySize: createForm.agencySize || undefined,
+                numberOfClients: createForm.numberOfClients === "" ? undefined : Number(createForm.numberOfClients),
+                contactName: createForm.contactName.trim(),
+                contactEmail: createForm.contactEmail.trim(),
+                contactPhone: createForm.contactPhone || undefined,
+                contactJobTitle: createForm.contactJobTitle || undefined,
+                streetAddress: createForm.streetAddress || undefined,
+                city: createForm.city || undefined,
+                state: createForm.state || undefined,
+                zip: createForm.zip || undefined,
+                country: createForm.country || undefined,
+                subdomain: createForm.subdomain?.trim() || undefined,
+                billingOption: createForm.billingOption,
+                tier: createForm.tier || undefined,
+                customPricing: createForm.billingOption === "manual_invoice" && createForm.customPricing !== "" ? Number(createForm.customPricing) : undefined,
+                internalNotes: createForm.internalNotes || undefined,
+                referralSource: createForm.referralSource || undefined,
+                referralSourceOther: createForm.referralSource === "referral" ? createForm.referralSourceOther : undefined,
+                primaryGoals: createForm.primaryGoals.length ? createForm.primaryGoals : undefined,
+                primaryGoalsOther: createForm.primaryGoalsOther || undefined,
+                currentTools: createForm.currentTools || undefined,
             }) as any);
-            setCreateForm({ name: "", subdomain: "", email: "", password: "", username: "" });
+            setCreateForm(initialCreateForm);
             setShowCreateModal(false);
-            toast.success("Agency created successfully!");
+            toast.success("Agency created. Set-password email sent to contact.");
             dispatch(fetchAgencies() as any);
-            // Notify Team page so it refetches and shows the new agency owner (if one was created)
             window.dispatchEvent(new CustomEvent("agency-created"));
         } catch (error: any) {
-            console.error("Failed to create agency:", error);
-            // Toast is already shown by API interceptor
+            const msg = error?.message || error?.response?.data?.message || "Failed to create agency.";
+            toast.error(msg);
         }
     };
 
@@ -518,7 +582,7 @@ const AgenciesPage = () => {
                                     onClick={() => handleSort("agency")}
                                 >
                                     <div className="flex items-center gap-2">
-                                        Agency
+                                        Name
                                         {sortField === "agency" && (
                                             sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                                         )}
@@ -843,113 +907,228 @@ const AgenciesPage = () => {
 
             {/* Create Agency Modal */}
             {showCreateModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold text-gray-900">
-                                Create New Agency
-                            </h2>
-                            <button
-                                onClick={() => setShowCreateModal(false)}
-                                className="text-gray-400 hover:text-gray-600"
-                            >
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-xl ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-200 shrink-0">
+                            <h2 className="text-xl font-bold text-gray-900">Create New Agency</h2>
+                            <button type="button" onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600">
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
-                        <form onSubmit={handleCreateAgency} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Agency Name *
-                                </label>
-                                <input
-                                    type="text"
-                                    value={createForm.name}
-                                    onChange={(e) =>
-                                        setCreateForm({ ...createForm, name: e.target.value })
-                                    }
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    required
-                                    placeholder="Enter agency name"
-                                />
+                        <form onSubmit={handleCreateAgency} className="flex flex-col min-h-0">
+                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                                {/* Section A: Agency Information */}
+                                <section>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">AGENCY INFORMATION (Required)</h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Agency Name *</label>
+                                            <input type="text" required value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="e.g. TKM Agency" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Agency Website *</label>
+                                            <input type="url" required value={createForm.website} onChange={(e) => setCreateForm({ ...createForm, website: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="https://tkmdigital.com" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Industry/Specialty</label>
+                                            <select value={createForm.industry} onChange={(e) => setCreateForm({ ...createForm, industry: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select...</option>
+                                                <option value="Full Service Agency">Full Service Agency</option>
+                                                <option value="SEO Specialist">SEO Specialist</option>
+                                                <option value="Web Design">Web Design</option>
+                                                <option value="PPC Agency">PPC Agency</option>
+                                                <option value="Social Media">Social Media</option>
+                                                <option value="Local Marketing">Local Marketing</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Agency Size</label>
+                                            <select value={createForm.agencySize} onChange={(e) => setCreateForm({ ...createForm, agencySize: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select...</option>
+                                                <option value="Solo (1 person)">Solo (1 person)</option>
+                                                <option value="Small (2-5 employees)">Small (2-5 employees)</option>
+                                                <option value="Medium (6-15 employees)">Medium (6-15 employees)</option>
+                                                <option value="Large (16-30 employees)">Large (16-30 employees)</option>
+                                                <option value="Enterprise (30+ employees)">Enterprise (30+ employees)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Number of Current Clients</label>
+                                            <input type="number" min={0} value={createForm.numberOfClients} onChange={(e) => setCreateForm({ ...createForm, numberOfClients: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="e.g. 12" />
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Section B: Primary Contact */}
+                                <section>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">PRIMARY CONTACT (Required)</h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Primary Contact Name *</label>
+                                            <input type="text" required value={createForm.contactName} onChange={(e) => setCreateForm({ ...createForm, contactName: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="e.g. Johnny Doe" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email * (login email)</label>
+                                            <input type="email" required value={createForm.contactEmail} onChange={(e) => setCreateForm({ ...createForm, contactEmail: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="johnny@tkmdigital.com" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                                            <input type="tel" value={createForm.contactPhone} onChange={(e) => setCreateForm({ ...createForm, contactPhone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="+1 (631) 555-1234" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
+                                            <input type="text" value={createForm.contactJobTitle} onChange={(e) => setCreateForm({ ...createForm, contactJobTitle: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Owner, Marketing Director, SEO Manager" />
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Section C: Business Address */}
+                                <section>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">BUSINESS ADDRESS (Optional)</h3>
+                                    <div className="space-y-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div className="sm:col-span-2">
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Street Address</label>
+                                            <input type="text" value={createForm.streetAddress} onChange={(e) => setCreateForm({ ...createForm, streetAddress: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="375 Commack Road" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                                            <input type="text" value={createForm.city} onChange={(e) => setCreateForm({ ...createForm, city: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Deer Park" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">State/Province</label>
+                                            <input type="text" value={createForm.state} onChange={(e) => setCreateForm({ ...createForm, state: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="NY" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">ZIP/Postal Code</label>
+                                            <input type="text" value={createForm.zip} onChange={(e) => setCreateForm({ ...createForm, zip: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="11729" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                                            <select value={createForm.country} onChange={(e) => setCreateForm({ ...createForm, country: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="United States">United States</option>
+                                                <option value="Canada">Canada</option>
+                                                <option value="United Kingdom">United Kingdom</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Section D: Subdomain */}
+                                <section>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">WHITE LABEL SUBDOMAIN (Optional)</h3>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Custom Subdomain</label>
+                                        <input type="text" value={createForm.subdomain} onChange={(e) => setCreateForm({ ...createForm, subdomain: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="tkmdigital" />
+                                        <p className="mt-1 text-xs text-gray-500">e.g. tkmdigital → tkmdigital.yourplatform.com. Leave blank if not needed.</p>
+                                    </div>
+                                </section>
+
+                                {/* Section E: Billing & Subscription */}
+                                <section>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">BILLING & SUBSCRIPTION</h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type *</label>
+                                            <div className="space-y-2">
+                                                {hasPaymentMethod && (
+                                                    <label className="flex items-center gap-2">
+                                                        <input type="radio" name="billingOption" value="charge" checked={createForm.billingOption === "charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "charge" })} className="text-primary-600" />
+                                                        <span>Charge to Card</span>
+                                                    </label>
+                                                )}
+                                                <label className="flex items-center gap-2">
+                                                    <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "no_charge" })} className="text-primary-600" />
+                                                    <span>No Charge – Free Account</span>
+                                                </label>
+                                                <label className="flex items-center gap-2">
+                                                    <input type="radio" name="billingOption" value="manual_invoice" checked={createForm.billingOption === "manual_invoice"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "manual_invoice" })} className="text-primary-600" />
+                                                    <span>Manual Invoice (Enterprise)</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier *</label>
+                                            <select value={createForm.tier} onChange={(e) => setCreateForm({ ...createForm, tier: e.target.value as typeof createForm.tier })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select tier</option>
+                                                <option value="solo">Solo ($147/mo) – 3 clients</option>
+                                                <option value="starter">Starter ($297/mo) – 10 clients</option>
+                                                <option value="growth">Growth ($597/mo) – 25 clients</option>
+                                                <option value="pro">Pro ($997/mo) – 50 clients</option>
+                                                <option value="enterprise">Enterprise (Custom) – Unlimited</option>
+                                            </select>
+                                        </div>
+                                        {createForm.billingOption === "manual_invoice" && (
+                                            <>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-1">Custom pricing</label>
+                                                    <input type="number" step="0.01" min={0} value={createForm.customPricing} onChange={(e) => setCreateForm({ ...createForm, customPricing: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="0.00" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-1">Internal notes</label>
+                                                    <textarea value={createForm.internalNotes} onChange={(e) => setCreateForm({ ...createForm, internalNotes: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Notes for internal use" />
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </section>
+
+                                {/* Section F: Additional Questions */}
+                                <section>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">ADDITIONAL QUESTIONS (Optional)</h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">How did you hear about us?</label>
+                                            <select value={createForm.referralSource} onChange={(e) => setCreateForm({ ...createForm, referralSource: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select...</option>
+                                                <option value="Google Search">Google Search</option>
+                                                <option value="referral">Referral</option>
+                                                <option value="Social Media">Social Media</option>
+                                                <option value="Industry Event">Industry Event</option>
+                                                <option value="Cold Outreach">Cold Outreach</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                            {createForm.referralSource === "referral" && (
+                                                <input type="text" value={createForm.referralSourceOther} onChange={(e) => setCreateForm({ ...createForm, referralSourceOther: e.target.value })} className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Referral from..." />
+                                            )}
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">What's your primary goal? (select multiple)</label>
+                                            <div className="space-y-1 flex flex-wrap gap-2">
+                                                {["White label reporting for clients", "Outsource SEO fulfillment", "Scale my agency", "Better client retention"].map((goal) => (
+                                                    <label key={goal} className="flex items-center gap-2">
+                                                        <input type="checkbox" checked={createForm.primaryGoals.includes(goal)} onChange={(e) => setCreateForm({ ...createForm, primaryGoals: e.target.checked ? [...createForm.primaryGoals, goal] : createForm.primaryGoals.filter((g) => g !== goal) })} className="rounded border-gray-300 text-primary-600" />
+                                                        <span className="text-sm">{goal}</span>
+                                                    </label>
+                                                ))}
+                                                <label className="flex items-center gap-2">
+                                                    <input type="checkbox" checked={createForm.primaryGoals.includes("Other")} onChange={(e) => setCreateForm({ ...createForm, primaryGoals: e.target.checked ? [...createForm.primaryGoals, "Other"] : createForm.primaryGoals.filter((g) => g !== "Other") })} className="rounded border-gray-300 text-primary-600" />
+                                                    <span className="text-sm">Other</span>
+                                                    {createForm.primaryGoals.includes("Other") && <input type="text" value={createForm.primaryGoalsOther} onChange={(e) => setCreateForm({ ...createForm, primaryGoalsOther: e.target.value })} className="ml-1 px-2 py-1 border rounded text-sm w-40" placeholder="Specify" />}
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">What tools are you currently using?</label>
+                                            <select value={createForm.currentTools} onChange={(e) => setCreateForm({ ...createForm, currentTools: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select...</option>
+                                                <option value="SEMrush">SEMrush</option>
+                                                <option value="Ahrefs">Ahrefs</option>
+                                                <option value="AgencyAnalytics">AgencyAnalytics</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                <p className="text-xs text-gray-500 border-t pt-3">After creation, an email will be sent to the contact with a secure &quot;Set your password&quot; link (expires in 24 hours). No password is collected in this form.</p>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Subdomain (Optional)
-                                </label>
-                                <input
-                                    type="text"
-                                    value={createForm.subdomain}
-                                    onChange={(e) =>
-                                        setCreateForm({ ...createForm, subdomain: e.target.value })
-                                    }
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    placeholder="subdomain"
-                                />
-                                <p className="mt-1 text-xs text-gray-500">
-                                    Will be accessible at subdomain.yourseodashboard.com
-                                </p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Email (Optional - for agency login)
-                                </label>
-                                <input
-                                    type="email"
-                                    value={createForm.email}
-                                    onChange={(e) =>
-                                        setCreateForm({ ...createForm, email: e.target.value })
-                                    }
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    placeholder="agency@example.com"
-                                />
-                                <p className="mt-1 text-xs text-gray-500">
-                                    Email address for agency owner login
-                                </p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Username (Optional)
-                                </label>
-                                <input
-                                    type="text"
-                                    value={createForm.username}
-                                    onChange={(e) =>
-                                        setCreateForm({ ...createForm, username: e.target.value })
-                                    }
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    placeholder="Agency Owner Name"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Password (Optional - min 6 characters)
-                                </label>
-                                    <input
-                                        type="password"
-                                        value={createForm.password}
-                                        onChange={(e) =>
-                                            setCreateForm({ ...createForm, password: e.target.value })
-                                        }
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                        placeholder="Password"
-                                        minLength={6}
-                                    />
-                                <p className="mt-1 text-xs text-gray-500">
-                                    Password for agency owner login (required if email is provided)
-                                </p>
-                            </div>
-                            <div className="flex space-x-4 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowCreateModal(false)}
-                                    className="flex-1 bg-gray-200 text-gray-800 py-3 px-6 rounded-lg hover:bg-gray-300 transition-colors"
-                                >
+                            <div className="flex gap-3 p-6 border-t border-gray-200 shrink-0">
+                                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
                                     Cancel
                                 </button>
-                                <button
-                                    type="submit"
-                                    className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors"
-                                >
+                                <button type="submit" className="flex-1 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
                                     Create Agency
                                 </button>
                             </div>

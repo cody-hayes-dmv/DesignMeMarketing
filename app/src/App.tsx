@@ -7,7 +7,7 @@ import { Toaster } from "react-hot-toast";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import SpecialistDashboard from "./pages/Specialist/SpecialistDashboardPage";
-import SpecialistTeamPage from "./pages/Specialist/SpecialistTeamPage";
+import SpecialistClientsPage from "./pages/Specialist/SpecialistClientsPage";
 import DashboardLayout from "./components/DashboardLayout";
 import ClientsPage from "./pages/ClientsPage";
 import KeywordsPage from "./pages/KeywordsPage";
@@ -16,6 +16,10 @@ import ReportsPage from "./pages/ReportsPage";
 import TeamPage from "./pages/TeamPage";
 import SettingsPage from "./pages/SettingsPage";
 import TasksPage from "./pages/TasksPage";
+import PlaceholderAgencyPage from "./pages/Agency/PlaceholderAgencyPage";
+import SubscriptionPage from "./pages/Agency/SubscriptionPage";
+import ManagedServicesPage from "./pages/Agency/ManagedServicesPage";
+import AddOnsPage from "./pages/Agency/AddOnsPage";
 import AgencyDashboardPage from "./pages/Agency/AgencyDashboardPage";
 import AgenciesPage from "./pages/SuperAdmin/AgenciesPage";
 import SuperAdminDashboard from "./pages/SuperAdmin/SuperAdminDashboard";
@@ -90,6 +94,9 @@ function App() {
     { path: "/agency/keywords", component: KeywordsPage },
     { path: "/agency/rankings", component: RankingsPage },
     { path: "/agency/reports", component: ReportsPage },
+    { path: "/agency/managed-services", component: ManagedServicesPage },
+    { path: "/agency/add-ons", component: AddOnsPage },
+    { path: "/agency/subscription", component: SubscriptionPage },
     { path: "/agency/users", component: ClientUsersPage },
     { path: "/agency/team", component: TeamPage },
     { path: "/agency/clients/:clientId", component: ClientDashboardPage },
@@ -97,12 +104,11 @@ function App() {
     { path: "/agency/tasks", component: TasksPage },
   ];
 
-  // Specialist routes (restore previous version)
+  // Specialist routes
   const specialistRoutes = [
     { path: "/specialist/dashboard", component: SpecialistDashboard },
-    { path: "/specialist/myagency", component: AgencyDashboardPage },
+    { path: "/specialist/clients", component: SpecialistClientsPage },
     { path: "/specialist/tasks", component: TasksPage },
-    { path: "/specialist/team", component: SpecialistTeamPage },
     { path: "/specialist/settings", component: SettingsPage },
   ];
 

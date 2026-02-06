@@ -32,15 +32,43 @@ model User {
 }
 
 model Agency {
-  id                  String               @id @default(cuid())
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  name                String
-  subdomain           String?              @unique
-  onboardingTemplates OnboardingTemplate[]
-  tasks               Task[]
-  tokens              Token[]
-  members             UserAgency[]
+  id                    String               @id @default(cuid())
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  name                  String
+  subdomain             String?              @unique
+  stripeCustomerId      String?              @db.VarChar(255)
+  stripeSubscriptionId  String?              @db.VarChar(255)
+  billingType           BillingType?         @default(paid)
+  // Agency info (create form)
+  website               String?              @db.VarChar(500)
+  industry              String?              @db.VarChar(100)
+  agencySize            String?              @db.VarChar(80)
+  numberOfClients       Int?
+  // Primary contact (also used for owner user)
+  contactName           String?              @db.VarChar(255)
+  contactEmail          String?              @db.VarChar(255)
+  contactPhone          String?              @db.VarChar(50)
+  contactJobTitle       String?              @db.VarChar(100)
+  // Business address
+  streetAddress         String?              @db.VarChar(255)
+  city                  String?              @db.VarChar(100)
+  state                 String?              @db.VarChar(100)
+  zip                   String?              @db.VarChar(20)
+  country               String?              @db.VarChar(100)
+  // Subscription
+  subscriptionTier      String?              @db.VarChar(50)
+  customPricing         Decimal?             @db.Decimal(10, 2)
+  internalNotes         String?              @db.Text
+  // Additional questions (stored as JSON: referralSource, referralText, primaryGoals[], currentTools, etc.)
+  onboardingData        String?              @db.LongText
+  onboardingTemplates   OnboardingTemplate[]
+  tasks                 Task[]
+  tokens                Token[]
+  members               UserAgency[]
+  managedServices       ManagedService[]
+  addOns                AgencyAddOn[]
+  clientsBelongingToAgency Client[]           @relation("ClientsBelongingToAgency")
 
   @@map("agencies")
 }
@@ -136,6 +164,7 @@ model Client {
   targets               String?                 @db.LongText
   status                Status                  @default(PENDING)
   canceledEndDate       DateTime?               // When status is CANCELED, optional end date to display
+  keepDashboardAfterEndDate Boolean?            @default(false) // If true, after end date → DASHBOARD_ONLY; else ARCHIVED
   loginUrl              String?
   username              String?
   password              String?
@@ -155,10 +184,21 @@ model Client {
   googleAdsConnectedAt  DateTime?
   vendasta              Boolean                  @default(false)
   userId                String
+  // Managed service fields (denormalized / summary on client)
+  managedServiceStatus       ManagedServiceStatus? @default(none)
+  managedServicePackage     ManagedServicePackage?
+  managedServicePrice       Decimal?               @db.Decimal(10, 2)
+  managedServiceRequestedDate DateTime?
+  managedServiceActivatedDate DateTime?
+  managedServiceCanceledDate  DateTime?
+  managedServiceEndDate      DateTime?             @db.Date
+  belongsToAgencyId     String?
+  isAgencyOwnDashboard   Boolean                  @default(false)
   aiSearchSerpCache     AiSearchSerpCache?
   backlinkTimeseries    BacklinkTimeseries[]
   backlinks             Backlink[]
   user                  User                    @relation(fields: [userId], references: [id])
+  belongsToAgency       Agency?                 @relation("ClientsBelongingToAgency", fields: [belongsToAgencyId], references: [id])
   ga4Metrics            Ga4Metrics?
   keywords              Keyword[]
   rankedKeywordsHistory RankedKeywordsHistory[]
@@ -169,10 +209,85 @@ model Client {
   topPages              TopPage[]
   trafficSources        TrafficSource[]
   clientUsers           ClientUser[]
+  managedServices       ManagedService[]
 
   @@index([name, domain])
   @@index([userId], map: "clients_userId_fkey")
+  @@index([belongsToAgencyId])
   @@map("clients")
+}
+
+model ManagedService {
+  id                       String   @id @default(cuid())
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  agencyId                 String
+  clientId                 String
+  packageId                String   // foundation | growth | domination | custom
+  packageName              String
+  monthlyPrice              Int      // cents
+  commissionPercent        Int
+  monthlyCommission        Int      // cents
+  startDate                DateTime
+  status                   String   @default("ACTIVE") // ACTIVE | CANCELED
+  stripeSubscriptionItemId String?  @db.VarChar(255)
+  agency                   Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client                   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId])
+  @@index([clientId])
+  @@map("managed_services")
+}
+
+// Track every managed service activation request for Super Admin (audit / reporting).
+model ManagedServiceRequest {
+  id                 String   @id @default(cuid())
+  createdAt          DateTime @default(now())
+  agencyId           String   @db.VarChar(191)
+  agencyName         String   @db.VarChar(255)
+  agencyEmail        String?  @db.VarChar(255)
+  clientId           String   @db.VarChar(191)
+  clientName         String   @db.VarChar(255)
+  packageId          String   @db.VarChar(80)
+  packageName        String   @db.VarChar(255)
+  monthlyPriceCents  Int
+  startDate         DateTime @db.Date
+  managedServiceId   String?  @db.VarChar(191)
+
+  @@index([agencyId])
+  @@index([createdAt])
+  @@map("managed_services_requests")
+}
+
+model AgencyAddOn {
+  id                       String   @id @default(cuid())
+  createdAt                DateTime @default(now())
+  agencyId                 String
+  addOnType                String   // credit_pack | extra_slots | map_pack
+  addOnOption              String   // e.g. "100", "500", "5_slots", "starter", "growth", "pro"
+  displayName              String
+  details                  String?  @db.VarChar(500)
+  priceCents               Int
+  billingInterval          String   // one_time | monthly
+  stripeSubscriptionItemId String?  @db.VarChar(255)
+  agency                   Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId])
+  @@map("agency_add_ons")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String   @db.VarChar(80)   // managed_service_request, cancellation, etc.
+  title     String   @db.VarChar(255)
+  message   String   @db.Text
+  link      String?  @db.VarChar(500)
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
 }
 
 model ClientUser {
@@ -545,6 +660,28 @@ enum Status {
   CANCELED         // Managed service canceled (use canceledEndDate for end date)
   SUSPENDED        // Client suspended
   ARCHIVED         // Past/deleted client (REJECTED kept for backward compatibility)
+}
+
+enum ManagedServiceStatus {
+  none
+  pending
+  active
+  canceled
+  suspended
+  archived
+}
+
+enum ManagedServicePackage {
+  foundation
+  growth
+  domination
+  custom
+}
+
+enum BillingType {
+  paid
+  free
+  custom
 }
 
 enum TokenType {

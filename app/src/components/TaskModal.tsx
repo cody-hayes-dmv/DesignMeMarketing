@@ -37,7 +37,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         [clients]
     );
     const { user } = useSelector((state: RootState) => state.auth);
-    const [specialists, setSpecialists] = useState<Array<{ id: string; name: string; email: string }>>([]);
+    const [specialists, setSpecialists] = useState<Array<{ id: string; name: string | null; email: string; specialties?: string[] }>>([]);
     const [form, setForm] = useState({
         title: "",
         description: "",
@@ -77,10 +77,31 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const fetchSpecialists = async () => {
         try {
             const response = await api.get("/auth/specialists");
-            setSpecialists(response.data);
+            setSpecialists(Array.isArray(response.data) ? response.data : []);
         } catch (error) {
             console.error("Error fetching specialists:", error);
         }
+    };
+
+    // Auto-suggest assignee by specialty when category is set (create mode)
+    const SPECIALTY_KEYS = ["ON_PAGE_SEO", "LINK_BUILDING", "CONTENT_WRITING", "TECHNICAL_SEO"] as const;
+    const categoryToSpecialtyKeys = (category: string): string[] => {
+        const c = (category || "").toLowerCase();
+        const out: string[] = [];
+        if (c.includes("on-page") || c.includes("on page")) out.push("ON_PAGE_SEO");
+        if (c.includes("link building") || c.includes("linkbuilding")) out.push("LINK_BUILDING");
+        if (c.includes("content")) out.push("CONTENT_WRITING");
+        if (c.includes("technical")) out.push("TECHNICAL_SEO");
+        return out;
+    };
+    const getSuggestedAssigneeId = (category: string): string | null => {
+        const keys = categoryToSpecialtyKeys(category);
+        if (keys.length === 0) return null;
+        const match = specialists.find((s) => {
+            const spec = s.specialties || [];
+            return keys.some((k) => spec.includes(k));
+        });
+        return match?.id ?? null;
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -332,8 +353,13 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <input
                                 type="text"
                                 value={form.category}
-                                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                                onChange={(e) => {
+                                    const newCategory = e.target.value;
+                                    const suggestedId = mode === 0 && !form.assigneeId ? getSuggestedAssigneeId(newCategory) : null;
+                                    setForm({ ...form, category: newCategory, assigneeId: suggestedId || form.assigneeId });
+                                }}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                placeholder="e.g. On-Page SEO, Link Building"
                             />
                         </div>
 
@@ -365,7 +391,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Assignee</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Assign to</label>
                             <select
                                 value={form.assigneeId}
                                 onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}
@@ -374,7 +400,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 <option value="">Unassigned</option>
                                 {specialists.map((specialist) => (
                                     <option key={specialist.id} value={specialist.id}>
-                                        {specialist.name || specialist.email}
+                                        {specialist.name || specialist.email} (Specialist)
                                     </option>
                                 ))}
                             </select>
