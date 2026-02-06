@@ -5,6 +5,7 @@ import { Prisma, Role } from "@prisma/client";
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { sendEmail } from '../lib/email.js';
 import jwt from 'jsonwebtoken';
+import { getAgencyTierContext, canAddTeamMember } from '../lib/agencyLimits.js';
 
 const router = express.Router();
 
@@ -281,8 +282,17 @@ router.post('/invite', authenticateToken, async (req, res) => {
             },
         });
 
-        // Add to agency if provided
+        // Add to agency if provided (check tier team limit)
         if (targetAgencyId) {
+            const tierCtx = await getAgencyTierContext(user.userId, user.role);
+            const teamCheck = canAddTeamMember(tierCtx);
+            if (!teamCheck.allowed) {
+                return res.status(403).json({
+                    message: teamCheck.message,
+                    code: 'TIER_LIMIT',
+                    limitType: 'team_members',
+                });
+            }
             await prisma.userAgency.create({
                 data: {
                     userId: newUser.id,
@@ -312,13 +322,14 @@ router.post('/invite', authenticateToken, async (req, res) => {
         });
 
         // Send invitation email (invite still succeeds if email fails)
-        let agencyName = 'the team';
+        const companyName = 'Design ME Marketing';
+        let teamLabel = companyName + "'s team";
         if (targetAgencyId) {
             const agency = await prisma.agency.findUnique({
                 where: { id: targetAgencyId },
                 select: { name: true },
             });
-            if (agency?.name) agencyName = agency.name;
+            if (agency?.name) teamLabel = agency.name + "'s team";
         }
         const inviter = await prisma.user.findUnique({
             where: { id: user.userId },
@@ -327,15 +338,17 @@ router.post('/invite', authenticateToken, async (req, res) => {
         const inviterName = inviter?.name?.trim() || 'A team admin';
 
         const inviteUrl = `${process.env.FRONTEND_URL || ''}/invite?token=${encodeURIComponent(inviteToken)}`;
+        let emailSent = false;
         if (sendInvitationEmail !== false) {
             try {
+                console.log('[Team invite] Sending invitation email to', email);
                 await sendEmail({
                     to: email,
-                    subject: `You've been invited to join ${agencyName}'s team`,
+                    subject: `You've been invited to join ${teamLabel}`,
                     html: `
           <h1>You've been invited!</h1>
           <p>Hi ${escapeHtml(name)},</p>
-          <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(agencyName)} team as a Specialist.</p>
+          <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(teamLabel)} as a ${role === 'ADMIN' ? 'Admin' : 'Specialist'}.</p>
           <p>Click the link below to set your password and access your dashboard:</p>
           <p><a href="${inviteUrl}">Secure Setup Link – expires in 7 days</a></p>
           <p>Once you're in, you'll be able to:</p>
@@ -345,19 +358,22 @@ router.post('/invite', authenticateToken, async (req, res) => {
             <li>Track your progress</li>
           </ul>
           <p>Questions? Reply to this email.</p>
-          <p>– ${escapeHtml(agencyName)} Team</p>
+          <p>– ${escapeHtml(companyName)} Team</p>
           <p style="color:#6b7280;font-size:12px;margin-top:24px;">If the link doesn't work, copy and paste this URL into your browser:</p>
           <p style="word-break:break-all;font-size:12px;color:#6b7280;">${inviteUrl}</p>
         `,
                 });
+                emailSent = true;
+                console.log('[Team invite] Email sent successfully to', email);
             } catch (emailErr: any) {
-                console.error('Team invite email failed:', emailErr);
+                console.error('[Team invite] Email send failed:', emailErr?.message || emailErr);
                 // Invite is already created; do not fail the request
             }
         }
 
         res.status(201).json({
             message: 'Team member invited successfully',
+            emailSent,
             user: {
                 id: newUser.id,
                 email: newUser.email,
@@ -371,6 +387,92 @@ router.post('/invite', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Invalid input', errors: error.errors });
         }
         console.error('Invite team member error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Resend invitation email (SUPER_ADMIN / ADMIN only)
+router.post('/:id/resend-invite', authenticateToken, async (req, res) => {
+    try {
+        const targetUserId = req.params.id;
+        const reqUser = req.user;
+
+        if (reqUser.role !== 'SUPER_ADMIN' && reqUser.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const targetUser = await prisma.user.findUnique({
+            where: { id: targetUserId },
+        });
+        if (!targetUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        if (targetUser.verified) {
+            return res.status(400).json({ message: 'User has already accepted the invitation' });
+        }
+        if (!targetUser.invited) {
+            return res.status(400).json({ message: 'User was not invited via invitation flow' });
+        }
+
+        const inviteToken = jwt.sign(
+            { userId: targetUser.id, email: targetUser.email },
+            getJwtSecret(),
+            { expiresIn: '7d' }
+        );
+
+        await prisma.token.updateMany({
+            where: { userId: targetUser.id, type: 'INVITE' },
+            data: { usedAt: new Date() },
+        });
+        await prisma.token.create({
+            data: {
+                type: 'INVITE',
+                email: targetUser.email,
+                token: inviteToken,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                userId: targetUser.id,
+                role: targetUser.role,
+            },
+        });
+
+        const inviteUrl = `${process.env.FRONTEND_URL || ''}/invite?token=${encodeURIComponent(inviteToken)}`;
+        const companyName = 'Design ME Marketing';
+        const inviter = await prisma.user.findUnique({
+            where: { id: reqUser.userId },
+            select: { name: true },
+        });
+        const inviterName = inviter?.name?.trim() || 'A team admin';
+        let emailSent = false;
+        try {
+            console.log('[Team resend invite] Sending to', targetUser.email);
+            await sendEmail({
+                to: targetUser.email,
+                subject: `You've been invited to join ${companyName}'s team`,
+                html: `
+          <h1>You've been invited!</h1>
+          <p>Hi ${escapeHtml(targetUser.name || 'there')},</p>
+          <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(companyName)} team.</p>
+          <p>Click the link below to set your password and access your dashboard (link expires in 7 days):</p>
+          <p><a href="${inviteUrl}">Secure Setup Link</a></p>
+          <p>Once you're in, you'll be able to view tasks assigned to you, mark tasks complete, and track your progress.</p>
+          <p>Questions? Reply to this email.</p>
+          <p>– ${escapeHtml(companyName)} Team</p>
+          <p style="color:#6b7280;font-size:12px;margin-top:24px;">If the link doesn't work, copy and paste this URL into your browser:</p>
+          <p style="word-break:break-all;font-size:12px;color:#6b7280;">${inviteUrl}</p>
+        `,
+            });
+            emailSent = true;
+            console.log('[Team resend invite] Email sent successfully to', targetUser.email);
+        } catch (emailErr: any) {
+            console.error('[Team resend invite] Email send failed:', emailErr?.message || emailErr);
+        }
+
+        return res.json({
+            message: emailSent ? 'Invitation email resent successfully' : 'Invitation created but email could not be sent. Use Resend again or check SMTP configuration.',
+            emailSent,
+        });
+    } catch (error: any) {
+        console.error('Resend invite error:', error);
         res.status(500).json({ message: 'Internal server error' });
     }
 });

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
 import jwt from "jsonwebtoken";
+import { getAgencyTierContext, canAddTargetKeyword, hasResearchCredits, useResearchCredits } from "../lib/agencyLimits.js";
+import { getTierConfig, getRankRefreshIntervalMs, getAiRefreshIntervalMs } from "../lib/tiers.js";
 
 const router = express.Router();
 
@@ -203,6 +205,113 @@ async function getGoogleAdsLocationsCached(): Promise<DataForSEOGoogleAdsLocatio
 
   return googleAdsLocationsLoadPromise;
 }
+
+// Super Admin dashboard metrics (SUPER_ADMIN only)
+router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const now = new Date();
+
+    const [totalAgencies, activeAgenciesCount, activeManagedClientsCount, totalDashboards, pendingRequests] = await Promise.all([
+      prisma.agency.count(),
+      prisma.agency.count({
+        where: {
+          subscriptionTier: { not: null },
+          OR: [{ trialEndsAt: null }, { trialEndsAt: { gt: now } }],
+        },
+      }),
+      prisma.client.count({ where: { managedServiceStatus: "active" } }),
+      prisma.client.count(),
+      prisma.managedService.count({ where: { status: "PENDING" } }),
+    ]);
+
+    return res.json({
+      totalAgencies,
+      activeAgencies: activeAgenciesCount,
+      activeManagedClients: activeManagedClientsCount,
+      totalDashboards,
+      pendingRequests,
+    });
+  } catch (err: any) {
+    console.error("Super admin dashboard error:", err);
+    res.status(500).json({ message: err?.message || "Failed to load dashboard" });
+  }
+});
+
+// Super Admin in-app notifications (pending requests, new signups) for bell dropdown
+router.get("/super-admin/notifications", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const [pendingServices, recentAgencies] = await Promise.all([
+      prisma.managedService.findMany({
+        where: { status: "PENDING" },
+        include: {
+          client: { select: { name: true } },
+          agency: { select: { name: true } },
+        },
+        orderBy: { startDate: "desc" },
+        take: 10,
+      }),
+      prisma.agency.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: { id: true, name: true, createdAt: true },
+      }),
+    ]);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const items: Array<{
+      id: string;
+      type: string;
+      title: string;
+      message: string;
+      link: string;
+      createdAt: string;
+    }> = [];
+
+    for (const ms of pendingServices) {
+      items.push({
+        id: `pending-${ms.id}`,
+        type: "managed_service_request",
+        title: "Managed service pending approval",
+        message: `${ms.agency.name} – ${ms.client.name} (${ms.packageName})`,
+        link: "/superadmin/dashboard",
+        createdAt: ms.startDate.toISOString(),
+      });
+    }
+
+    for (const agency of recentAgencies) {
+      if (new Date(agency.createdAt) >= sevenDaysAgo) {
+        items.push({
+          id: `agency-${agency.id}`,
+          type: "new_agency_signup",
+          title: "New agency",
+          message: agency.name,
+          link: "/agency/agencies",
+          createdAt: agency.createdAt.toISOString(),
+        });
+      }
+    }
+
+    items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const unreadCount = pendingServices.length;
+
+    return res.json({
+      unreadCount,
+      items: items.slice(0, 15),
+    });
+  } catch (err: any) {
+    console.error("Super admin notifications error:", err);
+    res.status(500).json({ message: err?.message || "Failed to load notifications" });
+  }
+});
 
 // Search Google Ads locations (DataForSEO) for UI combobox
 router.get("/locations", authenticateToken, async (req, res) => {
@@ -4341,6 +4450,30 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
       return res.status(403).json({ message: "Access denied" });
     }
 
+    // Tier-based AI refresh throttle (when force=true)
+    if (force && req.user.role !== "SUPER_ADMIN") {
+      const agency = await prisma.agency.findFirst({
+        where: { id: { in: userAgencyIds } },
+        select: { subscriptionTier: true },
+      });
+      const tierConfig = getTierConfig(agency?.subscriptionTier ?? null);
+      if (tierConfig) {
+        const intervalMs = getAiRefreshIntervalMs(tierConfig);
+        const lastAi = (client as any).lastAiRefreshAt as Date | null | undefined;
+        if (intervalMs > 0 && lastAi) {
+          const elapsed = Date.now() - new Date(lastAi).getTime();
+          if (elapsed < intervalMs) {
+            const nextAt = new Date(new Date(lastAi).getTime() + intervalMs);
+            return res.status(429).json({
+              message: `Your plan allows AI updates ${tierConfig.aiUpdateFrequency}. Next refresh at ${nextAt.toISOString()}.`,
+              code: "REFRESH_THROTTLE",
+              nextRefreshAt: nextAt.toISOString(),
+            });
+          }
+        }
+      }
+    }
+
     // Handle custom date range or period
     let startDate: Date;
     let endDate: Date;
@@ -4623,6 +4756,10 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
             aiOverviewCitedUrls: JSON.stringify(Array.from(aiOverviewUrls)),
             aiModeCitedUrls: JSON.stringify(Array.from(aiModeUrls)),
           },
+        });
+        await prisma.client.update({
+          where: { id: clientId },
+          data: { lastAiRefreshAt: new Date() },
         });
         return upserted;
       } catch (e) {
@@ -7872,16 +8009,40 @@ async function fetchKeywordsForSiteFromDataForSEO(
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    const rawBody = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      data = {};
     }
 
-    const data = await response.json();
-    const items: any[] =
-      data?.tasks?.[0]?.result?.[0]?.items && Array.isArray(data.tasks[0].result[0].items)
-        ? data.tasks[0].result[0].items
-        : [];
+    if (!response.ok) {
+      const taskMsg = data?.tasks?.[0]?.status_message;
+      const msg = taskMsg
+        ? `DataForSEO error: ${taskMsg} Please try again later.`
+        : `DataForSEO API error (${response.status}). Please try again later.`;
+      throw new Error(msg);
+    }
+
+    const task = data?.tasks?.[0];
+    const taskStatusCode = task?.status_code;
+    const result0 = task?.result?.[0];
+    if (data?.tasks_error === 1 || taskStatusCode === 50000 || result0 == null) {
+      const taskMsg = task?.status_message || "No data returned";
+      console.warn(
+        "[DataForSEO keywords_for_site] Task error:",
+        taskMsg,
+        "target:",
+        normalizedTarget,
+        "status_code:",
+        taskStatusCode
+      );
+      return [];
+    }
+
+    const rawItems = result0?.items;
+    const items: any[] = Array.isArray(rawItems) ? rawItems : [];
 
     return items.map((item) => {
       const keywordInfo = item?.keyword_info || {};
@@ -8942,6 +9103,16 @@ router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => 
 
 router.get("/keyword-research", authenticateToken, async (req, res) => {
   try {
+    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    const creditCheck = hasResearchCredits(tierCtx, 1);
+    if (!creditCheck.allowed) {
+      return res.status(403).json({
+        message: creditCheck.message,
+        code: "TIER_LIMIT",
+        limitType: "research_credits",
+      });
+    }
+
     const { keyword, limit = "50", locationCode = "2840", languageCode = "en" } = req.query;
 
     if (!keyword || typeof keyword !== "string" || keyword.trim().length === 0) {
@@ -8969,6 +9140,10 @@ router.get("/keyword-research", authenticateToken, async (req, res) => {
 
     // Strategy = pillar (seed) + items from DataForSEO related_keywords
     const strategy = { pillar: seed, items: suggestions };
+
+    if (tierCtx.agencyId) {
+      await useResearchCredits(tierCtx.agencyId, 1);
+    }
 
     res.json({
       suggestions,
@@ -9553,22 +9728,36 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       .sort((a, b) => b.organicEtv - a.organicEtv)
       .slice(0, 6);
 
-    // Limits from base plan + agency add-ons
-    let tierLimit = 10;
-    const keywordLimit = 500;
-    let researchLimit = 150;
+    // Limits from tier config + agency add-ons
+    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    let tierLimit = tierCtx.tierConfig?.maxDashboards ?? 10;
+    if (tierLimit === null) tierLimit = 999999;
+    const keywordLimit =
+      tierCtx.tierConfig?.keywordsPerDashboard ?? tierCtx.tierConfig?.keywordsTotal ?? 500;
+    let researchLimit = tierCtx.creditsLimit;
+    let monthlySpendDollars = tierCtx.tierConfig?.priceMonthlyUsd ?? 0;
     if (agencyIds.length > 0) {
       const addOns = await prisma.agencyAddOn.findMany({
         where: { agencyId: { in: agencyIds } },
-        select: { addOnType: true, addOnOption: true },
+        select: { addOnType: true, addOnOption: true, priceCents: true, billingInterval: true },
       });
       for (const a of addOns) {
         if (a.addOnType === "extra_slots" && a.addOnOption === "5_slots") tierLimit += 5;
         if (a.addOnType === "credit_pack" && a.addOnOption === "100") researchLimit += 100;
         if (a.addOnType === "credit_pack" && a.addOnOption === "500") researchLimit += 500;
+        if (a.billingInterval === "monthly") monthlySpendDollars += a.priceCents / 100;
       }
     }
-    const researchCredits = { used: 87, limit: researchLimit, resetsInDays: 26 };
+    const monthlySpend =
+      monthlySpendDollars > 0
+        ? monthlySpendDollars.toFixed(2)
+        : tierCtx.tierConfig?.priceMonthlyUsd != null
+          ? String(tierCtx.tierConfig.priceMonthlyUsd)
+          : "0.00";
+    const resetsInDays = tierCtx.creditsResetsAt
+      ? Math.max(0, Math.ceil((tierCtx.creditsResetsAt.getTime() - Date.now()) / 86400000))
+      : 30;
+    const researchCredits = { used: tierCtx.creditsUsed, limit: researchLimit, resetsInDays };
 
     // Recent activity (placeholder: from activity log when available)
     const recentActivity = [
@@ -9615,8 +9804,9 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       recentActivity,
       tierLimit,
       keywordLimit,
-      currentTier: "Growth",
-      monthlySpend: "297.00",
+      currentTier: tierCtx.tierConfig?.name ?? "Solo",
+      isBusinessTier: tierCtx.tierConfig?.type === "business",
+      monthlySpend,
       nextBillingDate: new Date(Date.now() + 26 * 86400000).toISOString().split("T")[0],
     });
   } catch (error: any) {
@@ -9653,20 +9843,18 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
       accessibleClientIds = clients.map((c) => c.id);
     }
 
-    const keywordCount = await prisma.keyword.count({
-      where: { clientId: { in: accessibleClientIds } },
-    });
+    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    const keywordCount = tierCtx.totalKeywords;
 
-    let tierLimit = 10;
-    const keywordLimit = 500;
-    let researchLimit = 150;
-    let teamMemberCount = 0;
-    let teamMemberLimit = 2;
+    let tierLimit = tierCtx.tierConfig?.maxDashboards ?? 10;
+    if (tierLimit === null) tierLimit = 999999;
+    const keywordLimit =
+      tierCtx.tierConfig?.keywordsPerDashboard ?? tierCtx.tierConfig?.keywordsTotal ?? 500;
+    let researchLimit = tierCtx.creditsLimit;
+    let teamMemberLimit = tierCtx.tierConfig?.maxTeamUsers ?? 10;
+    if (teamMemberLimit === null) teamMemberLimit = 999999;
 
     if (agencyIds.length > 0) {
-      teamMemberCount = await prisma.userAgency.count({
-        where: { agencyId: { in: agencyIds } },
-      });
       const addOns = await prisma.agencyAddOn.findMany({
         where: { agencyId: { in: agencyIds } },
         select: { addOnType: true, addOnOption: true },
@@ -9676,24 +9864,40 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
         if (a.addOnType === "credit_pack" && a.addOnOption === "100") researchLimit += 100;
         if (a.addOnType === "credit_pack" && a.addOnOption === "500") researchLimit += 500;
       }
-    } else if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
-      teamMemberCount = await prisma.userAgency.count({});
-      teamMemberLimit = 10;
     }
 
     const nextBilling = new Date();
     nextBilling.setDate(nextBilling.getDate() + 26);
 
+    const currentPlanPrice =
+      tierCtx.tierConfig?.priceMonthlyUsd ?? (tierCtx.tierConfig?.id === "enterprise" ? null : 147);
+
+    let trialEndsAt: string | null = null;
+    let trialDaysLeft: number | null = null;
+    if (tierCtx.agencyId) {
+      const agency = await prisma.agency.findUnique({
+        where: { id: tierCtx.agencyId },
+        select: { trialEndsAt: true },
+      });
+      if (agency?.trialEndsAt && agency.trialEndsAt > new Date()) {
+        trialEndsAt = agency.trialEndsAt.toISOString();
+        trialDaysLeft = Math.max(0, Math.ceil((agency.trialEndsAt.getTime() - Date.now()) / 86400000));
+      }
+    }
+
     res.json({
-      currentPlan: "starter",
-      currentPlanPrice: 297,
+      currentPlan: tierCtx.tierConfig?.id ?? "solo",
+      currentPlanPrice: currentPlanPrice ?? undefined,
       nextBillingDate: nextBilling.toISOString().split("T")[0],
       paymentMethod: { last4: "4242", brand: "Visa" },
+      isBusinessTier: tierCtx.tierConfig?.type === "business",
+      trialEndsAt,
+      trialDaysLeft,
       usage: {
-        clientDashboards: { used: accessibleClientIds.length, limit: tierLimit },
+        clientDashboards: { used: tierCtx.dashboardCount, limit: tierLimit },
         keywordsTracked: { used: keywordCount, limit: keywordLimit },
-        researchCredits: { used: 87, limit: researchLimit },
-        teamMembers: { used: teamMemberCount, limit: teamMemberLimit },
+        researchCredits: { used: tierCtx.creditsUsed, limit: researchLimit },
+        teamMembers: { used: tierCtx.teamMemberCount, limit: teamMemberLimit },
       },
     });
   } catch (error: any) {
@@ -9951,6 +10155,16 @@ router.post("/target-keywords/:clientId", authenticateToken, async (req, res) =>
       return res.status(403).json({ message: "Access denied" });
     }
 
+    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    const keywordLimitCheck = canAddTargetKeyword(tierCtx, clientId);
+    if (!keywordLimitCheck.allowed) {
+      return res.status(403).json({
+        message: keywordLimitCheck.message,
+        code: "TIER_LIMIT",
+        limitType: "keywords",
+      });
+    }
+
     // Check if target keyword already exists
     const existing = await prisma.targetKeyword.findUnique({
       where: {
@@ -10088,6 +10302,7 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
     const { clientId } = req.params;
     const client = await prisma.client.findUnique({
       where: { id: clientId },
+      select: { id: true, domain: true, userId: true, lastRankRefreshAt: true },
     });
 
     if (!client || !client.domain) {
@@ -10138,6 +10353,27 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
         hasAccess = Boolean(cu);
       }
       if (!hasAccess) return res.status(403).json({ message: "Access denied" });
+
+      // Tier-based rank refresh throttle
+      const agency = await prisma.agency.findFirst({
+        where: { id: { in: userAgencyIds } },
+        select: { subscriptionTier: true },
+      });
+      const tierConfig = getTierConfig(agency?.subscriptionTier ?? null);
+      if (tierConfig) {
+        const intervalMs = getRankRefreshIntervalMs(tierConfig);
+        if (intervalMs > 0 && client.lastRankRefreshAt) {
+          const elapsed = Date.now() - client.lastRankRefreshAt.getTime();
+          if (elapsed < intervalMs) {
+            const nextAt = new Date(client.lastRankRefreshAt.getTime() + intervalMs);
+            return res.status(429).json({
+              message: `Your plan allows rank updates ${tierConfig.rankUpdateFrequency}. Next refresh available at ${nextAt.toISOString()}.`,
+              code: "REFRESH_THROTTLE",
+              nextRefreshAt: nextAt.toISOString(),
+            });
+          }
+        }
+      }
 
       // Only refresh tracked target keywords (intersection of target_keywords + keywords)
       const trackedKeywords = await prisma.keyword.findMany({
@@ -10194,6 +10430,11 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
           }
         })
       );
+
+      await prisma.client.update({
+        where: { id: clientId },
+        data: { lastRankRefreshAt: new Date() },
+      });
 
       return res.json({
         message: "Target keywords refreshed successfully",

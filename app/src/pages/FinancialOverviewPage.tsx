@@ -144,7 +144,10 @@ const FinancialOverviewPage: React.FC = () => {
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         {/* Left Panel - MRR Breakdown */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-semibold text-gray-900">Monthly Recurring Revenue Breakdown</h3>
+          <h3 className="mb-2 text-lg font-semibold text-gray-900">Monthly Recurring Revenue Breakdown</h3>
+          <p className="mb-4 text-sm text-gray-500">
+            Platform subscriptions by tier • Managed services by package • Add-ons (extra slots, map packs, credit packs). Click a segment to see accounts.
+          </p>
 
           {mrrLoading ? (
             <div className="flex h-64 items-center justify-center">
@@ -152,10 +155,10 @@ const FinancialOverviewPage: React.FC = () => {
             </div>
           ) : mrrData?.configured && mrrData.segments.length > 0 ? (
             <>
-              <div className="mb-6 flex items-center justify-center rounded-lg bg-primary-50 py-4">
+              <div className="mb-6 flex items-center justify-center rounded-xl bg-primary-600 py-6">
                 <div className="text-center">
-                  <p className="text-sm font-medium text-gray-600">Total MRR</p>
-                  <p className="text-3xl font-bold text-primary-600">{formatCurrency(mrrData.totalMrr)}</p>
+                  <p className="text-sm font-medium text-primary-100">Total MRR</p>
+                  <p className="text-4xl font-bold tracking-tight text-white">{formatCurrency(mrrData.totalMrr)}</p>
                 </div>
               </div>
 
@@ -225,7 +228,10 @@ const FinancialOverviewPage: React.FC = () => {
 
         {/* Right Panel - Subscription Activity */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-semibold text-gray-900">Subscription Activity (Last 30 Days)</h3>
+          <h3 className="mb-2 text-lg font-semibold text-gray-900">Subscription Activity (Last 30 Days)</h3>
+          <p className="mb-4 text-sm text-gray-500">
+            Green: new subscriptions / upgrades. Red: cancellations / downgrades.
+          </p>
 
           {activityLoading ? (
             <div className="flex h-64 items-center justify-center">
@@ -278,23 +284,23 @@ const FinancialOverviewPage: React.FC = () => {
                 )}
               </div>
 
-              <div className="mt-6 grid grid-cols-3 gap-4 rounded-lg border border-gray-100 bg-gray-50 p-4">
+              <div className="mt-6 grid grid-cols-3 gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div>
-                  <p className="text-xs font-medium text-gray-500">New MRR Added</p>
-                  <p className="text-lg font-semibold text-green-600">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">New MRR added</p>
+                  <p className="mt-1 text-xl font-bold text-green-600">
                     +{formatCurrency(activityData.newMrrAdded)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-gray-500">Churned MRR</p>
-                  <p className="text-lg font-semibold text-red-600">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Churned MRR</p>
+                  <p className="mt-1 text-xl font-bold text-red-600">
                     -{formatCurrency(activityData.churnedMrr)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-gray-500">Net Change</p>
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Net change</p>
                   <p
-                    className={`text-lg font-semibold ${
+                    className={`mt-1 text-xl font-bold ${
                       activityData.netChange >= 0 ? "text-green-600" : "text-red-600"
                     }`}
                   >

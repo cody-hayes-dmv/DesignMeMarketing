@@ -1,4 +1,5 @@
 import express from "express";
+import type Stripe from "stripe";
 import { authenticateToken } from "../middleware/auth.js";
 import {
   getStripe,
@@ -76,21 +77,24 @@ router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (r
 
     const segmentsMap = new Map<string, MrrSegment>();
 
-    const iter = stripe.subscriptions.list({
-      status: "active",
-      expand: ["data.items.data.price.product", "data.customer"],
-      limit: 100,
-    });
+    let hasMore = true;
+    let startingAfter: string | undefined;
+    while (hasMore) {
+      const list = await stripe.subscriptions.list({
+        status: "active",
+        expand: ["data.items.data.price", "data.customer"],
+        limit: 100,
+        ...(startingAfter && { starting_after: startingAfter }),
+      });
+      for (const sub of list.data) {
+        const customer = sub.customer as { id?: string; email?: string };
+        const customerId = typeof customer === "string" ? customer : customer?.id || "";
+        const customerEmail =
+          typeof customer === "object" && customer && "email" in customer
+            ? (customer.email as string) || ""
+            : "";
 
-    for await (const sub of iter) {
-      const customer = sub.customer as { id?: string; email?: string };
-      const customerId = typeof customer === "string" ? customer : customer?.id || "";
-      const customerEmail =
-        typeof customer === "object" && customer && "email" in customer
-          ? (customer.email as string) || ""
-          : "";
-
-      for (const item of sub.items.data) {
+        for (const item of sub.items.data) {
         const price = item.price;
         if (!price || !price.recurring) continue;
 
@@ -98,7 +102,11 @@ router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (r
           typeof price.product === "object" ? price.product : await stripe.products.retrieve(price.product as string);
         const productName =
           product && "name" in product && typeof product.name === "string" ? product.name : "Unknown";
-        const category = categorizeProduct(productName);
+        const category = categorizeProduct(
+          product && typeof product === "object" && "deleted" in product
+            ? productName
+            : (product as Stripe.Product) || productName
+        );
         const interval = price.recurring.interval;
         const unitAmount = price.unit_amount || 0;
         const qty = item.quantity || 1;
@@ -124,7 +132,10 @@ router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (r
           mrr: monthlyAmount,
           productName,
         });
+        }
       }
+      hasMore = list.has_more && list.data.length > 0;
+      if (hasMore) startingAfter = list.data[list.data.length - 1].id;
     }
 
     const segments = Array.from(segmentsMap.values())
@@ -249,11 +260,15 @@ router.get("/subscription-activity", authenticateToken, requireFinancialAccess, 
           );
         }
         const delta = currMrr - prevMrr;
-        if (delta <= 0) continue;
         const dateKey = new Date((ev.created || 0) * 1000).toISOString().slice(0, 10);
         if (dailyNewMrr[dateKey] !== undefined) {
-          dailyNewMrr[dateKey] += delta;
-          totalNewMrr += delta;
+          if (delta > 0) {
+            dailyNewMrr[dateKey] += delta;
+            totalNewMrr += delta;
+          } else if (delta < 0) {
+            dailyChurnedMrr[dateKey] += Math.abs(delta);
+            totalChurnedMrr += Math.abs(delta);
+          }
         }
       }
       updatedHasMore = updatedResp.has_more;

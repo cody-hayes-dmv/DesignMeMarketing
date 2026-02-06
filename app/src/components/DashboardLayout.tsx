@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
 import Sidebar from "./Sidebar";
+import NotificationBell from "./NotificationBell";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -33,7 +34,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/agency/report") return "Report";
     if (path === "/agency/team") return "Team";
     if (path.startsWith("/agency/clients/")) return "Client Dashboard";
-    if (path === "/agency/workers") return "Team";
     if (path === "/agency/settings") return "Settings";
 
     if (path === "/superadmin/dashboard") return "Dashboard";
@@ -46,6 +46,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     if (path === "/specialist/dashboard") return "Dashboard";
     if (path === "/specialist/clients") return "My Clients";
+    if (path === "/specialist/team") return "Team";
     if (path === "/specialist/tasks") return "Tasks";
     if (path === "/specialist/settings") return "Settings";
 
@@ -70,8 +71,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         // so we don't create horizontal overflow (especially on smaller screens).
         className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}
       >
-        <div className="bg-white border-b border-gray-200 px-8 py-4">
+        <div className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
+          {user?.role === "SUPER_ADMIN" && <NotificationBell />}
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           {children}

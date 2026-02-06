@@ -42,7 +42,9 @@ import {
 } from "lucide-react";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
-import { endOfWeek, format, startOfWeek } from "date-fns";
+import { addDays, endOfWeek, format, startOfWeek, subDays } from "date-fns";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
@@ -329,6 +331,47 @@ const ClientDashboardPage: React.FC = () => {
   const [compareStartDate, setCompareStartDate] = useState<string>("");
   const [compareEndDate, setCompareEndDate] = useState<string>("");
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
+  // Date range picker modal: working state (synced when modal opens)
+  const [pickerStartDate, setPickerStartDate] = useState<Date | null>(null);
+  const [pickerEndDate, setPickerEndDate] = useState<Date | null>(null);
+  const [pickerPreset, setPickerPreset] = useState<string>("30");
+  const [pickerCompareTo, setPickerCompareTo] = useState<"none" | "previous_period" | "previous_year" | "custom">("none");
+  const [pickerCompareStart, setPickerCompareStart] = useState<string>("");
+  const [pickerCompareEnd, setPickerCompareEnd] = useState<string>("");
+  const [pickerCompareStartDate, setPickerCompareStartDate] = useState<Date | null>(null);
+  const [pickerCompareEndDate, setPickerCompareEndDate] = useState<Date | null>(null);
+  const [pickerIncludeToday, setPickerIncludeToday] = useState(true);
+  /** Which range the single calendar is editing */
+  const [calendarEditing, setCalendarEditing] = useState<"dateRange" | "compare">("dateRange");
+
+  // Sync date picker modal state when opening
+  useEffect(() => {
+    if (!calendarModalOpen) return;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let start: Date;
+    let end: Date | null;
+    if (dateRange === "custom" && customStartDate && customEndDate) {
+      start = new Date(customStartDate);
+      end = new Date(customEndDate);
+      setPickerPreset("custom");
+    } else {
+      const days = Math.max(1, parseInt(dateRange, 10) || 30);
+      end = new Date(today);
+      start = subDays(end, days - 1);
+      setPickerPreset(dateRange);
+    }
+    setPickerStartDate(start);
+    setPickerEndDate(end);
+    setPickerCompareTo(compareTo);
+    setPickerCompareStart(compareStartDate);
+    setPickerCompareEnd(compareEndDate);
+    setPickerCompareStartDate(compareStartDate ? new Date(compareStartDate) : null);
+    setPickerCompareEndDate(compareEndDate ? new Date(compareEndDate) : null);
+    setPickerIncludeToday(true);
+    setCalendarEditing(compareTo === "custom" && dateRange !== "custom" ? "compare" : "dateRange");
+  }, [calendarModalOpen, dateRange, customStartDate, customEndDate, compareTo, compareStartDate, compareEndDate]);
+
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [dashboardSummaryCompare, setDashboardSummaryCompare] = useState<DashboardSummary | null>(null);
   const [visitorSourcesCompare, setVisitorSourcesCompare] = useState<Array<{ source: string; users: number }>>([]);
@@ -559,6 +602,7 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogUrlInput, setWorkLogUrlInput] = useState("");
   const [workLogUrlType, setWorkLogUrlType] = useState<"image" | "video" | "url">("url");
   const [workLogAddMenuOpen, setWorkLogAddMenuOpen] = useState(false);
+  const [workLogListTab, setWorkLogListTab] = useState<"upcoming" | "completed">("upcoming");
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const workLogAddMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -3695,8 +3739,8 @@ const ClientDashboardPage: React.FC = () => {
                     >
                       <Calendar className="h-4 w-4 text-gray-600" />
                       <span className="text-gray-700">
-                        {dateRange === "custom" && customStartDate && customEndDate
-                          ? `${customStartDate} – ${customEndDate}`
+                        {dateRange === "custom"
+                          ? "Custom range"
                           : dateRange === "7"
                             ? "Last 7 days"
                             : dateRange === "30"
@@ -3705,17 +3749,7 @@ const ClientDashboardPage: React.FC = () => {
                                 ? "Last 90 days"
                                 : dateRange === "365"
                                   ? "Last year"
-                                  : "Date range"}
-                        {" · "}
-                        {compareTo === "none"
-                          ? "No comparison"
-                          : compareTo === "previous_period"
-                            ? "Compare to previous period"
-                            : compareTo === "previous_year"
-                              ? "Compare to previous year"
-                              : compareTo === "custom" && compareStartDate && compareEndDate
-                                ? `${compareStartDate} – ${compareEndDate}`
-                                : "Comparison"}
+                                  : "Data Range"}
                       </span>
                       <ChevronDown className="h-4 w-4 text-gray-500" />
                     </button>
@@ -3726,19 +3760,13 @@ const ClientDashboardPage: React.FC = () => {
                         onClick={handleRefreshDashboard}
                         disabled={refreshingDashboard}
                         data-pdf-hide="true"
-                        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="bg-green-600 text-white p-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
                         title="Refresh dashboard data from DataForSEO and GA4"
                       >
                         {refreshingDashboard ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span>Refreshing...</span>
-                          </>
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <>
-                            <RefreshCw className="h-4 w-4" />
-                            <span>Refresh</span>
-                          </>
+                          <RefreshCw className="h-4 w-4" />
                         )}
                       </button>
                     )}
@@ -3747,18 +3775,13 @@ const ClientDashboardPage: React.FC = () => {
                       type="button"
                       onClick={handleExportPdf}
                       disabled={exportingPdf}
-                      className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="bg-gray-100 text-gray-700 p-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
+                      title="Export"
                     >
                       {exportingPdf ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span>Exporting...</span>
-                        </>
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <>
-                          <Download className="h-4 w-4" />
-                          <span>Export</span>
-                        </>
+                        <Download className="h-4 w-4" />
                       )}
                     </button>
 
@@ -3766,51 +3789,92 @@ const ClientDashboardPage: React.FC = () => {
                       type="button"
                       onClick={handleShare}
                       disabled={sharing}
-                      className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="bg-primary-600 text-white p-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
+                      title="Share"
                     >
                       {sharing ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span>Generating...</span>
-                        </>
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <>
-                          <Share2 className="h-4 w-4" />
-                          <span>Share</span>
-                        </>
+                        <Share2 className="h-4 w-4" />
                       )}
                     </button>
                   </div>
 
                   {calendarModalOpen && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setCalendarModalOpen(false)}>
-                      <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-between mb-6">
-                          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                            <Calendar className="h-5 w-5 text-primary-600" />
-                            Date range & comparison
-                          </h3>
-                          <button type="button" onClick={() => setCalendarModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCalendarModalOpen(false)}>
+                      <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-4xl w-full overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end px-4 py-2 border-b border-gray-200">
+                          <button type="button" onClick={() => setCalendarModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
                             <X className="h-5 w-5" />
                           </button>
                         </div>
-                        <div className="space-y-6">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Date range</label>
-                            <select
-                              value={dateRange}
-                              onChange={(e) => {
-                                const newValue = e.target.value;
-                                setDateRange(newValue);
-                                if (newValue === "custom") {
-                                  const endDate = new Date();
-                                  const startDate = new Date();
-                                  startDate.setDate(startDate.getDate() - 30);
-                                  setCustomEndDate(endDate.toISOString().split("T")[0]);
-                                  setCustomStartDate(startDate.toISOString().split("T")[0]);
+                        <div className="flex flex-1 min-h-0">
+                          {/* Single shared calendar for Date Range and Compare To */}
+                          <div className="flex flex-col items-start p-4 border-r border-gray-200 bg-gray-50/50">
+                            {pickerPreset === "custom" && pickerCompareTo === "custom" && (
+                              <div className="flex rounded-lg border border-gray-200 p-1 mb-3 bg-white">
+                                <button
+                                  type="button"
+                                  onClick={() => setCalendarEditing("dateRange")}
+                                  className={`px-3 py-1.5 text-sm font-medium rounded-md ${calendarEditing === "dateRange" ? "bg-primary-100 text-primary-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                >
+                                  Date Range
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setCalendarEditing("compare")}
+                                  className={`px-3 py-1.5 text-sm font-medium rounded-md ${calendarEditing === "compare" ? "bg-primary-100 text-primary-700" : "text-gray-600 hover:bg-gray-100"}`}
+                                >
+                                  Compare To
+                                </button>
+                              </div>
+                            )}
+                            <DatePicker
+                              inline
+                              selectsRange
+                              monthsShown={2}
+                              startDate={calendarEditing === "dateRange" ? pickerStartDate : pickerCompareStartDate}
+                              endDate={calendarEditing === "dateRange" ? pickerEndDate : pickerCompareEndDate}
+                              minDate={subDays(new Date(), 365 * 2)}
+                              maxDate={new Date()}
+                              onChange={(dates: [Date | null, Date | null]) => {
+                                const [start, end] = dates;
+                                if (calendarEditing === "dateRange") {
+                                  setPickerStartDate(start);
+                                  setPickerEndDate(end ?? null);
+                                  setPickerPreset("custom");
+                                } else {
+                                  setPickerCompareStartDate(start);
+                                  setPickerCompareEndDate(end ?? null);
+                                  setPickerCompareStart(start ? format(start, "yyyy-MM-dd") : "");
+                                  setPickerCompareEnd(end ? format(end, "yyyy-MM-dd") : "");
                                 }
                               }}
-                              className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              className="react-datepicker-range"
+                              calendarClassName="border-0 bg-transparent"
+                            />
+                          </div>
+                          {/* Sidebar: presets, dates, compare, actions */}
+                          <div className="w-72 flex flex-col p-4">
+                            <div className="font-semibold text-gray-900 mb-2">Date Range</div>
+                            <select
+                              value={pickerPreset}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setPickerPreset(v);
+                                const today = new Date();
+                                today.setHours(0, 0, 0, 0);
+                                if (v === "custom") {
+                                  setPickerEndDate(today);
+                                  setPickerStartDate(subDays(today, 29));
+                                  setCalendarEditing("dateRange");
+                                  return;
+                                }
+                                const days = Math.max(1, parseInt(v, 10) || 30);
+                                setPickerEndDate(today);
+                                setPickerStartDate(subDays(today, days - 1));
+                              }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent mb-3"
                             >
                               <option value="7">Last 7 days</option>
                               <option value="30">Last 30 days</option>
@@ -3818,107 +3882,147 @@ const ClientDashboardPage: React.FC = () => {
                               <option value="365">Last year</option>
                               <option value="custom">Custom range</option>
                             </select>
-                            {dateRange === "custom" && (
-                              <div className="flex items-center gap-2 mt-2">
-                                <input
-                                  type="date"
-                                  value={customStartDate}
-                                  onChange={(e) => setCustomStartDate(e.target.value)}
-                                  max={customEndDate || new Date().toISOString().split("T")[0]}
-                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
-                                />
-                                <span className="text-gray-500 text-sm">to</span>
-                                <input
-                                  type="date"
-                                  value={customEndDate}
-                                  onChange={(e) => setCustomEndDate(e.target.value)}
-                                  min={customStartDate || undefined}
-                                  max={new Date().toISOString().split("T")[0]}
-                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
-                                />
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Comparison</label>
+                            <div className="flex items-center gap-2 mb-2">
+                              <input
+                                type="text"
+                                readOnly
+                                value={pickerStartDate ? format(pickerStartDate, "MMM d, yyyy") : ""}
+                                placeholder="Start date"
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                              />
+                              <span className="text-gray-500 text-sm shrink-0">to</span>
+                              <input
+                                type="text"
+                                readOnly
+                                value={pickerEndDate ? format(pickerEndDate, "MMM d, yyyy") : ""}
+                                placeholder="Select end date"
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 placeholder:text-gray-400"
+                              />
+                            </div>
+                            <label className="flex items-center gap-2 text-sm text-gray-700 mb-4">
+                              <input
+                                type="checkbox"
+                                checked={pickerIncludeToday}
+                                onChange={(e) => setPickerIncludeToday(e.target.checked)}
+                                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              />
+                              Include Today
+                            </label>
+                            <div className="font-semibold text-gray-900 mb-2">Compare To</div>
                             <select
-                              value={compareTo}
+                              value={pickerCompareTo}
                               onChange={(e) => {
                                 const v = e.target.value as "none" | "previous_period" | "previous_year" | "custom";
-                                setCompareTo(v);
+                                setPickerCompareTo(v);
                                 if (v === "custom") {
                                   const end = new Date();
-                                  const start = new Date();
-                                  start.setDate(start.getDate() - 30);
-                                  setCompareEndDate(end.toISOString().split("T")[0]);
-                                  setCompareStartDate(start.toISOString().split("T")[0]);
+                                  end.setHours(0, 0, 0, 0);
+                                  const start = subDays(end, 29);
+                                  setPickerCompareStartDate(start);
+                                  setPickerCompareEndDate(end);
+                                  setPickerCompareStart(format(start, "yyyy-MM-dd"));
+                                  setPickerCompareEnd(format(end, "yyyy-MM-dd"));
+                                  setCalendarEditing("compare");
                                 }
                               }}
-                              className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent mb-3"
                             >
                               <option value="none">No comparison</option>
-                              <option value="previous_period">Compare to previous period</option>
-                              <option value="previous_year">Compare to previous year</option>
+                              <option value="previous_period">Last Period</option>
+                              <option value="previous_year">Previous year</option>
                               <option value="custom">Custom comparison range</option>
                             </select>
-                            {compareTo === "custom" && (
-                              <div className="flex items-center gap-2 mt-2">
+                            {pickerCompareTo === "custom" && (
+                              <div className="flex items-center gap-2 mb-4">
                                 <input
-                                  type="date"
-                                  value={compareStartDate}
-                                  onChange={(e) => setCompareStartDate(e.target.value)}
-                                  max={compareEndDate || new Date().toISOString().split("T")[0]}
-                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
+                                  type="text"
+                                  readOnly
+                                  value={pickerCompareStartDate ? format(pickerCompareStartDate, "MMM d, yyyy") : ""}
+                                  placeholder="Start date"
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 placeholder:text-gray-400"
                                 />
-                                <span className="text-gray-500 text-sm">to</span>
+                                <span className="text-gray-500 text-sm shrink-0">to</span>
                                 <input
-                                  type="date"
-                                  value={compareEndDate}
-                                  onChange={(e) => setCompareEndDate(e.target.value)}
-                                  min={compareStartDate || undefined}
-                                  max={new Date().toISOString().split("T")[0]}
-                                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 flex-1"
+                                  type="text"
+                                  readOnly
+                                  value={pickerCompareEndDate ? format(pickerCompareEndDate, "MMM d, yyyy") : ""}
+                                  placeholder="Select end date"
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 placeholder:text-gray-400"
                                 />
                               </div>
                             )}
+                            <div className="flex gap-2 mt-auto pt-4">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!pickerStartDate) {
+                                    toast.error("Please select a start date on the calendar.");
+                                    return;
+                                  }
+                                  if (pickerPreset === "custom" && !pickerEndDate) {
+                                    toast.error("Please select an end date on the calendar.");
+                                    return;
+                                  }
+                                  if (pickerCompareTo === "custom" && (!pickerCompareStartDate || !pickerCompareEndDate)) {
+                                    toast.error("Please select a comparison date range on the calendar.");
+                                    return;
+                                  }
+                                  const endDateResolved = pickerPreset === "custom" ? (pickerEndDate ?? pickerStartDate) : pickerEndDate!;
+                                  const startStr = format(pickerStartDate, "yyyy-MM-dd");
+                                  const endStr = format(endDateResolved, "yyyy-MM-dd");
+                                  const isPreset = ["7", "30", "90", "365"].includes(pickerPreset);
+                                  const days = isPreset ? parseInt(pickerPreset, 10) : null;
+                                  const today = new Date();
+                                  today.setHours(0, 0, 0, 0);
+                                  const matchPreset = days != null && endStr === format(today, "yyyy-MM-dd") && format(subDays(today, days - 1), "yyyy-MM-dd") === startStr;
+                                  if (matchPreset) {
+                                    setDateRange(pickerPreset);
+                                    setCustomStartDate("");
+                                    setCustomEndDate("");
+                                  } else {
+                                    setDateRange("custom");
+                                    setCustomStartDate(startStr);
+                                    setCustomEndDate(endStr);
+                                  }
+                                  setCompareTo(pickerCompareTo);
+                                  const compareStartStr = pickerCompareTo === "custom" && pickerCompareStartDate
+                                    ? format(pickerCompareStartDate, "yyyy-MM-dd")
+                                    : pickerCompareStart;
+                                  const compareEndStr = pickerCompareTo === "custom" && pickerCompareEndDate
+                                    ? format(pickerCompareEndDate, "yyyy-MM-dd")
+                                    : pickerCompareEnd;
+                                  setCompareStartDate(compareStartStr);
+                                  setCompareEndDate(compareEndStr);
+                                  setCalendarModalOpen(false);
+                                  try {
+                                    setFetchingSummary(true);
+                                    const res = await api.get(buildDashboardUrl(clientId!));
+                                    const payload = res.data || {};
+                                    setDashboardSummary(formatDashboardSummary(payload));
+                                  } catch (error: any) {
+                                    console.error("Failed to fetch dashboard summary", error);
+                                    setDashboardSummary(null);
+                                  } finally {
+                                    setFetchingSummary(false);
+                                  }
+                                }}
+                                className="flex-1 px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 font-medium"
+                              >
+                                Apply
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCalendarModalOpen(false)}
+                                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
                         </div>
-                        <div className="mt-6 flex justify-end gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setCalendarModalOpen(false)}
-                            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (dateRange === "custom" && (!customStartDate || !customEndDate)) {
-                                toast.error("Please select both start and end dates for the date range.");
-                                return;
-                              }
-                              if (compareTo === "custom" && (!compareStartDate || !compareEndDate)) {
-                                toast.error("Please select both start and end dates for the comparison range.");
-                                return;
-                              }
-                              setCalendarModalOpen(false);
-                              try {
-                                setFetchingSummary(true);
-                                const res = await api.get(buildDashboardUrl(clientId!));
-                                const payload = res.data || {};
-                                setDashboardSummary(formatDashboardSummary(payload));
-                              } catch (error: any) {
-                                console.error("Failed to fetch dashboard summary", error);
-                                setDashboardSummary(null);
-                              } finally {
-                                setFetchingSummary(false);
-                              }
-                            }}
-                            className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                          >
-                            Apply
-                          </button>
+                        <div className="px-4 py-2 border-t border-gray-200 text-sm text-gray-500 flex items-center gap-2">
+                          Dates are shown in America/New_York timezone
+                          <button type="button" className="text-primary-600 hover:underline">Change</button>
                         </div>
                       </div>
                     </div>
@@ -6252,6 +6356,31 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </div>
                     </div>
+                    {/* Upcoming / Completed tabs */}
+                    <div className="flex gap-1 border-b border-gray-200">
+                      <button
+                        type="button"
+                        onClick={() => setWorkLogListTab("upcoming")}
+                        className={`px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors ${
+                          workLogListTab === "upcoming"
+                            ? "bg-white border-gray-200 text-primary-600 -mb-px"
+                            : "bg-gray-50 border-transparent text-gray-600 hover:text-gray-900"
+                        }`}
+                      >
+                        Upcoming
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWorkLogListTab("completed")}
+                        className={`px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors ${
+                          workLogListTab === "completed"
+                            ? "bg-white border-gray-200 text-primary-600 -mb-px"
+                            : "bg-gray-50 border-transparent text-gray-600 hover:text-gray-900"
+                        }`}
+                      >
+                        Completed
+                      </button>
+                    </div>
                     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200">
@@ -6259,7 +6388,7 @@ const ClientDashboardPage: React.FC = () => {
                             <tr>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Attachments</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -6278,14 +6407,20 @@ const ClientDashboardPage: React.FC = () => {
                                   {workLogError}
                                 </td>
                               </tr>
-                            ) : workLogTasks.length === 0 ? (
-                              <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
-                                  No work logged yet.
-                                </td>
-                              </tr>
-                            ) : (
-                              workLogTasks.map((task) => {
+                            ) : (() => {
+                              const filtered = workLogListTab === "completed"
+                                ? workLogTasks.filter((t) => t.status === "DONE")
+                                : workLogTasks.filter((t) => t.status !== "DONE");
+                              if (filtered.length === 0) {
+                                return (
+                                  <tr>
+                                    <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                      {workLogListTab === "completed" ? "No completed entries yet." : "No upcoming entries."}
+                                    </td>
+                                  </tr>
+                                );
+                              }
+                              return filtered.map((task) => {
                                 const dateRaw = task.updatedAt || task.createdAt;
                                 const date = (() => {
                                   try {
@@ -6295,13 +6430,16 @@ const ClientDashboardPage: React.FC = () => {
                                   }
                                 })();
                                 const workType = (task.category || "General").trim() || "General";
-                                const description = (task.description || task.title || "").trim();
+                                const titleText = (task.description || task.title || "").trim();
+                                const titleDisplay = titleText.length > 90 ? `${titleText.slice(0, 90)}…` : titleText;
                                 const taskAttachments = parseProofAttachments(task.proof);
                                 return (
                                   <tr key={task.id} className="hover:bg-gray-50">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{date}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
-                                    <td className="px-6 py-4 text-sm text-gray-500 whitespace-pre-wrap max-w-xs align-top">{description}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-900 max-w-xs align-top">
+                                      <span className="block truncate" title={titleText || undefined}>{titleDisplay || "—"}</span>
+                                    </td>
                                     <td className="px-6 py-4 text-sm text-gray-500 align-top">
                                       {taskAttachments.length === 0 ? (
                                         <span className="text-gray-400">—</span>
@@ -6364,8 +6502,8 @@ const ClientDashboardPage: React.FC = () => {
                                     </td>
                                   </tr>
                                 );
-                              })
-                            )}
+                              });
+                            })()}
                           </tbody>
                         </table>
                       </div>
@@ -6426,14 +6564,15 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                        <textarea
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Title (max 90 characters)</label>
+                        <input
+                          type="text"
+                          maxLength={90}
                           value={workLogForm.description}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
                           disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 resize-y min-h-[100px]"
-                          rows={5}
-                          placeholder="Details about the work performed..."
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          placeholder="e.g. Optimized homepage title tags"
                         />
                       </div>
 
@@ -8089,14 +8228,15 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <textarea
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Title (max 90 characters)</label>
+                    <input
+                      type="text"
+                      maxLength={90}
                       value={workLogForm.description}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
                       disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 resize-y min-h-[100px]"
-                      rows={5}
-                      placeholder="Details about the work performed..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      placeholder="e.g. Optimized homepage title tags"
                     />
                   </div>
 

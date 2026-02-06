@@ -110,7 +110,7 @@ const AgenciesPage = () => {
         country: "United States",
         subdomain: "",
         billingOption: "" as "" | "charge" | "no_charge" | "manual_invoice",
-        tier: "" as "" | "solo" | "starter" | "growth" | "pro" | "enterprise",
+        tier: "" as "" | "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro",
         customPricing: "" as string | number,
         internalNotes: "",
         referralSource: "",
@@ -1052,11 +1052,17 @@ const AgenciesPage = () => {
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier *</label>
                                             <select value={createForm.tier} onChange={(e) => setCreateForm({ ...createForm, tier: e.target.value as typeof createForm.tier })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
                                                 <option value="">Select tier</option>
-                                                <option value="solo">Solo ($147/mo) – 3 clients</option>
-                                                <option value="starter">Starter ($297/mo) – 10 clients</option>
-                                                <option value="growth">Growth ($597/mo) – 25 clients</option>
-                                                <option value="pro">Pro ($997/mo) – 50 clients</option>
-                                                <option value="enterprise">Enterprise (Custom) – Unlimited</option>
+                                                <optgroup label="Agency tiers">
+                                                    <option value="solo">Solo ($147/mo) – 3 dashboards</option>
+                                                    <option value="starter">Starter ($297/mo) – 10 dashboards</option>
+                                                    <option value="growth">Growth ($597/mo) – 25 dashboards</option>
+                                                    <option value="pro">Pro ($997/mo) – 50 dashboards</option>
+                                                    <option value="enterprise">Enterprise (Custom) – Unlimited</option>
+                                                </optgroup>
+                                                <optgroup label="Business tiers">
+                                                    <option value="business_lite">Business Lite ($79/mo) – 1 dashboard</option>
+                                                    <option value="business_pro">Business Pro ($197/mo) – 1 dashboard</option>
+                                                </optgroup>
                                             </select>
                                         </div>
                                         {createForm.billingOption === "manual_invoice" && (
@@ -1110,14 +1116,72 @@ const AgenciesPage = () => {
                                             </div>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">What tools are you currently using?</label>
-                                            <select value={createForm.currentTools} onChange={(e) => setCreateForm({ ...createForm, currentTools: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
-                                                <option value="">Select...</option>
-                                                <option value="SEMrush">SEMrush</option>
-                                                <option value="Ahrefs">Ahrefs</option>
-                                                <option value="AgencyAnalytics">AgencyAnalytics</option>
-                                                <option value="Other">Other</option>
-                                            </select>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">What tools are you currently using? (select multiple)</label>
+                                            <div className="space-y-2">
+                                                {["SEMrush", "Ahrefs", "AgencyAnalytics"].map((tool) => {
+                                                    const toolsList = createForm.currentTools ? createForm.currentTools.split(",").map((t) => t.trim()).filter(Boolean) : [];
+                                                    const isChecked = toolsList.includes(tool);
+                                                    return (
+                                                        <label key={tool} className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isChecked}
+                                                                onChange={(e) => {
+                                                                    const currentToolsList = createForm.currentTools ? createForm.currentTools.split(",").map((t) => t.trim()).filter(Boolean) : [];
+                                                                    if (e.target.checked) {
+                                                                        setCreateForm({ ...createForm, currentTools: [...currentToolsList.filter((t) => t !== tool), tool].join(", ") });
+                                                                    } else {
+                                                                        setCreateForm({ ...createForm, currentTools: currentToolsList.filter((t) => t !== tool).join(", ") });
+                                                                    }
+                                                                }}
+                                                                className="rounded border-gray-300 text-primary-600"
+                                                            />
+                                                            <span className="text-sm">{tool}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                                <label className="flex items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={(() => {
+                                                            if (!createForm.currentTools) return false;
+                                                            const toolsList = createForm.currentTools.split(",").map((t) => t.trim()).filter(Boolean);
+                                                            return toolsList.includes("Other") || toolsList.some((t) => !["SEMrush", "Ahrefs", "AgencyAnalytics"].includes(t));
+                                                        })()}
+                                                        onChange={(e) => {
+                                                            const currentToolsList = createForm.currentTools ? createForm.currentTools.split(",").map((t) => t.trim()).filter(Boolean) : [];
+                                                            const knownTools = currentToolsList.filter((t) => ["SEMrush", "Ahrefs", "AgencyAnalytics"].includes(t));
+                                                            const otherTools = currentToolsList.filter((t) => !["SEMrush", "Ahrefs", "AgencyAnalytics", "Other"].includes(t));
+                                                            if (e.target.checked) {
+                                                                setCreateForm({ ...createForm, currentTools: [...knownTools, ...otherTools, "Other"].join(", ") });
+                                                            } else {
+                                                                setCreateForm({ ...createForm, currentTools: knownTools.join(", ") });
+                                                            }
+                                                        }}
+                                                        className="rounded border-gray-300 text-primary-600"
+                                                    />
+                                                    <span className="text-sm">Other</span>
+                                                </label>
+                                            </div>
+                                            {(() => {
+                                                if (!createForm.currentTools) return null;
+                                                const toolsList = createForm.currentTools.split(",").map((t) => t.trim()).filter(Boolean);
+                                                const otherTools = toolsList.filter((t) => !["SEMrush", "Ahrefs", "AgencyAnalytics", "Other"].includes(t));
+                                                if (otherTools.length === 0) return null;
+                                                return (
+                                                    <input
+                                                        type="text"
+                                                        value={otherTools.join(", ")}
+                                                        onChange={(e) => {
+                                                            const knownTools = createForm.currentTools ? createForm.currentTools.split(",").map((t) => t.trim()).filter((t) => ["SEMrush", "Ahrefs", "AgencyAnalytics", "Other"].includes(t)) : [];
+                                                            const newOtherValue = e.target.value.trim();
+                                                            setCreateForm({ ...createForm, currentTools: [...knownTools, newOtherValue].filter(Boolean).join(", ") });
+                                                        }}
+                                                        className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                                                        placeholder="Enter other tools"
+                                                    />
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                 </section>

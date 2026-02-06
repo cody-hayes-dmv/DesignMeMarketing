@@ -94,7 +94,7 @@ export const createAgency = createAsyncThunk(
     country?: string;
     subdomain?: string;
     billingOption: "charge" | "no_charge" | "manual_invoice";
-    tier?: "solo" | "starter" | "growth" | "pro" | "enterprise";
+    tier?: "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro";
     customPricing?: number | null;
     internalNotes?: string;
     referralSource?: string;

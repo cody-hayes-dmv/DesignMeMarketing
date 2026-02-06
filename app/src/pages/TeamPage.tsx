@@ -7,6 +7,7 @@ import {
   Edit,
   Trash2,
   X,
+  Mail,
 } from "lucide-react";
 import api from "../lib/api";
 import { useSelector } from "react-redux";
@@ -114,7 +115,7 @@ const TeamPage = () => {
     e.preventDefault();
     setSubmittingInvite(true);
     try {
-      await api.post("/team/invite", {
+      const res = await api.post("/team/invite", {
         email: inviteForm.email.trim(),
         name: inviteForm.name.trim(),
         role: inviteForm.role,
@@ -129,10 +130,16 @@ const TeamPage = () => {
         sendInvitationEmail: true,
       });
       setShowInviteModal(false);
-      toast.success("Invitation sent successfully!");
+      const emailSent = res.data?.emailSent !== false;
+      if (emailSent) {
+        toast.success("Invitation sent successfully!");
+      } else {
+        toast.success("Team member created. Invitation email could not be sent—use Resend from the list.", { duration: 6000 });
+      }
       fetchTeamMembers();
     } catch (error: any) {
       console.error("Failed to invite specialist:", error);
+      toast.error(error?.response?.data?.message || "Failed to send invitation");
     } finally {
       setSubmittingInvite(false);
     }
@@ -214,17 +221,35 @@ const TeamPage = () => {
   };
 
   const getStatusBadge = (member: TeamMember) => {
-    const status = member.verified ? "Active" : member.invited ? "Invited" : "Inactive";
+    const status = getStatusText(member);
     const styles = {
       Active: "bg-green-100 text-green-800",
-      Invited: "bg-yellow-100 text-yellow-800",
+      Pending: "bg-yellow-100 text-yellow-800",
       Inactive: "bg-gray-100 text-gray-800",
     };
     return styles[status as keyof typeof styles] || "bg-gray-100 text-gray-800";
   };
 
   const getStatusText = (member: TeamMember) => {
-    return member.verified ? "Active" : member.invited ? "Invited" : "Inactive";
+    if (member.verified) return "Active";
+    if (member.invited) return "Pending";
+    return "Inactive";
+  };
+
+  const handleResendInvite = async (member: TeamMember) => {
+    if (!member.invited || member.verified) return;
+    try {
+      const res = await api.post(`/team/${member.id}/resend-invite`);
+      const emailSent = res.data?.emailSent !== false;
+      if (emailSent) {
+        toast.success(`Invitation resent to ${member.email}`);
+      } else {
+        toast.error("Resend failed. Check SMTP configuration and try again.");
+      }
+      fetchTeamMembers();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Failed to resend invitation");
+    }
   };
 
   const myTeamMembers = teamMembers.filter((member) =>
@@ -251,7 +276,7 @@ const TeamPage = () => {
             Manage your team members and their access
           </p>
         </div>
-        {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || user?.role === "AGENCY") && (
+        {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
           <button
             onClick={() => setShowInviteModal(true)}
             className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
@@ -331,14 +356,22 @@ const TeamPage = () => {
       {/* Team Members Table */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="p-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Team Members</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            {activeView === "myTeam" ? "My Team (Admins + Specialists)" : activeView === "agencyAccess" ? "Agency Access" : "All Users"}
+          </h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Member
+                  Photo
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Full Name
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Email
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Role
@@ -347,10 +380,7 @@ const TeamPage = () => {
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Clients / Tasks
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Last Active
+                  Date Added
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
@@ -360,13 +390,13 @@ const TeamPage = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {isTableLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
                     Loading team members...
                   </td>
                 </tr>
               ) : visibleMembers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
                     No team members found
                   </td>
                 </tr>
@@ -374,21 +404,17 @@ const TeamPage = () => {
                 visibleMembers.map((member) => (
                   <tr key={member.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                          <span className="text-sm font-medium text-primary-700">
-                            {getInitials(member.name)}
-                          </span>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {member.name}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {member.email}
-                          </div>
-                        </div>
+                      <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
+                        <span className="text-sm font-medium text-primary-700">
+                          {getInitials(member.name)}
+                        </span>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {member.name}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {member.email}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
@@ -396,7 +422,7 @@ const TeamPage = () => {
                           member.role
                         )}`}
                       >
-                        {member.role}
+                        {member.role === "SUPER_ADMIN" ? "Super Admin" : member.role === "ADMIN" ? "Admin" : member.role === "SPECIALIST" ? "Specialist" : member.role}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -408,29 +434,22 @@ const TeamPage = () => {
                         {getStatusText(member)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-600">
-                        {member.clientCount !== undefined
-                          ? `${member.clientCount} client${member.clientCount !== 1 ? "s" : ""}`
-                          : "-"}
-                      </div>
-                      {member.taskCount !== undefined && member.taskCount > 0 && (
-                        <div className="text-xs text-gray-500">
-                          {member.taskCount} task{member.taskCount !== 1 ? "s" : ""}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-600">
-                        {member.lastActive
-                          ? new Date(member.lastActive).toLocaleDateString()
-                          : "Never"}
-                      </div>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {member.createdAt ? new Date(member.createdAt).toLocaleDateString() : "—"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
-                        {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || user?.role === "AGENCY") && (
+                        {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") && (
                           <>
+                            {member.invited && !member.verified && (
+                              <button
+                                onClick={() => handleResendInvite(member)}
+                                className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+                                title="Resend invitation"
+                              >
+                                <Mail className="h-4 w-4" />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleEditTeamMember(member)}
                               className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
@@ -447,6 +466,24 @@ const TeamPage = () => {
                                 <Trash2 className="h-4 w-4" />
                               </button>
                             )}
+                          </>
+                        )}
+                        {user?.role === "AGENCY" && (member.role === "AGENCY" || member.agencies?.length) && (
+                          <>
+                            <button
+                              onClick={() => handleEditTeamMember(member)}
+                              className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                              title="Edit member"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTeamMember(member.id)}
+                              className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                              title="Remove from agency"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           </>
                         )}
                       </div>

@@ -60,6 +60,11 @@ model Agency {
   subscriptionTier      String?              @db.VarChar(50)
   customPricing         Decimal?             @db.Decimal(10, 2)
   internalNotes         String?              @db.Text
+  // 14-day free trial for new sign-ups (null = no trial or already converted)
+  trialEndsAt           DateTime?            @db.DateTime
+  // Keyword research credits (reset monthly)
+  keywordResearchCreditsUsed    Int            @default(0)
+  keywordResearchCreditsResetAt DateTime?      @db.DateTime
   // Additional questions (stored as JSON: referralSource, referralText, primaryGoals[], currentTools, etc.)
   onboardingData        String?              @db.LongText
   onboardingTemplates   OnboardingTemplate[]
@@ -197,6 +202,9 @@ model Client {
   aiSearchSerpCache     AiSearchSerpCache?
   backlinkTimeseries    BacklinkTimeseries[]
   backlinks             Backlink[]
+  // Tier-based refresh throttle (rank = target keywords/rankings, ai = AI search visibility)
+  lastRankRefreshAt     DateTime?               @db.DateTime
+  lastAiRefreshAt       DateTime?               @db.DateTime
   user                  User                    @relation(fields: [userId], references: [id])
   belongsToAgency       Agency?                 @relation("ClientsBelongingToAgency", fields: [belongsToAgencyId], references: [id])
   ga4Metrics            Ga4Metrics?

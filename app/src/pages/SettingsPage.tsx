@@ -44,6 +44,7 @@ const SettingsPage = () => {
     subdomain: "",
     website: "",
   });
+  const [isBusinessTier, setIsBusinessTier] = useState(false);
 
   const [notificationSettings, setNotificationSettings] = useState({
     emailReports: true,
@@ -140,6 +141,7 @@ const SettingsPage = () => {
           subdomain: response.data.subdomain || "",
           website: "", // Not stored in backend currently
         });
+        setIsBusinessTier(!!response.data.isBusinessTier);
       }
     } catch (error: any) {
       if (error.response?.status !== 404) {
@@ -519,27 +521,29 @@ const SettingsPage = () => {
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Subdomain
-                    </label>
-                    <div className="flex">
-                      <input
-                        type="text"
-                        value={agencyForm.subdomain}
-                        onChange={(e) =>
-                          setAgencyForm({
-                            ...agencyForm,
-                            subdomain: e.target.value,
-                          })
-                        }
-                        className="flex-1 px-4 py-3 border border-gray-300 rounded-l-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
-                      <span className="bg-gray-50 border border-l-0 border-gray-300 rounded-r-lg px-4 py-3 text-gray-500">
-                        .yourseodashboard.com
-                      </span>
+                  {!isBusinessTier && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        White-label subdomain
+                      </label>
+                      <div className="flex">
+                        <input
+                          type="text"
+                          value={agencyForm.subdomain}
+                          onChange={(e) =>
+                            setAgencyForm({
+                              ...agencyForm,
+                              subdomain: e.target.value,
+                            })
+                          }
+                          className="flex-1 px-4 py-3 border border-gray-300 rounded-l-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                        <span className="bg-gray-50 border border-l-0 border-gray-300 rounded-r-lg px-4 py-3 text-gray-500">
+                          .yourseodashboard.com
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Website

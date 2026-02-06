@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { sendEmail } from '../lib/email.js';
+import { getAgencyTierContext, canAddDashboard } from '../lib/agencyLimits.js';
 
 const router = express.Router();
 
@@ -269,6 +270,16 @@ router.get('/', authenticateToken, async (req, res) => {
             });
         }
 
+        // For SUPER_ADMIN/ADMIN: map clientId -> pending ManagedService id (for Approve from Clients page)
+        let pendingManagedServiceByClientId: Record<string, string> = {};
+        if (includeAgencyNames) {
+            const pendingList = await prisma.managedService.findMany({
+                where: { status: 'PENDING' },
+                select: { id: true, clientId: true },
+            });
+            pendingList.forEach((m) => { pendingManagedServiceByClientId[m.clientId] = m.id; });
+        }
+
         // Add statistics from database for each client
         const clientsWithStats = await Promise.all(
             clients.map(async (client: any) => {
@@ -316,6 +327,7 @@ router.get('/', authenticateToken, async (req, res) => {
                     traffic: trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0,
                     traffic30d,
                     agencyNames,
+                    ...(includeAgencyNames ? { pendingManagedServiceId: pendingManagedServiceByClientId[client.id] || null } : {}),
                 };
             })
         );
@@ -1042,6 +1054,17 @@ router.post('/', authenticateToken, async (req, res) => {
         if (req.user.role === 'USER') {
             return res.status(403).json({ message: 'Access denied' });
         }
+
+        const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+        const dashboardCheck = canAddDashboard(tierCtx);
+        if (!dashboardCheck.allowed) {
+            return res.status(403).json({
+                message: dashboardCheck.message,
+                code: 'TIER_LIMIT',
+                limitType: 'dashboards',
+            });
+        }
+
         const { name, domain, industry, targets, loginUrl, username, password, accountInfo } = createClientSchema.parse(req.body);
 
         // Normalize domain (strip protocol/www/path)

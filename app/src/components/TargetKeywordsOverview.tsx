@@ -134,7 +134,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
       ) {
         initialRefreshDoneRef.current[clientId] = true;
         api
-          .post(`/seo/target-keywords/${clientId}/refresh`)
+          .post(`/seo/target-keywords/${clientId}/refresh`, {}, { timeout: 120000 })
           .then(() => fetchKeywords())
           .catch((err: any) => {
             console.warn("Initial target keywords refresh failed:", err?.response?.data?.message || err);
@@ -208,7 +208,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     if (!clientId || (user?.role !== "SUPER_ADMIN" && user?.role !== "ADMIN") || isReadOnly) return;
     try {
       setRefreshing(true);
-      await api.post(`/seo/target-keywords/${clientId}/refresh`);
+      await api.post(`/seo/target-keywords/${clientId}/refresh`, {}, { timeout: 120000 });
       toast.success("Target keywords refreshed successfully!");
       await fetchKeywords();
     } catch (error: any) {

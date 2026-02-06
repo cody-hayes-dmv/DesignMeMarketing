@@ -8,6 +8,7 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import SpecialistDashboard from "./pages/Specialist/SpecialistDashboardPage";
 import SpecialistClientsPage from "./pages/Specialist/SpecialistClientsPage";
+import SpecialistTeamPage from "./pages/Specialist/SpecialistTeamPage";
 import DashboardLayout from "./components/DashboardLayout";
 import ClientsPage from "./pages/ClientsPage";
 import KeywordsPage from "./pages/KeywordsPage";
@@ -108,6 +109,7 @@ function App() {
   const specialistRoutes = [
     { path: "/specialist/dashboard", component: SpecialistDashboard },
     { path: "/specialist/clients", component: SpecialistClientsPage },
+    { path: "/specialist/team", component: SpecialistTeamPage },
     { path: "/specialist/tasks", component: TasksPage },
     { path: "/specialist/settings", component: SettingsPage },
   ];

@@ -66,17 +66,19 @@ export const sendEmail = async ({ to, subject, html, attachments }: EmailOptions
     }
 
     const emailTransporter = getTransporter();
-    
-    await emailTransporter.sendMail({
-      from: process.env.SMTP_FROM || "noreply@yourseodashboard.com",
+    const from = process.env.SMTP_FROM || "noreply@yourseodashboard.com";
+    console.log(`[Email] Attempting send to ${to}, subject: "${subject.slice(0, 50)}..."`);
+    const result = await emailTransporter.sendMail({
+      from,
       to,
       subject,
       html,
       attachments,
     });
-    console.log(`Email sent to ${to}`);
+    console.log(`[Email] Sent successfully to ${to}, messageId: ${result.messageId || "n/a"}`);
   } catch (error: any) {
-    console.error("Email sending failed:", error);
+    console.error("[Email] Send failed:", error?.message || error);
+    console.error("[Email] To:", to, "Subject:", subject?.slice(0, 40));
     
     // Provide more specific error messages
     if (error.code === "ECONNREFUSED" || error.code === "ESOCKET") {

@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
+import { getTierConfig } from '../lib/tiers.js';
 
 const router = express.Router();
 
@@ -113,7 +114,7 @@ const createAgencySchema = z.object({
   country: z.string().optional(),
   subdomain: z.string().optional(),
   billingOption: z.enum(['charge', 'no_charge', 'manual_invoice']),
-  tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise']).optional(),
+  tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise', 'business_lite', 'business_pro']).optional(),
   customPricing: z.coerce.number().optional().nullable(),
   internalNotes: z.string().optional(),
   referralSource: z.string().optional(),
@@ -197,6 +198,12 @@ router.post('/', authenticateToken, async (req, res) => {
         })
       : null;
 
+    // Super Admin–created agencies: 14-day trial only when no charge (free tier / choose later)
+    const trialEndsAt =
+      billingOption === "no_charge"
+        ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+        : null;
+
     const agency = await prisma.agency.create({
       data: {
         name,
@@ -219,6 +226,7 @@ router.post('/', authenticateToken, async (req, res) => {
         customPricing: customPricing ?? null,
         internalNotes: internalNotes || null,
         onboardingData,
+        trialEndsAt,
       },
       include: { _count: { select: { members: true } } },
     });
@@ -241,6 +249,25 @@ router.post('/', authenticateToken, async (req, res) => {
         agencyRole: 'OWNER',
       },
     });
+
+    // Automatic agency dashboard: one client dashboard for the agency itself (counts toward their slot)
+    const agencyDashboardName = `${name} - Agency Website`;
+    const agencyDashboardDomain = `agency-${agency.id}.internal`;
+    try {
+      await prisma.client.create({
+        data: {
+          name: agencyDashboardName,
+          domain: agencyDashboardDomain,
+          userId: agencyUser.id,
+          belongsToAgencyId: agency.id,
+          isAgencyOwnDashboard: true,
+          status: 'DASHBOARD_ONLY',
+          managedServiceStatus: 'none',
+        },
+      });
+    } catch (dashboardErr: any) {
+      console.warn('Auto agency dashboard create failed:', dashboardErr?.message);
+    }
 
     const inviteToken = jwt.sign(
       { userId: agencyUser.id, email: agencyUser.email },
@@ -370,9 +397,10 @@ router.post('/invite', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
 
-    // Create agency
+    // Create agency (public invite = 14-day free trial)
+    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const agency = await prisma.agency.create({
-      data: { name },
+      data: { name, trialEndsAt },
     });
 
     // Generate invitation token
@@ -504,7 +532,7 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
   }
 });
 
-// Get current user's agency
+// Get current user's agency (includes tier for UI: Your Business vs Clients)
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const user = req.user;
@@ -526,12 +554,28 @@ router.get('/me', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'No agency found for user' });
     }
 
+    const tierConfig = getTierConfig(membership.agency.subscriptionTier);
+    const trialEndsAt = membership.agency.trialEndsAt ?? null;
+    const now = new Date();
+    const trialActive = trialEndsAt && trialEndsAt > now;
+    const trialDaysLeft =
+      trialEndsAt && trialEndsAt > now
+        ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000))
+        : null;
+
     res.json({
       id: membership.agency.id,
       name: membership.agency.name,
       subdomain: membership.agency.subdomain,
       createdAt: membership.agency.createdAt,
       agencyRole: membership.agencyRole,
+      subscriptionTier: membership.agency.subscriptionTier ?? null,
+      tierId: tierConfig?.id ?? null,
+      isBusinessTier: tierConfig?.type === "business",
+      maxDashboards: tierConfig?.maxDashboards ?? null,
+      trialEndsAt: trialEndsAt?.toISOString() ?? null,
+      trialActive: !!trialActive,
+      trialDaysLeft,
     });
   } catch (error) {
     console.error('Get user agency error:', error);
@@ -954,6 +998,63 @@ router.patch('/managed-services/:id/approve', authenticateToken, async (req, res
   } catch (err: any) {
     console.error('Approve managed service error:', err);
     res.status(500).json({ message: err?.message || 'Failed to approve' });
+  }
+});
+
+// Managed Services: reject (SUPER_ADMIN only). Client becomes Dashboard Only, agency notified.
+router.patch('/managed-services/:id/reject', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can reject managed services.' });
+    }
+    const { id } = req.params;
+    const row = await prisma.managedService.findUnique({
+      where: { id },
+      include: { client: true, agency: { include: { members: { select: { user: { select: { email: true } } } } } } },
+    });
+    if (!row) return res.status(404).json({ message: 'Managed service not found' });
+    if (row.status !== 'PENDING') {
+      return res.status(400).json({ message: 'This managed service is not pending approval' });
+    }
+
+    await prisma.$transaction([
+      prisma.managedService.update({
+        where: { id },
+        data: { status: 'CANCELED' },
+      }),
+      prisma.client.update({
+        where: { id: row.clientId },
+        data: {
+          status: 'DASHBOARD_ONLY',
+          managedServiceStatus: 'none',
+          managedServicePackage: null,
+          managedServicePrice: null,
+          managedServiceRequestedDate: null,
+        },
+      }),
+    ]);
+
+    const clientName = row.client.name;
+    const seen = new Set<string>();
+    for (const m of row.agency.members) {
+      const email = (m as any).user?.email;
+      if (email && !seen.has(email)) {
+        seen.add(email);
+        sendEmail({
+          to: email,
+          subject: `Managed service request not approved: ${clientName}`,
+          html: `
+            <p>The managed service request for <strong>${clientName}</strong> was not approved. The client remains in Dashboard Only mode.</p>
+            <p>— SEO Dashboard</p>
+          `,
+        }).catch((e) => console.warn('Notify agency reject email failed:', e));
+      }
+    }
+
+    res.json({ success: true, message: 'Managed service request rejected; agency notified.' });
+  } catch (err: any) {
+    console.error('Reject managed service error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to reject' });
   }
 });
 

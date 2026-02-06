@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../store";
 import { logout } from "../store/slices/authSlice";
 import logoUrl from "@/assets/zoesi-white.png";
+import api from "@/lib/api";
 import {
   BarChart3,
   Home,
@@ -38,7 +39,16 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const dispatch = useDispatch();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const { user } = useSelector((state: RootState) => state.auth);
+  const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean } | null>(null);
   const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "AGENCY";
+
+  useEffect(() => {
+    if (user?.role === "AGENCY") {
+      api.get("/agencies/me").then((r) => setAgencyMe(r.data)).catch(() => setAgencyMe(null));
+    } else {
+      setAgencyMe(null);
+    }
+  }, [user?.role]);
 
   const panelLabel =
     user?.role === "SUPER_ADMIN"
@@ -218,9 +228,15 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     },
   ];
 
-  const filteredMenuItems = menuItems.filter((item) =>
-    item.roles.includes(user?.role || "")
-  );
+  const filteredMenuItems = menuItems
+    .filter((item) => item.roles.includes(user?.role || ""))
+    .filter((item) => !(item.path === "/agency/users" && agencyMe?.isBusinessTier))
+    .map((item) => {
+      if (item.path === "/agency/clients" && agencyMe?.isBusinessTier) {
+        return { ...item, label: "Your Business" };
+      }
+      return item;
+    });
 
   return (
     <div

@@ -25,6 +25,10 @@ export interface Client {
   traffic30d?: number | null;
   /** Agency names for this client (SUPER_ADMIN list only, e.g. Archived view). */
   agencyNames?: string[];
+  /** Managed service state: none | pending | active | canceled | suspended | archived (SUPER_ADMIN/backend). */
+  managedServiceStatus?: string | null;
+  /** Service package when managed service is active: foundation | growth | domination | custom. */
+  managedServicePackage?: string | null;
 }
 
 export interface Keyword {

@@ -4,7 +4,7 @@ import { RootState } from "@/store";
 import { fetchAgencies } from "@/store/slices/agencySlice";
 import { fetchClients } from "@/store/slices/clientSlice";
 import Layout from "@/components/Layout";
-import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
@@ -30,6 +30,46 @@ const SuperAdminDashboard = () => {
   const [pendingManagedServices, setPendingManagedServices] = useState<PendingManagedService[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [mrrData, setMrrData] = useState<{ totalMrr: number; segments: Array<{ label: string; mrr: number; color?: string }> } | null>(null);
+  const [activityData, setActivityData] = useState<{ newMrrAdded: number; churnedMrr: number; netChange: number } | null>(null);
+  const [financialLoading, setFinancialLoading] = useState(true);
+
+  const fetchFinancial = async () => {
+    setFinancialLoading(true);
+    try {
+      const [mrrRes, activityRes] = await Promise.all([
+        api.get("/financial/mrr-breakdown").catch(() => ({ data: null })),
+        api.get("/financial/subscription-activity").catch(() => ({ data: null })),
+      ]);
+      if (mrrRes.data?.segments) {
+        setMrrData({
+          totalMrr: mrrRes.data.totalMrr ?? 0,
+          segments: (mrrRes.data.segments ?? []).map((s: any) => ({ label: s.label, mrr: s.mrr, color: s.color })),
+        });
+      } else {
+        setMrrData(null);
+      }
+      if (activityRes.data && typeof activityRes.data.newMrrAdded === "number") {
+        setActivityData({
+          newMrrAdded: activityRes.data.newMrrAdded,
+          churnedMrr: activityRes.data.churnedMrr ?? 0,
+          netChange: activityRes.data.netChange ?? 0,
+        });
+      } else {
+        setActivityData(null);
+      }
+    } catch {
+      setMrrData(null);
+      setActivityData(null);
+    } finally {
+      setFinancialLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFinancial();
+  }, []);
 
   useEffect(() => {
     dispatch(fetchAgencies() as any);
@@ -72,15 +112,37 @@ const SuperAdminDashboard = () => {
     );
   };
 
-  // Calculate metrics
-  const totalAgencies = agencies.length;
+  // Dashboard metrics: prefer API (SUPER_ADMIN) for correct definitions
+  const [stats, setStats] = useState<{
+    totalAgencies: number;
+    activeAgencies: number;
+    activeManagedClients: number;
+    totalDashboards: number;
+    pendingRequests: number;
+  } | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await api.get("/seo/super-admin/dashboard");
+        setStats(res.data);
+      } catch {
+        setStats(null);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const totalAgencies = stats?.totalAgencies ?? agencies.length;
   const totalClients = clients.length;
-  const totalDashboards = totalClients;
-  const activeAgencies = agencies.filter((agency) => (agency.clientCount ?? 0) > 0).length;
-  const activeManagedClients = clients.filter(
-    (client) => client.status === "ACTIVE" && isManagedServiceClient(client)
-  ).length;
-  const pendingRequests = clients.filter((client) => client.status === "PENDING").length;
+  const totalDashboards = stats?.totalDashboards ?? totalClients;
+  const activeAgencies = stats?.activeAgencies ?? agencies.filter((a) => (a.clientCount ?? 0) > 0).length;
+  const activeManagedClients =
+    stats?.activeManagedClients ??
+    clients.filter((c) => (c as any).managedServiceStatus === "active").length;
+  const pendingRequests = stats?.pendingRequests ?? pendingManagedServices.length;
 
   // Recent agencies (last 5)
   const recentAgencies = [...agencies]
@@ -127,10 +189,10 @@ const SuperAdminDashboard = () => {
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Total Agencies</p>
                   <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {agenciesLoading ? "—" : totalAgencies}
+                    {statsLoading ? "—" : totalAgencies}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">agencies</p>
-                  {!agenciesLoading && (
+                  {!statsLoading && (
                     <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
                       {newAgenciesLast30Days} new in last 30 days
                     </p>
@@ -151,10 +213,10 @@ const SuperAdminDashboard = () => {
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Active Agencies</p>
                   <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {agenciesLoading ? "—" : activeAgencies}
+                    {statsLoading ? "—" : activeAgencies}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">active</p>
-                  {!agenciesLoading && (
+                  {!statsLoading && (
                     <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
                       {totalAgencies > 0 ? Math.round((activeAgencies / totalAgencies) * 100) : 0}% of total
                     </p>
@@ -175,10 +237,10 @@ const SuperAdminDashboard = () => {
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Active Clients</p>
                   <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {clientsLoading ? "—" : activeManagedClients}
+                    {statsLoading ? "—" : activeManagedClients}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">active clients</p>
-                  {!clientsLoading && (
+                  {!statsLoading && (
                     <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
                       Managed services only
                     </p>
@@ -199,10 +261,10 @@ const SuperAdminDashboard = () => {
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Total Dashboards</p>
                   <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {clientsLoading ? "—" : totalDashboards}
+                    {statsLoading ? "—" : totalDashboards}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">dashboards</p>
-                  {!clientsLoading && (
+                  {!statsLoading && (
                     <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
                       {newClientsLast30Days} new in last 30 days
                     </p>
@@ -223,10 +285,10 @@ const SuperAdminDashboard = () => {
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Pending Requests</p>
                   <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {clientsLoading ? "—" : pendingRequests}
+                    {statsLoading ? "—" : pendingRequests}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">pending</p>
-                  {!clientsLoading && (
+                  {!statsLoading && (
                     <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
                       Managed service activations
                     </p>
@@ -249,8 +311,10 @@ const SuperAdminDashboard = () => {
         {(loadingPending || pendingManagedServices.length > 0) && (
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Pending managed service approvals</h2>
-              <p className="text-sm text-gray-500 mt-1">Approve to activate and start billing; agency will be notified.</p>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Pending Managed Service Requests ({pendingManagedServices.length})
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">Approve to activate and start billing; reject to keep client as Dashboard Only. Agency will be notified.</p>
             </div>
             <div className="p-6">
               {loadingPending ? (
@@ -269,7 +333,7 @@ const SuperAdminDashboard = () => {
                         <th className="pb-3 pr-4">Package</th>
                         <th className="pb-3 pr-4">Price</th>
                         <th className="pb-3 pr-4">Start date</th>
-                        <th className="pb-3 text-right">Action</th>
+                        <th className="pb-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -281,27 +345,53 @@ const SuperAdminDashboard = () => {
                           <td className="py-3 pr-4 text-gray-700">${(ms.monthlyPrice / 100).toFixed(2)}/mo</td>
                           <td className="py-3 pr-4 text-gray-600">{format(new Date(ms.startDate), "MMM d, yyyy")}</td>
                           <td className="py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                setApprovingId(ms.id);
-                                try {
-                                  await api.patch(`/agencies/managed-services/${ms.id}/approve`);
-                                  toast.success(`${ms.clientName} approved; agency notified, billing started.`);
-                                  setPendingManagedServices((prev) => prev.filter((s) => s.id !== ms.id));
-                                  dispatch(fetchClients() as any);
-                                } catch (e: any) {
-                                  toast.error(e?.response?.data?.message || "Failed to approve");
-                                } finally {
-                                  setApprovingId(null);
-                                }
-                              }}
-                              disabled={approvingId !== null}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-60"
-                            >
-                              {approvingId === ms.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                              Approve
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  setApprovingId(ms.id);
+                                  try {
+                                    await api.patch(`/agencies/managed-services/${ms.id}/approve`);
+                                    toast.success(`${ms.clientName} approved; agency notified, billing started.`);
+                                    setPendingManagedServices((prev) => prev.filter((s) => s.id !== ms.id));
+                                    dispatch(fetchClients() as any);
+                                    const res = await api.get("/seo/super-admin/dashboard");
+                                    setStats(res.data);
+                                  } catch (e: any) {
+                                    toast.error(e?.response?.data?.message || "Failed to approve");
+                                  } finally {
+                                    setApprovingId(null);
+                                  }
+                                }}
+                                disabled={approvingId !== null || rejectingId !== null}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-60"
+                              >
+                                {approvingId === ms.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  setRejectingId(ms.id);
+                                  try {
+                                    await api.patch(`/agencies/managed-services/${ms.id}/reject`);
+                                    toast.success(`Request rejected; agency notified.`);
+                                    setPendingManagedServices((prev) => prev.filter((s) => s.id !== ms.id));
+                                    dispatch(fetchClients() as any);
+                                    const res = await api.get("/seo/super-admin/dashboard");
+                                    setStats(res.data);
+                                  } catch (e: any) {
+                                    toast.error(e?.response?.data?.message || "Failed to reject");
+                                  } finally {
+                                    setRejectingId(null);
+                                  }
+                                }}
+                                disabled={approvingId !== null || rejectingId !== null}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+                              >
+                                {rejectingId === ms.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reject"}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -312,6 +402,91 @@ const SuperAdminDashboard = () => {
             </div>
           </div>
         )}
+
+        {/* Financial Overview */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Financial Overview</h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fetchFinancial()}
+                disabled={financialLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${financialLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/superadmin/financial-overview")}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700"
+              >
+                View full report
+              </button>
+            </div>
+          </div>
+          <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Monthly Recurring Revenue</h3>
+              {financialLoading ? (
+                <div className="flex items-center gap-2 text-gray-500 py-8">
+                  <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+                </div>
+              ) : mrrData ? (
+                <>
+                  <p className="text-3xl font-bold text-gray-900 mb-4">
+                    {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(mrrData.totalMrr)}
+                  </p>
+                  <ul className="space-y-2">
+                    {mrrData.segments.slice(0, 8).map((seg, i) => (
+                      <li key={i} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-700">{seg.label}</span>
+                        <span className="font-medium text-gray-900">
+                          {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(seg.mrr)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="text-sm text-gray-500 py-4">Stripe not configured or no data.</p>
+              )}
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Subscription Activity (Last 30 Days)</h3>
+              {financialLoading ? (
+                <div className="flex items-center gap-2 text-gray-500 py-8">
+                  <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+                </div>
+              ) : activityData ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                    <span className="text-sm text-gray-700">New MRR added</span>
+                    <span className="font-semibold text-green-700">
+                      +{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(activityData.newMrrAdded)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                    <span className="text-sm text-gray-700">Churned MRR</span>
+                    <span className="font-semibold text-red-700">
+                      -{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(activityData.churnedMrr)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-gray-100 rounded-lg">
+                    <span className="text-sm text-gray-700">Net change</span>
+                    <span className={`font-semibold ${activityData.netChange >= 0 ? "text-green-700" : "text-red-700"}`}>
+                      {activityData.netChange >= 0 ? "+" : ""}
+                      {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(activityData.netChange)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 py-4">Stripe not configured or no data.</p>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Recent Agencies and Clients */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

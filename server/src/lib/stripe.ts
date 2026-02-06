@@ -21,6 +21,8 @@ export type MrrCategory =
   | "platform_growth"
   | "platform_pro"
   | "platform_enterprise"
+  | "platform_business_lite"
+  | "platform_business_pro"
   | "managed_foundation"
   | "managed_growth"
   | "managed_domination"
@@ -29,7 +31,7 @@ export type MrrCategory =
   | "addon_creditpacks"
   | "other";
 
-const PLATFORM_TIERS = ["solo", "starter", "growth", "pro", "enterprise"];
+const PLATFORM_TIERS = ["solo", "starter", "growth", "pro", "enterprise", "business_lite", "business_pro"];
 const MANAGED_PACKAGES = ["foundation", "growth", "domination"];
 export function categorizeProduct(product: Stripe.Product | string): MrrCategory | "other" {
   const name = typeof product === "string" ? product : (product.name || "").toLowerCase();
@@ -70,6 +72,8 @@ export const CATEGORY_LABELS: Record<MrrCategory | "other", string> = {
   platform_growth: "Growth",
   platform_pro: "Pro",
   platform_enterprise: "Enterprise",
+  platform_business_lite: "Business Lite",
+  platform_business_pro: "Business Pro",
   managed_foundation: "Foundation (Managed)",
   managed_growth: "Growth (Managed)",
   managed_domination: "Domination (Managed)",

@@ -26,6 +26,8 @@ interface SubscriptionData {
   currentPlanPrice: number | null;
   nextBillingDate: string;
   paymentMethod: { last4: string; brand: string } | null;
+  trialEndsAt?: string | null;
+  trialDaysLeft?: number | null;
   usage: {
     clientDashboards: { used: number; limit: number };
     keywordsTracked: { used: number; limit: number };
@@ -54,6 +56,12 @@ const SubscriptionPage = () => {
   const [invoicesLoading, setInvoicesLoading] = useState(false);
 
   useEffect(() => {
+    if (window.location.hash === "#invoices") {
+      document.getElementById("invoices")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [loading]);
+
+  useEffect(() => {
     const fetchSubscription = async () => {
       try {
         const res = await api.get("/seo/agency/subscription").catch(() => ({ data: null }));
@@ -63,6 +71,8 @@ const SubscriptionPage = () => {
             currentPlanPrice: res.data.currentPlanPrice ?? defaultSubscription.currentPlanPrice,
             nextBillingDate: res.data.nextBillingDate ?? defaultSubscription.nextBillingDate,
             paymentMethod: res.data.paymentMethod ?? defaultSubscription.paymentMethod,
+            trialEndsAt: res.data.trialEndsAt ?? null,
+            trialDaysLeft: res.data.trialDaysLeft ?? null,
             usage: {
               clientDashboards: res.data.usage?.clientDashboards ?? defaultSubscription.usage.clientDashboards,
               keywordsTracked: res.data.usage?.keywordsTracked ?? defaultSubscription.usage.keywordsTracked,
@@ -103,22 +113,20 @@ const SubscriptionPage = () => {
     handleManageBilling();
   };
 
-  const handleDownloadInvoices = async () => {
+  const handleViewInvoiceHistory = async () => {
     setInvoicesLoading(true);
     try {
-      const res = await api.get("/agencies/invoices", { responseType: "blob" }).catch(() => null);
-      if (res?.data instanceof Blob) {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(res.data);
-        a.download = "invoices.pdf";
-        a.click();
-        URL.revokeObjectURL(a.href);
-        toast.success("Download started.");
+      const res = await api.post("/agencies/billing-portal", {
+        returnUrl: `${window.location.origin}${window.location.pathname}#invoices`,
+      });
+      const url = res.data?.url;
+      if (url) {
+        window.location.href = url;
       } else {
-        toast.error("Invoice download is not available.");
+        toast.error(res.data?.message || "Billing portal is not available.");
       }
-    } catch {
-      toast.error("Could not download invoices.");
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Could not open billing portal.");
     } finally {
       setInvoicesLoading(false);
     }
@@ -137,6 +145,7 @@ const SubscriptionPage = () => {
         year: "numeric",
       })
     : "—";
+  const hasTrial = data.trialDaysLeft != null && data.trialDaysLeft > 0;
 
   const planOrder = ["solo", "starter", "growth", "pro", "enterprise"];
   const currentIndex = planOrder.indexOf(data.currentPlan);
@@ -151,6 +160,22 @@ const SubscriptionPage = () => {
         </div>
       ) : (
         <>
+          {hasTrial && (
+            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-800">
+                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Choose a paid plan before it ends to keep your account active.
+              </p>
+              <button
+                type="button"
+                onClick={handleUpgradePlan}
+                disabled={portalLoading}
+                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
+              >
+                Choose a plan
+              </button>
+            </div>
+          )}
+
           {/* Top Section - Current Plan Overview */}
           <section className="mb-10">
             <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
@@ -258,15 +283,32 @@ const SubscriptionPage = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={handleDownloadInvoices}
+                  onClick={handleViewInvoiceHistory}
                   disabled={invoicesLoading}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
                 >
                   {invoicesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  Download Invoices
+                  View invoice history
                 </button>
               </div>
             </div>
+          </section>
+
+          {/* Invoice history - linked from dashboard Card 4 */}
+          <section id="invoices" className="scroll-mt-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Invoice history</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              View and download your past invoices in the billing portal.
+            </p>
+            <button
+              type="button"
+              onClick={handleViewInvoiceHistory}
+              disabled={invoicesLoading || portalLoading}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
+            >
+              {invoicesLoading || portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              View invoice history
+            </button>
           </section>
 
           {/* Middle Section - Available Plans */}

@@ -256,14 +256,14 @@ const AgencyDashboardPage = () => {
                   if (slotsLeft <= 0) {
                     return (
                       <p className="mt-1 text-sm font-medium text-red-600">
-                        At capacity — upgrade to add more clients
+                        At capacity - Upgrade
                       </p>
                     );
                   }
                   if (slotsLeft === 1) {
                     return (
                       <p className="mt-1 text-sm font-medium text-amber-600">
-                        {slotsLeft} slot left — consider upgrading
+                        {slotsLeft} slot left
                       </p>
                     );
                   }
@@ -282,39 +282,41 @@ const AgencyDashboardPage = () => {
             to="/agency/keywords"
             className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Keywords Tracked</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {stats.totalKeywords.toLocaleString()} / {(stats.keywordLimit ?? 500).toLocaleString()}
-                </p>
-                {(() => {
-                  const limit = stats.keywordLimit ?? 500;
-                  const used = stats.totalKeywords;
-                  const pct = limit ? (used / limit) * 100 : 0;
-                  if (pct >= 100) {
-                    return (
-                      <p className="mt-1 text-sm font-medium text-red-600">
-                        At limit — upgrade for more keywords
-                      </p>
-                    );
-                  }
-                  if (pct >= 90) {
-                    return (
-                      <p className="mt-1 text-sm font-medium text-amber-600">
-                        Approaching limit — consider upgrading
-                      </p>
-                    );
-                  }
-                  return (
-                    <p className="mt-1 text-xs text-gray-500">
-                      {Math.max(0, limit - used).toLocaleString()} remaining
+            {(() => {
+              const limit = stats.keywordLimit ?? 500;
+              const used = stats.totalKeywords;
+              const pct = limit ? (used / limit) * 100 : 0;
+              return (
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-600">Total Keywords Tracked</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {used.toLocaleString()} / {limit.toLocaleString()}
                     </p>
-                  );
-                })()}
-              </div>
-              <Target className="h-8 w-8 text-green-600" />
-            </div>
+                    {pct >= 100 ? (
+                      <p className="mt-1 text-sm font-medium text-red-600">At limit - Upgrade</p>
+                    ) : pct >= 90 ? (
+                      <p className="mt-1 text-sm font-medium text-amber-600">Approaching limit</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {Math.max(0, limit - used).toLocaleString()} remaining
+                      </p>
+                    )}
+                    <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(100, pct)}%`,
+                          backgroundColor:
+                            pct >= 100 ? "rgb(220 38 38)" : pct >= 90 ? "rgb(217 119 6)" : "rgb(34 197 94)",
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <Target className="h-8 w-8 text-green-600 shrink-0 ml-3" />
+                </div>
+              );
+            })()}
             <p className="mt-3 text-xs text-primary-600 font-medium flex items-center gap-1">
               Keyword breakdown <ChevronRight className="h-3 w-3" />
             </p>
@@ -339,7 +341,7 @@ const AgencyDashboardPage = () => {
 
           {/* Card 4 - Monthly Spend */}
           <Link
-            to="/agency/subscription"
+            to="/agency/subscription#invoices"
             className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
           >
             <div className="flex items-center justify-between">
