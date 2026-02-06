@@ -98,6 +98,7 @@ model Task {
   updatedAt      DateTime   @updatedAt
   title          String
   description    String?    @db.Text
+  taskNotes      String?    @db.LongText
   category       String?
   dueDate        DateTime?
   status         TaskStatus @default(TODO)

@@ -583,16 +583,27 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogForm, setWorkLogForm] = useState<{
     title: string;
     description: string;
+    taskNotes: string;
     category: string;
     status: TaskStatus;
     attachments: WorkLogAttachment[];
   }>({
     title: "",
     description: "",
+    taskNotes: "",
     category: "",
     status: "TODO",
     attachments: [],
   });
+  const workLogTaskNotesRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!workLogModalOpen) return;
+    const initial = workLogForm.taskNotes || "";
+    const id = requestAnimationFrame(() => {
+      if (workLogTaskNotesRef.current) workLogTaskNotesRef.current.innerHTML = initial;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [workLogModalOpen]);
   const [workLogDeleteConfirm, setWorkLogDeleteConfirm] = useState<{
     isOpen: boolean;
     taskId: string | null;
@@ -888,7 +899,7 @@ const ClientDashboardPage: React.FC = () => {
     setWorkLogAddMenuOpen(false);
     setWorkLogModalMode("create");
     setSelectedWorkLogTaskId(null);
-    setWorkLogForm({ title: "", description: "", category: "", status: "TODO", attachments: [] });
+    setWorkLogForm({ title: "", description: "", taskNotes: "", category: "", status: "TODO", attachments: [] });
     setWorkLogUrlInput("");
     setWorkLogUrlType("url");
     setWorkLogModalOpen(true);
@@ -919,9 +930,11 @@ const ClientDashboardPage: React.FC = () => {
     const task = workLogTasks.find((t) => t.id === taskId);
     if (task) {
       const attachments = parseProofAttachments((task as any).proof);
+      const titleForForm = (task.description || task.title || "").trim();
       setWorkLogForm({
-        title: task.title || "",
-        description: task.description || "",
+        title: titleForForm,
+        description: titleForForm,
+        taskNotes: (task as any).taskNotes || "",
         category: task.category || "",
         status: task.status,
         attachments,
@@ -938,9 +951,11 @@ const ClientDashboardPage: React.FC = () => {
     const task = workLogTasks.find((t) => t.id === taskId);
     if (task) {
       const attachments = parseProofAttachments((task as any).proof);
+      const titleForForm = (task.description || task.title || "").trim();
       setWorkLogForm({
-        title: task.title || "",
-        description: task.description || "",
+        title: titleForForm,
+        description: titleForForm,
+        taskNotes: (task as any).taskNotes || "",
         category: task.category || "",
         status: task.status,
         attachments,
@@ -955,16 +970,21 @@ const ClientDashboardPage: React.FC = () => {
 
   const handleSaveWorkLog = async () => {
     if (!clientId) return;
+    const titleValue = workLogForm.description.trim();
+    // Read Task field from DOM so we always save current contenteditable content (state can be stale)
+    const taskNotesFromDom = workLogTaskNotesRef.current?.innerHTML?.trim() ?? "";
+    const taskNotesValue = (taskNotesFromDom || workLogForm.taskNotes || "").trim() || undefined;
     const payload = {
-      title: workLogForm.title.trim(),
-      description: workLogForm.description.trim() || undefined,
+      title: titleValue,
+      description: titleValue || undefined,
+      taskNotes: taskNotesValue,
       category: workLogForm.category.trim() || undefined,
       status: workLogForm.status,
       clientId,
       proof: workLogForm.attachments.length > 0 ? workLogForm.attachments : undefined,
     };
 
-    if (!payload.title) {
+    if (!titleValue) {
       toast.error("Title is required.");
       return;
     }
@@ -2223,7 +2243,7 @@ const ClientDashboardPage: React.FC = () => {
       } else {
         params.period = dateRange;
       }
-      const res = await api.get(`/seo/ai-intelligence/${clientId}`, { params, timeout: 60000 }); // Increased to 60s for heavy DataForSEO API calls
+      const res = await api.get(`/seo/ai-intelligence/${clientId}`, { params, timeout: 120000 }); // 2 min for heavy DataForSEO AI APIs (search volume, mentions, etc.)
       setAiIntelligence(res.data);
     } catch (error: any) {
       console.error("Failed to fetch AI Intelligence", error);
@@ -3194,6 +3214,11 @@ const ClientDashboardPage: React.FC = () => {
       if (endpoint) {
         const res = await api.get(endpoint, { params });
         setPpcData(res.data);
+        if (res.data?.success === false && res.data?.message) {
+          setPpcError(res.data.message);
+        } else {
+          setPpcError(null);
+        }
       }
     } catch (error: any) {
       console.error("Failed to load PPC data:", error);
@@ -3203,13 +3228,13 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  // Load PPC data when subsection changes
+  // Load PPC data when subsection or date range changes
   useEffect(() => {
     if (dashboardSection === "ppc" && googleAdsConnected && clientId) {
       loadPpcData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId]);
+  }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId, ppcDateRange, ppcCustomStartDate, ppcCustomEndDate]);
 
   // When Google Ads is disconnected, leave PPC section so we don't show a hidden section
   useEffect(() => {
@@ -5779,7 +5804,17 @@ const ClientDashboardPage: React.FC = () => {
                                       </div>
                                     </div>
                                   ) : (
-                                    <p className="text-sm text-gray-500">No campaign data available.</p>
+                                    <div className="text-center py-6">
+                                      <p className="text-sm text-gray-500">No campaign data available for the selected date range.</p>
+                                      <p className="text-xs text-gray-400 mt-1">Try a different date range or ensure your Google Ads account has active campaigns with traffic.</p>
+                                      <button
+                                        type="button"
+                                        onClick={loadPpcData}
+                                        className="mt-3 text-sm text-primary-600 hover:text-primary-700"
+                                      >
+                                        Refresh
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               )}
@@ -6520,8 +6555,8 @@ const ClientDashboardPage: React.FC = () => {
                     className="absolute inset-0 bg-black/50"
                     onClick={() => setWorkLogModalOpen(false)}
                   />
-                  <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-200">
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                  <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-gray-200">
+                    <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200">
                       <h3 className="text-lg font-semibold text-gray-900">
                         {workLogModalMode === "create"
                           ? "Add Work Log Entry"
@@ -6538,16 +6573,26 @@ const ClientDashboardPage: React.FC = () => {
                       </button>
                     </div>
 
-                    <div className="px-6 py-5 space-y-4">
+                    <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
+                      <div className="px-6 py-5 space-y-4 min-w-0">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                        <input
-                          type="text"
-                          value={workLogForm.title}
-                          onChange={(e) => setWorkLogForm({ ...workLogForm, title: e.target.value })}
-                          disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                          placeholder="e.g. Optimized homepage title tags"
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
+                        {workLogModalMode !== "view" && (
+                          <div className="flex flex-wrap gap-1 mb-1 p-1 border border-gray-200 rounded-t-lg bg-gray-50">
+                            <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-gray-300 rounded hover:bg-gray-200" title="Bold">B</button>
+                            <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Bullet list">• List</button>
+                            <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Numbered list">1. List</button>
+                          </div>
+                        )}
+                        <div
+                          ref={workLogTaskNotesRef}
+                          contentEditable={workLogModalMode !== "view"}
+                          suppressContentEditableWarning
+                          onInput={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                          onBlur={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                          className="min-h-[220px] w-full border border-gray-300 rounded-lg rounded-tl-none px-4 py-3 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 overflow-y-auto overflow-x-auto resize-y prose prose-sm max-w-none list-disc pl-5 space-y-1"
+                          data-placeholder="Add task details, bullet points, etc."
+                          style={{ outline: "none" }}
                         />
                       </div>
 
@@ -6693,12 +6738,13 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </div>
                     </div>
+                    </div>
 
-                    <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                    <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
                       {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
                         <button
                           type="button"
-                          onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.title)}
+                          onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
                           className="mr-auto px-4 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
                         >
                           Delete
@@ -8184,8 +8230,8 @@ const ClientDashboardPage: React.FC = () => {
                 className="absolute inset-0 bg-black/50"
                 onClick={() => setWorkLogModalOpen(false)}
               />
-              <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-gray-200">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-gray-200">
+                <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200">
                   <h3 className="text-lg font-semibold text-gray-900">
                     {workLogModalMode === "create"
                       ? "Add Work Log Entry"
@@ -8202,16 +8248,25 @@ const ClientDashboardPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="px-6 py-5 space-y-4">
+                <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
+                  <div className="px-6 py-5 space-y-4 min-w-0">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                    <input
-                      type="text"
-                      value={workLogForm.title}
-                      onChange={(e) => setWorkLogForm({ ...workLogForm, title: e.target.value })}
-                      disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                      placeholder="e.g. Optimized homepage title tags"
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
+                    {workLogModalMode !== "view" && (
+                      <div className="flex flex-wrap gap-1 mb-1 p-1 border border-gray-200 rounded-t-lg bg-gray-50">
+                        <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-gray-300 rounded hover:bg-gray-200" title="Bold">B</button>
+                        <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Bullet list">• List</button>
+                        <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Numbered list">1. List</button>
+                      </div>
+                    )}
+                    <div
+                      ref={workLogTaskNotesRef}
+                      contentEditable={workLogModalMode !== "view"}
+                      suppressContentEditableWarning
+                      onInput={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                      onBlur={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                      className="min-h-[220px] w-full border border-gray-300 rounded-lg rounded-tl-none px-4 py-3 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 overflow-y-auto overflow-x-auto resize-y prose prose-sm max-w-none list-disc pl-5 space-y-1"
+                      style={{ outline: "none" }}
                     />
                   </div>
 
@@ -8357,12 +8412,13 @@ const ClientDashboardPage: React.FC = () => {
                     )}
                   </div>
                 </div>
+                </div>
 
-                <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
                   {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
                     <button
                       type="button"
-                      onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.title)}
+                      onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
                       className="mr-auto px-4 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
                     >
                       Delete

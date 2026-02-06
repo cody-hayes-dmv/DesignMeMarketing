@@ -14,6 +14,7 @@ const proofItemSchema = z.object({
 const createTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
+  taskNotes: z.string().optional(),
   category: z.string().optional(),
   status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
   dueDate: z.coerce.date().optional(), // accepts ISO string or Date
@@ -27,6 +28,7 @@ const createTaskSchema = z.object({
 const updateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
+  taskNotes: z.string().nullable().optional(),
   category: z.string().optional(),
   status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
   dueDate: z.coerce.date().nullable().optional(),
@@ -212,6 +214,7 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
         id: true,
         title: true,
         description: true,
+        taskNotes: true,
         category: true,
         status: true,
         proof: true,
@@ -407,6 +410,7 @@ router.post("/", authenticateToken, async (req, res) => {
       data: {
         title: parsed.title,
         description: parsed.description,
+        taskNotes: parsed.taskNotes ?? undefined,
         category: parsed.category,
         status: parsed.status ?? "TODO",
         dueDate: parsed.dueDate,

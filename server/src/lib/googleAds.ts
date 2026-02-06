@@ -467,16 +467,29 @@ export async function fetchGoogleAdsCampaigns(
       }),
     });
 
+    const responseText = await response.text();
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[Google Ads] API error:', response.status, errorText);
+      console.error('[Google Ads] API error:', response.status, responseText);
       if (response.status === 401 || response.status === 403) {
         throw new Error('Google Ads API authentication failed. Check OAuth credentials and GOOGLE_ADS_DEVELOPER_TOKEN in server/.env.');
       }
-      throw new Error(`Google Ads API error: ${response.status} ${errorText}`);
+      throw new Error(`Google Ads API error: ${response.status} ${responseText}`);
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      // Some responses may be NDJSON (newline-delimited JSON)
+      const batches = responseText.trim().split('\n').filter(Boolean).map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+      data = batches.length === 1 ? batches[0] : batches;
+    }
     const results = getSearchStreamResults(data);
 
     // Parse the response
@@ -555,21 +568,7 @@ export async function fetchGoogleAdsCampaigns(
     };
   } catch (error: any) {
     console.error('[Google Ads] Failed to fetch campaigns:', error);
-    
-    // Return empty data structure on error
-    return {
-      campaigns: [],
-      summary: {
-        clicks: 0,
-        impressions: 0,
-        cost: 0,
-        conversions: 0,
-        conversionRate: 0,
-        avgCpc: 0,
-        costPerConversion: 0,
-      },
-      error: error.message,
-    };
+    throw error;
   }
 }
 

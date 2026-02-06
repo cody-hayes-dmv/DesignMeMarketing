@@ -4969,29 +4969,56 @@ async function fetchAiSearchMentions(
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    const rawBody = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      data = {};
     }
 
-    const data = await response.json();
+    if (!response.ok) {
+      const taskMsg = data?.tasks?.[0]?.status_message;
+      console.warn(
+        "[AI Intelligence] Search mentions API returned",
+        response.status,
+        "-",
+        taskMsg || "unknown",
+        "target:",
+        target
+      );
+      return [];
+    }
+
+    const task = data?.tasks?.[0];
+    const taskStatusCode = task?.status_code;
+    const result0 = task?.result?.[0];
+    if (data?.tasks_error === 1 || taskStatusCode === 50000) {
+      const taskMsg = task?.status_message || "Internal Error";
+      console.warn(
+        "[AI Intelligence] Search mentions task error:",
+        taskMsg,
+        "target:",
+        target,
+        "status_code:",
+        taskStatusCode
+      );
+      return [];
+    }
+
     console.log("[AI Intelligence] Search mentions API response:", {
       statusCode: data?.status_code,
       statusMessage: data?.status_message,
       tasksCount: data?.tasks_count,
       hasTasks: !!data?.tasks?.[0],
-      hasResult: !!data?.tasks?.[0]?.result?.[0],
-      itemsCount: data?.tasks?.[0]?.result?.[0]?.items_count,
+      hasResult: !!result0,
+      itemsCount: result0?.items_count,
     });
-    
-    // The API returns result[0].items array
-    const result = data?.tasks?.[0]?.result?.[0];
-    const items = result?.items || [];
-    
+
+    const items = Array.isArray(result0?.items) ? result0.items : [];
     if (items.length === 0 && data?.status_code === 20000) {
       console.log("[AI Intelligence] API returned success but no items - domain may not have AI mentions yet");
     }
-    
     return items;
   } catch (error: any) {
     console.error("DataForSEO Search Mentions API error:", error);
@@ -5193,13 +5220,35 @@ async function fetchAiKeywordSearchVolume(
       },
       body: JSON.stringify(requestBody),
     });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    const rawBody = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      data = {};
     }
-    const data = await response.json();
-    const result = data?.tasks?.[0]?.result?.[0];
-    const items = result?.items || [];
+    if (!response.ok) {
+      const taskMsg = data?.tasks?.[0]?.status_message;
+      console.warn(
+        "[AI Intelligence] AI Keyword Search Volume API returned",
+        response.status,
+        "-",
+        taskMsg || "unknown"
+      );
+      return [];
+    }
+    const task = data?.tasks?.[0];
+    if (data?.tasks_error === 1 || task?.status_code === 50000) {
+      console.warn(
+        "[AI Intelligence] AI Keyword Search Volume task error:",
+        task?.status_message || "Internal Error",
+        "status_code:",
+        task?.status_code
+      );
+      return [];
+    }
+    const result0 = Array.isArray(task?.result) ? task.result[0] : task?.result;
+    const items = Array.isArray(result0?.items) ? result0.items : [];
     return items.map((item: any) => ({
       keyword: item?.keyword || "",
       aiSearchVolume: Number(item?.ai_search_volume || 0),
@@ -8019,10 +8068,15 @@ async function fetchKeywordsForSiteFromDataForSEO(
 
     if (!response.ok) {
       const taskMsg = data?.tasks?.[0]?.status_message;
-      const msg = taskMsg
-        ? `DataForSEO error: ${taskMsg} Please try again later.`
-        : `DataForSEO API error (${response.status}). Please try again later.`;
-      throw new Error(msg);
+      console.warn(
+        "[DataForSEO keywords_for_site] API returned",
+        response.status,
+        "-",
+        taskMsg || "unknown",
+        "target:",
+        normalizedTarget
+      );
+      return [];
     }
 
     const task = data?.tasks?.[0];
