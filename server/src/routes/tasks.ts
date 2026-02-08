@@ -209,7 +209,7 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
 
     const tasks = await prisma.task.findMany({
       where: { clientId },
-      orderBy: { updatedAt: "desc" },
+      orderBy: [{ dueDate: { sort: "asc", nulls: "last" } }, { updatedAt: "desc" }],
       select: {
         id: true,
         title: true,
@@ -217,6 +217,7 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
         taskNotes: true,
         category: true,
         status: true,
+        dueDate: true,
         proof: true,
         createdAt: true,
         updatedAt: true,

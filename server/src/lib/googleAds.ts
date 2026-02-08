@@ -279,14 +279,93 @@ async function getGoogleAdsApiClient(clientId: string) {
   if (!customerId) {
     throw new Error('Google Ads customer ID is not set');
   }
-
-  // Google Ads API uses REST endpoints
-  // We'll use the googleapis library to make authenticated requests
+  const accessToken = oauth2Client.credentials.access_token;
+  if (!accessToken) {
+    throw new Error('Google Ads access token is not available. Please reconnect Google Ads.');
+  }
   return {
     oauth2Client,
     customerId: customerId.replace(/-/g, ''), // Remove dashes from customer ID
-    accessToken: oauth2Client.credentials.access_token,
+    accessToken,
   };
+}
+
+/**
+ * Get ordered list of accessible customer IDs (from listAccessibleCustomers).
+ * First ID is typically the manager (MCC) when user has multiple accounts.
+ * Used to set login-customer-id when accessing a child account.
+ */
+async function getAccessibleCustomerIds(clientId: string): Promise<string[]> {
+  const { oauth2Client } = await getGoogleAdsClient(clientId);
+  const accessToken = oauth2Client.credentials.access_token;
+  if (!accessToken) return [];
+  const apiUrl = 'https://googleads.googleapis.com/v20/customers:listAccessibleCustomers';
+  const response = await fetch(apiUrl, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'developer-token': getGoogleAdsDeveloperToken(),
+    },
+  });
+  if (!response.ok) return [];
+  const data = await response.json();
+  const resourceNames = data.resourceNames || [];
+  return resourceNames.map((name: string) => {
+    const m = name.match(/customers\/(\d+)/);
+    return m ? m[1] : null;
+  }).filter((id: string | null) => id !== null);
+}
+
+/**
+ * Run a Google Ads searchStream request with 403 retry using login-customer-id when accessing via manager account.
+ * Uses manager (login-customer-id) on first request when user has multiple accounts and selected account is not the first.
+ */
+async function googleAdsSearchStream(
+  clientId: string,
+  customerId: string,
+  accessToken: string,
+  query: string
+): Promise<{ response: Response; responseText: string }> {
+  const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
+  const body = JSON.stringify({ query });
+  const selectedId = customerId.replace(/-/g, '');
+  const doRequest = (loginCustomerId?: string) => {
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'developer-token': getGoogleAdsDeveloperToken(),
+    };
+    if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
+    return fetch(apiUrl, { method: 'POST', headers, body });
+  };
+
+  // When user has multiple accounts, use manager (first accessible) as login-customer-id on first request to avoid 403
+  let loginIdForFirstRequest: string | undefined;
+  try {
+    const accessibleIds = await getAccessibleCustomerIds(clientId);
+    if (accessibleIds.length > 1 && accessibleIds[0] !== selectedId && accessibleIds.includes(selectedId)) {
+      loginIdForFirstRequest = accessibleIds[0];
+    }
+  } catch {
+    /* ignore; will try without header first */
+  }
+
+  let response = await doRequest(loginIdForFirstRequest);
+  let responseText = await response.text();
+
+  // On 403 permission error, retry with each other accessible customer as login-customer-id (manager)
+  if (response.status === 403 && /permission|login-customer-id|caller does not have/i.test(responseText)) {
+    const accessibleIds = await getAccessibleCustomerIds(clientId);
+    for (const loginId of accessibleIds) {
+      if (loginId === selectedId) continue;
+      response = await doRequest(loginId);
+      responseText = await response.text();
+      if (response.ok) break;
+    }
+  }
+
+  return { response, responseText };
 }
 
 /**
@@ -450,30 +529,23 @@ export async function fetchGoogleAdsCampaigns(
       ORDER BY metrics.clicks DESC
     `;
 
-    // Use Google Ads API REST endpoint (v20 - v16 deprecated)
-    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
-    
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'developer-token': getGoogleAdsDeveloperToken(),
-    };
+    const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        query: query,
-      }),
-    });
-
-    const responseText = await response.text();
     if (!response.ok) {
       console.error('[Google Ads] API error:', response.status, responseText);
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('Google Ads API authentication failed. Check OAuth credentials and GOOGLE_ADS_DEVELOPER_TOKEN in server/.env.');
+      let detail = responseText;
+      try {
+        const errJson = JSON.parse(responseText);
+        const fromArray = Array.isArray(errJson) ? errJson[0]?.error?.message : undefined;
+        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? fromArray;
+        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      } catch {
+        /* use responseText as detail */
       }
-      throw new Error(`Google Ads API error: ${response.status} ${responseText}`);
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`Google Ads API authentication failed. ${detail}`);
+      }
+      throw new Error(`Google Ads API error (${response.status}): ${detail}`);
     }
 
     let data: any;
@@ -610,24 +682,26 @@ export async function fetchGoogleAdsAdGroups(
 
     query += ` ORDER BY metrics.clicks DESC`;
 
-    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'developer-token': getGoogleAdsDeveloperToken(),
-    };
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ query }),
-    });
-
+    const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Google Ads API error: ${response.status} ${errorText}`);
+      let detail = responseText;
+      try {
+        const errJson = JSON.parse(responseText);
+        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? (Array.isArray(errJson) ? errJson[0]?.error?.message : undefined);
+        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      } catch { /* ignore */ }
+      throw new Error(`Google Ads API error: ${response.status} ${detail}`);
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      const batches = responseText.trim().split('\n').filter(Boolean).map((line) => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean);
+      data = batches.length === 1 ? batches[0] : batches;
+    }
     const results = getSearchStreamResults(data);
     const adGroups: any[] = [];
     const adGroupMap = new Map<string, any>();
@@ -726,24 +800,26 @@ export async function fetchGoogleAdsKeywords(
 
     query += ` ORDER BY metrics.clicks DESC LIMIT 1000`;
 
-    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'developer-token': getGoogleAdsDeveloperToken(),
-    };
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ query }),
-    });
-
+    const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Google Ads API error: ${response.status} ${errorText}`);
+      let detail = responseText;
+      try {
+        const errJson = JSON.parse(responseText);
+        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? (Array.isArray(errJson) ? errJson[0]?.error?.message : undefined);
+        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      } catch { /* ignore */ }
+      throw new Error(`Google Ads API error: ${response.status} ${detail}`);
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      const batches = responseText.trim().split('\n').filter(Boolean).map((line) => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean);
+      data = batches.length === 1 ? batches[0] : batches;
+    }
     const results = getSearchStreamResults(data);
     const keywords: any[] = [];
     const keywordMap = new Map<string, any>();
@@ -830,24 +906,26 @@ export async function fetchGoogleAdsConversions(
       ORDER BY segments.date DESC, metrics.conversions DESC
     `;
 
-    const apiUrl = `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`;
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'developer-token': getGoogleAdsDeveloperToken(),
-    };
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ query }),
-    });
-
+    const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Google Ads API error: ${response.status} ${errorText}`);
+      let detail = responseText;
+      try {
+        const errJson = JSON.parse(responseText);
+        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? (Array.isArray(errJson) ? errJson[0]?.error?.message : undefined);
+        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      } catch { /* ignore */ }
+      throw new Error(`Google Ads API error: ${response.status} ${detail}`);
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      const batches = responseText.trim().split('\n').filter(Boolean).map((line) => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean);
+      data = batches.length === 1 ? batches[0] : batches;
+    }
     const results = getSearchStreamResults(data);
     const conversions: any[] = [];
     let totalConversions = 0;

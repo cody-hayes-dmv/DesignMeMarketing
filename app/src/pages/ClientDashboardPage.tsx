@@ -515,9 +515,7 @@ const ClientDashboardPage: React.FC = () => {
   const [ppcData, setPpcData] = useState<any>(null);
   const [ppcLoading, setPpcLoading] = useState(false);
   const [ppcError, setPpcError] = useState<string | null>(null);
-  const [ppcDateRange, setPpcDateRange] = useState("30");
-  const [ppcCustomStartDate, setPpcCustomStartDate] = useState<string>("");
-  const [ppcCustomEndDate, setPpcCustomEndDate] = useState<string>("");
+  const [ppcDateRange] = useState("30"); // Fixed last 30 days for PPC data (no UI selector)
   const [showGA4Modal, setShowGA4Modal] = useState(false);
   const [ga4PropertyId, setGa4PropertyId] = useState("");
   const [ga4Properties, setGa4Properties] = useState<Array<{
@@ -585,6 +583,7 @@ const ClientDashboardPage: React.FC = () => {
     description: string;
     taskNotes: string;
     category: string;
+    dueDate: string;
     status: TaskStatus;
     attachments: WorkLogAttachment[];
   }>({
@@ -592,6 +591,7 @@ const ClientDashboardPage: React.FC = () => {
     description: "",
     taskNotes: "",
     category: "",
+    dueDate: "",
     status: "TODO",
     attachments: [],
   });
@@ -899,7 +899,7 @@ const ClientDashboardPage: React.FC = () => {
     setWorkLogAddMenuOpen(false);
     setWorkLogModalMode("create");
     setSelectedWorkLogTaskId(null);
-    setWorkLogForm({ title: "", description: "", taskNotes: "", category: "", status: "TODO", attachments: [] });
+    setWorkLogForm({ title: "", description: "", taskNotes: "", category: "", dueDate: "", status: "TODO", attachments: [] });
     setWorkLogUrlInput("");
     setWorkLogUrlType("url");
     setWorkLogModalOpen(true);
@@ -931,11 +931,14 @@ const ClientDashboardPage: React.FC = () => {
     if (task) {
       const attachments = parseProofAttachments((task as any).proof);
       const titleForForm = (task.description || task.title || "").trim();
+      const dueDateRaw = (task as any).dueDate;
+      const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
       setWorkLogForm({
         title: titleForForm,
         description: titleForForm,
         taskNotes: (task as any).taskNotes || "",
         category: task.category || "",
+        dueDate: dueDateStr,
         status: task.status,
         attachments,
       });
@@ -952,11 +955,14 @@ const ClientDashboardPage: React.FC = () => {
     if (task) {
       const attachments = parseProofAttachments((task as any).proof);
       const titleForForm = (task.description || task.title || "").trim();
+      const dueDateRaw = (task as any).dueDate;
+      const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
       setWorkLogForm({
         title: titleForForm,
         description: titleForForm,
         taskNotes: (task as any).taskNotes || "",
         category: task.category || "",
+        dueDate: dueDateStr,
         status: task.status,
         attachments,
       });
@@ -979,6 +985,7 @@ const ClientDashboardPage: React.FC = () => {
       description: titleValue || undefined,
       taskNotes: taskNotesValue,
       category: workLogForm.category.trim() || undefined,
+      dueDate: workLogForm.dueDate.trim() ? workLogForm.dueDate.trim() : undefined,
       status: workLogForm.status,
       clientId,
       proof: workLogForm.attachments.length > 0 ? workLogForm.attachments : undefined,
@@ -3186,15 +3193,10 @@ const ClientDashboardPage: React.FC = () => {
       let startDate: Date;
       let endDate: Date = new Date();
       
-      if (ppcDateRange === "custom" && ppcCustomStartDate && ppcCustomEndDate) {
-        startDate = new Date(ppcCustomStartDate);
-        endDate = new Date(ppcCustomEndDate);
-      } else {
-        const days = parseInt(ppcDateRange, 10) || 30;
-        startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
-      }
-      
+      const days = parseInt(ppcDateRange, 10) || 30;
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
       let endpoint = '';
       const params: any = {
         start: startDate.toISOString().split('T')[0],
@@ -3222,7 +3224,12 @@ const ClientDashboardPage: React.FC = () => {
       }
     } catch (error: any) {
       console.error("Failed to load PPC data:", error);
-      setPpcError(error.response?.data?.message || "Failed to load PPC data");
+      const message =
+        error.response?.data?.message ??
+        error.response?.data?.error ??
+        error.message ??
+        "Failed to load PPC data";
+      setPpcError(typeof message === "string" ? message : "Failed to load PPC data");
     } finally {
       setPpcLoading(false);
     }
@@ -3234,7 +3241,7 @@ const ClientDashboardPage: React.FC = () => {
       loadPpcData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId, ppcDateRange, ppcCustomStartDate, ppcCustomEndDate]);
+  }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId]);
 
   // When Google Ads is disconnected, leave PPC section so we don't show a hidden section
   useEffect(() => {
@@ -3865,7 +3872,7 @@ const ClientDashboardPage: React.FC = () => {
                               onChange={(dates: [Date | null, Date | null]) => {
                                 const [start, end] = dates;
                                 if (calendarEditing === "dateRange") {
-                                  setPickerStartDate(start);
+                                  setPickerStartDate(start);                     
                                   setPickerEndDate(end ?? null);
                                   setPickerPreset("custom");
                                 } else {
@@ -5566,62 +5573,6 @@ const ClientDashboardPage: React.FC = () => {
                               </button>
                             ))}
                           </nav>
-                          {/* Date Range Selector */}
-                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2">
-                              <label className="text-sm text-gray-600">Date Range:</label>
-                              <select
-                                value={ppcDateRange}
-                                onChange={(e) => {
-                                  setPpcDateRange(e.target.value);
-                                  if (e.target.value !== "custom") {
-                                    setTimeout(() => loadPpcData(), 100);
-                                  }
-                                }}
-                                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                              >
-                                <option value="7">Last 7 days</option>
-                                <option value="30">Last 30 days</option>
-                                <option value="90">Last 90 days</option>
-                                <option value="custom">Custom</option>
-                              </select>
-                            </div>
-                            {ppcDateRange === "custom" && (
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="date"
-                                  value={ppcCustomStartDate}
-                                  onChange={(e) => setPpcCustomStartDate(e.target.value)}
-                                  max={ppcCustomEndDate || new Date().toISOString().split("T")[0]}
-                                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                />
-                                <span className="text-gray-500">to</span>
-                                <input
-                                  type="date"
-                                  value={ppcCustomEndDate}
-                                  onChange={(e) => setPpcCustomEndDate(e.target.value)}
-                                  min={ppcCustomStartDate || undefined}
-                                  max={new Date().toISOString().split("T")[0]}
-                                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                />
-                                <button
-                                  onClick={loadPpcData}
-                                  disabled={!ppcCustomStartDate || !ppcCustomEndDate}
-                                  className="bg-primary-600 text-white px-4 py-1.5 rounded-lg hover:bg-primary-700 transition-colors text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                                >
-                                  Apply
-                                </button>
-                              </div>
-                            )}
-                            <button
-                              onClick={loadPpcData}
-                              disabled={ppcLoading}
-                              className="ml-auto text-sm text-primary-600 hover:text-primary-700 flex items-center gap-2 disabled:opacity-60"
-                            >
-                              <RefreshCw className={`h-4 w-4 ${ppcLoading ? 'animate-spin' : ''}`} />
-                              Refresh
-                            </button>
-                          </div>
                         </div>
 
                         {/* PPC Content */}
@@ -5805,15 +5756,8 @@ const ClientDashboardPage: React.FC = () => {
                                     </div>
                                   ) : (
                                     <div className="text-center py-6">
-                                      <p className="text-sm text-gray-500">No campaign data available for the selected date range.</p>
-                                      <p className="text-xs text-gray-400 mt-1">Try a different date range or ensure your Google Ads account has active campaigns with traffic.</p>
-                                      <button
-                                        type="button"
-                                        onClick={loadPpcData}
-                                        className="mt-3 text-sm text-primary-600 hover:text-primary-700"
-                                      >
-                                        Refresh
-                                      </button>
+                                      <p className="text-sm text-gray-500">No campaign data available.</p>
+                                      <p className="text-xs text-gray-400 mt-1">Ensure your Google Ads account has active campaigns with traffic.</p>
                                     </div>
                                   )}
                                 </div>
@@ -6421,10 +6365,9 @@ const ClientDashboardPage: React.FC = () => {
                         <table className="min-w-full divide-y divide-gray-200">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Attachments</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due date</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                             </tr>
@@ -6432,13 +6375,13 @@ const ClientDashboardPage: React.FC = () => {
                           <tbody className="bg-white divide-y divide-gray-200">
                             {workLogLoading ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
                                   Loading work log...
                                 </td>
                               </tr>
                             ) : workLogError ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
+                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={5}>
                                   {workLogError}
                                 </td>
                               </tr>
@@ -6449,55 +6392,27 @@ const ClientDashboardPage: React.FC = () => {
                               if (filtered.length === 0) {
                                 return (
                                   <tr>
-                                    <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                    <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
                                       {workLogListTab === "completed" ? "No completed entries yet." : "No upcoming entries."}
                                     </td>
                                   </tr>
                                 );
                               }
                               return filtered.map((task) => {
-                                const dateRaw = task.updatedAt || task.createdAt;
-                                const date = (() => {
-                                  try {
-                                    return new Date(dateRaw).toISOString().slice(0, 10);
-                                  } catch {
-                                    return "";
-                                  }
-                                })();
+                                const dueDateRaw = (task as any).dueDate;
+                                const dueDateStr = dueDateRaw
+                                  ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10))
+                                  : "—";
                                 const workType = (task.category || "General").trim() || "General";
                                 const titleText = (task.description || task.title || "").trim();
                                 const titleDisplay = titleText.length > 90 ? `${titleText.slice(0, 90)}…` : titleText;
-                                const taskAttachments = parseProofAttachments(task.proof);
                                 return (
                                   <tr key={task.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{date}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
                                     <td className="px-6 py-4 text-sm text-gray-900 max-w-xs align-top">
                                       <span className="block truncate" title={titleText || undefined}>{titleDisplay || "—"}</span>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-500 align-top">
-                                      {taskAttachments.length === 0 ? (
-                                        <span className="text-gray-400">—</span>
-                                      ) : (
-                                        <ul className="list-none space-y-1">
-                                          {taskAttachments.map((att, i) => (
-                                            <li key={i}>
-                                              <a
-                                                href={att.value}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-primary-600 hover:text-primary-800 inline-flex items-center gap-1"
-                                              >
-                                                <FileText className="h-3.5 w-3.5 shrink-0" />
-                                                <span className="truncate max-w-[140px]" title={att.name || att.value}>
-                                                  {att.name || "Attachment"}
-                                                </span>
-                                              </a>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      )}
-                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{dueDateStr}</td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                       <span
                                         className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${taskStatusClass(task.status)}`}
@@ -6576,6 +6491,31 @@ const ClientDashboardPage: React.FC = () => {
                     <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
                       <div className="px-6 py-5 space-y-4 min-w-0">
                       <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                        <input
+                          type="text"
+                          maxLength={90}
+                          value={workLogForm.description}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
+                          disabled={workLogModalMode === "view"}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          placeholder="e.g. Optimized homepage title tags"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                        <input
+                          type="text"
+                          value={workLogForm.category}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
+                          disabled={workLogModalMode === "view"}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          placeholder="e.g. Technical, Content, Link Building"
+                        />
+                      </div>
+
+                      <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
                         {workLogModalMode !== "view" && (
                           <div className="flex flex-wrap gap-1 mb-1 p-1 border border-gray-200 rounded-t-lg bg-gray-50">
@@ -6597,43 +6537,14 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Due date</label>
                         <input
-                          type="text"
-                          value={workLogForm.category}
-                          onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
+                          type="date"
+                          value={workLogForm.dueDate}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, dueDate: e.target.value })}
                           disabled={workLogModalMode === "view"}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                          placeholder="e.g. Technical, Content, Link Building"
                         />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Title (max 90 characters)</label>
-                        <input
-                          type="text"
-                          maxLength={90}
-                          value={workLogForm.description}
-                          onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
-                          disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                          placeholder="e.g. Optimized homepage title tags"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                        <select
-                          value={workLogForm.status}
-                          onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
-                          disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                        >
-                          <option value="TODO">Pending</option>
-                          <option value="IN_PROGRESS">In Progress</option>
-                          <option value="REVIEW">In Review</option>
-                          <option value="DONE">Completed</option>
-                        </select>
                       </div>
 
                       <div>
@@ -6736,6 +6647,21 @@ const ClientDashboardPage: React.FC = () => {
                         ) : (
                           <p className="text-sm text-gray-500">No attachments</p>
                         )}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                        <select
+                          value={workLogForm.status}
+                          onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
+                          disabled={workLogModalMode === "view"}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                        >
+                          <option value="TODO">Pending</option>
+                          <option value="IN_PROGRESS">In Progress</option>
+                          <option value="REVIEW">In Review</option>
+                          <option value="DONE">Completed</option>
+                        </select>
                       </div>
                     </div>
                     </div>
@@ -8251,6 +8177,31 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
                   <div className="px-6 py-5 space-y-4 min-w-0">
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                    <input
+                      type="text"
+                      maxLength={90}
+                      value={workLogForm.description}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
+                      disabled={workLogModalMode === "view"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      placeholder="e.g. Optimized homepage title tags"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                    <input
+                      type="text"
+                      value={workLogForm.category}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
+                      disabled={workLogModalMode === "view"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      placeholder="e.g. Technical, Content, Link Building"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
                     {workLogModalMode !== "view" && (
                       <div className="flex flex-wrap gap-1 mb-1 p-1 border border-gray-200 rounded-t-lg bg-gray-50">
@@ -8271,43 +8222,14 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Due date</label>
                     <input
-                      type="text"
-                      value={workLogForm.category}
-                      onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
+                      type="date"
+                      value={workLogForm.dueDate}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, dueDate: e.target.value })}
                       disabled={workLogModalMode === "view"}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                      placeholder="e.g. Technical, Content, Link Building"
                     />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Title (max 90 characters)</label>
-                    <input
-                      type="text"
-                      maxLength={90}
-                      value={workLogForm.description}
-                      onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
-                      disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                      placeholder="e.g. Optimized homepage title tags"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                    <select
-                      value={workLogForm.status}
-                      onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
-                      disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
-                    >
-                      <option value="TODO">Pending</option>
-                      <option value="IN_PROGRESS">In Progress</option>
-                      <option value="REVIEW">In Review</option>
-                      <option value="DONE">Completed</option>
-                    </select>
                   </div>
 
                   <div>
@@ -8410,6 +8332,21 @@ const ClientDashboardPage: React.FC = () => {
                     ) : (
                       <p className="text-sm text-gray-500">No attachments</p>
                     )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select
+                      value={workLogForm.status}
+                      onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
+                      disabled={workLogModalMode === "view"}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                    >
+                      <option value="TODO">Pending</option>
+                      <option value="IN_PROGRESS">In Progress</option>
+                      <option value="REVIEW">In Review</option>
+                      <option value="DONE">Completed</option>
+                    </select>
                   </div>
                 </div>
                 </div>
