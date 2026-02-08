@@ -3066,14 +3066,9 @@ const ClientDashboardPage: React.FC = () => {
           }
         };
 
-        let popupCheckIntervalId: ReturnType<typeof setInterval> | null = null;
         const cleanupPopup = () => {
           if (messageListener) {
             window.removeEventListener('message', messageListener);
-          }
-          if (popupCheckIntervalId !== null) {
-            clearInterval(popupCheckIntervalId);
-            popupCheckIntervalId = null;
           }
           if (manualCloseTimeout) {
             clearTimeout(manualCloseTimeout);
@@ -3082,27 +3077,10 @@ const ClientDashboardPage: React.FC = () => {
 
         window.addEventListener('message', messageListener);
 
-        // Handle manual popup close (wrap in try-catch: COOP can block access to popup.closed)
-        popupCheckIntervalId = setInterval(() => {
-          try {
-            if (popup.closed) {
-              cleanupPopup();
-              setGoogleAdsConnecting(false);
-            }
-          } catch (_e) {
-            cleanupPopup();
-            setGoogleAdsConnecting(false);
-          }
-        }, 500);
-
-        // Cleanup after 10 minutes
+        // Cleanup after 10 minutes (do not use popup.closed - COOP can block it and trigger console errors)
         manualCloseTimeout = window.setTimeout(() => {
           cleanupPopup();
-          try {
-            if (!popup.closed) closePopupSafely();
-          } catch (_e) {
-            // COOP may block access; ignore
-          }
+          closePopupSafely();
           setGoogleAdsConnecting(false);
         }, 10 * 60 * 1000);
       }
@@ -4137,6 +4115,22 @@ const ClientDashboardPage: React.FC = () => {
                 >
                 {dashboardSection === "seo" && (
                   <div className="space-y-8">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-50 text-primary-600">
+                        <Search className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                          SEO Overview
+                          <span title="Traffic, keywords, backlinks, and conversions in one place. Data from GA4 and DataForSEO.">
+                            <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                          </span>
+                        </h2>
+                        <p className="text-sm text-gray-500 mt-0.5">
+                          Website traffic, organic performance, target keywords, and backlink trends.
+                        </p>
+                      </div>
+                    </div>
                     {/* GA4 connection is managed in the Integration tab */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
@@ -5983,7 +5977,7 @@ const ClientDashboardPage: React.FC = () => {
                       <div className="flex items-center justify-between">
                         <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
                           Backlinks Overview
-                          <span title="Total number of external websites currently linking to your site. Use the table below to see each link and its quality.">
+                          <span title="Monitor all backlinks, new vs lost trends, and link quality. Use the table below to see each link and its quality. Data from DataForSEO.">
                             <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
                           </span>
                         </h2>

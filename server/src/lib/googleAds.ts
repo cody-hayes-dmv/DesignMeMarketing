@@ -271,6 +271,25 @@ function getSearchStreamResults(data: any): any[] {
 }
 
 /**
+ * Extract user-facing message from Google Ads API error response (403/401).
+ * Prefers the specific error from details[].errors[] (e.g. CUSTOMER_NOT_ENABLED message).
+ */
+function getGoogleAdsErrorMessage(responseText: string): string {
+  try {
+    let err = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
+    if (Array.isArray(err) && err[0]?.error) err = err[0];
+    const topMsg = err?.error?.message ?? err?.message;
+    const details = err?.error?.details ?? err?.details;
+    if (Array.isArray(details) && details[0]?.errors?.[0]?.message) {
+      return details[0].errors[0].message;
+    }
+    return typeof topMsg === 'string' ? topMsg : responseText;
+  } catch {
+    return responseText;
+  }
+}
+
+/**
  * Get Google Ads API client using REST API
  */
 async function getGoogleAdsApiClient(clientId: string) {
@@ -533,17 +552,9 @@ export async function fetchGoogleAdsCampaigns(
 
     if (!response.ok) {
       console.error('[Google Ads] API error:', response.status, responseText);
-      let detail = responseText;
-      try {
-        const errJson = JSON.parse(responseText);
-        const fromArray = Array.isArray(errJson) ? errJson[0]?.error?.message : undefined;
-        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? fromArray;
-        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
-      } catch {
-        /* use responseText as detail */
-      }
+      const detail = getGoogleAdsErrorMessage(responseText);
       if (response.status === 401 || response.status === 403) {
-        throw new Error(`Google Ads API authentication failed. ${detail}`);
+        throw new Error(detail);
       }
       throw new Error(`Google Ads API error (${response.status}): ${detail}`);
     }
@@ -684,13 +695,8 @@ export async function fetchGoogleAdsAdGroups(
 
     const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
     if (!response.ok) {
-      let detail = responseText;
-      try {
-        const errJson = JSON.parse(responseText);
-        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? (Array.isArray(errJson) ? errJson[0]?.error?.message : undefined);
-        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
-      } catch { /* ignore */ }
-      throw new Error(`Google Ads API error: ${response.status} ${detail}`);
+      const detail = getGoogleAdsErrorMessage(responseText);
+      throw new Error(response.status === 401 || response.status === 403 ? detail : `Google Ads API error: ${response.status} ${detail}`);
     }
 
     let data: any;
@@ -802,13 +808,8 @@ export async function fetchGoogleAdsKeywords(
 
     const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
     if (!response.ok) {
-      let detail = responseText;
-      try {
-        const errJson = JSON.parse(responseText);
-        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? (Array.isArray(errJson) ? errJson[0]?.error?.message : undefined);
-        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
-      } catch { /* ignore */ }
-      throw new Error(`Google Ads API error: ${response.status} ${detail}`);
+      const detail = getGoogleAdsErrorMessage(responseText);
+      throw new Error(response.status === 401 || response.status === 403 ? detail : `Google Ads API error: ${response.status} ${detail}`);
     }
 
     let data: any;
@@ -908,13 +909,8 @@ export async function fetchGoogleAdsConversions(
 
     const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
     if (!response.ok) {
-      let detail = responseText;
-      try {
-        const errJson = JSON.parse(responseText);
-        const msg = errJson?.error?.message ?? errJson?.message ?? errJson?.error ?? (Array.isArray(errJson) ? errJson[0]?.error?.message : undefined);
-        if (msg != null) detail = typeof msg === 'string' ? msg : JSON.stringify(msg);
-      } catch { /* ignore */ }
-      throw new Error(`Google Ads API error: ${response.status} ${detail}`);
+      const detail = getGoogleAdsErrorMessage(responseText);
+      throw new Error(response.status === 401 || response.status === 403 ? detail : `Google Ads API error: ${response.status} ${detail}`);
     }
 
     let data: any;

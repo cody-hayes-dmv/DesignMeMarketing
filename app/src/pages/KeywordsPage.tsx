@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2,
   Search,
@@ -15,6 +15,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
@@ -402,20 +404,58 @@ const KeywordsPage: React.FC = () => {
     }
   };
 
-  const exportSerpToCsv = () => {
-    if (!serpAnalysis?.items?.length) return;
-    const headers = ["Position", "URL", "Domain", "Title"];
-    const rows = serpAnalysis.items.map((r) => [r.position, r.url, r.domain, r.title ?? ""]);
-    const csv = [headers.join(","), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `serp-${(serpAnalysis.keyword || "keyword").replace(/\s+/g, "-")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("SERP exported to CSV");
-  };
+  const keywordResearchPdfRef = useRef<HTMLDivElement>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const handleExportKeywordResearchPdf = useCallback(async () => {
+    const element = keywordResearchPdfRef.current;
+    if (!element) return;
+    const previousOverflow = document.body.style.overflow;
+    try {
+      setExportingPdf(true);
+      document.body.style.overflow = "hidden";
+      element.classList.add("pdf-exporting");
+      await new Promise((r) => setTimeout(r, 200));
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+        scrollX: 0,
+        scrollY: 0,
+        backgroundColor: "#ffffff",
+      });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      const seed = (researchSeed || "keyword-research").replace(/\s+/g, "-").toLowerCase();
+      const date = new Date();
+      const dateStr = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+      pdf.save(`keyword-research-${seed}-${dateStr}.pdf`);
+      toast.success("Keyword Research page exported as PDF.");
+    } catch (err: any) {
+      console.error("PDF export error", err);
+      toast.error(err?.message || "Failed to export PDF.");
+    } finally {
+      document.body.style.overflow = previousOverflow;
+      element.classList.remove("pdf-exporting");
+      setExportingPdf(false);
+    }
+  }, [researchSeed]);
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -469,7 +509,19 @@ const KeywordsPage: React.FC = () => {
       )}
 
       {activeTab === "research" && (
-        <div className="space-y-6">
+        <div ref={keywordResearchPdfRef} className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-2" data-pdf-hide="true">
+            <span />
+            <button
+              type="button"
+              onClick={handleExportKeywordResearchPdf}
+              disabled={exportingPdf}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              {exportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export as PDF
+            </button>
+          </div>
           <form
             onSubmit={handleResearchSubmit}
             className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 space-y-6"
@@ -810,7 +862,7 @@ const KeywordsPage: React.FC = () => {
                       <div className="mt-3 h-24">
                         {(keywordDetail.monthlySearches || []).length > 0 ? (
                           <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={(keywordDetail.monthlySearches || []).slice(-12).map((m) => ({ month: `${m.month}/${String(m.year).slice(2)}`, vol: m.searchVolume }))}>
+                            <BarChart data={(keywordDetail.monthlySearches || []).slice(-12).map((m) => ({ month: `${m.month}/${String(m.year).slice(-2)}`, vol: m.searchVolume }))}>
                               <XAxis dataKey="month" tick={{ fontSize: 9 }} />
                               <YAxis tick={{ fontSize: 9 }} />
                               <Tooltip />
@@ -972,10 +1024,6 @@ const KeywordsPage: React.FC = () => {
                       <Search className="h-4 w-4" />
                       View SERP
                     </a>
-                    <button type="button" onClick={exportSerpToCsv} disabled={!serpAnalysis?.items?.length} className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-                      <Download className="h-4 w-4" />
-                      Export
-                    </button>
                   </div>
                 </div>
                 {serpAnalysisLoading && !serpAnalysis ? (
@@ -999,7 +1047,7 @@ const KeywordsPage: React.FC = () => {
                     <div className="flex flex-wrap gap-2 mb-4">
                       {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90].map((off) => (
                         <button key={off} type="button" onClick={() => loadSerpPage(off)} disabled={serpAnalysisLoading} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${serpAnalysisOffset === off ? "bg-primary-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-                          {off + 1}-{off + 10}
+                          page {off / 10 + 1}
                         </button>
                       ))}
                     </div>
@@ -1057,7 +1105,7 @@ const KeywordsPage: React.FC = () => {
                       <table className="min-w-full divide-y divide-gray-200 text-sm">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase text-xs">URL</th>
+                            <th className="px-6 py-3 text-left font-semibold text-gray-700 uppercase text-xs">{serpViewMode === "domain" ? "Domain" : "URL"}</th>
                             <th className="px-6 py-3 text-right font-semibold text-gray-700 uppercase text-xs">Page AS</th>
                             <th className="px-6 py-3 text-right font-semibold text-gray-700 uppercase text-xs">Ref. Domains</th>
                             <th className="px-6 py-3 text-right font-semibold text-gray-700 uppercase text-xs">Backlinks</th>
@@ -1068,11 +1116,32 @@ const KeywordsPage: React.FC = () => {
                         <tbody className="bg-white divide-y divide-gray-100">
                           {(serpViewMode === "domain"
                             ? (() => {
-                                type DomainRow = { domain: string; urls: string[]; title: string };
-                                const byDomain = (serpAnalysis.items || []).reduce<Record<string, DomainRow>>((acc, row: { position: number; url: string; domain: string; title: string }) => {
+                                type DomainRow = {
+                                  domain: string;
+                                  urls: string[];
+                                  title: string;
+                                  pageAs: number | null;
+                                  refDomains: number | null;
+                                  backlinks: number | null;
+                                  searchTraffic: number | null;
+                                  urlKeywords: number | null;
+                                };
+                                const byDomain = (serpAnalysis.items || []).reduce<Record<string, DomainRow>>((acc, row: { position: number; url: string; domain: string; title: string; pageAs: number | null; refDomains: number | null; backlinks: number | null; searchTraffic: number | null; urlKeywords: number | null }) => {
                                   const d = row.domain || "—";
-                                  if (!acc[d]) acc[d] = { domain: d, urls: [], title: row.title || "" };
-                                  acc[d].urls.push(row.url);
+                                  if (!acc[d]) {
+                                    acc[d] = {
+                                      domain: d,
+                                      urls: [row.url],
+                                      title: row.title || "",
+                                      pageAs: row.pageAs,
+                                      refDomains: row.refDomains,
+                                      backlinks: row.backlinks,
+                                      searchTraffic: row.searchTraffic,
+                                      urlKeywords: row.urlKeywords,
+                                    };
+                                  } else {
+                                    acc[d].urls.push(row.url);
+                                  }
                                   return acc;
                                 }, {});
                                 return Object.entries(byDomain).map(([domain, data]: [string, DomainRow]) => (
@@ -1081,11 +1150,11 @@ const KeywordsPage: React.FC = () => {
                                       <a href={data.urls[0]} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline inline-flex items-center gap-1">{domain}<ExternalLink className="h-3 w-3" /></a>
                                       <p className="text-xs text-gray-500 mt-0.5">{data.urls.length} URL(s)</p>
                                     </td>
-                                    <td className="px-6 py-4 text-right text-gray-700">—</td>
-                                    <td className="px-6 py-4 text-right text-gray-700">—</td>
-                                    <td className="px-6 py-4 text-right text-gray-700">—</td>
-                                    <td className="px-6 py-4 text-right text-gray-700">—</td>
-                                    <td className="px-6 py-4 text-right text-gray-700">—</td>
+                                    <td className="px-6 py-4 text-right text-gray-700">{formatNumber(data.pageAs)}</td>
+                                    <td className="px-6 py-4 text-right text-gray-700">{formatNumber(data.refDomains)}</td>
+                                    <td className="px-6 py-4 text-right text-gray-700">{formatNumber(data.backlinks)}</td>
+                                    <td className="px-6 py-4 text-right text-gray-700">{formatNumber(data.searchTraffic)}</td>
+                                    <td className="px-6 py-4 text-right text-gray-700">{formatNumber(data.urlKeywords)}</td>
                                   </tr>
                                 ));
                               })()

@@ -825,13 +825,9 @@ async function fetchKeywordSuggestionsFromDataForSEO(
     );
   }
 
-  // Request extra from API so that after deduplication we can return exactly `limit` items.
-  const requestLimit = Math.min(Math.max(limit + 20, limit * 2), 100);
-
-  // DataForSEO related_keywords: depth controls how many keywords are available (depth 1 ≈ 8, 2 ≈ 72, 3 ≈ 584, 4 ≈ 4680).
-  // Without setting depth, default 1 caps results at ~8–9, so requests for >9 suggestions need higher depth.
-  const depth =
-    requestLimit <= 8 ? 1 : requestLimit <= 72 ? 2 : requestLimit <= 584 ? 3 : 4;
+  // DataForSEO related_keywords: max limit 1000; depth 1 ≈ 8, 2 ≈ 72, 3 ≈ 584, 4 ≈ 4680 keywords.
+  const requestLimit = Math.min(Math.max(limit, 1), 1000);
+  const depth = requestLimit <= 8 ? 1 : requestLimit <= 72 ? 2 : requestLimit <= 584 ? 3 : 4;
 
   const requestBody = [
     {
@@ -3671,16 +3667,50 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
         console.error("Failed to refresh traffic sources:", error);
       }
 
-      // Refresh ranked keywords count (already saved via ranked-keywords endpoint)
+      // Refresh ranked keywords count and position breakdown for current month
       let rankedKeywordsCount = 0;
       try {
         const rankedData = await fetchRankedKeywordsFromDataForSEO(targetDomain, 2840, "en");
         rankedKeywordsCount = rankedData.totalKeywords || 0;
 
-        // Update ranked keywords history (current month)
         const now = new Date();
-        const currentMonth = now.getMonth() + 1;
+        const currentMonth = now.getMonth() + 1; // 1-12
         const currentYear = now.getFullYear();
+        const firstDay = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
+        const lastDay = new Date(currentYear, now.getMonth() + 1, 0).toISOString().split("T")[0];
+
+        let totalKeywords = rankedKeywordsCount;
+        let top3 = 0;
+        let top10 = 0;
+        let page2 = 0;
+        let pos21_30 = 0;
+        let pos31_50 = 0;
+        let pos51Plus = rankedKeywordsCount; // default: all in 51+ when no breakdown
+
+        try {
+          const historicalForMonth = await fetchHistoricalRankOverviewFromDataForSEO(
+            targetDomain,
+            2840,
+            "en",
+            firstDay,
+            lastDay
+          );
+          const currentMonthItem = historicalForMonth.find(
+            (item: any) => item.month === currentMonth && item.year === currentYear
+          ) || historicalForMonth[0];
+          if (currentMonthItem && (currentMonthItem.totalKeywords > 0 || currentMonthItem.top3 || currentMonthItem.top10 || currentMonthItem.page2 || currentMonthItem.pos21_30 || currentMonthItem.pos31_50 || currentMonthItem.pos51Plus)) {
+            totalKeywords = Number(currentMonthItem.totalKeywords ?? 0) || rankedKeywordsCount;
+            top3 = Number(currentMonthItem.top3 ?? 0);
+            top10 = Number(currentMonthItem.top10 ?? 0);
+            page2 = Number(currentMonthItem.page2 ?? 0);
+            pos21_30 = Number(currentMonthItem.pos21_30 ?? 0);
+            pos31_50 = Number(currentMonthItem.pos31_50 ?? 0);
+            const knownSum = top3 + top10 + page2 + pos21_30 + pos31_50;
+            pos51Plus = Number(currentMonthItem.pos51Plus ?? 0) || Math.max(0, totalKeywords - knownSum);
+          }
+        } catch (histErr) {
+          console.warn("Historical rank overview for current month failed, using total only:", histErr);
+        }
 
         await prisma.rankedKeywordsHistory.upsert({
           where: {
@@ -3691,14 +3721,26 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
             },
           },
           update: {
-            totalKeywords: rankedKeywordsCount,
-          },
+            totalKeywords,
+            top3,
+            top10,
+            page2,
+            pos21_30,
+            pos31_50,
+            pos51Plus,
+          } as any,
           create: {
             clientId,
-            totalKeywords: rankedKeywordsCount,
+            totalKeywords,
             month: currentMonth,
             year: currentYear,
-          },
+            top3,
+            top10,
+            page2,
+            pos21_30,
+            pos31_50,
+            pos51Plus,
+          } as any,
         });
       } catch (error) {
         console.error("Failed to refresh ranked keywords:", error);
@@ -4855,20 +4897,22 @@ async function fetchAiAggregatedMetrics(
   targetType: "domain" | "url",
   locationCode: number,
   languageCode: string,
-  dateFrom: string,
-  dateTo: string
+  _dateFrom?: string,
+  _dateTo?: string
 ): Promise<any> {
   const base64Auth = process.env.DATAFORSEO_BASE64;
   if (!base64Auth) {
     throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
   }
 
+  // DataForSEO expects "target" array: each element is { domain: "..." } or { keyword: "..." }
+  const targetPayload = targetType === "domain" ? { domain: target } : { keyword: target };
   const requestBody = [{
-    targets: [{ target, target_type: targetType }],
+    target: [targetPayload],
     location_code: locationCode,
     language_code: languageCode,
-    date_from: dateFrom,
-    date_to: dateTo,
+    platform: "google",
+    // date_from/date_to not in API spec; API returns current aggregated data
   }];
 
   try {
@@ -4887,42 +4931,13 @@ async function fetchAiAggregatedMetrics(
     }
 
     const data = await response.json();
-    console.log("[AI Intelligence] Aggregated metrics API response:", {
-      statusCode: data?.status_code,
-      statusMessage: data?.status_message,
-      tasksCount: data?.tasks_count,
-      hasTasks: !!data?.tasks?.[0],
-      hasResult: !!data?.tasks?.[0]?.result?.[0],
-      resultKeys: data?.tasks?.[0]?.result?.[0] ? Object.keys(data.tasks[0].result[0]) : [],
-    });
-    
     const result = data?.tasks?.[0]?.result?.[0] || null;
-    
     if (result) {
-      // Log the structure to understand the response format
-      console.log("[AI Intelligence] Result structure:", {
-        total_mentions: result?.total_mentions,
-        ai_search_volume: result?.ai_search_volume,
-        impressions: result?.impressions,
-        hasAggregatedData: !!result?.aggregated_data,
-        aggregatedDataLength: result?.aggregated_data?.length || 0,
-        aggregatedDataSample: result?.aggregated_data?.[0] ? {
-          type: result.aggregated_data[0].type,
-          grouping_identifier: result.aggregated_data[0].grouping_identifier,
-          total_mentions: result.aggregated_data[0].total_mentions,
-        } : null,
-        platformBasedGrouping: result?.platform_based_grouping ? {
-          length: result.platform_based_grouping.length,
-          sample: result.platform_based_grouping[0] ? {
-            grouping_identifier: result.platform_based_grouping[0].grouping_identifier,
-            total_mentions: result.platform_based_grouping[0].total_mentions,
-          } : null,
-        } : null,
+      console.log("[AI Intelligence] Aggregated metrics result:", {
+        hasTotal: !!result?.total,
+        platformKeys: result?.total?.platform?.map((p: any) => p?.key) || [],
       });
-    } else if (data?.status_code === 20000) {
-      console.log("[AI Intelligence] API returned success but no result - domain may not have AI mentions yet");
     }
-    
     return result;
   } catch (error: any) {
     console.error("DataForSEO Aggregated Metrics API error:", error);
@@ -4950,11 +4965,12 @@ async function fetchAiSearchMentions(
     targetArray.push({ keyword: target });
   }
 
+  // DataForSEO: target = array of { domain } or { keyword }; platform = "google" | "chat_gpt"
   const requestBody = [{
     target: targetArray,
     location_code: locationCode,
     language_code: languageCode,
-    platform: "google", // Default to google, can be "chat_gpt" or "google"
+    platform: "google",
     order_by: ["ai_search_volume,desc"],
     limit,
   }];
@@ -5039,12 +5055,12 @@ async function fetchCompetitorAiMetrics(
     return new Map();
   }
 
+  // DataForSEO: target = array of { domain } objects (one task, multiple targets = multiple results)
   const requestBody = [{
-    targets: competitorDomains.map(domain => ({ target: domain, target_type: "domain" })),
+    target: competitorDomains.map(domain => ({ domain })),
     location_code: locationCode,
     language_code: languageCode,
-    date_from: dateFrom,
-    date_to: dateTo,
+    platform: "google",
   }];
 
   try {
@@ -5065,32 +5081,24 @@ async function fetchCompetitorAiMetrics(
     const data = await response.json();
     const results = data?.tasks?.[0]?.result || [];
     const competitorMap = new Map<string, any>();
-    
-    for (const result of results) {
-      const target = result?.target || "";
-      if (target) {
-        const totalMentions = Number(result?.total_mentions || 0);
-        const aiSearchVolume = Number(result?.ai_search_volume || 0);
-        const aggregatedData = result?.aggregated_data || [];
-        const platformDiversity = aggregatedData.filter((item: any) => Number(item?.mentions || 0) > 0).length;
-        
-        // Calculate AI Visibility Score using same formula
-        const score = Math.min(100,
-          (totalMentions * 2) +
-          (aiSearchVolume / 100) +
-          (platformDiversity * 10)
-        );
-        
-        competitorMap.set(target.toLowerCase(), {
-          domain: target,
-          totalMentions,
-          aiSearchVolume,
-          score: Math.round(score),
-          aggregatedData,
-        });
-      }
+    // One result per target in same order as request
+    for (let i = 0; i < results.length; i++) {
+      const domain = competitorDomains[i];
+      if (!domain) continue;
+      const result = results[i];
+      const total = result?.total;
+      const platformArr = Array.isArray(total?.platform) ? total.platform : [];
+      const totalMentions = platformArr.reduce((s: number, p: any) => s + Number(p?.mentions || 0), 0);
+      const aiSearchVolume = platformArr.reduce((s: number, p: any) => s + Number(p?.ai_search_volume || 0), 0);
+      const platformDiversity = platformArr.filter((p: any) => Number(p?.mentions || 0) > 0).length;
+      const score = Math.min(99, (totalMentions * 2) + (aiSearchVolume / 100) + (platformDiversity * 10));
+      competitorMap.set(domain.toLowerCase(), {
+        domain,
+        totalMentions,
+        aiSearchVolume,
+        score: Math.round(score),
+      });
     }
-    
     return competitorMap;
   } catch (error: any) {
     console.error("DataForSEO Competitor Metrics API error:", error);
@@ -5584,56 +5592,25 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       console.warn("[AI Intelligence] Failed to extract competitor domains:", competitorDomainsResult[0].reason);
     }
 
-    // Parse aggregated metrics from DataForSEO only
-    // DataForSEO returns data in summary object with total_mentions, ai_search_volume, impressions
-    // And platform breakdown in platform_based_grouping array
-    const summary = currentMetrics?.summary || currentMetrics || {};
-    let totalMentions = Number(summary?.total_mentions || currentMetrics?.total_mentions || 0);
-    let totalAiSearchVolume = Number(summary?.ai_search_volume || currentMetrics?.ai_search_volume || 0);
-    let totalImpressions = Number(summary?.impressions || currentMetrics?.impressions || 0);
-    
-    // Also check aggregated_data for backward compatibility
-    const aggregatedData = currentMetrics?.aggregated_data || [];
+    // Parse aggregated metrics from DataForSEO: result[0].total.platform (array of group_element)
+    // Docs: https://docs.dataforseo.com/v3/ai_optimization-llm_mentions-aggregated_metrics-live/
+    const totalObj = currentMetrics?.total;
+    const platformArr = Array.isArray(totalObj?.platform) ? totalObj.platform : [];
+    let totalMentions = platformArr.reduce((s: number, p: any) => s + Number(p?.mentions || 0), 0);
+    let totalAiSearchVolume = platformArr.reduce((s: number, p: any) => s + Number(p?.ai_search_volume || 0), 0);
+    let totalImpressions = platformArr.reduce((s: number, p: any) => s + Number(p?.impressions || 0), 0);
 
-    // Parse platform breakdown from aggregated_data
-    // DataForSEO returns platform_based_grouping array OR aggregated_data with platform field
-    // Check both structures to handle different response formats
     const platformMap: Record<string, { mentions: number; aiSearchVol: number; impressions: number }> = {};
-    
-    // First, try platform_based_grouping (if available)
-    const platformBasedGrouping = currentMetrics?.platform_based_grouping || [];
-    for (const item of platformBasedGrouping) {
-      const platformId = String(item?.grouping_identifier || "").toLowerCase();
-      if (!platformId) continue;
-      const key = platformId.includes("chatgpt") || platformId === "chatgpt" ? "chatgpt" :
-                  platformId.includes("google") || platformId.includes("ai_overview") || platformId === "google_ai_overview" ? "google_ai" :
-                  platformId.includes("perplexity") || platformId === "perplexity" ? "perplexity" : null;
+    for (const item of platformArr) {
+      const keyStr = String(item?.key || "").toLowerCase();
+      const key = keyStr.includes("chat_gpt") || keyStr === "chatgpt" ? "chatgpt" :
+                  keyStr.includes("google") || keyStr === "google" ? "google_ai" :
+                  keyStr.includes("perplexity") ? "perplexity" : null;
       if (!key) continue;
-      if (!platformMap[key]) {
-        platformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
-      }
-      platformMap[key].mentions += Number(item?.total_mentions || 0);
+      if (!platformMap[key]) platformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
+      platformMap[key].mentions += Number(item?.mentions || 0);
       platformMap[key].aiSearchVol += Number(item?.ai_search_volume || 0);
       platformMap[key].impressions += Number(item?.impressions || 0);
-    }
-    
-    // Fallback to aggregated_data if platform_based_grouping is empty
-    if (Object.keys(platformMap).length === 0) {
-      for (const item of aggregatedData) {
-        const platform = item?.platform || item?.grouping_identifier || "";
-        if (!platform) continue;
-        const platformLower = String(platform).toLowerCase();
-        const key = platformLower.includes("chatgpt") || platformLower === "chatgpt" ? "chatgpt" :
-                    platformLower.includes("google") || platformLower.includes("ai_overview") || platformLower === "google_ai_overview" ? "google_ai" :
-                    platformLower.includes("perplexity") || platformLower === "perplexity" ? "perplexity" : null;
-        if (!key) continue;
-        if (!platformMap[key]) {
-          platformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
-        }
-        platformMap[key].mentions += Number(item?.mentions || item?.total_mentions || 0);
-        platformMap[key].aiSearchVol += Number(item?.ai_search_volume || 0);
-        platformMap[key].impressions += Number(item?.impressions || 0);
-      }
     }
 
     // When aggregated_metrics returns no result but search_mentions has items, derive overview from search_mentions
@@ -5669,47 +5646,22 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       });
     }
 
-    // Get previous period metrics for trends
-    const prevSummary = previousMetrics?.summary || previousMetrics || {};
-    const prevTotalMentions = Number(prevSummary?.total_mentions || previousMetrics?.total_mentions || 0);
-    const prevTotalAiSearchVolume = Number(prevSummary?.ai_search_volume || previousMetrics?.ai_search_volume || 0);
-    const prevPlatformBasedGrouping = previousMetrics?.platform_based_grouping || [];
-    const prevAggregatedData = previousMetrics?.aggregated_data || [];
+    // Previous period: same DataForSEO structure (result[0].total.platform)
+    const prevTotalObj = previousMetrics?.total;
+    const prevPlatformArr = Array.isArray(prevTotalObj?.platform) ? prevTotalObj.platform : [];
+    const prevTotalMentions = prevPlatformArr.reduce((s: number, p: any) => s + Number(p?.mentions || 0), 0);
+    const prevTotalAiSearchVolume = prevPlatformArr.reduce((s: number, p: any) => s + Number(p?.ai_search_volume || 0), 0);
     const prevPlatformMap: Record<string, { mentions: number; aiSearchVol: number; impressions: number }> = {};
-    
-    // Parse previous period platform data (same logic as current period)
-    for (const item of prevPlatformBasedGrouping) {
-      const platformId = String(item?.grouping_identifier || "").toLowerCase();
-      if (!platformId) continue;
-      const key = platformId.includes("chatgpt") || platformId === "chatgpt" ? "chatgpt" :
-                  platformId.includes("google") || platformId.includes("ai_overview") || platformId === "google_ai_overview" ? "google_ai" :
-                  platformId.includes("perplexity") || platformId === "perplexity" ? "perplexity" : null;
+    for (const item of prevPlatformArr) {
+      const keyStr = String(item?.key || "").toLowerCase();
+      const key = keyStr.includes("chat_gpt") || keyStr === "chatgpt" ? "chatgpt" :
+                  keyStr.includes("google") || keyStr === "google" ? "google_ai" :
+                  keyStr.includes("perplexity") ? "perplexity" : null;
       if (!key) continue;
-      if (!prevPlatformMap[key]) {
-        prevPlatformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
-      }
-      prevPlatformMap[key].mentions += Number(item?.total_mentions || 0);
+      if (!prevPlatformMap[key]) prevPlatformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
+      prevPlatformMap[key].mentions += Number(item?.mentions || 0);
       prevPlatformMap[key].aiSearchVol += Number(item?.ai_search_volume || 0);
       prevPlatformMap[key].impressions += Number(item?.impressions || 0);
-    }
-    
-    // Fallback to aggregated_data for previous period
-    if (Object.keys(prevPlatformMap).length === 0) {
-      for (const item of prevAggregatedData) {
-        const platform = item?.platform || item?.grouping_identifier || "";
-        if (!platform) continue;
-        const platformLower = String(platform).toLowerCase();
-        const key = platformLower.includes("chatgpt") || platformLower === "chatgpt" ? "chatgpt" :
-                    platformLower.includes("google") || platformLower.includes("ai_overview") || platformLower === "google_ai_overview" ? "google_ai" :
-                    platformLower.includes("perplexity") || platformLower === "perplexity" ? "perplexity" : null;
-        if (!key) continue;
-        if (!prevPlatformMap[key]) {
-          prevPlatformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
-        }
-        prevPlatformMap[key].mentions += Number(item?.mentions || item?.total_mentions || 0);
-        prevPlatformMap[key].aiSearchVol += Number(item?.ai_search_volume || 0);
-        prevPlatformMap[key].impressions += Number(item?.impressions || 0);
-      }
     }
 
     // Calculate trends
@@ -5719,7 +5671,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     };
 
     const monthlyTrendPercent = calculateTrend(totalMentions, prevTotalMentions);
-    const aiSearchVolumeTrend = totalAiSearchVolume - (previousMetrics?.ai_search_volume || 0);
+    const aiSearchVolumeTrend = totalAiSearchVolume - prevTotalAiSearchVolume;
     const totalAiMentionsTrend = totalMentions - prevTotalMentions;
 
     // Calculate platform trends
@@ -5738,9 +5690,9 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 
     // Calculate AI Visibility Score trend (compare to previous period)
     const prevPlatformDiversity = Object.keys(prevPlatformMap).filter(k => (prevPlatformMap[k]?.mentions || 0) > 0).length;
-    const prevVisibilityScore = Math.min(100,
+    const prevVisibilityScore = Math.min(99,
       (prevTotalMentions * 2) +
-      ((previousMetrics?.ai_search_volume || 0) / 100) +
+      (prevTotalAiSearchVolume / 100) +
       (prevPlatformDiversity * 10)
     );
     const aiVisibilityScoreTrend = Math.round(aiVisibilityScore - prevVisibilityScore);
@@ -5820,38 +5772,8 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       })
       .filter((item: { query: string }) => isQueryRelevant(item.query));
 
-    // If no queries from DataForSEO, create placeholder queries from target keywords
-    if (queriesWhereYouAppear.length === 0 && totalMentions > 0) {
-      const targetKeywords = await prisma.targetKeyword.findMany({
-        where: { clientId },
-        select: { keyword: true, serpItemTypes: true },
-        take: 10,
-      });
-      
-      queriesWhereYouAppear = targetKeywords
-        .filter((tk) => {
-          const raw = tk.serpItemTypes;
-          if (!raw) return false;
-          try {
-            const arr = JSON.parse(raw);
-            return Array.isArray(arr) && arr.some((t: any) => 
-              String(t).toLowerCase().includes("ai_overview") || 
-              String(t).toLowerCase().includes("ai_mode")
-            );
-          } catch {
-            return false;
-          }
-        })
-        .slice(0, 5)
-        .map((tk) => ({
-          query: tk.keyword,
-          aiVolPerMo: totalAiSearchVolume > 0 ? Math.round(totalAiSearchVolume / Math.max(1, totalMentions)) : 300,
-          platforms: "GAI",
-          mentions: 1,
-        }));
-    }
-
-    const totalQueriesCount = queriesWhereYouAppear.length || searchMentions.length || 0;
+    // Only DataForSEO-sourced queries; no placeholders from SERP cache
+    const totalQueriesCount = queriesWhereYouAppear.length;
 
     // Build "How AI Platforms Mention You" from search mentions (relevance-filtered)
     let howAiMentionsYou = searchMentions
@@ -5886,40 +5808,8 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       };
     });
 
-    // If no contexts from DataForSEO, create placeholder contexts from target keywords
-    if (howAiMentionsYou.length === 0 && totalMentions > 0) {
-      const targetKeywords = await prisma.targetKeyword.findMany({
-        where: { clientId },
-        select: { keyword: true, serpItemTypes: true },
-        take: 5,
-      });
-      
-      howAiMentionsYou = targetKeywords
-        .filter((tk) => {
-          const raw = tk.serpItemTypes;
-          if (!raw) return false;
-          try {
-            const arr = JSON.parse(raw);
-            return Array.isArray(arr) && arr.some((t: any) => 
-              String(t).toLowerCase().includes("ai_overview") || 
-              String(t).toLowerCase().includes("ai_mode")
-            );
-          } catch {
-            return false;
-          }
-        })
-        .slice(0, 3)
-        .map((tk, idx) => ({
-          query: tk.keyword,
-          platform: "Google AI Overview",
-          aiVolPerMo: totalAiSearchVolume > 0 ? Math.round(totalAiSearchVolume / Math.max(1, totalMentions)) : 300,
-          snippet: `${clientName} appears in AI responses for "${tk.keyword}". This indicates your content is being cited by AI platforms.`,
-          sourceUrl: `https://${domain}`,
-          citationIndex: idx + 1,
-        }));
-    }
-
-    const totalContextsCount = howAiMentionsYou.length || searchMentions.length || 0;
+    // Only DataForSEO-sourced contexts; no placeholders from SERP cache
+    const totalContextsCount = howAiMentionsYou.length;
 
     // ===== AI SEARCH VOLUME TREND, TOP PAGES (CONTENT TYPES) =====
     let aiSearchVolumeTrend12Months: { year: number; month: number; searchVolume: number }[] = [];
@@ -7600,7 +7490,9 @@ router.delete("/reports/:reportId", authenticateToken, async (req, res) => {
 async function fetchHistoricalRankOverviewFromDataForSEO(
   domain: string,
   locationCode: number = 2840,
-  languageCode: string = "en"
+  languageCode: string = "en",
+  dateFromOverride?: string,
+  dateToOverride?: string
 ) {
   const base64Auth = process.env.DATAFORSEO_BASE64;
 
@@ -7619,34 +7511,25 @@ async function fetchHistoricalRankOverviewFromDataForSEO(
 
   const normalizedDomain = normalizeDomain(domain);
 
-  // Calculate date range for last 12 months (including current month)
-  // Example: If today is Nov 6, 2025, we want data from Dec 1, 2024 to Nov 6, 2025
+  // Use override range (e.g. current month only) or default to last 12 months
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth(); // 0-11 (0 = January, 11 = December)
   
-  // Calculate 12 months ago (11 months back + current month = 12 months total)
-  // If currentMonth is 10 (November), then currentMonth - 11 = -1, which becomes December of previous year
-  const twelveMonthsAgo = new Date(currentYear, currentMonth - 11, 1);
-  
-  // Format dates as YYYY-MM-DD for API
-  const dateTo = now.toISOString().split('T')[0]; // Today's date
-  const dateFrom = twelveMonthsAgo.toISOString().split('T')[0]; // 12 months ago
-  
-  console.log(`Requesting historical data from ${dateFrom} to ${dateTo} (12 months)`);
-
-  const requestBody = [{
-    target: normalizedDomain,
-    location_code: locationCode,
-    language_code: languageCode,
-    date_from: dateFrom,
-    date_to: dateTo,
-    correlate: true, // Correlate data with previously obtained datasets for consistency
-  }];
+  let dateFrom: string;
+  let dateTo: string;
+  if (dateFromOverride && dateToOverride) {
+    dateFrom = dateFromOverride;
+    dateTo = dateToOverride;
+    console.log(`Requesting historical data from ${dateFrom} to ${dateTo} (custom range)`);
+  } else {
+    const twelveMonthsAgo = new Date(currentYear, currentMonth - 11, 1);
+    dateTo = now.toISOString().split('T')[0];
+    dateFrom = twelveMonthsAgo.toISOString().split('T')[0];
+    console.log(`Requesting historical data from ${dateFrom} to ${dateTo} (12 months)`);
+  }
 
   try {
-    // Use the current (non-legacy) endpoint under /google/.
-    // Some accounts/environments have seen the legacy endpoint reject `date_to`.
     const endpoint = "https://api.dataforseo.com/v3/dataforseo_labs/google/historical_rank_overview/live";
 
     const doRequest = async (body: any) => {
@@ -7658,82 +7541,85 @@ async function fetchHistoricalRankOverviewFromDataForSEO(
         },
         body: JSON.stringify(body),
       });
-
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
       }
-
       return await response.json();
     };
 
-    let data = await doRequest(requestBody);
-
-    // If DataForSEO rejects `date_to` for any reason, retry without it (it is optional).
-    const task0 = data?.tasks?.[0];
-    const statusMessage = String(task0?.status_message || "");
-    if (task0?.status_code === 40501 && /Invalid Field:\s*'date_to'\./i.test(statusMessage)) {
-      console.warn("[DataForSEO] historical_rank_overview: retrying without date_to (API rejected date_to)");
-      const retryBody = [
-        {
+    // Fetch one date range and return items array; retry without date_to if API rejects it.
+    const fetchOneChunk = async (chunkDateFrom: string, chunkDateTo: string): Promise<any[]> => {
+      let body: any[] = [{
+        target: normalizedDomain,
+        location_code: locationCode,
+        language_code: languageCode,
+        date_from: chunkDateFrom,
+        date_to: chunkDateTo,
+        correlate: true,
+      }];
+      let data = await doRequest(body);
+      const task0 = data?.tasks?.[0];
+      const statusMessage = String(task0?.status_message || "");
+      if (task0?.status_code === 40501 && /Invalid Field:\s*'date_to'\./i.test(statusMessage)) {
+        console.warn("[DataForSEO] historical_rank_overview: retrying without date_to (API rejected date_to)");
+        body = [{
           target: normalizedDomain,
           location_code: locationCode,
           language_code: languageCode,
-          date_from: dateFrom,
+          date_from: chunkDateFrom,
           correlate: true,
-        },
-      ];
-      data = await doRequest(retryBody);
-    }
-
-    // Log the full response for debugging
-    console.log("DataForSEO Historical Rank Overview API Response:", JSON.stringify(data, null, 2));
-
-    // Parse the response structure
-    // DataForSEO API response structure: 
-    // data.tasks[0].result[0].items[] - array of historical data points
-    // Each item has: date, metrics.organic.count (total keywords), position_distribution, etc.
-    if (!data.tasks || data.tasks.length === 0) {
-      console.warn("No tasks in API response");
+        }];
+        data = await doRequest(body);
+      }
+      const result = data?.tasks?.[0]?.result?.[0];
+      if (!result) return [];
+      if (result.items && Array.isArray(result.items)) return result.items;
+      if (result.historical_data && Array.isArray(result.historical_data)) return result.historical_data;
+      if (result.data && Array.isArray(result.data)) return result.data;
+      if (Array.isArray(result)) return result;
       return [];
+    };
+
+    let historicalData: any[] = [];
+
+    if (dateFromOverride && dateToOverride) {
+      // Single request (e.g. current month only for dashboard refresh)
+      historicalData = await fetchOneChunk(dateFrom, dateTo);
+      console.log(`[DataForSEO] historical_rank_overview: single range returned ${historicalData.length} items`);
+    } else {
+      // 12-month range: request in two 6-month chunks so we get up to 12 months (API may limit per-request)
+      const twelveMonthsAgo = new Date(currentYear, currentMonth - 11, 1);
+      const sixMonthsAgo = new Date(currentYear, currentMonth - 5, 1);
+      const lastDayFirstChunk = new Date(sixMonthsAgo.getFullYear(), sixMonthsAgo.getMonth(), 0);
+      const dateFrom1 = twelveMonthsAgo.toISOString().split("T")[0];
+      const dateTo1 = lastDayFirstChunk.toISOString().split("T")[0];
+      const dateFrom2 = sixMonthsAgo.toISOString().split("T")[0];
+      const dateTo2 = now.toISOString().split("T")[0];
+      console.log(`[DataForSEO] historical_rank_overview: requesting two chunks: ${dateFrom1}–${dateTo1} and ${dateFrom2}–${dateTo2}`);
+      const [items1, items2] = await Promise.all([
+        fetchOneChunk(dateFrom1, dateTo1),
+        fetchOneChunk(dateFrom2, dateTo2),
+      ]);
+      const byKey = new Map<string, any>();
+      const addItems = (items: any[]) => {
+        (items || []).forEach((item: any) => {
+          const y = item.year != null ? Number(item.year) : new Date(item.date || 0).getFullYear();
+          const m = item.month != null ? Number(item.month) : new Date(item.date || 0).getMonth() + 1;
+          const key = `${y}-${String(m).padStart(2, "0")}`;
+          if (!byKey.has(key)) byKey.set(key, item);
+        });
+      };
+      addItems(items1);
+      addItems(items2);
+      historicalData = Array.from(byKey.values());
+      console.log(`[DataForSEO] historical_rank_overview: merged ${items1.length} + ${items2.length} → ${historicalData.length} unique months`);
     }
 
-    const task = data.tasks[0];
-    if (!task.result || task.result.length === 0) {
-      console.warn("No result in task");
-      return [];
-    }
-
-    const result = task.result[0];
-    
-    // Log the result structure to understand the data format
-    console.log("Result structure keys:", Object.keys(result || {}));
-    console.log("Result sample (first 2000 chars):", JSON.stringify(result, null, 2).substring(0, 2000));
-    
-    // Extract historical data points
-    // The Historical Rank Overview API returns items array
-    // Structure: result.items[] where each item has:
-    //   - year: number (e.g., 2021)
-    //   - month: number (e.g., 3 for March)
-    //   - metrics.organic.count: number (total keywords ranked, e.g., 1499)
-    let historicalData = [];
-    
-    if (result.items && Array.isArray(result.items)) {
-      historicalData = result.items;
-    } else if (result.historical_data && Array.isArray(result.historical_data)) {
-      historicalData = result.historical_data;
-    } else if (result.data && Array.isArray(result.data)) {
-      historicalData = result.data;
-    } else if (Array.isArray(result)) {
-      // Sometimes the result itself is an array
-      historicalData = result;
-    }
-    
     console.log(`Found ${historicalData.length} historical data items in API response`);
-    
+
     if (historicalData.length === 0) {
       console.warn("No historical data items found in API response.");
-      console.warn("Result structure:", JSON.stringify(result, null, 2));
       return [];
     }
     
@@ -8551,7 +8437,8 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
   }
 });
 
-// Refresh ranked keywords history from DataForSEO (SUPER_ADMIN only)
+// Refresh ranked keywords history from DataForSEO (SUPER_ADMIN only).
+// Fetches 12 months of data: total keywords per month + position breakdown (1-3, 4-10, 11-20, 21-30, 31-50, 51+) from Historical Rank Overview API only.
 router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, async (req, res) => {
   try {
     // Only SUPER_ADMIN can refresh data
@@ -8586,24 +8473,22 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
       });
     }
 
-    // Fetch historical data from DataForSEO Historical Rank Overview API
+    // Fetch historical data from DataForSEO Historical Rank Overview API (may return 0..12 months)
+    let historicalData: any[] = [];
     try {
       console.log(`Fetching historical data for domain: ${client.domain}`);
-      const historicalData = await fetchHistoricalRankOverviewFromDataForSEO(
+      historicalData = await fetchHistoricalRankOverviewFromDataForSEO(
         client.domain,
         2840, // Default to US
         "en" // Default to English
       );
-
       console.log(`Received ${historicalData.length} data points from API`);
+    } catch (apiErr: any) {
+      console.warn("Historical rank overview API failed, will keep/use existing DB data:", apiErr?.message || apiErr);
+    }
 
-      if (historicalData.length === 0) {
-        return res.status(404).json({ message: "No historical data returned from API" });
-      }
-
-      // Group by month and year, taking the latest value for each month
-      // This handles cases where there are multiple data points per month (e.g., weekly snapshots)
-      const monthlyData: Record<
+    // Group by month and year (when we have API data)
+    const monthlyData: Record<
         string,
         {
           month: number;
@@ -8642,16 +8527,58 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
 
       console.log(`Grouped into ${Object.keys(monthlyData).length} unique months`);
 
-      // Convert to array and sort by year and month (chronologically)
-      const sortedData = Object.values(monthlyData).sort((a, b) => {
-        if (a.year !== b.year) {
-          return a.year - b.year;
-        }
-        return a.month - b.month;
+      // Load existing history from DB so we don't overwrite months with zeros when API returns partial data
+      const existingHistory = await prisma.rankedKeywordsHistory.findMany({
+        where: { clientId },
+        select: {
+          month: true,
+          year: true,
+          totalKeywords: true,
+          top3: true,
+          top10: true,
+          page2: true,
+          pos21_30: true,
+          pos31_50: true,
+          pos51Plus: true,
+        },
+      });
+      const existingByKey: Record<string, {
+        month: number;
+        year: number;
+        totalKeywords: number;
+        top3: number;
+        top10: number;
+        page2: number;
+        pos21_30: number;
+        pos31_50: number;
+        pos51Plus: number;
+        date: string;
+      }> = {};
+      existingHistory.forEach((row) => {
+        const key = `${row.year}-${String(row.month).padStart(2, '0')}`;
+        const total = Number(row.totalKeywords || 0);
+        const top3 = Number(row.top3 ?? 0);
+        const top10 = Number(row.top10 ?? 0);
+        const page2 = Number(row.page2 ?? 0);
+        const pos21_30 = Number(row.pos21_30 ?? 0);
+        const pos31_50 = Number(row.pos31_50 ?? 0);
+        const knownSum = top3 + top10 + page2 + pos21_30 + pos31_50;
+        const pos51Plus = Number(row.pos51Plus ?? 0) || Math.max(0, total - knownSum);
+        existingByKey[key] = {
+          month: row.month,
+          year: row.year,
+          totalKeywords: total,
+          top3,
+          top10,
+          page2,
+          pos21_30,
+          pos31_50,
+          pos51Plus,
+          date: `${row.year}-${String(row.month).padStart(2, '0')}-01`,
+        };
       });
 
-      // Create a complete 12-month dataset (from 12 months ago to current month)
-      // Fill in missing months with 0 or use the previous month's value
+      // Create a complete 12-month dataset: prefer API data, then existing DB, then zeros
       const now = new Date();
       const currentYear = now.getFullYear();
       const currentMonth = now.getMonth() + 1; // 1-12
@@ -8669,26 +8596,25 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
         date: string;
       }> = [];
       
-      // Generate all 12 months
       for (let i = 11; i >= 0; i--) {
         const targetDate = new Date(currentYear, currentMonth - 1 - i, 1);
         const targetYear = targetDate.getFullYear();
         const targetMonth = targetDate.getMonth() + 1;
         const key = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
         
-        const existingData = monthlyData[key];
-        if (existingData) {
-          const total = Number(existingData.totalKeywords || 0);
-          const top3 = Number(existingData.top3 || 0);
-          const top10 = Number(existingData.top10 || 0);
-          const page2 = Number(existingData.page2 || 0);
-          const pos21_30 = Number(existingData.pos21_30 || 0);
-          const pos31_50 = Number(existingData.pos31_50 || 0);
+        const apiData = monthlyData[key];
+        if (apiData) {
+          const total = Number(apiData.totalKeywords || 0);
+          const top3 = Number(apiData.top3 || 0);
+          const top10 = Number(apiData.top10 || 0);
+          const page2 = Number(apiData.page2 || 0);
+          const pos21_30 = Number(apiData.pos21_30 || 0);
+          const pos31_50 = Number(apiData.pos31_50 || 0);
           const knownSum = top3 + top10 + page2 + pos21_30 + pos31_50;
-          const pos51Plus = Number(existingData.pos51Plus || 0) || Math.max(0, total - knownSum);
+          const pos51Plus = Number(apiData.pos51Plus || 0) || Math.max(0, total - knownSum);
           completeData.push({
-            month: existingData.month,
-            year: existingData.year,
+            month: apiData.month,
+            year: apiData.year,
             totalKeywords: total,
             top3,
             top10,
@@ -8696,25 +8622,27 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
             pos21_30,
             pos31_50,
             pos51Plus,
-            date: existingData.date,
+            date: apiData.date,
           });
         } else {
-          // Fill missing months with 0 or use previous month's value
-          const prevValue = completeData.length > 0 
-            ? completeData[completeData.length - 1].totalKeywords 
-            : 0;
-          completeData.push({
-            month: targetMonth,
-            year: targetYear,
-            totalKeywords: 0, // Use 0 for missing months to show accurate data
-            top3: 0,
-            top10: 0,
-            page2: 0,
-            pos21_30: 0,
-            pos31_50: 0,
-            pos51Plus: 0,
-            date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
-          });
+          // No API data for this month: keep existing DB row if any, else zeros
+          const existing = existingByKey[key];
+          if (existing) {
+            completeData.push(existing);
+          } else {
+            completeData.push({
+              month: targetMonth,
+              year: targetYear,
+              totalKeywords: 0,
+              top3: 0,
+              top10: 0,
+              page2: 0,
+              pos21_30: 0,
+              pos31_50: 0,
+              pos51Plus: 0,
+              date: `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`,
+            });
+          }
         }
       }
 
@@ -8759,16 +8687,12 @@ router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, asy
         message: "Ranked keywords history refreshed successfully",
         months: completeData.length,
       });
-    } catch (apiError: any) {
-      console.error("Failed to fetch historical data from DataForSEO:", apiError);
-      res.status(500).json({ 
-        message: "Failed to refresh historical data",
-        error: apiError.message 
-      });
-    }
   } catch (error: any) {
-    console.error("Get ranked keywords history error:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Ranked keywords history refresh error:", error);
+    res.status(500).json({
+      message: "Failed to refresh historical data",
+      error: error?.message ?? String(error),
+    });
   }
 });
 
@@ -9173,27 +9097,33 @@ router.get("/keyword-research", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Keyword query is required" });
     }
 
-    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 1000);
     const parsedLocationCode = Number(locationCode) || 2840;
     const parsedLanguageCode = typeof languageCode === "string" ? languageCode : "en";
     const seed = keyword.trim();
 
-    // All Keyword Ideas data from DataForSEO: suggestions + question keywords in parallel
-    const [suggestions, questions] = await Promise.all([
+    const isQuestion = (kw: string) =>
+      kw.includes("?") || /^(who|what|where|when|why|how|can|is|are|do|does)\s/i.test((kw || "").trim());
+
+    // 1) Suggestions table only: uses limit (Suggestions number).
+    // 2) Keyword Ideas: variations, questions, strategy each from their own DataForSEO calls with NO limit (get all).
+    const MAX_RELATED = 1000;
+    const MAX_QUESTIONS = 1000;
+    const [suggestions, variationsFromApi, questionsFromApi, strategyItemsFromApi] = await Promise.all([
       fetchKeywordSuggestionsFromDataForSEO(seed, parsedLimit, parsedLocationCode, parsedLanguageCode),
-      fetchQuestionKeywordsFromDataForSEO(seed, 20, parsedLocationCode, parsedLanguageCode),
+      fetchKeywordSuggestionsFromDataForSEO(seed, MAX_RELATED, parsedLocationCode, parsedLanguageCode),
+      fetchQuestionKeywordsFromDataForSEO(seed, MAX_QUESTIONS, parsedLocationCode, parsedLanguageCode),
+      fetchKeywordSuggestionsFromDataForSEO(seed, MAX_RELATED, parsedLocationCode, parsedLanguageCode),
     ]);
 
-    // Variations = non-question keywords from DataForSEO related_keywords (same source as suggestions)
-    const isQuestion = (kw: string) =>
-      kw.includes("?") || /^(who|what|where|when|why|how|can|is|are|do|does)\s/i.test(kw);
-    const variations = suggestions.filter((r) => !isQuestion(r.keyword));
-
-    // Only return actual question-shaped phrases in "questions" (API can return non-questions)
-    const questionsOnly = questions.filter((r) => isQuestion(r.keyword));
-
-    // Strategy = pillar (seed) + items from DataForSEO related_keywords
-    const strategy = { pillar: seed, items: suggestions };
+    const variations = variationsFromApi.filter((r) => !isQuestion(r.keyword));
+    const questionsOnly = questionsFromApi.filter((r) => isQuestion(r.keyword));
+    const seedLower = seed.toLowerCase().trim();
+    const seedInStrategy = strategyItemsFromApi.find((r) => (r.keyword || "").toLowerCase().trim() === seedLower);
+    const strategyItems = seedInStrategy
+      ? [seedInStrategy, ...strategyItemsFromApi.filter((r) => (r.keyword || "").toLowerCase().trim() !== seedLower)]
+      : strategyItemsFromApi;
+    const strategy = { pillar: seed, items: strategyItems };
 
     if (tierCtx.agencyId) {
       await useResearchCredits(tierCtx.agencyId, 1);
@@ -9233,22 +9163,20 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
       return res.status(200).json({ keyword: keyword.trim(), found: false, detail: null });
     }
 
-    // All fields below from DataForSEO keyword_overview/live response (keyword_info, keyword_properties, search_intent_info)
+    // DataForSEO keyword_overview/live: item.keyword_info, item.keyword_properties, item.search_intent_info
     const keywordInfo = item?.keyword_info || item?.keyword_data?.keyword_info || {};
     const keywordProps = item?.keyword_properties || item?.keyword_data?.keyword_properties || {};
-    const monthlySearches = Array.isArray(keywordInfo?.monthly_searches) ? keywordInfo.monthly_searches : [];
+    const rawMonthly = Array.isArray(keywordInfo?.monthly_searches) ? keywordInfo.monthly_searches : [];
     const searchVolume = Number(keywordInfo?.search_volume ?? 0);
-    const keywordDifficultyRaw = keywordProps?.keyword_difficulty ?? (keywordInfo?.competition_index != null ? Number(keywordInfo.competition_index) * 100 : null);
+    const keywordDifficultyRaw = keywordProps?.keyword_difficulty ?? null;
     const keywordDifficultyNum = Number(keywordDifficultyRaw);
     const keywordDifficulty = Number.isFinite(keywordDifficultyNum) ? Math.max(0, Math.min(100, Math.round(keywordDifficultyNum))) : 0;
-    const cpc = Number(keywordInfo?.cpc ?? keywordInfo?.cpc_v2 ?? 0);
+    const cpc = Number(keywordInfo?.cpc ?? 0);
     const competition = Number(keywordInfo?.competition ?? 0);
     const competitionLevel = (keywordInfo?.competition_level || "").toString().toLowerCase();
-    // Intent: prefer DataForSEO search_intent_info.main_intent, then keyword_properties/keyword_info
     const intentRaw = (item?.search_intent_info?.main_intent || keywordProps?.keyword_intent || keywordInfo?.keyword_intent || "commercial").toString().toLowerCase();
     const intent = intentRaw === "informational" ? "Informational" : intentRaw === "transactional" ? "Transactional" : intentRaw === "navigational" ? "Navigational" : "Commercial";
 
-    // Country breakdown if available (keyword_info.country_data or similar)
     const countryData = item?.keyword_info?.country_data || item?.keyword_data?.keyword_info?.country_data || [];
     const countryBreakdown = Array.isArray(countryData)
       ? countryData.slice(0, 10).map((c: any) => ({
@@ -9261,6 +9189,17 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
       ? countryBreakdown.reduce((sum: number, c: { searchVolume: number }) => sum + c.searchVolume, 0)
       : searchVolume;
 
+    // Monthly trend: sort chronologically (oldest first), take last 12 months, so chart shows left-to-right correctly
+    const monthlyMapped = rawMonthly
+      .map((m: any) => ({
+        year: Number(m?.year ?? 0),
+        month: Number(m?.month ?? 0),
+        searchVolume: Number(m?.search_volume ?? 0),
+      }))
+      .filter((m: { year: number; month: number }) => m.year > 0 && m.month > 0);
+    monthlyMapped.sort((a: { year: number; month: number }, b: { year: number; month: number }) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+    const monthlySearches = monthlyMapped.slice(-12);
+
     const detailData = {
       keyword: item?.keyword || keyword.trim(),
       searchVolume,
@@ -9272,11 +9211,7 @@ router.get("/keyword-detail", authenticateToken, async (req, res) => {
       competition,
       competitionLevel,
       intent,
-      monthlySearches: monthlySearches.map((m: any) => ({
-        year: Number(m?.year ?? 0),
-        month: Number(m?.month ?? 0),
-        searchVolume: Number(m?.search_volume ?? 0),
-      })),
+      monthlySearches,
     };
 
     return res.json({ keyword: keyword.trim(), found: true, detail: detailData });
@@ -9348,37 +9283,43 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
     });
 
     // Extract feature details for expandable sections (Local pack, People also ask, Things to know)
+    // DataForSEO: local_pack is one item per place (flat items[]); people_also_ask has items[] and optionally expanded_element; found_on_web/featured_snippet have items[].
     const localPackItems: { title?: string; link?: string; domain?: string }[] = [];
     const peopleAlsoAskItems: { title?: string; snippet?: string }[] = [];
     const thingsToKnowItems: { title?: string; snippet?: string }[] = [];
     items.forEach((i: any) => {
+      // Local pack: each SERP item with type "local_pack" is one place (no nested items array)
       if (i.type === "local_pack") {
-        const places = i?.items || [];
-        places.forEach((p: any) => {
-          localPackItems.push({
-            title: p?.title || p?.name,
-            link: p?.url || p?.link,
-            domain: p?.domain,
-          });
+        localPackItems.push({
+          title: i?.title || i?.name,
+          link: (i?.url || i?.link) ?? undefined,
+          domain: i?.domain ?? undefined,
         });
       }
+      // People also ask: collect from items[] (initial questions) and expanded_element (expanded Q&A)
       if (i.type === "people_also_ask") {
-        const expanded = i?.expanded_element || i?.items || [];
-        const list = Array.isArray(expanded) ? expanded : [expanded];
-        list.forEach((e: any) => {
+        const fromItems = Array.isArray(i?.items) ? i.items : [];
+        const fromExpanded = Array.isArray(i?.expanded_element) ? i.expanded_element : (i?.expanded_element ? [i.expanded_element] : []);
+        const seen = new Set<string>();
+        [...fromItems, ...fromExpanded].forEach((e: any) => {
+          const title = (e?.title ?? e?.question ?? "").trim();
+          if (!title || seen.has(title)) return;
+          seen.add(title);
           peopleAlsoAskItems.push({
-            title: e?.title || e?.question,
-            snippet: e?.description || e?.snippet || e?.answer,
+            title,
+            snippet: [e?.description, e?.snippet, e?.answer, e?.text].find(Boolean) ?? undefined,
           });
         });
       }
-      if (i.type === "featured_snippet" || i.type === "found_on_web" || (i.type === "knowledge_graph" && i?.items)) {
+      // Things to know: found_on_web, featured_snippet, knowledge_graph, perspectives (items have title, subtitle/description/snippet/text)
+      if (i.type === "featured_snippet" || i.type === "found_on_web" || i.type === "perspectives" || (i.type === "knowledge_graph" && i?.items)) {
         const list = i?.items ? (Array.isArray(i.items) ? i.items : [i.items]) : [];
         list.forEach((e: any) => {
-          thingsToKnowItems.push({
-            title: e?.title || e?.name || e?.featured_title,
-            snippet: e?.description || e?.snippet || e?.text,
-          });
+          const title = e?.title || e?.name || e?.featured_title;
+          const snippet = e?.description || e?.snippet || e?.text || e?.subtitle;
+          if (title || snippet) {
+            thingsToKnowItems.push({ title: title || undefined, snippet: snippet || undefined });
+          }
         });
       }
     });
@@ -9409,30 +9350,37 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
     });
 
     // Enrich rows with DataForSEO Backlinks Summary (backlinks, referring_domains, rank) per URL
+    // Use bulk_pages_summary so one request returns one result per target in result[0].items
     if (rows.length > 0 && base64Auth) {
       try {
-        const backlinksBody = rows.slice(0, 10).map((r) => ({ target: r.url || r.domain }));
-        const blRes = await fetch("https://api.dataforseo.com/v3/backlinks/summary/live", {
-          method: "POST",
-          headers: {
-            Authorization: `Basic ${base64Auth}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(backlinksBody),
-        });
-        if (blRes.ok) {
-          const blData = await blRes.json();
-          const tasks = blData?.tasks || [];
-          rows.forEach((row, i) => {
-            const task = tasks[i] ?? tasks[0];
-            const resultList = task?.result;
-            const result = Array.isArray(resultList) && resultList.length > 1 ? resultList[i] : resultList?.[0];
-            if (row && result) {
-              row.refDomains = result.referring_domains != null ? Number(result.referring_domains) : null;
-              row.backlinks = result.backlinks != null ? Number(result.backlinks) : null;
-              row.pageAs = result.rank != null ? Number(result.rank) : null;
-            }
+        const targets = rows.slice(0, 10).map((r) => {
+          const u = r.url || r.domain;
+          return u && (u.startsWith("http://") || u.startsWith("https://")) ? u : (u ? `https://${u}` : "");
+        }).filter(Boolean);
+        if (targets.length > 0) {
+          const backlinksBody = [{ targets }];
+          const blRes = await fetch("https://api.dataforseo.com/v3/backlinks/bulk_pages_summary/live", {
+            method: "POST",
+            headers: {
+              Authorization: `Basic ${base64Auth}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(backlinksBody),
           });
+          if (blRes.ok) {
+            const blData = await blRes.json();
+            const task = blData?.tasks?.[0];
+            const resultBlock = task?.result?.[0];
+            const items = Array.isArray(resultBlock?.items) ? resultBlock.items : [];
+            rows.forEach((row, i) => {
+              const item = items[i] ?? items.find((it: any) => (it?.url || "").replace(/^https?:\/\//, "").replace(/\/$/, "") === (row.url || "").replace(/^https?:\/\//, "").replace(/\/$/, ""));
+              if (row && item) {
+                row.refDomains = item.referring_domains != null ? Number(item.referring_domains) : null;
+                row.backlinks = item.backlinks != null ? Number(item.backlinks) : null;
+                row.pageAs = item.rank != null ? Number(item.rank) : null;
+              }
+            });
+          }
         }
       } catch {
         // keep rows with null metrics if backlinks call fails
@@ -9440,39 +9388,36 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
     }
 
     // Enrich rows with DataForSEO Ranked Keywords (search traffic ETV, keyword count) per URL
+    // No bulk endpoint; one request per row so each row gets its own result
     if (rows.length > 0 && base64Auth) {
       try {
-        const rankedKwBody = rows.slice(0, 10).map((r) => {
+        const slice = rows.slice(0, 10);
+        const rkResults = await Promise.all(slice.map(async (r) => {
           const target = r.url && (r.url.startsWith("http://") || r.url.startsWith("https://")) ? r.url : (r.url ? `https://${r.url}` : r.domain ? `https://${r.domain}` : r.domain || "");
-          return {
-            target: target || r.domain,
-            location_code: parsedLocationCode,
-            language_code: parsedLanguageCode,
-            limit: 1,
-          };
-        });
-        const rkRes = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live", {
-          method: "POST",
-          headers: {
-            Authorization: `Basic ${base64Auth}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(rankedKwBody),
-        });
-        if (rkRes.ok) {
-          const rkData = await rkRes.json();
-          const rkTasks = rkData?.tasks || [];
-          rows.forEach((row, i) => {
-            const task = rkTasks[i] ?? rkTasks[0];
-            const resultList = task?.result;
-            const result = Array.isArray(resultList) && resultList.length > 1 ? resultList[i] : resultList?.[0];
-            if (row && result) {
-              row.urlKeywords = result.total_count != null ? Number(result.total_count) : null;
-              const etv = result.metrics?.organic?.etv;
-              row.searchTraffic = etv != null ? Math.round(Number(etv)) : null;
-            }
+          if (!target) return null;
+          const body = [{ target, location_code: parsedLocationCode, language_code: parsedLanguageCode, limit: 1 }];
+          const rkRes = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live", {
+            method: "POST",
+            headers: {
+              Authorization: `Basic ${base64Auth}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
           });
-        }
+          if (!rkRes.ok) return null;
+          const rkData = await rkRes.json();
+          const task = rkData?.tasks?.[0];
+          const result = Array.isArray(task?.result) ? task.result[0] : task?.result;
+          return result ?? null;
+        }));
+        rkResults.forEach((result, i) => {
+          const row = rows[i];
+          if (row && result) {
+            row.urlKeywords = result.total_count != null ? Number(result.total_count) : null;
+            const etv = result.metrics?.organic?.etv;
+            row.searchTraffic = etv != null ? Math.round(Number(etv)) : null;
+          }
+        });
       } catch {
         // keep rows with null searchTraffic/urlKeywords if ranked_keywords call fails
       }

@@ -434,7 +434,9 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
               <h4 className="text-sm font-semibold text-gray-900">
                 Total Keywords Ranked Over Time
               </h4>
-              <p className="text-xs text-gray-500">Based on the last 12 monthly snapshots.</p>
+              <p className="text-xs text-gray-500">
+                Total keywords per month (12 months) with breakdown by rank: 1–3, 4–10, 11–20, 21–30, 31–50, 51+. Data from DataForSEO.
+              </p>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center space-x-1 rounded-lg bg-gray-100 p-1">
