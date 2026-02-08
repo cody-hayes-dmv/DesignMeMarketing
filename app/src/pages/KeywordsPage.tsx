@@ -20,6 +20,7 @@ import { jsPDF } from "jspdf";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
+import DomainResearchView from "@/components/DomainResearchView";
 
 type TabId = "research" | "tracked";
 
@@ -1188,11 +1189,7 @@ const KeywordsPage: React.FC = () => {
       )}
 
       {activeTab === "tracked" && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8">
-          <p className="text-sm text-gray-600">
-            Use <strong>Keyword Research</strong> to find and assign keywords. Manage tracked keywords from each client&apos;s <strong>Keywords</strong> tab in the Client Dashboard.
-          </p>
-        </div>
+        <DomainResearchView clients={clients} clientsError={clientsError} />
       )}
 
     </div>
