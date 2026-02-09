@@ -170,10 +170,11 @@ const MANAGED_SERVICE_STATUS_OPTIONS = [
 ] as const;
 
 const MANAGED_SERVICE_PACKAGE_OPTIONS = [
-  { value: "foundation", label: "Foundation ($750/mo)" },
-  { value: "growth", label: "Growth ($1,500/mo)" },
-  { value: "domination", label: "Domination ($3,000/mo)" },
-  { value: "custom", label: "Custom" },
+  { value: "foundation", label: "SEO Essentials + Automation ($750/mo)" },
+  { value: "growth", label: "Growth & Automation ($1,500/mo)" },
+  { value: "domination", label: "Authority Builder ($3,000/mo)" },
+  { value: "market_domination", label: "Market Domination ($5,000/mo)" },
+  { value: "custom", label: "Custom ($5,000+/mo)" },
 ] as const;
 
 const EMPTY_CLIENT_FORM: ClientFormState = {
@@ -244,6 +245,8 @@ const ClientsPage = () => {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean; maxDashboards?: number | null } | null>(null);
   const [dashboardLimit, setDashboardLimit] = useState<{ used: number; limit: number } | null>(null);
+  const [approvingClientId, setApprovingClientId] = useState<string | null>(null);
+  const [rejectingClientId, setRejectingClientId] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(fetchClients() as any);
@@ -551,6 +554,7 @@ const ClientsPage = () => {
 
   const handleApproveAndActivate = async (client: Client) => {
     const msId = (client as any).pendingManagedServiceId;
+    setApprovingClientId(client.id);
     try {
       if (msId) {
         await api.patch(`/agencies/managed-services/${msId}/approve`);
@@ -561,13 +565,17 @@ const ClientsPage = () => {
       }
       dispatch(fetchClients() as any);
     } catch (error: any) {
-      console.error("Approve & Activate failed:", error);
-      toast.error(error?.response?.data?.message || "Failed to approve client");
+      const message = error?.response?.data?.message || "Failed to approve client";
+      toast.error(message);
+      dispatch(fetchClients() as any);
+    } finally {
+      setApprovingClientId(null);
     }
   };
 
   const handleRejectToDashboardOnly = async (client: Client) => {
     const msId = (client as any).pendingManagedServiceId;
+    setRejectingClientId(client.id);
     try {
       if (msId) {
         await api.patch(`/agencies/managed-services/${msId}/reject`);
@@ -578,8 +586,10 @@ const ClientsPage = () => {
       }
       dispatch(fetchClients() as any);
     } catch (error: any) {
-      console.error("Reject failed:", error);
       toast.error(error?.response?.data?.message || "Failed to reject client");
+      dispatch(fetchClients() as any);
+    } finally {
+      setRejectingClientId(null);
     }
   };
 
@@ -721,19 +731,26 @@ const ClientsPage = () => {
     }
   };
 
-  /** Service package label: prefer managedServicePackage from API, else accountInfo (Foundation, Growth, Domination, Custom, or None). */
+  /** Service package label: prefer managedServicePackage from API, else accountInfo. */
   const getServicePackageLabel = (client: Client): string => {
     const pkg = (client as any).managedServicePackage;
     if (pkg && typeof pkg === "string") {
-      return pkg.charAt(0).toUpperCase() + pkg.slice(1).toLowerCase();
+      const id = pkg.toLowerCase().replace(/\s+/g, "_");
+      if (id === "foundation") return "SEO Essentials + Automation";
+      if (id === "growth") return "Growth & Automation";
+      if (id === "domination") return "Authority Builder";
+      if (id === "market_domination") return "Market Domination";
+      if (id === "custom") return "Custom";
+      return pkg.charAt(0).toUpperCase() + pkg.slice(1).replace(/_/g, " ");
     }
     const raw = client.accountInfo;
     if (!raw) return "None";
     const obj = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch { return {}; } })() : raw;
     const pkgAlt = (obj?.servicePackage ?? obj?.managedTier ?? obj?.stripePriceId ?? "").toString().toLowerCase();
-    if (pkgAlt.includes("foundation")) return "Foundation";
-    if (pkgAlt.includes("growth")) return "Growth";
-    if (pkgAlt.includes("domination")) return "Domination";
+    if (pkgAlt.includes("foundation")) return "SEO Essentials + Automation";
+    if (pkgAlt.includes("growth")) return "Growth & Automation";
+    if (pkgAlt.includes("market_domination") || (pkgAlt.includes("market") && pkgAlt.includes("domination"))) return "Market Domination";
+    if (pkgAlt.includes("domination")) return "Authority Builder";
     if (pkgAlt.includes("custom")) return "Custom";
     return "None";
   };
@@ -1080,14 +1097,16 @@ const ClientsPage = () => {
                             <button
                               type="button"
                               onClick={() => handleApproveAndActivate(client)}
-                              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700"
+                              disabled={approvingClientId === client.id || rejectingClientId === client.id}
+                              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                               Approve & Activate
                             </button>
                             <button
                               type="button"
                               onClick={() => handleRejectToDashboardOnly(client)}
-                              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-200 text-gray-800 hover:bg-gray-300"
+                              disabled={approvingClientId === client.id || rejectingClientId === client.id}
+                              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-200 text-gray-800 hover:bg-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                               Reject
                             </button>
@@ -1257,15 +1276,17 @@ const ClientsPage = () => {
                                   setOpenCardMenuId(null);
                                   handleApproveAndActivate(client);
                                 }}
+                                disabled={approvingClientId === client.id || rejectingClientId === client.id}
                               >
                                 Approve & Activate
                               </button>
                               <button
-                                className="w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+                                className="w-full text-left px-4 py-2 text-xs hover:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
                                 onClick={() => {
                                   setOpenCardMenuId(null);
                                   handleRejectToDashboardOnly(client);
                                 }}
+                                disabled={approvingClientId === client.id || rejectingClientId === client.id}
                               >
                                 Reject
                               </button>

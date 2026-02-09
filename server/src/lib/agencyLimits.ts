@@ -18,10 +18,14 @@ export interface AgencyTierContext {
   teamMemberCount: number;
   /** Credits used this month (after applying reset if needed) */
   creditsUsed: number;
-  /** Credits limit from tier (+ add-ons if we add later) */
+  /** Credits limit from tier + extra keyword research add-ons */
   creditsLimit: number;
   /** When credits reset (end of current month) */
   creditsResetsAt: Date | null;
+  /** Max dashboards (tier + extra dashboard add-ons). If null, use tierConfig.maxDashboards. */
+  effectiveMaxDashboards: number | null;
+  /** Total keyword cap (base tier + extra keywords tracked add-ons). Used for business total and agency account-wide cap. */
+  effectiveKeywordCap: number | null;
 }
 
 const now = () => new Date();
@@ -61,6 +65,8 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
   creditsUsed: 0,
   creditsLimit: 0,
   creditsResetsAt: null,
+  effectiveMaxDashboards: null,
+  effectiveKeywordCap: null,
 };
 
   if (role === "SUPER_ADMIN" || role === "ADMIN") {
@@ -72,6 +78,8 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
     totalKeywords,
     creditsLimit: 10000,
     creditsResetsAt: null,
+    effectiveMaxDashboards: null,
+    effectiveKeywordCap: null,
   };
 }
 
@@ -150,7 +158,41 @@ async function getTargetKeywordCounts(clientIds: string[]) {
     creditsUsed = reset.used;
     creditsResetsAt = reset.resetsAt;
   }
-  const creditsLimit = tierConfig?.keywordResearchCreditsPerMonth ?? 0;
+  let creditsLimit = tierConfig?.keywordResearchCreditsPerMonth ?? 0;
+  let effectiveMaxDashboards: number | null = tierConfig?.maxDashboards ?? null;
+
+  const addOns = await prisma.agencyAddOn.findMany({
+    where: { agencyId: agency.id },
+    select: { addOnType: true, addOnOption: true },
+  });
+  let addOnKeywords = 0;
+  for (const a of addOns) {
+    if (a.addOnType === "extra_keyword_lookups") {
+      if (a.addOnOption === "100") creditsLimit += 100;
+      else if (a.addOnOption === "300") creditsLimit += 300;
+      else if (a.addOnOption === "500") creditsLimit += 500;
+    } else if (a.addOnType === "extra_dashboards") {
+      if (effectiveMaxDashboards != null) {
+        if (a.addOnOption === "5_slots") effectiveMaxDashboards += 5;
+        else if (a.addOnOption === "10_slots") effectiveMaxDashboards += 10;
+        else if (a.addOnOption === "25_slots") effectiveMaxDashboards += 25;
+      }
+    } else if (a.addOnType === "extra_keywords_tracked") {
+      if (a.addOnOption === "100") addOnKeywords += 100;
+      else if (a.addOnOption === "250") addOnKeywords += 250;
+      else if (a.addOnOption === "500") addOnKeywords += 500;
+    }
+  }
+
+  let effectiveKeywordCap: number | null = null;
+  if (tierConfig) {
+    if (tierConfig.type === "business" && tierConfig.keywordsTotal != null) {
+      effectiveKeywordCap = tierConfig.keywordsTotal + addOnKeywords;
+    } else if (tierConfig.maxDashboards != null && tierConfig.keywordsPerDashboard != null) {
+      const maxD = effectiveMaxDashboards ?? tierConfig.maxDashboards;
+      effectiveKeywordCap = maxD * tierConfig.keywordsPerDashboard + addOnKeywords;
+    }
+  }
 
   return {
     agencyId: agency.id,
@@ -165,6 +207,8 @@ async function getTargetKeywordCounts(clientIds: string[]) {
     creditsUsed,
     creditsLimit,
     creditsResetsAt,
+    effectiveMaxDashboards,
+    effectiveKeywordCap,
   };
 }
 
@@ -173,12 +217,12 @@ async function getTargetKeywordCounts(clientIds: string[]) {
  */
 export function canAddDashboard(ctx: AgencyTierContext): { allowed: boolean; message?: string } {
   if (!ctx.tierConfig) return { allowed: true };
-  const max = ctx.tierConfig.maxDashboards;
+  const max = ctx.effectiveMaxDashboards ?? ctx.tierConfig.maxDashboards;
   if (max === null) return { allowed: true };
   if (ctx.dashboardCount >= max) {
     return {
       allowed: false,
-      message: `Your plan allows up to ${max} dashboard${max === 1 ? "" : "s"}. Upgrade to add more.`,
+      message: `Your plan allows up to ${max} dashboard${max === 1 ? "" : "s"}. Upgrade or add an add-on to add more.`,
     };
   }
   return { allowed: true };
@@ -195,17 +239,15 @@ export function canAddKeywords(
 ): { allowed: boolean; message?: string } {
   if (!ctx.tierConfig) return { allowed: true };
   const currentForClient = ctx.keywordsByClient.get(clientId) ?? 0;
-  if (ctx.tierConfig.type === "business") {
-    const max = ctx.tierConfig.keywordsTotal ?? 0;
-    const totalAfter = ctx.totalKeywords + addCount;
-    if (totalAfter > max) {
-      return {
-        allowed: false,
-        message: `Your plan allows ${max} keywords total. You have ${ctx.totalKeywords}. Upgrade to add more.`,
-      };
-    }
-    return { allowed: true };
+  const totalAfter = ctx.totalKeywords + addCount;
+  const cap = ctx.effectiveKeywordCap;
+  if (cap != null && totalAfter > cap) {
+    return {
+      allowed: false,
+      message: `Your plan allows ${cap} keywords total. You have ${ctx.totalKeywords}. Upgrade or add an add-on to add more.`,
+    };
   }
+  if (ctx.tierConfig.type === "business") return { allowed: true };
   const perDashboard = ctx.tierConfig.keywordsPerDashboard ?? 0;
   const forThisClient = currentForClient + addCount;
   if (forThisClient > perDashboard) {
@@ -223,16 +265,14 @@ export function canAddKeywords(
 export function canAddTargetKeyword(ctx: AgencyTierContext, clientId: string): { allowed: boolean; message?: string } {
   if (!ctx.tierConfig) return { allowed: true };
   const currentForClient = ctx.targetKeywordsByClient.get(clientId) ?? 0;
-  if (ctx.tierConfig.type === "business") {
-    const max = ctx.tierConfig.keywordsTotal ?? 0;
-    if (ctx.totalTargetKeywords + 1 > max) {
-      return {
-        allowed: false,
-        message: `Your plan allows ${max} keywords total. You have ${ctx.totalTargetKeywords}. Upgrade to add more.`,
-      };
-    }
-    return { allowed: true };
+  const cap = ctx.effectiveKeywordCap;
+  if (cap != null && ctx.totalTargetKeywords + 1 > cap) {
+    return {
+      allowed: false,
+      message: `Your plan allows ${cap} keywords total. You have ${ctx.totalTargetKeywords}. Upgrade or add an add-on to add more.`,
+    };
   }
+  if (ctx.tierConfig.type === "business") return { allowed: true };
   const perDashboard = ctx.tierConfig.keywordsPerDashboard ?? 0;
   if (currentForClient + 1 > perDashboard) {
     return {

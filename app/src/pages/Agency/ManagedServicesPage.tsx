@@ -7,14 +7,6 @@ import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { Link } from "react-router-dom";
 
-const COMMISSION_BY_TIER: Record<string, number> = {
-  solo: 20,
-  starter: 25,
-  growth: 30,
-  pro: 35,
-  enterprise: 40,
-};
-
 function formatCurrency(centsOrDollars: number, asCents = false): string {
   const amount = asCents ? centsOrDollars / 100 : centsOrDollars;
   return `$${Number(amount).toFixed(2)}`;
@@ -23,36 +15,73 @@ function formatCurrency(centsOrDollars: number, asCents = false): string {
 const PACKAGES = [
   {
     id: "foundation",
-    name: "Foundation",
+    name: "SEO Essentials + Automation",
     price: 750,
     includes: [
-      "On-page SEO",
-      "Citations",
-      "Review management",
-      "Basic link building",
+      "Web chat widget installed on client's site",
+      "SMS and email conversations in one inbox",
+      "Missed call text-back automation",
+      "Review request system (send texts for Google reviews)",
+      "Lead pipeline setup (basic CRM)",
+      "One social channel connected (Facebook Messenger or Instagram DMs)",
+      "Local listings sync (50+ directories)",
+      "Review widget embedded on client's website",
+      "Appointment booking calendar with reminders",
+      "FAQ auto-replies across SMS and 1 social channel",
+      "Monthly backlinks",
+      "2 pieces of content per month",
+      "1 hour of on-page SEO optimization per month",
+      "Call and lead tracking dashboard",
+      "Local listings fully managed",
+      "1,000 SMS + 1,000 emails included",
     ],
     buttonLabel: "Activate",
   },
   {
     id: "growth",
-    name: "Growth",
+    name: "Growth & Automation",
     price: 1500,
     includes: [
-      "Everything in Foundation",
-      "Content creation",
-      "Link building",
-      "Reporting",
+      "Everything in SEO Essentials + Automation package, plus:",
+      "5 pieces of content per month (increased from 2)",
+      "2 hours of on-page SEO optimization (increased from 1 hour)",
+      "2 chatbots (web + one social channel)",
+      "Full nurture sequence (email + SMS drip campaigns)",
+      "Reactivation campaign (text, email, voicemail drop)",
+      "1,500 SMS + 1,500 emails included (increased from 1,000)",
     ],
     buttonLabel: "Activate",
   },
   {
     id: "domination",
-    name: "Domination",
+    name: "Authority Builder",
     price: 3000,
     includes: [
-      "Everything in Growth",
-      "Advanced content",
-      "Aggressive link building",
+      "Everything in Growth & Automation package, plus:",
+      "10 pieces of content per month (increased from 5)",
+      "PPC and social ads management (Google + Facebook/Instagram)",
+      "3 chatbots (web, Facebook, Instagram + optional email responder)",
+      "Multi-channel nurture campaigns (SMS, email, Facebook, Instagram)",
+      "AI agent setup (handles inbound chats/leads on 1 channel)",
+      "Social planner access (DIY scheduling tool)",
+      "2,500 SMS + 2,500 emails included (increased from 1,500)",
+    ],
+    buttonLabel: "Activate",
+  },
+  {
+    id: "market_domination",
+    name: "Market Domination",
+    price: 5000,
+    includes: [
+      "Everything in Authority Builder package, plus:",
+      "15 pieces of content per month (increased from 10)",
+      "Full PPC and social ads management (Google, Facebook, Instagram)",
+      "Unlimited chatbot workflows (web, Facebook, Instagram, email, SMS)",
+      "AI Voice Agent (answers inbound calls and texts)",
+      "Advanced automations (cart recovery, upsells, win-backs, cross-sells)",
+      "Social Planner (done-for-you posting on Facebook, Instagram, LinkedIn)",
+      "Dedicated monthly strategy and growth consulting",
+      "5,000 SMS + 5,000 emails included (increased from 2,500)",
     ],
     buttonLabel: "Activate",
   },
@@ -60,8 +89,11 @@ const PACKAGES = [
     id: "custom",
     name: "Custom",
     price: 5000,
-    includes: ["Let's talk about your custom needs"],
-    commissionLabel: "Custom",
+    includes: [
+      "Fully customized service package based on client needs",
+      "Agency contacts Johnny directly to discuss requirements",
+      "Pricing negotiated based on scope of work",
+    ],
     buttonLabel: "Contact",
   },
 ];
@@ -99,7 +131,6 @@ const ManagedServicesPage = () => {
       !c.vendasta &&
       !["CANCELED", "ARCHIVED", "SUSPENDED"].includes(c.status || "")
   );
-  const commissionPct = COMMISSION_BY_TIER[tier.toLowerCase()] ?? 25;
 
   useEffect(() => {
     dispatch(fetchClients() as any);
@@ -228,16 +259,10 @@ const ManagedServicesPage = () => {
     }
   };
 
-  const pkgCommission = (pkg: (typeof PACKAGES)[0]) => {
-    if (pkg.id === "custom") return "Custom";
-    const pct = COMMISSION_BY_TIER[tier.toLowerCase()] ?? 25;
-    const amount = Math.round((pkg.price * pct) / 100);
-    return `${formatCurrency(amount)}/mo (${pct}% commission)`;
-  };
-
   const pkgPriceLabel = (pkg: (typeof PACKAGES)[0]) => {
-    if (pkg.id === "custom") return "$5,000+/month";
-    return `${formatCurrency(pkg.price)}/month`;
+    if (pkg.id === "custom") return "Starting at $5,000+/month";
+    const formatted = pkg.price >= 1000 ? `$${pkg.price.toLocaleString()}` : formatCurrency(pkg.price);
+    return `${formatted}/month`;
   };
 
   return (
@@ -246,34 +271,37 @@ const ManagedServicesPage = () => {
       <header className="mb-10">
         <h1 className="text-2xl font-bold text-gray-900">Managed SEO Services</h1>
         <p className="text-lg text-primary-600 font-medium mt-1">White-label fulfillment by Design ME Marketing</p>
-        <p className="text-gray-600 mt-2 max-w-2xl">
-          Choose a package, select a client, we handle the rest. You earn commission based on your plan tier.
-        </p>
       </header>
 
-      {/* Middle Section - Service Packages */}
+      {/* Overview */}
+      <section className="mb-10 rounded-xl border border-gray-200 bg-gray-50 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Overview</h2>
+        <p className="text-gray-700 max-w-3xl">
+          Agencies can activate managed SEO and automation services for their clients through the dashboard. When activated, Design ME Marketing fulfills the work.
+        </p>
+      </section>
+
+      {/* Service Packages */}
       <section className="mb-12">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Service Packages</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Available Managed Service Packages</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {PACKAGES.map((pkg) => (
             <div
               key={pkg.id}
-              className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col"
+              className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col min-h-0"
             >
               <h3 className="text-xl font-bold text-gray-900">{pkg.name}</h3>
               <p className="text-2xl font-bold text-primary-600 mt-2">{pkgPriceLabel(pkg)}</p>
-              <ul className="mt-4 space-y-2 text-sm text-gray-700">
+              <p className="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">What&apos;s included</p>
+              <ul className="mt-2 space-y-1.5 text-sm text-gray-700 overflow-y-auto flex-1 min-h-0 max-h-64 pr-1">
                 {pkg.includes.map((item, i) => (
                   <li key={i} className="flex items-start gap-2">
-                    <span className="text-primary-500 mt-0.5">•</span>
-                    {item}
+                    <span className="text-primary-500 mt-0.5 shrink-0">•</span>
+                    <span>{item}</span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-4 text-sm font-medium text-gray-700">
-                You earn: {pkgCommission(pkg)}
-              </p>
-              <div className="mt-6 flex-1 flex items-end">
+              <div className="mt-4 shrink-0">
                 <button
                   type="button"
                   onClick={() => openActivateModal(pkg)}
@@ -317,7 +345,6 @@ const ManagedServicesPage = () => {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Package & Price</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Your Commission</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -329,9 +356,6 @@ const ManagedServicesPage = () => {
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{s.clientName}</td>
                     <td className="px-6 py-4 text-sm text-gray-700">
                       {s.packageName} ({formatCurrency(s.monthlyPrice, true)}/mo)
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-700">
-                      {formatCurrency(s.monthlyCommission, true)}/mo ({s.commissionPercent}%)
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
                       {new Date(s.startDate).toLocaleDateString()}
@@ -416,9 +440,6 @@ const ManagedServicesPage = () => {
             <h3 className="text-lg font-bold text-gray-900">Activate Managed Service</h3>
             <p className="mt-2 text-gray-600">
               {selectedPackage.name} – {pkgPriceLabel(selectedPackage)}
-            </p>
-            <p className="mt-1 text-sm font-medium text-primary-600">
-              Your commission: {pkgCommission(selectedPackage)}
             </p>
 
             <div className="mt-6">

@@ -5,7 +5,7 @@ import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
-import { getTierConfig } from '../lib/tiers.js';
+import { getTierConfig, type TierId } from '../lib/tiers.js';
 
 const router = express.Router();
 
@@ -501,6 +501,7 @@ router.post('/:agencyId/invite-specialist', authenticateToken, async (req, res) 
 });
 
 // Create Stripe billing portal session (for Subscription page: Manage Billing / Upgrade / Downgrade)
+// Uses the current user's agency.stripeCustomerId (or creates one if missing). Fallback: STRIPE_AGENCY_CUSTOMER_ID. Never uses req.body for customer id.
 router.post('/billing-portal', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
@@ -511,13 +512,34 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
     if (!stripe || !isStripeConfigured()) {
       return res.status(400).json({ url: null, message: 'Billing is not configured. Contact support.' });
     }
-    const customerId = process.env.STRIPE_AGENCY_CUSTOMER_ID || (req.body && req.body.stripeCustomerId);
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ url: null, message: 'No agency found.' });
+    }
+
+    let customerId = membership.agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
     if (!customerId) {
-      return res.status(400).json({
-        url: null,
-        message: 'No billing account linked. Contact support to set up billing.',
+      const agency = membership.agency;
+      const email = agency.contactEmail ?? (await prisma.user.findUnique({
+        where: { id: membership.userId },
+        select: { email: true },
+      }).then((u) => u?.email ?? undefined));
+      const customer = await stripe.customers.create({
+        email: email ?? undefined,
+        name: agency.name ?? undefined,
+        metadata: { agencyId: agency.id },
+      });
+      customerId = customer.id;
+      await prisma.agency.update({
+        where: { id: agency.id },
+        data: { stripeCustomerId: customerId },
       });
     }
+
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: returnUrl,
@@ -563,6 +585,7 @@ router.get('/me', authenticateToken, async (req, res) => {
         ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000))
         : null;
 
+    const tierId = tierConfig?.id ?? null;
     res.json({
       id: membership.agency.id,
       name: membership.agency.name,
@@ -570,12 +593,14 @@ router.get('/me', authenticateToken, async (req, res) => {
       createdAt: membership.agency.createdAt,
       agencyRole: membership.agencyRole,
       subscriptionTier: membership.agency.subscriptionTier ?? null,
-      tierId: tierConfig?.id ?? null,
+      tierId,
       isBusinessTier: tierConfig?.type === "business",
       maxDashboards: tierConfig?.maxDashboards ?? null,
       trialEndsAt: trialEndsAt?.toISOString() ?? null,
       trialActive: !!trialActive,
       trialDaysLeft,
+      allowedAddOns: getAllowedAddOnOptions(tierId as TierId | null),
+      basePriceMonthlyUsd: tierConfig?.priceMonthlyUsd ?? null,
     });
   } catch (error) {
     console.error('Get user agency error:', error);
@@ -737,15 +762,16 @@ router.get('/managed-services', authenticateToken, async (req, res) => {
 });
 
 const activateManagedServiceSchema = z.object({
-  packageId: z.enum(['foundation', 'growth', 'domination', 'custom']),
+  packageId: z.enum(['foundation', 'growth', 'domination', 'market_domination', 'custom']),
   clientId: z.string().min(1),
   clientAgreed: z.boolean().refine((v) => v === true, { message: 'Client must have agreed to this service' }),
 });
 
 const PACKAGES: Record<string, { name: string; priceCents: number }> = {
-  foundation: { name: 'Foundation', priceCents: 75000 },
-  growth: { name: 'Growth', priceCents: 150000 },
-  domination: { name: 'Domination', priceCents: 300000 },
+  foundation: { name: 'SEO Essentials + Automation', priceCents: 75000 },
+  growth: { name: 'Growth & Automation', priceCents: 150000 },
+  domination: { name: 'Authority Builder', priceCents: 300000 },
+  market_domination: { name: 'Market Domination', priceCents: 500000 },
   custom: { name: 'Custom', priceCents: 500000 },
 };
 
@@ -933,15 +959,29 @@ router.patch('/managed-services/:id/approve', authenticateToken, async (req, res
       return res.status(400).json({ message: 'This managed service is not pending approval' });
     }
 
+    /** Env key suffix by packageId (matches service page names: SEO Essentials + Automation, etc.) */
+    const MANAGED_PRICE_ENV_KEY: Record<string, string> = {
+      foundation: 'SEO_ESSENTIALS_AUTOMATION',
+      growth: 'GROWTH_AUTOMATION',
+      domination: 'AUTHORITY_BUILDER',
+      market_domination: 'MARKET_DOMINATION',
+      custom: 'CUSTOM',
+    };
+    const envKey = MANAGED_PRICE_ENV_KEY[row.packageId];
+    const priceEnvVar = `STRIPE_PRICE_MANAGED_${envKey}`;
     let stripeSubscriptionItemId: string | null = null;
     const stripe = getStripe();
-    const customerId = process.env.STRIPE_AGENCY_CUSTOMER_ID;
-    if (stripe && isStripeConfigured() && customerId) {
+    const customerId = (row.agency as { stripeCustomerId?: string | null })?.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
+    if (stripe && isStripeConfigured() && customerId && envKey) {
       try {
-        const priceId = (process.env as any)[`STRIPE_PRICE_MANAGED_${row.packageId.toUpperCase()}`];
-        if (priceId) {
+        const priceId = (process.env as any)[priceEnvVar];
+        if (!priceId) {
+          console.warn(`[Managed service approve] No Stripe subscription item created: ${priceEnvVar} is not set in .env. Add it and restart the server to attach managed services to Stripe.`);
+        } else {
           const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
-          if (subs.data.length > 0) {
+          if (subs.data.length === 0) {
+            console.warn(`[Managed service approve] No Stripe subscription item created: customer ${customerId} has no active subscription. Create a subscription for this customer in Stripe Dashboard.`);
+          } else {
             const item = await stripe.subscriptionItems.create({
               subscription: subs.data[0].id,
               price: priceId,
@@ -1161,23 +1201,52 @@ router.get('/add-ons', authenticateToken, async (req, res) => {
   }
 });
 
+/** Which add-on options each tier can add. Business tiers cannot add Extra Dashboards (only 1 business). */
+export function getAllowedAddOnOptions(tierId: TierId | null): {
+  extra_dashboards: string[];
+  extra_keywords_tracked: string[];
+  extra_keyword_lookups: string[];
+} {
+  const keywordsTracked = ['100', '250', '500'];
+  const keywordLookups = ['100', '300', '500'];
+  if (!tierId) return { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] };
+  switch (tierId) {
+    case 'business_lite':
+    case 'business_pro':
+      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+    case 'solo':
+      return { extra_dashboards: ['5_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+    case 'starter':
+      return { extra_dashboards: ['5_slots', '10_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+    case 'growth':
+    case 'pro':
+    case 'enterprise':
+      return { extra_dashboards: ['5_slots', '10_slots', '25_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+    default:
+      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+  }
+}
+
 const addAddOnSchema = z.object({
-  addOnType: z.enum(['credit_pack', 'extra_slots', 'map_pack']),
+  addOnType: z.enum(['extra_dashboards', 'extra_keywords_tracked', 'extra_keyword_lookups']),
   addOnOption: z.string().min(1),
 });
 
 const ADDON_OPTIONS: Record<string, Record<string, { displayName: string; details: string; priceCents: number; billingInterval: string }>> = {
-  credit_pack: {
-    '100': { displayName: 'Keyword Credit Pack (100 credits)', details: '100 research credits, one-time', priceCents: 3500, billingInterval: 'one_time' },
-    '500': { displayName: 'Keyword Credit Pack (500 credits)', details: '500 research credits, one-time', priceCents: 15000, billingInterval: 'one_time' },
+  extra_dashboards: {
+    '5_slots': { displayName: 'Extra Client Dashboards (+5)', details: '+5 client dashboards', priceCents: 9900, billingInterval: 'monthly' },
+    '10_slots': { displayName: 'Extra Client Dashboards (+10)', details: '+10 client dashboards', priceCents: 17900, billingInterval: 'monthly' },
+    '25_slots': { displayName: 'Extra Client Dashboards (+25)', details: '+25 client dashboards', priceCents: 39900, billingInterval: 'monthly' },
   },
-  extra_slots: {
-    '5_slots': { displayName: 'Extra Client Slots (+5)', details: '+5 client dashboards', priceCents: 9900, billingInterval: 'monthly' },
+  extra_keywords_tracked: {
+    '100': { displayName: 'Extra Keywords Tracked (+100)', details: '+100 keywords tracked account-wide', priceCents: 4900, billingInterval: 'monthly' },
+    '250': { displayName: 'Extra Keywords Tracked (+250)', details: '+250 keywords tracked account-wide', priceCents: 9900, billingInterval: 'monthly' },
+    '500': { displayName: 'Extra Keywords Tracked (+500)', details: '+500 keywords tracked account-wide', priceCents: 17900, billingInterval: 'monthly' },
   },
-  map_pack: {
-    starter: { displayName: 'Local Map Pack – Starter', details: '1 keyword per client, bi-weekly updates', priceCents: 4900, billingInterval: 'monthly' },
-    growth: { displayName: 'Local Map Pack – Growth', details: '3 keywords per client, weekly updates', priceCents: 14900, billingInterval: 'monthly' },
-    pro: { displayName: 'Local Map Pack – Pro', details: '5 keywords per client, weekly updates', priceCents: 24900, billingInterval: 'monthly' },
+  extra_keyword_lookups: {
+    '100': { displayName: 'Extra Keyword Research Lookups (+100/mo)', details: '+100 keyword lookups per month', priceCents: 4900, billingInterval: 'monthly' },
+    '300': { displayName: 'Extra Keyword Research Lookups (+300/mo)', details: '+300 keyword lookups per month', priceCents: 12900, billingInterval: 'monthly' },
+    '500': { displayName: 'Extra Keyword Research Lookups (+500/mo)', details: '+500 keyword lookups per month', priceCents: 19900, billingInterval: 'monthly' },
   },
 };
 
@@ -1198,9 +1267,21 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
     const option = options[body.addOnOption];
     if (!option) return res.status(400).json({ message: 'Invalid add-on option' });
 
+    const tierConfig = getTierConfig(membership!.agency.subscriptionTier);
+    const tierId = tierConfig?.id ?? null;
+    const allowed = getAllowedAddOnOptions(tierId as TierId | null);
+    const allowedForType = allowed[body.addOnType as keyof typeof allowed];
+    if (!Array.isArray(allowedForType) || !allowedForType.includes(body.addOnOption)) {
+      if (body.addOnType === 'extra_dashboards' && (tierId === 'business_lite' || tierId === 'business_pro')) {
+        return res.status(400).json({ message: 'Extra Dashboards are not available for Business tiers (only tracks 1 business).' });
+      }
+      return res.status(400).json({ message: 'This add-on is not available for your plan tier.' });
+    }
+
+    const agencyRecord = membership!.agency as { stripeCustomerId?: string | null };
+    const customerId = agencyRecord?.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
     let stripeSubscriptionItemId: string | null = null;
     const stripe = getStripe();
-    const customerId = process.env.STRIPE_AGENCY_CUSTOMER_ID;
     if (stripe && isStripeConfigured() && customerId) {
       try {
         const priceKey = `STRIPE_PRICE_ADDON_${body.addOnType.toUpperCase()}_${body.addOnOption.toUpperCase().replace('-', '_')}`;

@@ -26,13 +26,18 @@ export type MrrCategory =
   | "managed_foundation"
   | "managed_growth"
   | "managed_domination"
+  | "managed_market_domination"
+  | "managed_custom"
   | "addon_slots"
   | "addon_mappacks"
   | "addon_creditpacks"
+  | "addon_dashboards"
+  | "addon_keywords_tracked"
+  | "addon_keyword_lookups"
   | "other";
 
 const PLATFORM_TIERS = ["solo", "starter", "growth", "pro", "enterprise", "business_lite", "business_pro"];
-const MANAGED_PACKAGES = ["foundation", "growth", "domination"];
+const MANAGED_PACKAGES = ["foundation", "growth", "market_domination", "domination", "custom"];
 export function categorizeProduct(product: Stripe.Product | string): MrrCategory | "other" {
   const name = typeof product === "string" ? product : (product.name || "").toLowerCase();
   const metadata =
@@ -62,6 +67,9 @@ export function categorizeProduct(product: Stripe.Product | string): MrrCategory
   if (name.includes("slot") || name.includes("extra slot")) return "addon_slots";
   if (name.includes("map pack") || name.includes("mappack")) return "addon_mappacks";
   if (name.includes("credit pack") || name.includes("creditpack")) return "addon_creditpacks";
+  if (name.includes("dashboard") && (name.includes("extra") || name.includes("client"))) return "addon_dashboards";
+  if (name.includes("keywords tracked") || name.includes("keyword tracked")) return "addon_keywords_tracked";
+  if (name.includes("keyword lookup") || name.includes("research lookup")) return "addon_keyword_lookups";
 
   return "other";
 }
@@ -74,11 +82,16 @@ export const CATEGORY_LABELS: Record<MrrCategory | "other", string> = {
   platform_enterprise: "Enterprise",
   platform_business_lite: "Business Lite",
   platform_business_pro: "Business Pro",
-  managed_foundation: "Foundation (Managed)",
-  managed_growth: "Growth (Managed)",
-  managed_domination: "Domination (Managed)",
+  managed_foundation: "SEO Essentials + Automation (Managed)",
+  managed_growth: "Growth & Automation (Managed)",
+  managed_domination: "Authority Builder (Managed)",
+  managed_market_domination: "Market Domination (Managed)",
+  managed_custom: "Custom (Managed)",
   addon_slots: "Extra Slots",
   addon_mappacks: "Map Packs",
   addon_creditpacks: "Credit Packs",
+  addon_dashboards: "Extra Client Dashboards",
+  addon_keywords_tracked: "Extra Keywords Tracked",
+  addon_keyword_lookups: "Extra Keyword Research Lookups",
   other: "Other",
 };

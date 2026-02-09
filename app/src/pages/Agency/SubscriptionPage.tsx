@@ -145,6 +145,9 @@ const SubscriptionPage = () => {
         year: "numeric",
       })
     : "—";
+  const paymentMethodLabel = data.paymentMethod
+    ? `•••• ${data.paymentMethod.last4} (${(data.paymentMethod.brand || "").charAt(0).toUpperCase() + (data.paymentMethod.brand || "").slice(1).toLowerCase()})`
+    : "—";
   const hasTrial = data.trialDaysLeft != null && data.trialDaysLeft > 0;
 
   const planOrder = ["solo", "starter", "growth", "pro", "enterprise"];
@@ -184,7 +187,8 @@ const SubscriptionPage = () => {
                 <div>
                   <p className="text-sm font-medium text-gray-500">Current Plan</p>
                   <p className="text-xl font-bold text-gray-900">
-                    {currentPlanMeta?.name ?? data.currentPlan} ({currentPriceLabel}/month)
+                    {currentPlanMeta?.name ?? data.currentPlan} ({currentPriceLabel}
+                    {currentPlanMeta?.price != null ? "/month" : ""})
                   </p>
                 </div>
                 <div>
@@ -193,11 +197,7 @@ const SubscriptionPage = () => {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Payment Method</p>
-                  <p className="text-xl font-bold text-gray-900">
-                    {data.paymentMethod
-                      ? `•••• ${data.paymentMethod.last4} (${data.paymentMethod.brand})`
-                      : "—"}
-                  </p>
+                  <p className="text-xl font-bold text-gray-900">{paymentMethodLabel}</p>
                 </div>
               </div>
 
@@ -285,37 +285,20 @@ const SubscriptionPage = () => {
                   type="button"
                   onClick={handleViewInvoiceHistory}
                   disabled={invoicesLoading}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
                 >
                   {invoicesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  View invoice history
+                  Download Invoices
                 </button>
               </div>
             </div>
           </section>
 
-          {/* Invoice history - linked from dashboard Card 4 */}
-          <section id="invoices" className="scroll-mt-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">Invoice history</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              View and download your past invoices in the billing portal.
-            </p>
-            <button
-              type="button"
-              onClick={handleViewInvoiceHistory}
-              disabled={invoicesLoading || portalLoading}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
-            >
-              {invoicesLoading || portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              View invoice history
-            </button>
-          </section>
-
           {/* Middle Section - Available Plans */}
-          <section>
+          <section className="mt-10">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Available Plans</h2>
             <p className="text-sm text-gray-500 mb-6">
-              Upgrades are prorated and take effect immediately. Downgrades take effect at the next billing cycle.
+              Plan changes use Stripe&apos;s billing portal. Upgrades are prorated and take effect immediately. Downgrades take effect at the next billing cycle.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               {PLANS.map((plan) => {
@@ -346,7 +329,7 @@ const SubscriptionPage = () => {
                     </div>
                     <div className="mt-4">
                       {isCurrent ? (
-                        <span className="inline-block px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium">
+                        <span className="inline-block w-full text-center px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium">
                           Current plan
                         </span>
                       ) : isHigher ? (
@@ -382,6 +365,19 @@ const SubscriptionPage = () => {
                 );
               })}
             </div>
+          </section>
+
+          <section id="invoices" className="mt-10 scroll-mt-6 pt-6 border-t border-gray-200">
+            <p className="text-sm text-gray-500 mb-2">Past invoices are available in the billing portal.</p>
+            <button
+              type="button"
+              onClick={handleViewInvoiceHistory}
+              disabled={invoicesLoading || portalLoading}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
+            >
+              {invoicesLoading || portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download Invoices
+            </button>
           </section>
         </>
       )}

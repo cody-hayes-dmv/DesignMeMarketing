@@ -13,6 +13,7 @@ import onboardingRoutes from "./routes/onboarding.js";
 import teamRoutes from "./routes/team.js";
 import uploadRoutes from "./routes/upload.js";
 import financialRoutes from "./routes/financial.js";
+import stripeWebhookRoutes from "./routes/stripeWebhook.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
 // Load .env file from server directory
@@ -57,6 +58,8 @@ app.use(
     credentials: true,
   })
 );
+// Stripe webhook needs raw body for signature verification (must be before express.json())
+app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }), stripeWebhookRoutes);
 app.use(express.json());
 
 // Routes

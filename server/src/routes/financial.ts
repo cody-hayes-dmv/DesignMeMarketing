@@ -38,9 +38,14 @@ const CATEGORY_COLORS: Record<string, string> = {
   managed_foundation: "#0ea5e9",
   managed_growth: "#06b6d4",
   managed_domination: "#14b8a6",
+  managed_market_domination: "#0d9488",
+  managed_custom: "#059669",
   addon_slots: "#22c55e",
   addon_mappacks: "#84cc16",
   addon_creditpacks: "#eab308",
+  addon_dashboards: "#22c55e",
+  addon_keywords_tracked: "#84cc16",
+  addon_keyword_lookups: "#eab308",
   other: "#94a3b8",
 };
 
