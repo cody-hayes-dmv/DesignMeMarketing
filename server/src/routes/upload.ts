@@ -108,6 +108,7 @@ const workLogFileFilter = (req: express.Request, file: Express.Multer.File, cb: 
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
     "text/plain",
     "text/csv",
+    "application/octet-stream", // fallback when OS/browser reports unknown type
   ];
   if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
@@ -122,20 +123,28 @@ const uploadWorkLog = multer({
   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB per file
 });
 
-// Work log attachment upload (PDF, docs, images, etc.)
-router.post("/worklog", authenticateToken, uploadWorkLog.single("file"), (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
+// Work log: multiple files in one request (same pattern as /upload/multiple), field name "files"
+router.post("/worklog", authenticateToken, (req, res, next) => {
+  uploadWorkLog.array("files", 10)(req, res, (err: any) => {
+    if (err) {
+      const message = err.message || "Invalid file. Allowed: PDF, Word, Excel, images, videos, text, CSV. Max 25MB per file.";
+      return res.status(400).json({ message });
     }
-    const fileUrl = `/uploads/${req.file.filename}`;
+    next();
+  });
+}, (req: express.Request, res: express.Response) => {
+  try {
+    const files = req.files as Express.Multer.File[] | undefined;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ message: "No files uploaded" });
+    }
     const baseUrl = process.env.API_URL || `${req.protocol}://${req.get("host")}`;
-    const fullUrl = `${baseUrl}${fileUrl}`;
-    res.json({
-      type: "url",
-      value: fullUrl,
-      name: req.file.originalname,
+    const results = files.map((file) => {
+      const fileUrl = `/uploads/${file.filename}`;
+      const fullUrl = `${baseUrl}${fileUrl}`;
+      return { type: "url" as const, value: fullUrl, name: file.originalname };
     });
+    res.json(results);
   } catch (error: any) {
     console.error("Work log upload error:", error);
     res.status(500).json({ message: "Failed to upload file" });

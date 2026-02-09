@@ -167,7 +167,7 @@ router.get("/assignable-users", authenticateToken, async (req, res) => {
     if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN" && req.user.role !== "AGENCY") {
       return res.status(403).json({ message: "Access denied" });
     }
-    const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
     const users = await prisma.user.findMany({
       where: {
         role: { in: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
@@ -175,8 +175,8 @@ router.get("/assignable-users", authenticateToken, async (req, res) => {
         ...(search
           ? {
               OR: [
-                { name: { contains: search, mode: "insensitive" } },
-                { email: { contains: search, mode: "insensitive" } },
+                { name: { contains: search } },
+                { email: { contains: search } },
               ],
             }
           : {}),

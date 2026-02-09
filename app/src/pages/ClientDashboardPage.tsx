@@ -959,7 +959,14 @@ const ClientDashboardPage: React.FC = () => {
     if (!proof || typeof proof !== "string") return [];
     try {
       const arr = JSON.parse(proof);
-      return Array.isArray(arr) ? arr.filter((x: any) => x && typeof x.value === "string") : [];
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .filter((x: any) => x && typeof x.value === "string")
+        .map((x: any) => ({
+          type: x.type === "video" ? "video" : x.type === "image" ? "image" : "url",
+          value: x.value,
+          name: x.name,
+        }));
     } catch {
       return [];
     }
@@ -1025,6 +1032,28 @@ const ClientDashboardPage: React.FC = () => {
     // Read Task field from DOM so we always save current contenteditable content (state can be stale)
     const taskNotesFromDom = workLogTaskNotesRef.current?.innerHTML?.trim() ?? "";
     const taskNotesValue = (taskNotesFromDom || workLogForm.taskNotes || "").trim() || undefined;
+    // Normalize proof for task API: each item must have type "image"|"video"|"url" and value as absolute URL
+    const apiOrigin =
+      typeof window !== "undefined" && api.defaults.baseURL
+        ? new URL(api.defaults.baseURL).origin
+        : typeof window !== "undefined"
+          ? window.location.origin
+          : "";
+    const proofItems =
+      workLogForm.attachments.length > 0
+        ? workLogForm.attachments
+            .filter((a) => a && typeof a.value === "string" && a.value.trim())
+            .map((a) => {
+              const type = a.type === "video" ? "video" : a.type === "image" ? "image" : "url";
+              let value = a.value.trim();
+              if (!value.startsWith("http://") && !value.startsWith("https://") && apiOrigin) {
+                value = value.startsWith("/") ? `${apiOrigin}${value}` : `${apiOrigin}/${value}`;
+              }
+              return { type, value, name: a.name };
+            })
+            .filter((a) => /^https?:\/\//.test(a.value))
+        : undefined;
+
     const payload = {
       title: titleValue,
       description: titleValue || undefined,
@@ -1034,7 +1063,7 @@ const ClientDashboardPage: React.FC = () => {
       assigneeId: workLogForm.assigneeId.trim() || undefined,
       status: workLogForm.status,
       clientId,
-      proof: workLogForm.attachments.length > 0 ? workLogForm.attachments : undefined,
+      proof: proofItems,
     };
 
     if (!titleValue) {
@@ -1088,60 +1117,31 @@ const ClientDashboardPage: React.FC = () => {
 
   const handleWorkLogFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files?.length) return;
-    e.target.value = "";
-    const fileList = Array.from(files);
+    if (!files || files.length === 0) return;
+
     setWorkLogUploading(true);
-    const uploaded: WorkLogAttachment[] = [];
-    let failed = 0;
-    let firstError: string | null = null;
-    const apiOrigin =
-      typeof window !== "undefined"
-        ? api.defaults.baseURL
-          ? new URL(api.defaults.baseURL).origin
-          : window.location.origin
-        : "";
     try {
-      for (const file of fileList) {
-        try {
-          const formData = new FormData();
-          formData.append("file", file);
-          const res = await api.post("/upload/worklog", formData);
-          const raw = res.data as WorkLogAttachment;
-          if (!raw?.value) continue;
-          const value =
-            raw.value.startsWith("http://") || raw.value.startsWith("https://")
-              ? raw.value
-              : apiOrigin
-                ? `${apiOrigin}${raw.value.startsWith("/") ? "" : "/"}${raw.value}`
-                : raw.value;
-          uploaded.push({
-            type: "url",
-            value,
-            name: raw.name ?? file.name,
-          });
-        } catch (err: any) {
-          failed += 1;
-          const msg =
-            (err?.response?.data && typeof err.response.data === "object" && err.response.data.message) ||
-            err?.message ||
-            "Upload failed.";
-          if (!firstError) firstError = msg;
-        }
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append("files", files[i]);
       }
-      if (uploaded.length > 0) {
-        setWorkLogForm((prev) => ({ ...prev, attachments: [...prev.attachments, ...uploaded] }));
-        if (failed === 0) {
-          toast.success(uploaded.length === 1 ? "File attached." : `${uploaded.length} files attached.`);
-        } else {
-          toast.success(`${uploaded.length} file(s) attached. ${failed} failed.`);
-        }
+
+      const response = await api.post("/upload/worklog", formData);
+      const uploadedFiles = Array.isArray(response.data) ? response.data : [response.data];
+      const items: WorkLogAttachment[] = uploadedFiles
+        .filter((raw: any) => raw && typeof raw.value === "string")
+        .map((raw: any) => ({ type: "url", value: raw.value, name: raw.name }));
+
+      if (items.length > 0) {
+        setWorkLogForm((prev) => ({ ...prev, attachments: [...prev.attachments, ...items] }));
+        toast.success(items.length === 1 ? "File uploaded successfully!" : "Files uploaded successfully!");
       }
-      if (failed > 0 && uploaded.length === 0) {
-        toast.error(firstError || "Failed to upload file(s).");
-      }
+    } catch (err: any) {
+      console.error("Work log upload error", err);
+      toast.error(err?.response?.data?.message || "Failed to upload file(s).");
     } finally {
       setWorkLogUploading(false);
+      e.target.value = "";
     }
   };
 
@@ -6695,7 +6695,7 @@ const ClientDashboardPage: React.FC = () => {
                                 type="url"
                                 value={workLogUrlInput}
                                 onChange={(e) => setWorkLogUrlInput(e.target.value)}
-                                placeholder="Enter URL (e.g., https://example.com/file.pdf)"
+                                placeholder="Enter URL (e.g., https://example.com/image.png)"
                                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                               />
                               <button
@@ -8439,7 +8439,7 @@ const ClientDashboardPage: React.FC = () => {
                             type="url"
                             value={workLogUrlInput}
                             onChange={(e) => setWorkLogUrlInput(e.target.value)}
-                            placeholder="Enter URL (e.g., https://example.com/file.pdf)"
+                            placeholder="Enter URL (e.g., https://example.com/image.png)"
                             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                           />
                           <button

@@ -37,7 +37,12 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         [clients]
     );
     const { user } = useSelector((state: RootState) => state.auth);
-    const [specialists, setSpecialists] = useState<Array<{ id: string; name: string | null; email: string; specialties?: string[] }>>([]);
+    const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
+    const [assignableLoading, setAssignableLoading] = useState(false);
+    const [assignableSearch, setAssignableSearch] = useState("");
+    const [assignToOpen, setAssignToOpen] = useState(false);
+    const [assigneeDisplay, setAssigneeDisplay] = useState("");
+    const assignToRef = React.useRef<HTMLDivElement>(null);
     const [form, setForm] = useState({
         title: "",
         description: "",
@@ -64,45 +69,39 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     });
 
     useEffect(() => {
-        if (open) {
-            // Fetch clients if not already loaded
-            if (clients.length === 0) {
-                dispatch(fetchClients() as any);
-            }
-            // Fetch specialists
-            fetchSpecialists();
+        if (open && clients.length === 0) {
+            dispatch(fetchClients() as any);
         }
-    }, [open]);
+    }, [open, clients.length, dispatch]);
 
-    const fetchSpecialists = async () => {
-        try {
-            const response = await api.get("/auth/specialists");
-            setSpecialists(Array.isArray(response.data) ? response.data : []);
-        } catch (error) {
-            console.error("Error fetching specialists:", error);
-        }
-    };
+    // Fetch assignable users (Super Admin, Admin, Specialist) when modal is open
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        setAssignableLoading(true);
+        const q = assignableSearch.trim();
+        api.get("/tasks/assignable-users", { params: q ? { search: q } : {} })
+            .then((res) => {
+                if (!cancelled && Array.isArray(res.data)) setAssignableUsers(res.data);
+            })
+            .catch(() => {
+                if (!cancelled) setAssignableUsers([]);
+            })
+            .finally(() => {
+                if (!cancelled) setAssignableLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, [open, assignableSearch]);
 
-    // Auto-suggest assignee by specialty when category is set (create mode)
-    const SPECIALTY_KEYS = ["ON_PAGE_SEO", "LINK_BUILDING", "CONTENT_WRITING", "TECHNICAL_SEO"] as const;
-    const categoryToSpecialtyKeys = (category: string): string[] => {
-        const c = (category || "").toLowerCase();
-        const out: string[] = [];
-        if (c.includes("on-page") || c.includes("on page")) out.push("ON_PAGE_SEO");
-        if (c.includes("link building") || c.includes("linkbuilding")) out.push("LINK_BUILDING");
-        if (c.includes("content")) out.push("CONTENT_WRITING");
-        if (c.includes("technical")) out.push("TECHNICAL_SEO");
-        return out;
-    };
-    const getSuggestedAssigneeId = (category: string): string | null => {
-        const keys = categoryToSpecialtyKeys(category);
-        if (keys.length === 0) return null;
-        const match = specialists.find((s) => {
-            const spec = s.specialties || [];
-            return keys.some((k) => spec.includes(k));
-        });
-        return match?.id ?? null;
-    };
+    // Close Assign to dropdown on outside click
+    useEffect(() => {
+        if (!assignToOpen) return;
+        const onDocClick = (e: MouseEvent) => {
+            if (assignToRef.current && !assignToRef.current.contains(e.target as Node)) setAssignToOpen(false);
+        };
+        document.addEventListener("click", onDocClick);
+        return () => document.removeEventListener("click", onDocClick);
+    }, [assignToOpen]);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
@@ -170,7 +169,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             clientId: form.clientId || undefined,
             priority: form.priority || undefined,
             estimatedHours: form.estimatedHours ? parseInt(form.estimatedHours) : undefined,
-            proof: proof.length > 0 ? proof : undefined,
+            // Always send current proof so removals are saved (empty array clears proof on server)
+            proof: proof.length > 0 ? proof : [],
         };
 
         try {
@@ -195,17 +195,21 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     React.useEffect(() => {
         if (open) {
             if (mode === 1 && task) {
+                const assignee = task.assignee;
                 setForm({
                     title: task.title ?? "",
                     description: task.description ?? "",
                     category: task.category ?? "",
                     status: task.status,
                     dueDate: task.dueDate ? new Date(task.dueDate) : null,
-                    assigneeId: task.assignee?.id ?? "",
+                    assigneeId: assignee?.id ?? "",
                     clientId: task.client?.id ?? "",
                     priority: (task as any).priority ?? "",
                     estimatedHours: (task as any).estimatedHours?.toString() ?? "",
                 });
+                setAssigneeDisplay(assignee ? (assignee.name || assignee.email || "") : "");
+                setAssignableSearch("");
+                setAssignToOpen(false);
                 setProof((() => {
                     const p = task.proof;
                     if (Array.isArray(p)) return p as ProofItem[];
@@ -232,6 +236,9 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                     estimatedHours: "",
                 });
                 setProof([]);
+                setAssigneeDisplay("");
+                setAssignableSearch("");
+                setAssignToOpen(false);
             }
             setUrlInput("");
             setUrlType("url");
@@ -353,11 +360,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <input
                                 type="text"
                                 value={form.category}
-                                onChange={(e) => {
-                                    const newCategory = e.target.value;
-                                    const suggestedId = mode === 0 && !form.assigneeId ? getSuggestedAssigneeId(newCategory) : null;
-                                    setForm({ ...form, category: newCategory, assigneeId: suggestedId || form.assigneeId });
-                                }}
+                                onChange={(e) => setForm({ ...form, category: e.target.value })}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                 placeholder="e.g. On-Page SEO, Link Building"
                             />
@@ -390,20 +393,66 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             />
                         </div>
 
-                        <div>
+                        <div ref={assignToRef} className="relative">
                             <label className="block text-sm font-medium text-gray-700 mb-2">Assign to</label>
-                            <select
-                                value={form.assigneeId}
-                                onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            >
-                                <option value="">Unassigned</option>
-                                {specialists.map((specialist) => (
-                                    <option key={specialist.id} value={specialist.id}>
-                                        {specialist.name || specialist.email} (Specialist)
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="flex items-stretch gap-2">
+                                <input
+                                    type="text"
+                                    value={form.assigneeId ? assigneeDisplay : assignableSearch}
+                                    onChange={(e) => {
+                                        setAssignableSearch(e.target.value);
+                                        setAssignToOpen(true);
+                                        if (form.assigneeId && e.target.value !== assigneeDisplay) {
+                                            setForm((p) => ({ ...p, assigneeId: "" }));
+                                            setAssigneeDisplay("");
+                                        }
+                                    }}
+                                    onFocus={() => setAssignToOpen(true)}
+                                    placeholder="Search by name or email (Super Admin, Admin, Specialist)"
+                                    className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                                {form.assigneeId && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setForm((p) => ({ ...p, assigneeId: "" }));
+                                            setAssigneeDisplay("");
+                                            setAssignableSearch("");
+                                            setAssignToOpen(true);
+                                        }}
+                                        className="shrink-0 px-3 py-3 text-sm text-gray-500 hover:text-gray-700 rounded-lg border border-transparent hover:bg-gray-100"
+                                    >
+                                        Clear
+                                    </button>
+                                )}
+                            </div>
+                            {assignToOpen && (
+                                <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                                    {assignableLoading ? (
+                                        <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
+                                    ) : assignableUsers.length === 0 ? (
+                                        <li className="px-3 py-2 text-sm text-gray-500">No users found. Try a different search.</li>
+                                    ) : (
+                                        assignableUsers.map((u) => (
+                                            <li key={u.id}>
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center justify-between"
+                                                    onClick={() => {
+                                                        setForm((p) => ({ ...p, assigneeId: u.id }));
+                                                        setAssigneeDisplay(u.name || u.email);
+                                                        setAssignableSearch("");
+                                                        setAssignToOpen(false);
+                                                    }}
+                                                >
+                                                    <span>{u.name || u.email}</span>
+                                                    <span className="text-xs text-gray-500 ml-2">{u.role.replace("_", " ")}</span>
+                                                </button>
+                                            </li>
+                                        ))
+                                    )}
+                                </ul>
+                            )}
                         </div>
                     </div>
 
