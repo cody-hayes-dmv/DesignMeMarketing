@@ -2,11 +2,14 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import type { TokenType } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../lib/email.js";
 import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
 
 const router = express.Router();
+
+const PASSWORD_RESET: TokenType = "PASSWORD_RESET" as TokenType;
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -573,6 +576,110 @@ router.put("/profile", authenticateToken, async (req, res) => {
     }
     console.error("Update profile error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Forgot password: request a reset link by email
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = forgotPasswordSchema.parse(req.body);
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, passwordHash: true },
+    });
+    // Always respond with success to avoid leaking whether the email exists
+    if (!user || !user.passwordHash) {
+      return res.json({ message: "If an account exists with this email, you will receive a reset link shortly." });
+    }
+    const resetToken = jwt.sign(
+      { userId: user.id, purpose: "password_reset" },
+      getJwtSecret(),
+      { expiresIn: "1h" }
+    );
+    await prisma.token.create({
+      data: {
+        type: PASSWORD_RESET,
+        email: user.email,
+        token: resetToken,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        userId: user.id,
+      },
+    });
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
+    await sendEmail({
+      to: user.email,
+      subject: "Reset your ZOESI password",
+      html: `
+        <p>You requested a password reset for your ZOESI account.</p>
+        <p><a href="${resetUrl}">Reset your password</a></p>
+        <p>This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>
+      `,
+    }).catch((err) => {
+      console.error("Forgot-password email failed:", err?.message);
+    });
+    return res.json({ message: "If an account exists with this email, you will receive a reset link shortly." });
+  } catch (error: any) {
+    if (error?.name === "ZodError") {
+      return res.status(400).json({ message: "Please enter a valid email address." });
+    }
+    console.error("Forgot password error:", error);
+    return res.status(500).json({ message: "Something went wrong. Please try again." });
+  }
+});
+
+// Validate reset token (for the reset-password page)
+router.get("/reset-password", async (req, res) => {
+  try {
+    const token = String(req.query.token || "").trim();
+    if (!token) return res.status(400).json({ valid: false, message: "Missing token" });
+    const record = await prisma.token.findUnique({ where: { token } });
+    if (!record || record.usedAt || record.expiresAt < new Date() || record.type !== PASSWORD_RESET) {
+      return res.json({ valid: false, message: "Invalid or expired link" });
+    }
+    return res.json({ valid: true });
+  } catch (error) {
+    console.error("Reset token check error:", error);
+    return res.status(500).json({ valid: false, message: "Something went wrong" });
+  }
+});
+
+// Reset password with token (from email link)
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(6),
+});
+
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { token: resetToken, newPassword } = resetPasswordSchema.parse(req.body);
+    const record = await prisma.token.findUnique({
+      where: { token: resetToken },
+      include: { user: true },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date() || record.type !== PASSWORD_RESET) {
+      return res.status(400).json({ message: "Invalid or expired link. Please request a new reset link." });
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: record.userId! },
+      data: { passwordHash },
+    });
+    await prisma.token.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    });
+    return res.json({ message: "Password updated successfully. You can now sign in." });
+  } catch (error: any) {
+    if (error?.name === "ZodError") {
+      return res.status(400).json({ message: "Invalid input. Password must be at least 6 characters." });
+    }
+    console.error("Reset password error:", error);
+    return res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 });
 

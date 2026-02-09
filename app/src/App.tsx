@@ -6,6 +6,8 @@ import { checkAuth } from "./store/slices/authSlice";
 import { Toaster } from "react-hot-toast";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import SpecialistDashboard from "./pages/Specialist/SpecialistDashboardPage";
 import SpecialistClientsPage from "./pages/Specialist/SpecialistClientsPage";
 import SpecialistTeamPage from "./pages/Specialist/SpecialistTeamPage";
@@ -185,6 +187,8 @@ function App() {
           )
         }
       />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
 
       {/* Specialist routes */}

@@ -42,7 +42,7 @@ api.interceptors.response.use(
   (error) => {
     const status = error.response?.status;
     const url = error.config?.url ?? "";
-    const isAuth = /\/auth\/(login|register|verify)$/i.test(url);
+    const isAuth = /\/auth\/(login|register|verify|forgot-password|reset-password)/i.test(url);
     const isShare = /\/seo\/share\//i.test(url); // public shared dashboard endpoints
     
     // Get error message from response
