@@ -71,12 +71,10 @@ router.post("/", authenticateToken, upload.single("file"), (req, res) => {
       fileType = "video";
     }
 
-    // Return the file URL
-    // In production, you'd want to use a CDN or cloud storage
+    // Return the file URL (configurable via BACKEND_URL or API_URL in .env)
     const fileUrl = `/uploads/${req.file.filename}`;
-    // Use the API base URL or construct from request
-    const baseUrl = process.env.API_URL || `${req.protocol}://${req.get("host")}`;
-    const fullUrl = `${baseUrl}${fileUrl}`;
+    const baseUrl = process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`;
+    const fullUrl = `${baseUrl.replace(/\/$/, "")}${fileUrl}`;
 
     res.json({
       type: fileType,
@@ -138,7 +136,7 @@ router.post("/worklog", authenticateToken, (req, res, next) => {
     if (!files || files.length === 0) {
       return res.status(400).json({ message: "No files uploaded" });
     }
-    const baseUrl = process.env.API_URL || `${req.protocol}://${req.get("host")}`;
+    const baseUrl = (process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
     const results = files.map((file) => {
       const fileUrl = `/uploads/${file.filename}`;
       const fullUrl = `${baseUrl}${fileUrl}`;
@@ -166,8 +164,7 @@ router.post("/multiple", authenticateToken, upload.array("files", 10), (req, res
       }
 
       const fileUrl = `/uploads/${file.filename}`;
-      // Use the API base URL or construct from request
-      const baseUrl = process.env.API_URL || `${req.protocol}://${req.get("host")}`;
+      const baseUrl = (process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
       const fullUrl = `${baseUrl}${fileUrl}`;
 
       return {

@@ -275,79 +275,47 @@ export function generateReportEmailHTML(
             </h2>
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
               <tr>
-                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;">
                     <tr>
                       <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #1e40af; margin-bottom: 4px;">Total Sessions</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #1e3a8a;">${Number(report.totalSessions || 0).toLocaleString()}</div>
+                        <div style="font-size: 11px; font-weight: 600; color: #1e40af; margin-bottom: 4px;">Web Visitors</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #1e3a8a;">${Number((report as any).totalUsers ?? report.activeUsers ?? 0).toLocaleString()}</div>
                       </td>
                     </tr>
                   </table>
                 </td>
-                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;">
                     <tr>
                       <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #166534; margin-bottom: 4px;">Organic Sessions</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #14532d;">${Number(report.organicSessions || 0).toLocaleString()}</div>
+                        <div style="font-size: 11px; font-weight: 600; color: #166534; margin-bottom: 4px;">Organic Traffic</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #14532d;">${Number((report as any).organicSearchEngagedSessions ?? report.organicSessions ?? 0).toLocaleString()}</div>
                       </td>
                     </tr>
                   </table>
                 </td>
-                ${report.activeUsers != null ? `
-                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px;">
                     <tr>
                       <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #6b21a8; margin-bottom: 4px;">Active Users</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #581c87;">${Number(report.activeUsers || 0).toLocaleString()}</div>
+                        <div style="font-size: 11px; font-weight: 600; color: #6b21a8; margin-bottom: 4px;">First Time Visitors</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #581c87;">${Number(report.newUsers ?? 0).toLocaleString()}</div>
                       </td>
                     </tr>
                   </table>
                 </td>
-                ` : ""}
-              </tr>
-              ${(report.newUsers != null || report.eventCount != null || report.keyEvents != null) ? `
-              <tr>
-                ${report.newUsers != null ? `
-                <td width="33%" align="center" valign="top" style="padding: 8px;">
+                <td width="25%" align="center" valign="top" style="padding: 8px;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;">
                     <tr>
                       <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #9a3412; margin-bottom: 4px;">New Users</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #7c2d12;">${Number(report.newUsers || 0).toLocaleString()}</div>
+                        <div style="font-size: 11px; font-weight: 600; color: #9a3412; margin-bottom: 4px;">Engaged Visitors</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #7c2d12;">${Number((report as any).engagedSessions ?? 0).toLocaleString()}</div>
                       </td>
                     </tr>
                   </table>
                 </td>
-                ` : ""}
-                ${report.eventCount != null ? `
-                <td width="33%" align="center" valign="top" style="padding: 8px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;">
-                    <tr>
-                      <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #3730a3; margin-bottom: 4px;">Event Count</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #312e81;">${Number(report.eventCount || 0).toLocaleString()}</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-                ` : ""}
-                ${report.keyEvents != null ? `
-                <td width="33%" align="center" valign="top" style="padding: 8px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #fce7f3; border: 1px solid #fbcfe8; border-radius: 8px;">
-                    <tr>
-                      <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #9f1239; margin-bottom: 4px;">Key Events</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #831843;">${Number(report.keyEvents || 0).toLocaleString()}</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-                ` : ""}
               </tr>
-              ` : ""}
             </table>
           </div>
 
@@ -554,12 +522,12 @@ export async function generateReportPDFBuffer(
     doc.fontSize(14).text('Traffic Overview');
     doc.moveDown(0.5);
     doc.fontSize(12);
-    doc.text(`Total Sessions: ${report.totalSessions?.toLocaleString?.() ?? report.totalSessions ?? 0}`);
-    doc.text(`Organic Sessions: ${report.organicSessions?.toLocaleString?.() ?? report.organicSessions ?? 0}`);
-    if (report.activeUsers != null) doc.text(`Active Users: ${report.activeUsers}`);
-    if (report.newUsers != null) doc.text(`New Users: ${report.newUsers}`);
-    if (report.eventCount != null) doc.text(`Event Count: ${report.eventCount}`);
-    if (report.keyEvents != null) doc.text(`Key Events: ${report.keyEvents}`);
+    const webVisitors = (report as any).totalUsers ?? report.activeUsers ?? 0;
+    const organicTraffic = (report as any).organicSearchEngagedSessions ?? report.organicSessions ?? 0;
+    doc.text(`Web Visitors: ${Number(webVisitors).toLocaleString()}`);
+    doc.text(`Organic Traffic: ${Number(organicTraffic).toLocaleString()}`);
+    doc.text(`First Time Visitors: ${Number(report.newUsers ?? 0).toLocaleString()}`);
+    doc.text(`Engaged Visitors: ${Number((report as any).engagedSessions ?? 0).toLocaleString()}`);
 
     doc.moveDown();
     doc.fontSize(14).text('SEO Performance');
@@ -759,18 +727,22 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
     throw new Error('Client not found');
   }
 
-  // Calculate date range based on period (aligned so "Monthly report" = data for that calendar month)
+  // Calculate date range based on period - aligned with SEO Overview date picker ranges
+  // so Report Traffic Overview metrics match SEO Overview when viewing the same period
   const endDate = new Date();
   let startDate: Date;
   if (period === "weekly") {
+    // Last 7 days - matches SEO Overview "Last 7 days"
     startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 7);
   } else if (period === "biweekly") {
+    // Last 14 days - matches SEO Overview when user selects 14-day equivalent
     startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 14);
   } else if (period === "monthly") {
-    // First day of current month so GA4 Event Count / Key Events match the report period
-    startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    // Last 30 days - matches SEO Overview default "Last 30 days"
+    startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 30);
   } else {
     startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 30);
@@ -832,6 +804,7 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
         : 0);
 
   // Create report data
+  // Traffic Overview aligns with SEO Overview: Web Visitors, Organic Traffic, First Time Visitors, Engaged Visitors
   const reportData = {
     reportDate: endDate,
     period: period,
@@ -851,6 +824,9 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
     conversions: Math.round(ga4Data?.conversions || 0),
     conversionRate: ga4Data?.conversionRate || 0,
     activeUsers: Math.round(ga4Data?.activeUsers || 0),
+    totalUsers: ga4Data?.totalUsers != null ? Math.round(ga4Data.totalUsers) : null,
+    organicSearchEngagedSessions: ga4Data?.organicSearchEngagedSessions != null ? Math.round(ga4Data.organicSearchEngagedSessions) : null,
+    engagedSessions: ga4Data?.engagedSessions != null ? Math.round(ga4Data.engagedSessions) : null,
     eventCount: Math.round(ga4Data?.eventCount || 0),
     newUsers: Math.round(ga4Data?.newUsers || 0),
     keyEvents: Math.round(ga4Data?.keyEvents || 0),

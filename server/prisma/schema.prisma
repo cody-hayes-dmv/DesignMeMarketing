@@ -344,6 +344,9 @@ model SeoReport {
   conversionRate     Float
   clientId           String          @unique
   activeUsers        Int?
+  totalUsers         Int?   // Web Visitors (preferred over activeUsers for SEO Overview alignment)
+  organicSearchEngagedSessions Int?  // Organic Traffic (SEO Overview)
+  engagedSessions    Int?   // Engaged Visitors (SEO Overview)
   emailSubject       String?
   eventCount         Int?
   keyEvents          Int?

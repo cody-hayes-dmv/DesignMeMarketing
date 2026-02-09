@@ -1575,16 +1575,21 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
     }
 
     // Optionally refresh an *existing* report when stale. Do NOT auto-create reports for new clients.
+    // Use the existing report's period when regenerating so weekly/biweekly reports are not overwritten with monthly.
     if (ensureFresh) {
       const existing = await prisma.seoReport.findFirst({
         where: { clientId },
-        select: { updatedAt: true },
+        select: { updatedAt: true, period: true },
       });
 
+      const periodToUse = existing?.period && ["weekly", "biweekly", "monthly"].includes(String(existing.period))
+        ? String(existing.period)
+        : requestedPeriod;
+
       if (existing && !isFresh(existing.updatedAt, DATAFORSEO_REFRESH_TTL_MS)) {
-        await dedupeInFlight(`report-autogen:${clientId}:${requestedPeriod}`, async () => {
+        await dedupeInFlight(`report-autogen:${clientId}:${periodToUse}`, async () => {
           const { autoGenerateReport } = await import("../lib/reportScheduler.js");
-          await autoGenerateReport(clientId, requestedPeriod);
+          await autoGenerateReport(clientId, periodToUse);
         });
       }
     }
@@ -1648,8 +1653,11 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       // Conversion metrics from database
       conversions: report.conversions,
       conversionRate: report.conversionRate,
-      // GA4 metrics from database
+      // GA4 metrics from database (Traffic Overview aligns with SEO Overview)
       activeUsers: report.activeUsers,
+      totalUsers: (report as { totalUsers?: number | null }).totalUsers ?? null,
+      organicSearchEngagedSessions: (report as { organicSearchEngagedSessions?: number | null }).organicSearchEngagedSessions ?? null,
+      engagedSessions: (report as { engagedSessions?: number | null }).engagedSessions ?? null,
       eventCount: report.eventCount,
       newUsers: report.newUsers,
       keyEvents: report.keyEvents,

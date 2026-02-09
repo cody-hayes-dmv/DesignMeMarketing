@@ -1293,7 +1293,7 @@ const ClientDashboardPage: React.FC = () => {
       toast.success(successMessage);
       
       // Refetch dashboard data (this will get fresh DataForSEO and GA4 data)
-      const res = await api.get(buildDashboardUrl(clientId));
+      const res = await api.get(buildDashboardUrl(clientId), { timeout: 90000 });
       const payload = res.data || {};
       const isGA4Connected = payload?.isGA4Connected || false;
       const dataSource = payload?.dataSources?.traffic || "none";
@@ -1644,7 +1644,7 @@ const ClientDashboardPage: React.FC = () => {
       // Refresh dashboard data
       const fetchSummary = async () => {
         try {
-          const res = await api.get(buildDashboardUrl(clientId));
+          const res = await api.get(buildDashboardUrl(clientId), { timeout: 90000 });
           const payload = res.data || {};
           setDashboardSummary(formatDashboardSummary(payload));
         } catch (error) {
@@ -1805,7 +1805,7 @@ const ClientDashboardPage: React.FC = () => {
         setFetchingSummary(true);
         setGa4ConnectionError(null);
         const fetchDashboardPayload = async () => {
-          const res = await api.get(buildDashboardUrl(clientId));
+          const res = await api.get(buildDashboardUrl(clientId), { timeout: 90000 });
           return res.data || {};
         };
 
@@ -3036,7 +3036,7 @@ const ClientDashboardPage: React.FC = () => {
       setGa4Properties([]);
       setGa4Connected(true);
       // Refresh dashboard data
-      const res = await api.get(buildDashboardUrl(clientId));
+      const res = await api.get(buildDashboardUrl(clientId), { timeout: 90000 });
       const payload = res.data || {};
       setDashboardSummary(formatDashboardSummary(payload));
     } catch (error: any) {
@@ -4052,7 +4052,7 @@ const ClientDashboardPage: React.FC = () => {
                                   setCalendarModalOpen(false);
                                   try {
                                     setFetchingSummary(true);
-                                    const res = await api.get(buildDashboardUrl(clientId!));
+                                    const res = await api.get(buildDashboardUrl(clientId!), { timeout: 90000 });
                                     const payload = res.data || {};
                                     setDashboardSummary(formatDashboardSummary(payload));
                                   } catch (error: any) {
@@ -8775,45 +8775,29 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Traffic Overview Card */}
+                {/* Traffic Overview Card - aligned with SEO Overview metrics */}
                 <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
                   <div className="flex items-center mb-4">
                     <Activity className="h-5 w-5 text-blue-500 mr-2" />
                     <h2 className="text-xl font-bold text-gray-900">Traffic Overview</h2>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
-                      <div className="text-xs font-medium text-blue-600 mb-1">Total Sessions</div>
-                      <div className="text-2xl font-bold text-blue-900">{Number(serverReport?.totalSessions ?? 0).toLocaleString()}</div>
+                      <div className="text-xs font-medium text-blue-600 mb-1">Web Visitors</div>
+                      <div className="text-2xl font-bold text-blue-900">{Number(serverReport?.totalUsers ?? serverReport?.activeUsers ?? 0).toLocaleString()}</div>
                     </div>
                     <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-                      <div className="text-xs font-medium text-green-600 mb-1">Organic Sessions</div>
-                      <div className="text-2xl font-bold text-green-900">{Number(serverReport?.organicSessions ?? 0).toLocaleString()}</div>
+                      <div className="text-xs font-medium text-green-600 mb-1">Organic Traffic</div>
+                      <div className="text-2xl font-bold text-green-900">{Number(serverReport?.organicSearchEngagedSessions ?? serverReport?.organicSessions ?? 0).toLocaleString()}</div>
                     </div>
-                    {serverReport?.activeUsers != null && (
-                      <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
-                        <div className="text-xs font-medium text-purple-600 mb-1">Active Users</div>
-                        <div className="text-2xl font-bold text-purple-900">{Number(serverReport.activeUsers ?? 0).toLocaleString()}</div>
-                      </div>
-                    )}
-                    {serverReport?.newUsers != null && (
-                      <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
-                        <div className="text-xs font-medium text-orange-600 mb-1">New Users</div>
-                        <div className="text-2xl font-bold text-orange-900">{Number(serverReport.newUsers ?? 0).toLocaleString()}</div>
-                      </div>
-                    )}
-                    {serverReport?.eventCount != null && (
-                      <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-100">
-                        <div className="text-xs font-medium text-indigo-600 mb-1">Event Count</div>
-                        <div className="text-2xl font-bold text-indigo-900">{Number(serverReport.eventCount ?? 0).toLocaleString()}</div>
-                      </div>
-                    )}
-                    {serverReport?.keyEvents != null && (
-                      <div className="bg-pink-50 rounded-lg p-4 border border-pink-100">
-                        <div className="text-xs font-medium text-pink-600 mb-1">Key Events</div>
-                        <div className="text-2xl font-bold text-pink-900">{Number(serverReport.keyEvents ?? 0).toLocaleString()}</div>
-                      </div>
-                    )}
+                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                      <div className="text-xs font-medium text-purple-600 mb-1">First Time Visitors</div>
+                      <div className="text-2xl font-bold text-purple-900">{Number(serverReport?.newUsers ?? 0).toLocaleString()}</div>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                      <div className="text-xs font-medium text-orange-600 mb-1">Engaged Visitors</div>
+                      <div className="text-2xl font-bold text-orange-900">{Number(serverReport?.engagedSessions ?? 0).toLocaleString()}</div>
+                    </div>
                   </div>
                 </div>
 
