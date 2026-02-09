@@ -161,6 +161,37 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
+// List users who can be assigned to work log tasks (Super Admins, Admins, Specialists — not agencies)
+router.get("/assignable-users", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN" && req.user.role !== "AGENCY") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
+    const users = await prisma.user.findMany({
+      where: {
+        role: { in: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
+        verified: true,
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: [{ role: "asc" }, { name: "asc" }],
+      take: 100,
+    });
+    return res.json(users);
+  } catch (error) {
+    console.error("Assignable users error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Work log for a client (tasks associated with clientId)
 // IMPORTANT: This route must be before "/:id"
 router.get("/worklog/:clientId", authenticateToken, async (req, res) => {

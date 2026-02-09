@@ -4,7 +4,7 @@ import { RootState } from "@/store";
 import { fetchAgencies } from "@/store/slices/agencySlice";
 import { fetchClients } from "@/store/slices/clientSlice";
 import Layout from "@/components/Layout";
-import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle, Loader2, RefreshCw, ListTodo, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
@@ -34,6 +34,14 @@ const SuperAdminDashboard = () => {
   const [mrrData, setMrrData] = useState<{ totalMrr: number; segments: Array<{ label: string; mrr: number; color?: string }> } | null>(null);
   const [activityData, setActivityData] = useState<{ newMrrAdded: number; churnedMrr: number; netChange: number } | null>(null);
   const [financialLoading, setFinancialLoading] = useState(true);
+  const [upcomingTasks, setUpcomingTasks] = useState<Array<{
+    id: string;
+    title: string;
+    status: string;
+    dueDate?: string | null;
+    client?: { id: string; name: string; domain?: string } | null;
+  }>>([]);
+  const [upcomingTasksLoading, setUpcomingTasksLoading] = useState(true);
 
   const fetchFinancial = async () => {
     setFinancialLoading(true);
@@ -88,6 +96,28 @@ const SuperAdminDashboard = () => {
       }
     };
     fetchPending();
+  }, []);
+
+  useEffect(() => {
+    const fetchUpcoming = async () => {
+      setUpcomingTasksLoading(true);
+      try {
+        const res = await api.get("/tasks");
+        const list = Array.isArray(res.data) ? res.data : [];
+        const notDone = list.filter((t: any) => t.status !== "DONE");
+        const sorted = [...notDone].sort((a: any, b: any) => {
+          const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+          const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+          return aDue - bDue;
+        });
+        setUpcomingTasks(sorted.slice(0, 7));
+      } catch {
+        setUpcomingTasks([]);
+      } finally {
+        setUpcomingTasksLoading(false);
+      }
+    };
+    fetchUpcoming();
   }, []);
 
   const safeParseObject = (raw: any): Record<string, any> => {
@@ -402,6 +432,83 @@ const SuperAdminDashboard = () => {
             </div>
           </div>
         )}
+
+        {/* Upcoming tasks */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Upcoming tasks</h2>
+            <button
+              type="button"
+              onClick={() => navigate("/agency/tasks")}
+              className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+            >
+              View all
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="p-6">
+            {upcomingTasksLoading ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
+                <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+              </div>
+            ) : upcomingTasks.length === 0 ? (
+              <div className="text-center py-6 text-gray-500">No upcoming tasks</div>
+            ) : (
+              <ul className="space-y-3">
+                {upcomingTasks.map((task) => {
+                  const dueStr = task.dueDate
+                    ? format(new Date(task.dueDate), "MMM d, yyyy")
+                    : "—";
+                  const statusLabel =
+                    task.status === "TODO"
+                      ? "Pending"
+                      : task.status === "IN_PROGRESS"
+                        ? "In progress"
+                        : task.status === "REVIEW"
+                          ? "In review"
+                          : task.status;
+                  const statusClass =
+                    task.status === "DONE"
+                      ? "bg-gray-100 text-gray-800"
+                      : task.status === "IN_PROGRESS"
+                        ? "bg-blue-100 text-blue-800"
+                        : task.status === "REVIEW"
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-gray-100 text-gray-700";
+                  return (
+                    <li key={task.id}>
+                      <button
+                        type="button"
+                        onClick={() => navigate("/agency/tasks")}
+                        className="w-full flex items-center justify-between gap-3 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                      >
+                        <div className="min-w-0 flex-1 flex items-center gap-3">
+                          <div className="bg-primary-50 p-2 rounded-lg shrink-0">
+                            <ListTodo className="h-4 w-4 text-primary-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 truncate">
+                              {task.title || "Untitled"}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {task.client?.name || task.client?.domain || "No client"}
+                              {dueStr !== "—" ? ` · Due ${dueStr}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                        <span
+                          className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded-full ${statusClass}`}
+                        >
+                          {statusLabel}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
 
         {/* Financial Overview */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm">

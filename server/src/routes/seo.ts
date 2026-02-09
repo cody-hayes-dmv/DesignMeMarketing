@@ -9597,7 +9597,7 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
     }
     const parsedLocationCode = Number(locationCode) || 2840;
     const parsedLanguageCode = typeof languageCode === "string" ? languageCode : "en";
-    const parsedOffset = Math.max(0, Number(offset) || 0);
+    const parsedOffset = Math.min(20, Math.max(0, Number(offset) || 0)); // Only first 3 pages (0, 10, 20)
 
     const base64Auth = process.env.DATAFORSEO_BASE64;
     if (!base64Auth) {

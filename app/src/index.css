@@ -12,7 +12,7 @@
   }
 }
 
-/* PDF export mode (used by ClientDashboardPage export) */
+/* PDF export mode (used by ClientDashboardPage and KeywordsPage export) */
 .pdf-exporting [data-pdf-hide="true"] {
   display: none !important;
 }
@@ -25,3 +25,11 @@
 .pdf-exporting .shadow-2xl {
   box-shadow: none !important;
 }
+
+/* Keyword Research PDF: match on-screen layout so exported data is correct */
+
+.pdf-exporting .bg-gradient-to-br,
+.pdf-exporting [class*="gradient"] {
+  background: #ffffff !important;
+}
+/* Section spacing in PDF so page 1 / page 2 content isn’t cramped */

@@ -412,48 +412,106 @@ const KeywordsPage: React.FC = () => {
     const element = keywordResearchPdfRef.current;
     if (!element) return;
     const previousOverflow = document.body.style.overflow;
+    const previousBg = element.style.background;
+    const previousPadding = element.style.padding;
+    const previousMinHeight = element.style.minHeight;
     try {
       setExportingPdf(true);
       document.body.style.overflow = "hidden";
       element.classList.add("pdf-exporting");
+      element.style.background = "#ffffff";
+      element.style.padding = "32px";
+      element.style.boxSizing = "border-box";
+      element.style.minHeight = "auto";
+      element.scrollIntoView({ behavior: "auto", block: "start" });
       await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => requestAnimationFrame(r));
+      await new Promise((r) => requestAnimationFrame(r));
+      await new Promise((r) => setTimeout(r, 450));
+      const rect = element.getBoundingClientRect();
+      const w = Math.max(element.scrollWidth, element.offsetWidth, Math.ceil(rect.width));
+      const h = Math.max(element.scrollHeight, element.offsetHeight, Math.ceil(rect.height));
+      const prevWidth = element.style.width;
+      const prevMinWidth = element.style.minWidth;
+      element.style.width = `${w}px`;
+      element.style.minWidth = `${w}px`;
+      await new Promise((r) => requestAnimationFrame(r));
+      const captureW = element.scrollWidth;
+      const captureH = element.scrollHeight;
       const canvas = await html2canvas(element, {
-        scale: 2,
+        scale: 3,
         useCORS: true,
         logging: false,
-        width: element.scrollWidth,
-        height: element.scrollHeight,
+        width: captureW,
+        height: captureH,
         scrollX: 0,
         scrollY: 0,
+        x: 0,
+        y: 0,
         backgroundColor: "#ffffff",
+        windowWidth: captureW,
+        windowHeight: captureH,
+        allowTaint: false,
+        onclone: (clonedDoc, clonedNode) => {
+          const root = clonedNode as HTMLElement;
+          root.style.backgroundColor = "#ffffff";
+          root.style.background = "#ffffff";
+          clonedDoc.body.style.backgroundColor = "#ffffff";
+          clonedDoc.body.style.background = "#ffffff";
+          root.querySelectorAll("[class*='gradient'], .bg-gray-50, .from-primary-50, .to-secondary-50").forEach((el) => {
+            (el as HTMLElement).style.background = "#ffffff";
+          });
+        },
       });
-      const imgData = canvas.toDataURL("image/png");
+      element.style.width = prevWidth;
+      element.style.minWidth = prevMinWidth;
+      element.style.padding = previousPadding;
+      element.style.background = previousBg;
+      element.style.minHeight = previousMinHeight;
+      const imgData = canvas.toDataURL("image/png", 1.0);
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth;
+      const margin = 16;
+      const stepHeight = pageHeight - margin * 2;
+      const imgWidth = pageWidth - margin * 2;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-      while (heightLeft > 0) {
-        position -= pageHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
       const seed = (researchSeed || "keyword-research").replace(/\s+/g, "-").toLowerCase();
       const date = new Date();
-      const dateStr = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
-      pdf.save(`keyword-research-${seed}-${dateStr}.pdf`);
-      toast.success("Keyword Research page exported as PDF.");
+      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+      const totalContentPages = Math.max(1, Math.ceil(imgHeight / stepHeight));
+      let heightLeft = imgHeight;
+      let position = margin;
+      let pageNum = 1;
+      pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+      pdf.setFontSize(9);
+      pdf.setTextColor(120, 120, 120);
+      pdf.text(`Page ${pageNum} of ${totalContentPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
+      pdf.setTextColor(0, 0, 0);
+      heightLeft -= stepHeight;
+      while (heightLeft > 0) {
+        position -= stepHeight;
+        pageNum += 1;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+        pdf.setFontSize(9);
+        pdf.setTextColor(120, 120, 120);
+        pdf.text(`Page ${pageNum} of ${totalContentPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
+        pdf.setTextColor(0, 0, 0);
+        heightLeft -= stepHeight;
+      }
+      pdf.save(`keyword-research-${seed}-${dateStr.replace(/-/g, "")}.pdf`);
+      toast.success("Keyword Research exported as PDF.");
     } catch (err: any) {
       console.error("PDF export error", err);
       toast.error(err?.message || "Failed to export PDF.");
     } finally {
       document.body.style.overflow = previousOverflow;
       element.classList.remove("pdf-exporting");
+      element.style.padding = previousPadding;
+      element.style.background = previousBg;
+      element.style.minHeight = previousMinHeight;
       setExportingPdf(false);
     }
   }, [researchSeed]);
@@ -1016,7 +1074,7 @@ const KeywordsPage: React.FC = () => {
               <div className="border-t border-gray-200 p-6 bg-white">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">SERP Analysis</h3>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
                       <button type="button" onClick={() => setSerpViewMode("domain")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${serpViewMode === "domain" ? "bg-primary-600 text-white" : "text-gray-700 hover:bg-gray-200"}`}>Domain</button>
                       <button type="button" onClick={() => setSerpViewMode("url")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${serpViewMode === "url" ? "bg-primary-600 text-white" : "text-gray-700 hover:bg-gray-200"}`}>URL</button>
@@ -1046,9 +1104,9 @@ const KeywordsPage: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 mb-4">
-                      {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90].map((off) => (
+                      {[0, 10, 20].map((off) => (
                         <button key={off} type="button" onClick={() => loadSerpPage(off)} disabled={serpAnalysisLoading} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${serpAnalysisOffset === off ? "bg-primary-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-                          page {off / 10 + 1}
+                          Page {off / 10 + 1}
                         </button>
                       ))}
                     </div>

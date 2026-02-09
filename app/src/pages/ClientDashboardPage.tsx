@@ -584,6 +584,8 @@ const ClientDashboardPage: React.FC = () => {
     taskNotes: string;
     category: string;
     dueDate: string;
+    assigneeId: string;
+    assigneeDisplay: string;
     status: TaskStatus;
     attachments: WorkLogAttachment[];
   }>({
@@ -592,9 +594,16 @@ const ClientDashboardPage: React.FC = () => {
     taskNotes: "",
     category: "",
     dueDate: "",
+    assigneeId: "",
+    assigneeDisplay: "",
     status: "TODO",
     attachments: [],
   });
+  const [assignableUsers, setAssignableUsers] = useState<{ id: string; name: string | null; email: string; role: string }[]>([]);
+  const [assignableLoading, setAssignableLoading] = useState(false);
+  const [assignableSearch, setAssignableSearch] = useState("");
+  const [assignToOpen, setAssignToOpen] = useState(false);
+  const assignToRef = useRef<HTMLDivElement | null>(null);
   const workLogTaskNotesRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!workLogModalOpen) return;
@@ -604,6 +613,34 @@ const ClientDashboardPage: React.FC = () => {
     });
     return () => cancelAnimationFrame(id);
   }, [workLogModalOpen]);
+
+  useEffect(() => {
+    if (!workLogModalOpen) return;
+    let cancelled = false;
+    const q = assignableSearch.trim();
+    setAssignableLoading(true);
+    api
+      .get("/tasks/assignable-users", { params: q ? { search: q } : {} })
+      .then((res) => {
+        if (!cancelled) setAssignableUsers(Array.isArray(res.data) ? res.data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignableUsers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAssignableLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [workLogModalOpen, assignableSearch]);
+
+  useEffect(() => {
+    if (!assignToOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (assignToRef.current && !assignToRef.current.contains(e.target as Node)) setAssignToOpen(false);
+    };
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [assignToOpen]);
   const [workLogDeleteConfirm, setWorkLogDeleteConfirm] = useState<{
     isOpen: boolean;
     taskId: string | null;
@@ -899,9 +936,11 @@ const ClientDashboardPage: React.FC = () => {
     setWorkLogAddMenuOpen(false);
     setWorkLogModalMode("create");
     setSelectedWorkLogTaskId(null);
-    setWorkLogForm({ title: "", description: "", taskNotes: "", category: "", dueDate: "", status: "TODO", attachments: [] });
+    setWorkLogForm({ title: "", description: "", taskNotes: "", category: "", dueDate: "", assigneeId: "", assigneeDisplay: "", status: "TODO", attachments: [] });
     setWorkLogUrlInput("");
     setWorkLogUrlType("url");
+    setAssignableSearch("");
+    setAssignToOpen(false);
     setWorkLogModalOpen(true);
   };
 
@@ -933,12 +972,15 @@ const ClientDashboardPage: React.FC = () => {
       const titleForForm = (task.description || task.title || "").trim();
       const dueDateRaw = (task as any).dueDate;
       const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
+      const assignee = task.assignee;
       setWorkLogForm({
         title: titleForForm,
         description: titleForForm,
         taskNotes: (task as any).taskNotes || "",
         category: task.category || "",
         dueDate: dueDateStr,
+        assigneeId: assignee?.id ?? "",
+        assigneeDisplay: assignee ? (assignee.name || assignee.email || "") : "",
         status: task.status,
         attachments,
       });
@@ -957,12 +999,15 @@ const ClientDashboardPage: React.FC = () => {
       const titleForForm = (task.description || task.title || "").trim();
       const dueDateRaw = (task as any).dueDate;
       const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
+      const assignee = task.assignee;
       setWorkLogForm({
         title: titleForForm,
         description: titleForForm,
         taskNotes: (task as any).taskNotes || "",
         category: task.category || "",
         dueDate: dueDateStr,
+        assigneeId: assignee?.id ?? "",
+        assigneeDisplay: assignee ? (assignee.name || assignee.email || "") : "",
         status: task.status,
         attachments,
       });
@@ -986,6 +1031,7 @@ const ClientDashboardPage: React.FC = () => {
       taskNotes: taskNotesValue,
       category: workLogForm.category.trim() || undefined,
       dueDate: workLogForm.dueDate.trim() ? workLogForm.dueDate.trim() : undefined,
+      assigneeId: workLogForm.assigneeId.trim() || undefined,
       status: workLogForm.status,
       clientId,
       proof: workLogForm.attachments.length > 0 ? workLogForm.attachments : undefined,
@@ -6362,6 +6408,7 @@ const ClientDashboardPage: React.FC = () => {
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due date</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned to</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                             </tr>
@@ -6369,13 +6416,13 @@ const ClientDashboardPage: React.FC = () => {
                           <tbody className="bg-white divide-y divide-gray-200">
                             {workLogLoading ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
                                   Loading work log...
                                 </td>
                               </tr>
                             ) : workLogError ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={5}>
+                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
                                   {workLogError}
                                 </td>
                               </tr>
@@ -6386,7 +6433,7 @@ const ClientDashboardPage: React.FC = () => {
                               if (filtered.length === 0) {
                                 return (
                                   <tr>
-                                    <td className="px-6 py-6 text-sm text-gray-500" colSpan={5}>
+                                    <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
                                       {workLogListTab === "completed" ? "No completed entries yet." : "No upcoming entries."}
                                     </td>
                                   </tr>
@@ -6407,6 +6454,9 @@ const ClientDashboardPage: React.FC = () => {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{dueDateStr}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                      {task.assignee ? (task.assignee.name || task.assignee.email) : "—"}
+                                    </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                       <span
                                         className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${taskStatusClass(task.status)}`}
@@ -6539,6 +6589,65 @@ const ClientDashboardPage: React.FC = () => {
                           disabled={workLogModalMode === "view"}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
                         />
+                      </div>
+
+                      <div ref={assignToRef} className="relative">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Assign to</label>
+                        {workLogModalMode === "view" ? (
+                          <p className="text-sm text-gray-900 py-2">
+                            {workLogForm.assigneeId
+                              ? (() => {
+                                  const task = selectedWorkLogTaskId ? workLogTasks.find((t) => t.id === selectedWorkLogTaskId) : null;
+                                  const u = task?.assignee ?? assignableUsers.find((x) => x.id === workLogForm.assigneeId);
+                                  return u ? `${u.name || u.email}${u.email && u.name ? ` (${u.email})` : ""}` : "—";
+                                })()
+                              : "—"}
+                          </p>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={workLogForm.assigneeId ? workLogForm.assigneeDisplay : assignableSearch}
+                                onChange={(e) => {
+                                  setAssignableSearch(e.target.value);
+                                  setAssignToOpen(true);
+                                  if (workLogForm.assigneeId && e.target.value !== workLogForm.assigneeDisplay) setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" }));
+                                }}
+                                onFocus={() => setAssignToOpen(true)}
+                                placeholder="Search by name or email (Super Admin, Admin, Specialist)"
+                                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              />
+                              {workLogForm.assigneeId && (
+                                <button type="button" onClick={() => { setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" })); setAssignableSearch(""); setAssignToOpen(true); }} className="text-sm text-gray-500 hover:text-gray-700">
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            {assignToOpen && (
+                              <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                                {assignableLoading ? (
+                                  <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
+                                ) : assignableUsers.length === 0 ? (
+                                  <li className="px-3 py-2 text-sm text-gray-500">No users found. Try a different search.</li>
+                                ) : (
+                                  assignableUsers.map((u) => (
+                                    <li key={u.id}>
+                                      <button
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center justify-between"
+                                        onClick={() => { setWorkLogForm((p) => ({ ...p, assigneeId: u.id, assigneeDisplay: u.name || u.email })); setAssignableSearch(""); setAssignToOpen(false); }}
+                                      >
+                                        <span>{u.name || u.email}</span>
+                                        <span className="text-xs text-gray-500 ml-2">{u.role.replace("_", " ")}</span>
+                                      </button>
+                                    </li>
+                                  ))
+                                )}
+                              </ul>
+                            )}
+                          </>
+                        )}
                       </div>
 
                       <div>
@@ -8224,6 +8333,65 @@ const ClientDashboardPage: React.FC = () => {
                       disabled={workLogModalMode === "view"}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
                     />
+                  </div>
+
+                  <div ref={assignToRef} className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Assign to</label>
+                    {workLogModalMode === "view" ? (
+                      <p className="text-sm text-gray-900 py-2">
+                        {workLogForm.assigneeId
+                          ? (() => {
+                              const task = selectedWorkLogTaskId ? workLogTasks.find((t) => t.id === selectedWorkLogTaskId) : null;
+                              const u = task?.assignee ?? assignableUsers.find((x) => x.id === workLogForm.assigneeId);
+                              return u ? `${u.name || u.email}${u.email && u.name ? ` (${u.email})` : ""}` : "—";
+                            })()
+                          : "—"}
+                      </p>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={workLogForm.assigneeId ? workLogForm.assigneeDisplay : assignableSearch}
+                            onChange={(e) => {
+                              setAssignableSearch(e.target.value);
+                              setAssignToOpen(true);
+                              if (workLogForm.assigneeId && e.target.value !== workLogForm.assigneeDisplay) setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" }));
+                            }}
+                            onFocus={() => setAssignToOpen(true)}
+                            placeholder="Search by name or email (Super Admin, Admin, Specialist)"
+                            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          />
+                          {workLogForm.assigneeId && (
+                            <button type="button" onClick={() => { setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" })); setAssignableSearch(""); setAssignToOpen(true); }} className="text-sm text-gray-500 hover:text-gray-700">
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        {assignToOpen && (
+                          <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                            {assignableLoading ? (
+                              <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
+                            ) : assignableUsers.length === 0 ? (
+                              <li className="px-3 py-2 text-sm text-gray-500">No users found. Try a different search.</li>
+                            ) : (
+                              assignableUsers.map((u) => (
+                                <li key={u.id}>
+                                  <button
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center justify-between"
+                                    onClick={() => { setWorkLogForm((p) => ({ ...p, assigneeId: u.id, assigneeDisplay: u.name || u.email })); setAssignableSearch(""); setAssignToOpen(false); }}
+                                  >
+                                    <span>{u.name || u.email}</span>
+                                    <span className="text-xs text-gray-500 ml-2">{u.role.replace("_", " ")}</span>
+                                  </button>
+                                </li>
+                              ))
+                            )}
+                          </ul>
+                        )}
+                      </>
+                    )}
                   </div>
 
                   <div>
