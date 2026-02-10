@@ -2,7 +2,7 @@ import React from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "react-beautiful-dnd";
 import { Task } from "@/utils/types";
 import { truncateText } from "@/utils";
-import { Calendar, Link, User } from "lucide-react";
+import { Calendar, User } from "lucide-react";
 import { format } from "date-fns";
 
 interface KanbanBoardProps {
@@ -69,15 +69,10 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, onMove, onTaskClick })
                                                         </span>
                                                     </div>
                                                 </div>
-                                                <p className="text-xs text-gray-600">{task.description ?? "No description"}</p>
                                                 <div className="flex flex-row items-center justify-between">
                                                     <div className="flex flex-row gap-1 items-center text-sm font-semibold">
                                                         <User size={18} />
                                                         <span className="text-sm text-gray-600">{task.assignee?.name ?? "Unassigned"}</span>
-                                                    </div>
-                                                    <div className="flex flex-row gap-1 items-center text-sm font-semibold">
-                                                        <Link size={18} />
-                                                        <span className="text-sm text-gray-400">{task.proof?.length ?? 0} proof{(task.proof?.length ?? 0) === 1 ? "" : "s"}</span>
                                                     </div>
                                                 </div>
                                                 {task.dueDate &&

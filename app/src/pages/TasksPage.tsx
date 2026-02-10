@@ -22,6 +22,7 @@ import {
     Clock,
     AlertTriangle,
     Calendar,
+    User,
     Image as ImageIcon,
     Video as VideoIcon,
     Link as LinkIcon,
@@ -51,9 +52,11 @@ const TasksPage = () => {
     const [showCredentials, setShowCredentials] = useState<Record<string, boolean>>({});
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [filterClientId, setFilterClientId] = useState<string>("all");
+    const [filterAssigneeId, setFilterAssigneeId] = useState<string>("all");
+    const [taskListTab, setTaskListTab] = useState<"upcoming" | "completed">("upcoming");
     const [showOnboardingModal, setShowOnboardingModal] = useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
-    const [specialists, setSpecialists] = useState<Array<{ id: string; name: string | null; email: string }>>([]);
+    const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role?: string }>>([]);
     const [assignSelectedOpen, setAssignSelectedOpen] = useState(false);
     const [assignSelectedSpecialistId, setAssignSelectedSpecialistId] = useState<string>("");
     const [bulkAssigning, setBulkAssigning] = useState(false);
@@ -69,11 +72,28 @@ const TasksPage = () => {
     const canCreate = (user?.role as ROLE | undefined) !== "SPECIALIST";
     const canFilterByClient = (user?.role as ROLE | undefined) !== "USER";
 
+    const assigneeRoleLabel = (role: string | undefined) => {
+        if (role === "SUPER_ADMIN") return "Super Admin";
+        if (role === "ADMIN") return "Admin";
+        return "Specialist";
+    };
+
     useEffect(() => {
-        if (canCreate) {
-            api.get("/auth/specialists").then((res) => setSpecialists(res.data || [])).catch(() => {});
+        if (!canCreate) return;
+        const isSuperAdmin = user?.role === "SUPER_ADMIN";
+        if (isSuperAdmin) {
+            api.get("/tasks/assignable-users")
+                .then((res) => setAssignableUsers(res.data || []))
+                .catch(() => setAssignableUsers([]));
+        } else {
+            api.get("/auth/specialists")
+                .then((res) => {
+                    const list = res.data || [];
+                    setAssignableUsers(list.map((u: { id: string; name: string | null; email: string }) => ({ ...u, role: "SPECIALIST" })));
+                })
+                .catch(() => setAssignableUsers([]));
         }
-    }, [canCreate]);
+    }, [canCreate, user?.role]);
 
     const toggleTaskSelection = (taskId: string) => {
         setSelectedTaskIds((prev) =>
@@ -81,7 +101,7 @@ const TasksPage = () => {
         );
     };
     const selectAllFiltered = () => {
-        const ids = filtered.map((t) => t.id);
+        const ids = displayedTasks.map((t) => t.id);
         setSelectedTaskIds((prev) => (prev.length === ids.length ? [] : ids));
     };
     const clearSelection = () => setSelectedTaskIds([]);
@@ -181,9 +201,41 @@ const TasksPage = () => {
 
         const matchesClient =
             filterClientId === "all" || (t.client?.id ? t.client.id === filterClientId : false);
-        
-        return matchesSearch && matchesStatus && matchesClient;
+
+        const matchesAssignee =
+            filterAssigneeId === "all" ||
+            (filterAssigneeId === "unassigned" && !t.assignee?.id) ||
+            (t.assignee?.id === filterAssigneeId);
+
+        return matchesSearch && matchesStatus && matchesClient && matchesAssignee;
     });
+
+    const isSuperAdmin = user?.role === "SUPER_ADMIN";
+
+    // For Super Admin: split into Upcoming (sorted by next due) and Completed
+    const upcomingTasks = useMemo(() => {
+        const list = filtered.filter((t) => t.status !== "DONE");
+        return [...list].sort((a, b) => {
+            const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+            const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+            return aDue - bDue;
+        });
+    }, [filtered]);
+
+    const completedTasks = useMemo(() => {
+        const list = filtered.filter((t) => t.status === "DONE");
+        return [...list].sort((a, b) => {
+            const aDue = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+            const bDue = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+            return bDue - aDue;
+        });
+    }, [filtered]);
+
+    const displayedTasks = isSuperAdmin
+        ? taskListTab === "upcoming"
+            ? upcomingTasks
+            : completedTasks
+        : filtered;
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
 
@@ -335,7 +387,27 @@ const TasksPage = () => {
                             <option value="DONE">DONE</option>
                         </select>
                     </div>
-                    
+
+                    {/* Assignee Filter (Specialist / Admin tasks) */}
+                    {canCreate && (
+                        <div className="flex items-center space-x-2">
+                            <User className="h-5 w-5 text-gray-400" />
+                            <select
+                                value={filterAssigneeId}
+                                onChange={(e) => setFilterAssigneeId(e.target.value)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            >
+                                <option value="all">All Assignees</option>
+                                <option value="unassigned">Unassigned</option>
+                                {assignableUsers.map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                        {u.name || u.email} ({assigneeRoleLabel(u.role)})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
                     {/* Select Mode (Table | Kanban) */}
                     <div className="flex flex-row items-center">
                         <button
@@ -355,6 +427,26 @@ const TasksPage = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Upcoming / Completed tabs (Super Admin only) */}
+            {isSuperAdmin && (
+                <div className="flex gap-1 p-1 bg-gray-100 rounded-lg w-fit mb-6">
+                    <button
+                        type="button"
+                        onClick={() => setTaskListTab("upcoming")}
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${taskListTab === "upcoming" ? "bg-white text-primary-600 shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+                    >
+                        Upcoming ({upcomingTasks.length})
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setTaskListTab("completed")}
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${taskListTab === "completed" ? "bg-white text-primary-600 shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+                    >
+                        Completed ({completedTasks.length})
+                    </button>
+                </div>
+            )}
 
             {/* Task View */}
             {(!enabled) ? (
@@ -386,9 +478,9 @@ const TasksPage = () => {
                                         className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                                     >
                                         <option value="">Unassigned</option>
-                                        {specialists.map((s) => (
-                                            <option key={s.id} value={s.id}>
-                                                {s.name || s.email} (Specialist)
+                                        {assignableUsers.map((u) => (
+                                            <option key={u.id} value={u.id}>
+                                                {u.name || u.email} ({assigneeRoleLabel(u.role)})
                                             </option>
                                         ))}
                                     </select>
@@ -419,7 +511,7 @@ const TasksPage = () => {
                                         <th className="px-4 py-3 text-left">
                                             <input
                                                 type="checkbox"
-                                                checked={filtered.length > 0 && selectedTaskIds.length === filtered.length}
+                                                checked={displayedTasks.length > 0 && selectedTaskIds.length === displayedTasks.length}
                                                 onChange={selectAllFiltered}
                                                 className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                                             />
@@ -434,7 +526,7 @@ const TasksPage = () => {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {filtered.map((task) => (
+                                {displayedTasks.map((task) => (
                                     <tr key={task.id} className={`hover:bg-gray-50 ${isOverdue(task.dueDate) ? 'bg-red-50' : ''}`}>
                                         {canCreate && (
                                             <td className="px-4 py-4">
@@ -608,7 +700,7 @@ const TasksPage = () => {
                 </div>
             ) : (
                 <KanbanBoard
-                    tasks={filtered}
+                    tasks={displayedTasks}
                     onMove={(id, status) => dispatch(patchTaskStatus({ id, status }) as any)}
                     onTaskClick={handleEditClick}
                 />
