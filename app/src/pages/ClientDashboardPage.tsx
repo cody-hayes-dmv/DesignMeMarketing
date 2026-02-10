@@ -41,6 +41,23 @@ import {
   Calendar,
 } from "lucide-react";
 import api from "@/lib/api";
+
+// Resolve upload URL: use /api/upload/:filename so the request hits the backend (avoids SPA serving index.html for /uploads/*)
+function getUploadFileUrl(url: string | undefined): string {
+  if (!url || typeof url !== "string") return url || "#";
+  const match = url.match(/\/uploads\/([^/?]+)/);
+  if (!match) return url;
+  const filename = match[1];
+  const apiBase = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "");
+  if (!apiBase) return url;
+  try {
+    const base = new URL(apiBase);
+    const apiOrigin = base.origin;
+    return `${apiOrigin}/api/upload/${encodeURIComponent(filename)}`;
+  } catch {
+    return url;
+  }
+}
 import { Client } from "@/store/slices/clientSlice";
 import { addDays, endOfWeek, format, startOfWeek, subDays } from "date-fns";
 import DatePicker from "react-datepicker";
@@ -6725,12 +6742,17 @@ const ClientDashboardPage: React.FC = () => {
                                       {att.name || att.value || "Attachment"}
                                     </div>
                                     <a
-                                      href={att.value}
+                                      href={getUploadFileUrl(att.value)}
                                       target="_blank"
                                       rel="noopener noreferrer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.open(getUploadFileUrl(att.value), "_blank", "noopener,noreferrer");
+                                        e.preventDefault();
+                                      }}
                                       className="text-xs text-primary-600 hover:text-primary-800 truncate block"
                                     >
-                                      {att.value}
+                                      {att.name || att.value}
                                     </a>
                                   </div>
                                 </div>
