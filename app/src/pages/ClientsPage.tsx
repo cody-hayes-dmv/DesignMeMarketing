@@ -712,8 +712,8 @@ const ClientsPage = () => {
 
   const nonVendasta = modifiedClients.filter((c) => !c.vendasta);
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  // Active Clients = clients with status ACTIVE (includes new clients and managed service clients)
-  const activeCount = nonVendasta.filter((m) => m.status === "ACTIVE").length;
+  // Active Clients = all clients with status ACTIVE (includes non-Vendasta and Vendasta active clients)
+  const activeCount = modifiedClients.filter((m) => m.status === "ACTIVE").length;
   const totalCount = modifiedClients.length;
   const pendingCount = nonVendasta.filter((m) => m.status === "PENDING").length;
   const dashboardOnlyCount = nonVendasta.filter((m) => m.status === "DASHBOARD_ONLY").length;
@@ -755,7 +755,8 @@ const ClientsPage = () => {
 
   const filteredClients = modifiedClients
     .filter((client) => {
-      if (statusFilter !== "total" && client.vendasta) return false;
+      // For "Active" and "Total", include Vendasta clients; for other filters show only non-Vendasta
+      if (statusFilter !== "total" && statusFilter !== "active" && client.vendasta) return false;
       if (statusFilter === "active") {
         return client.status === "ACTIVE";
       }
