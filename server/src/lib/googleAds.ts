@@ -558,6 +558,64 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
 }
 
 /**
+ * List only client accounts (flattened): standalone non-manager accounts plus all children under each manager.
+ * Use this to show a single list of accounts that have PPC data (no manager accounts in the list).
+ * Each item includes managerCustomerId when the account is under an MCC (for connect API).
+ */
+export async function listGoogleAdsClientAccounts(clientId: string): Promise<Array<{
+  customerId: string;
+  customerName: string;
+  currencyCode: string;
+  timeZone: string;
+  managerCustomerId: string | null;
+}>> {
+  const all = await listGoogleAdsCustomers(clientId);
+  const result: Array<{
+    customerId: string;
+    customerName: string;
+    currencyCode: string;
+    timeZone: string;
+    managerCustomerId: string | null;
+  }> = [];
+  const seenIds = new Set<string>();
+
+  for (const account of all) {
+    if (account.isManager) {
+      try {
+        const children = await listChildAccountsUnderManager(clientId, account.customerId);
+        for (const child of children) {
+          if (child.customerId && !seenIds.has(child.customerId)) {
+            seenIds.add(child.customerId);
+            result.push({
+              customerId: child.customerId,
+              customerName: child.customerName,
+              currencyCode: 'USD',
+              timeZone: 'America/New_York',
+              managerCustomerId: account.customerId,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[Google Ads] Skipping children for manager', account.customerId, err);
+      }
+    } else {
+      if (!seenIds.has(account.customerId)) {
+        seenIds.add(account.customerId);
+        result.push({
+          customerId: account.customerId,
+          customerName: account.customerName,
+          currencyCode: account.currencyCode,
+          timeZone: account.timeZone,
+          managerCustomerId: null,
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
  * List child (client) accounts under a manager (MCC) account.
  * Used when the user selects a manager so they can pick which client account to connect.
  * Query runs against the manager customer ID; no login-customer-id needed.

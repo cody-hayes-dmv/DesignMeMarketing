@@ -3151,7 +3151,10 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setLoadingGoogleAdsCustomers(true);
-      const res = await api.get(`/clients/${clientId}/google-ads/customers`);
+      // clientOnly=true: flattened list of client accounts only (no managers), so user picks an account that has PPC data in one step
+      const res = await api.get(`/clients/${clientId}/google-ads/customers`, {
+        params: { clientOnly: 'true' },
+      });
       const customers = res.data?.customers || [];
       
       if (customers.length === 0) {
@@ -3169,37 +3172,13 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const handleSelectGoogleAdsAccount = async (customer: { customerId: string; customerName: string; isManager?: boolean }) => {
+  const handleSelectGoogleAdsAccount = async (customer: { customerId: string; customerName: string; managerCustomerId?: string | null }) => {
     if (!clientId) return;
-    // If this is a manager (MCC), fetch child accounts so user can pick the client account with PPC data
-    if (customer.isManager) {
-      try {
-        setLoadingGoogleAdsChildAccounts(true);
-        setGoogleAdsChildAccounts([]);
-        const res = await api.get(`/clients/${clientId}/google-ads/child-accounts`, {
-          params: { customerId: customer.customerId },
-        });
-        const children = res.data?.children || [];
-        if (children.length > 0) {
-          setGoogleAdsSelectedManager({ customerId: customer.customerId, customerName: customer.customerName });
-          setGoogleAdsChildAccounts(children);
-        } else {
-          setGoogleAdsSelectedManager({ customerId: customer.customerId, customerName: customer.customerName });
-          setGoogleAdsChildAccounts([]);
-        }
-      } catch (error: any) {
-        console.error("Failed to fetch child accounts:", error);
-        toast.error(error.response?.data?.message || "Failed to load client accounts under this manager");
-      } finally {
-        setLoadingGoogleAdsChildAccounts(false);
-      }
-      return;
-    }
-    // Non-manager account: connect directly
-    await handleSubmitGoogleAdsCustomerId(customer.customerId);
+    // Client-only list: every item is a client account (with optional managerCustomerId when under MCC); connect in one step
+    await handleSubmitGoogleAdsCustomerId(customer.customerId, customer.managerCustomerId ?? undefined);
   };
 
-  const handleSubmitGoogleAdsCustomerId = async (selectedCustomerId?: string) => {
+  const handleSubmitGoogleAdsCustomerId = async (selectedCustomerId?: string, managerCustomerId?: string | null) => {
     const customerIdToUse = selectedCustomerId || googleAdsCustomerId.trim();
     if (!clientId || !customerIdToUse) {
       toast.error("Please select a Google Ads account");
@@ -3208,8 +3187,9 @@ const ClientDashboardPage: React.FC = () => {
     try {
       setGoogleAdsConnecting(true);
       const body: { customerId: string; managerCustomerId?: string } = { customerId: customerIdToUse };
-      if (googleAdsSelectedManager) {
-        body.managerCustomerId = googleAdsSelectedManager.customerId;
+      const managerId = managerCustomerId ?? googleAdsSelectedManager?.customerId;
+      if (managerId) {
+        body.managerCustomerId = managerId;
       }
       await api.post(`/clients/${clientId}/google-ads/connect`, body);
       toast.success("Google Ads connected successfully!");
@@ -9907,7 +9887,7 @@ const ClientDashboardPage: React.FC = () => {
             ) : (
               <>
                 <p className="text-sm text-gray-600 mb-4">
-                  Select a Google Ads account to connect. If you use a manager (MCC) account, select it and then choose the client account that has this client&apos;s PPC data.
+                  Select a Google Ads client account to connect. These are the accounts that can have PPC data (standalone accounts and client accounts under your manager accounts).
                 </p>
                 {loadingGoogleAdsCustomers ? (
                   <div className="flex items-center justify-center py-8">

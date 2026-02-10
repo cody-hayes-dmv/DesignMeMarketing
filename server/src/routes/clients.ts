@@ -1425,7 +1425,7 @@ router.patch('/:id/reactivate', authenticateToken, async (req, res) => {
 // GA4 Connection Routes
 import { getGA4AuthUrl, exchangeCodeForTokens, isGA4Connected, listGA4Properties } from '../lib/ga4.js';
 // Google Ads Connection Routes
-import { getGoogleAdsAuthUrl, exchangeCodeForTokens as exchangeGoogleAdsCodeForTokens, isGoogleAdsConnected, listGoogleAdsCustomers, listChildAccountsUnderManager, fetchGoogleAdsCampaigns, fetchGoogleAdsAdGroups, fetchGoogleAdsKeywords, fetchGoogleAdsConversions } from '../lib/googleAds.js';
+import { getGoogleAdsAuthUrl, exchangeCodeForTokens as exchangeGoogleAdsCodeForTokens, isGoogleAdsConnected, listGoogleAdsCustomers, listGoogleAdsClientAccounts, listChildAccountsUnderManager, fetchGoogleAdsCampaigns, fetchGoogleAdsAdGroups, fetchGoogleAdsKeywords, fetchGoogleAdsConversions } from '../lib/googleAds.js';
 
 // GA4 OAuth callback (no auth required - handled via state parameter)
 router.get('/ga4/callback', async (req, res) => {
@@ -2669,8 +2669,11 @@ router.get('/:id/google-ads/customers', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Please complete OAuth flow first by clicking "Connect Google Ads"' });
         }
 
-        // List all Google Ads customers
-        const customers = await listGoogleAdsCustomers(clientId);
+        // clientOnly=true: flattened list of client accounts only (no managers), each with managerCustomerId when under an MCC
+        const clientOnly = String(req.query.clientOnly ?? '').toLowerCase() === 'true';
+        const customers = clientOnly
+            ? await listGoogleAdsClientAccounts(clientId)
+            : await listGoogleAdsCustomers(clientId);
         res.json({ customers });
     } catch (error: any) {
         console.error('Google Ads customers list error:', error);
