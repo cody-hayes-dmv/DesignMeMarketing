@@ -1425,7 +1425,7 @@ router.patch('/:id/reactivate', authenticateToken, async (req, res) => {
 // GA4 Connection Routes
 import { getGA4AuthUrl, exchangeCodeForTokens, isGA4Connected, listGA4Properties } from '../lib/ga4.js';
 // Google Ads Connection Routes
-import { getGoogleAdsAuthUrl, exchangeCodeForTokens as exchangeGoogleAdsCodeForTokens, isGoogleAdsConnected, listGoogleAdsCustomers, fetchGoogleAdsCampaigns, fetchGoogleAdsAdGroups, fetchGoogleAdsKeywords, fetchGoogleAdsConversions } from '../lib/googleAds.js';
+import { getGoogleAdsAuthUrl, exchangeCodeForTokens as exchangeGoogleAdsCodeForTokens, isGoogleAdsConnected, listGoogleAdsCustomers, listChildAccountsUnderManager, fetchGoogleAdsCampaigns, fetchGoogleAdsAdGroups, fetchGoogleAdsKeywords, fetchGoogleAdsConversions } from '../lib/googleAds.js';
 
 // GA4 OAuth callback (no auth required - handled via state parameter)
 router.get('/ga4/callback', async (req, res) => {
@@ -2664,6 +2664,38 @@ router.get('/:id/google-ads/customers', authenticateToken, async (req, res) => {
         res.json({ customers });
     } catch (error: any) {
         console.error('Google Ads customers list error:', error);
+        const msg = error.message || 'Internal server error';
+        const isAuthError = /reconnect|authentication failed|token expired|token revoked|not connected|tokens not found/i.test(msg);
+        res.status(isAuthError ? 401 : 500).json({ message: msg });
+    }
+});
+
+// List child (client) accounts under a manager (MCC) - so user can pick which client to connect
+router.get('/:id/google-ads/child-accounts', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const customerId = req.query.customerId as string;
+        if (!customerId) {
+            return res.status(400).json({ message: 'customerId query is required' });
+        }
+
+        const { hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
+        const existingClient = await prisma.client.findUnique({
+            where: { id: clientId },
+            select: { googleAdsRefreshToken: true },
+        });
+        if (!existingClient?.googleAdsRefreshToken) {
+            return res.status(400).json({ message: 'Please complete OAuth flow first by clicking "Connect Google Ads"' });
+        }
+
+        const children = await listChildAccountsUnderManager(clientId, customerId);
+        res.json({ children });
+    } catch (error: any) {
+        console.error('Google Ads child accounts list error:', error);
         const msg = error.message || 'Internal server error';
         const isAuthError = /reconnect|authentication failed|token expired|token revoked|not connected|tokens not found/i.test(msg);
         res.status(isAuthError ? 401 : 500).json({ message: msg });

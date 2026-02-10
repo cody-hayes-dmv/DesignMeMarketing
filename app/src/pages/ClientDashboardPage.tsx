@@ -529,6 +529,9 @@ const ClientDashboardPage: React.FC = () => {
     timeZone: string;
   }>>([]);
   const [loadingGoogleAdsCustomers, setLoadingGoogleAdsCustomers] = useState(false);
+  const [googleAdsSelectedManager, setGoogleAdsSelectedManager] = useState<{ customerId: string; customerName: string } | null>(null);
+  const [googleAdsChildAccounts, setGoogleAdsChildAccounts] = useState<Array<{ customerId: string; customerName: string; status: string }>>([]);
+  const [loadingGoogleAdsChildAccounts, setLoadingGoogleAdsChildAccounts] = useState(false);
   // PPC dashboard state
   const [ppcSubSection, setPpcSubSection] = useState<"campaigns" | "ad-groups" | "keywords" | "conversions">("campaigns");
   const [ppcData, setPpcData] = useState<any>(null);
@@ -3188,6 +3191,33 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
+  const handleSelectGoogleAdsAccount = async (customer: { customerId: string; customerName: string }) => {
+    if (!clientId) return;
+    try {
+      setLoadingGoogleAdsChildAccounts(true);
+      setGoogleAdsChildAccounts([]);
+      const res = await api.get(`/clients/${clientId}/google-ads/child-accounts`, {
+        params: { customerId: customer.customerId },
+      });
+      const children = res.data?.children || [];
+      if (children.length > 0) {
+        setGoogleAdsSelectedManager({ customerId: customer.customerId, customerName: customer.customerName });
+        setGoogleAdsChildAccounts(children);
+      } else {
+        await handleSubmitGoogleAdsCustomerId(customer.customerId);
+      }
+    } catch (error: any) {
+      if (error.response?.status === 400 || error.response?.data?.message?.includes('customer')) {
+        await handleSubmitGoogleAdsCustomerId(customer.customerId);
+      } else {
+        console.error("Failed to fetch child accounts:", error);
+        toast.error(error.response?.data?.message || "Failed to load accounts");
+      }
+    } finally {
+      setLoadingGoogleAdsChildAccounts(false);
+    }
+  };
+
   const handleSubmitGoogleAdsCustomerId = async (selectedCustomerId?: string) => {
     const customerIdToUse = selectedCustomerId || googleAdsCustomerId.trim();
     if (!clientId || !customerIdToUse) {
@@ -3203,6 +3233,8 @@ const ClientDashboardPage: React.FC = () => {
       setShowGoogleAdsModal(false);
       setGoogleAdsCustomerId("");
       setGoogleAdsCustomers([]);
+      setGoogleAdsSelectedManager(null);
+      setGoogleAdsChildAccounts([]);
       setGoogleAdsConnected(true);
       // Refresh PPC data if on PPC section
       if (dashboardSection === "ppc") {
@@ -9792,80 +9824,169 @@ const ClientDashboardPage: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Select Google Ads Account</h3>
+              <h3 className="text-lg font-semibold text-gray-900">
+                {googleAdsSelectedManager
+                  ? "Select client account"
+                  : "Select Google Ads Account"}
+              </h3>
               <button
                 onClick={() => {
                   setShowGoogleAdsModal(false);
                   setGoogleAdsCustomerId("");
                   setGoogleAdsCustomers([]);
+                  setGoogleAdsSelectedManager(null);
+                  setGoogleAdsChildAccounts([]);
                 }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <p className="text-sm text-gray-600 mb-4">
-              Select a Google Ads account to connect. These are all the accounts accessible with your Google account.
-            </p>
-            
-            {loadingGoogleAdsCustomers ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
-                <span className="ml-2 text-gray-600">Loading accounts...</span>
-              </div>
-            ) : googleAdsCustomers.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <p>No Google Ads accounts found.</p>
-                <p className="text-sm mt-2">Please make sure you have access to at least one Google Ads account.</p>
-              </div>
+            {googleAdsSelectedManager ? (
+              <>
+                <p className="text-sm text-gray-600 mb-4">
+                  <span className="font-medium text-gray-700">{googleAdsSelectedManager.customerName}</span> is a manager account and has no campaign stats. Select the client account that has the PPC data for this client.
+                </p>
+                {loadingGoogleAdsChildAccounts ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                    <span className="ml-2 text-gray-600">Loading client accounts...</span>
+                  </div>
+                ) : googleAdsChildAccounts.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No client accounts found under this manager.</p>
+                    <button
+                      onClick={() => { setGoogleAdsSelectedManager(null); setGoogleAdsChildAccounts([]); }}
+                      className="mt-3 text-primary-600 hover:underline"
+                    >
+                      Back to account list
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
+                      <div className="divide-y divide-gray-200">
+                        {googleAdsChildAccounts.map((child) => (
+                          <button
+                            key={child.customerId}
+                            onClick={() => handleSubmitGoogleAdsCustomerId(child.customerId)}
+                            disabled={googleAdsConnecting}
+                            className="w-full text-left p-4 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{child.customerName}</div>
+                                <div className="text-sm text-gray-500 mt-1">
+                                  Customer ID: {child.customerId}
+                                </div>
+                                {child.status && (
+                                  <div className="text-xs text-gray-400 mt-1">Status: {child.status}</div>
+                                )}
+                              </div>
+                              {googleAdsConnecting ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                              ) : (
+                                <div className="text-primary-600">
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => { setGoogleAdsSelectedManager(null); setGoogleAdsChildAccounts([]); }}
+                        className="px-4 py-2 text-gray-600 hover:text-gray-900"
+                      >
+                        ← Back to account list
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowGoogleAdsModal(false);
+                          setGoogleAdsCustomerId("");
+                          setGoogleAdsCustomers([]);
+                          setGoogleAdsSelectedManager(null);
+                          setGoogleAdsChildAccounts([]);
+                        }}
+                        className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                )}
+              </>
             ) : (
               <>
-                <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
-                  <div className="divide-y divide-gray-200">
-                    {googleAdsCustomers.map((customer) => (
-                      <button
-                        key={customer.customerId}
-                        onClick={() => handleSubmitGoogleAdsCustomerId(customer.customerId)}
-                        disabled={googleAdsConnecting}
-                        className="w-full text-left p-4 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">{customer.customerName}</div>
-                            <div className="text-sm text-gray-500 mt-1">
-                              Customer ID: {customer.customerId}
-                            </div>
-                            <div className="text-xs text-gray-400 mt-1">
-                              Currency: {customer.currencyCode} | Timezone: {customer.timeZone}
-                            </div>
-                          </div>
-                          {googleAdsConnecting ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
-                          ) : (
-                            <div className="text-primary-600">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                              </svg>
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+                <p className="text-sm text-gray-600 mb-4">
+                  Select a Google Ads account to connect. If you use a manager (MCC) account, select it and then choose the client account that has this client&apos;s PPC data.
+                </p>
+                {loadingGoogleAdsCustomers ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                    <span className="ml-2 text-gray-600">Loading accounts...</span>
                   </div>
-                </div>
-                
-                <div className="flex items-center justify-end">
-                  <button
-                    onClick={() => {
-                      setShowGoogleAdsModal(false);
-                      setGoogleAdsCustomerId("");
-                      setGoogleAdsCustomers([]);
-                    }}
-                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
+                ) : googleAdsCustomers.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No Google Ads accounts found.</p>
+                    <p className="text-sm mt-2">Please make sure you have access to at least one Google Ads account.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1 overflow-y-auto mb-4 border border-gray-200 rounded-lg">
+                      <div className="divide-y divide-gray-200">
+                        {googleAdsCustomers.map((customer) => (
+                          <button
+                            key={customer.customerId}
+                            onClick={() => handleSelectGoogleAdsAccount(customer)}
+                            disabled={googleAdsConnecting || loadingGoogleAdsChildAccounts}
+                            className="w-full text-left p-4 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{customer.customerName}</div>
+                                <div className="text-sm text-gray-500 mt-1">
+                                  Customer ID: {customer.customerId}
+                                </div>
+                                <div className="text-xs text-gray-400 mt-1">
+                                  Currency: {customer.currencyCode} | Timezone: {customer.timeZone}
+                                </div>
+                              </div>
+                              {googleAdsConnecting || loadingGoogleAdsChildAccounts ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                              ) : (
+                                <div className="text-primary-600">
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end">
+                      <button
+                        onClick={() => {
+                          setShowGoogleAdsModal(false);
+                          setGoogleAdsCustomerId("");
+                          setGoogleAdsCustomers([]);
+                          setGoogleAdsSelectedManager(null);
+                          setGoogleAdsChildAccounts([]);
+                        }}
+                        className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

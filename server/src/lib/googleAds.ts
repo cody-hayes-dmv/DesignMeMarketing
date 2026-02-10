@@ -336,9 +336,22 @@ async function getAccessibleCustomerIds(clientId: string): Promise<string[]> {
   }).filter((id: string | null) => id !== null);
 }
 
+/** True if the response indicates "must set login-customer-id" / permission to access customer. */
+function isLoginCustomerIdPermissionError(response: Response, responseText: string): boolean {
+  if (response.status === 403) return true;
+  const lower = responseText.toLowerCase();
+  return (
+    (lower.includes("permission") && (lower.includes("customer") || lower.includes("login-customer-id"))) ||
+    lower.includes("login-customer-id") ||
+    /caller does not have/i.test(responseText) ||
+    /user doesn't have permission to access customer/i.test(responseText)
+  );
+}
+
 /**
- * Run a Google Ads searchStream request with 403 retry using login-customer-id when accessing via manager account.
- * Uses manager (login-customer-id) on first request when user has multiple accounts and selected account is not the first.
+ * Run a Google Ads searchStream request with retry using login-customer-id when accessing a client via manager (MCC).
+ * When the selected account is a client under an MCC, the API requires the manager's customer ID in the
+ * 'login-customer-id' header. We try each accessible account as the manager until one succeeds.
  */
 async function googleAdsSearchStream(
   clientId: string,
@@ -359,28 +372,38 @@ async function googleAdsSearchStream(
     return fetch(apiUrl, { method: 'POST', headers, body });
   };
 
-  // When user has multiple accounts, use manager (first accessible) as login-customer-id on first request to avoid 403
-  let loginIdForFirstRequest: string | undefined;
+  let accessibleIds: string[] = [];
   try {
-    const accessibleIds = await getAccessibleCustomerIds(clientId);
-    if (accessibleIds.length > 1 && accessibleIds[0] !== selectedId && accessibleIds.includes(selectedId)) {
-      loginIdForFirstRequest = accessibleIds[0];
-    }
+    accessibleIds = await getAccessibleCustomerIds(clientId);
   } catch {
     /* ignore; will try without header first */
   }
 
-  let response = await doRequest(loginIdForFirstRequest);
+  // When we have multiple accounts and the selected one is in the list, the selected account may be a client.
+  // Try each other accessible ID as login-customer-id (manager) so we always send the required header.
+  const otherIds = accessibleIds.filter((id) => id !== selectedId);
+  if (otherIds.length > 0 && accessibleIds.includes(selectedId)) {
+    for (const loginId of otherIds) {
+      const response = await doRequest(loginId);
+      const responseText = await response.text();
+      if (response.ok && !isLoginCustomerIdPermissionError(response, responseText)) {
+        return { response, responseText };
+      }
+    }
+  }
+
+  // First request without login-customer-id (e.g. single account or selected is the manager)
+  let response = await doRequest(undefined);
   let responseText = await response.text();
 
-  // On 403 permission error, retry with each other accessible customer as login-customer-id (manager)
-  if (response.status === 403 && /permission|login-customer-id|caller does not have/i.test(responseText)) {
-    const accessibleIds = await getAccessibleCustomerIds(clientId);
-    for (const loginId of accessibleIds) {
+  // On permission error (403 or body message), retry with each other accessible customer as login-customer-id
+  if (isLoginCustomerIdPermissionError(response, responseText)) {
+    const ids = accessibleIds.length > 0 ? accessibleIds : await getAccessibleCustomerIds(clientId);
+    for (const loginId of ids) {
       if (loginId === selectedId) continue;
       response = await doRequest(loginId);
       responseText = await response.text();
-      if (response.ok) break;
+      if (response.ok && !isLoginCustomerIdPermissionError(response, responseText)) break;
     }
   }
 
@@ -511,6 +534,67 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
     // For other errors, return empty array - user can still connect manually
     return [];
   }
+}
+
+/**
+ * List child (client) accounts under a manager (MCC) account.
+ * Used when the user selects a manager so they can pick which client account to connect.
+ * Query runs against the manager customer ID; no login-customer-id needed.
+ */
+export async function listChildAccountsUnderManager(
+  clientId: string,
+  managerCustomerId: string
+): Promise<Array<{ customerId: string; customerName: string; status: string }>> {
+  const { oauth2Client } = await getGoogleAdsClient(clientId);
+  const accessToken = oauth2Client.credentials.access_token;
+  if (!accessToken) {
+    throw new Error('Google Ads access token is not available. Please reconnect Google Ads.');
+  }
+  const managerId = managerCustomerId.replace(/-/g, '');
+  const apiUrl = `https://googleads.googleapis.com/v20/customers/${managerId}/googleAds:searchStream`;
+  const query = `
+    SELECT customer_client.id, customer_client.descriptive_name, customer_client.status
+    FROM customer_client
+    WHERE customer_client.status IN ('ENABLED', 'CANCELED')
+      AND customer_client.manager = false
+  `;
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'developer-token': getGoogleAdsDeveloperToken(),
+    },
+    body: JSON.stringify({ query }),
+  });
+  const responseText = await response.text();
+  if (!response.ok) {
+    const detail = getGoogleAdsErrorMessage(responseText);
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(detail);
+    }
+    throw new Error(`Google Ads API error (${response.status}): ${detail}`);
+  }
+  let data: any;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    const batches = responseText.trim().split('\n').filter(Boolean).map((line: string) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+    data = batches.length === 1 ? batches[0] : batches;
+  }
+  const results = getSearchStreamResults(data);
+  return results.map((row: any) => {
+    const id = row.customerClient?.id ?? row.customer_client?.id;
+    const name = row.customerClient?.descriptiveName ?? row.customer_client?.descriptive_name ?? `Account ${id}`;
+    const status = row.customerClient?.status ?? row.customer_client?.status ?? 'UNKNOWN';
+    return {
+      customerId: id != null ? String(id) : '',
+      customerName: name,
+      status: status,
+    };
+  }).filter((c: { customerId: string }) => c.customerId);
 }
 
 /**
