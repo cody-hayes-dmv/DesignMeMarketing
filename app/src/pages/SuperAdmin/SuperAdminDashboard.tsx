@@ -171,7 +171,7 @@ const SuperAdminDashboard = () => {
   const activeAgencies = stats?.activeAgencies ?? agencies.filter((a) => (a.clientCount ?? 0) > 0).length;
   const activeManagedClients =
     stats?.activeManagedClients ??
-    clients.filter((c) => (c as any).managedServiceStatus === "active").length;
+    clients.filter((c) => c.status === "ACTIVE").length;
   const pendingRequests = stats?.pendingRequests ?? pendingManagedServices.length;
 
   // Recent agencies (last 5)
@@ -193,7 +193,7 @@ const SuperAdminDashboard = () => {
   ).length;
   
   const newClientsLast30Days = clients.filter(
-    client => new Date(client.createdAt) >= thirtyDaysAgo
+    (client) => new Date(client.createdAt) >= thirtyDaysAgo
   ).length;
 
   return (
@@ -272,7 +272,7 @@ const SuperAdminDashboard = () => {
                   <p className="text-sm text-gray-500 mt-1">active clients</p>
                   {!statsLoading && (
                     <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
-                      Managed services only
+                      Clients with active status
                     </p>
                   )}
                 </div>

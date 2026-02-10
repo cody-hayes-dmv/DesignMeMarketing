@@ -214,7 +214,7 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
     }
     const now = new Date();
 
-    const [totalAgencies, activeAgenciesCount, activeManagedClientsCount, totalDashboards, pendingRequests] = await Promise.all([
+    const [totalAgencies, activeAgenciesCount, activeClientsCount, totalDashboards, pendingRequests] = await Promise.all([
       prisma.agency.count(),
       prisma.agency.count({
         where: {
@@ -222,7 +222,7 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
           OR: [{ trialEndsAt: null }, { trialEndsAt: { gt: now } }],
         },
       }),
-      prisma.client.count({ where: { managedServiceStatus: "active" } }),
+      prisma.client.count({ where: { status: "ACTIVE" } }),
       prisma.client.count(),
       prisma.managedService.count({ where: { status: "PENDING" } }),
     ]);
@@ -230,7 +230,7 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
     return res.json({
       totalAgencies,
       activeAgencies: activeAgenciesCount,
-      activeManagedClients: activeManagedClientsCount,
+      activeManagedClients: activeClientsCount,
       totalDashboards,
       pendingRequests,
     });

@@ -712,11 +712,9 @@ const ClientsPage = () => {
 
   const nonVendasta = modifiedClients.filter((c) => !c.vendasta);
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  // For Super Admin: "Active" = managed services active (Johnny's work); otherwise use status ACTIVE
-  const activeCount = isSuperAdmin
-    ? nonVendasta.filter((m) => (m as any).managedServiceStatus === "active").length
-    : nonVendasta.filter((m) => m.status === "ACTIVE").length;
-  const totalCount = nonVendasta.length;
+  // Active Clients = clients with status ACTIVE (includes new clients and managed service clients)
+  const activeCount = nonVendasta.filter((m) => m.status === "ACTIVE").length;
+  const totalCount = modifiedClients.length;
   const pendingCount = nonVendasta.filter((m) => m.status === "PENDING").length;
   const dashboardOnlyCount = nonVendasta.filter((m) => m.status === "DASHBOARD_ONLY").length;
   const canceledCount = nonVendasta.filter((m) => m.status === "CANCELED").length;
@@ -757,9 +755,9 @@ const ClientsPage = () => {
 
   const filteredClients = modifiedClients
     .filter((client) => {
-      if (client.vendasta) return false;
+      if (statusFilter !== "total" && client.vendasta) return false;
       if (statusFilter === "active") {
-        return isSuperAdmin ? (client as any).managedServiceStatus === "active" : client.status === "ACTIVE";
+        return client.status === "ACTIVE";
       }
       if (statusFilter === "total") return true;
       if (statusFilter === "pending") return client.status === "PENDING";
@@ -840,13 +838,13 @@ const ClientsPage = () => {
           type="button"
           onClick={() => setStatusFilter("active")}
           className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "active" ? "border-green-300 ring-2 ring-green-100" : "border-gray-200 hover:bg-gray-50"}`}
-          title="Managed services active"
+          title="Clients with active status"
         >
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-gray-600">Active Clients</p>
               <p className="text-xl font-bold text-green-600">{activeCount}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Managed services active</p>
+              <p className="text-xs text-gray-500 mt-0.5">Clients with active status</p>
             </div>
             <UserCheck className="h-8 w-8 text-green-600 shrink-0" />
           </div>
