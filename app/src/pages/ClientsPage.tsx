@@ -1764,18 +1764,71 @@ const ClientsPage = () => {
                 <h2 className="text-xl font-bold text-gray-900">Edit Client</h2>
                 <p className="text-sm text-gray-500 mt-1">Account information</p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEditModal(false);
-                  setEditingClient(null);
-                  setClientForm(EMPTY_CLIENT_FORM);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-                aria-label="Close"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const niche = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther : clientForm.businessNiche;
+                    const industry = clientForm.industry === "Other" ? clientForm.industryOther : clientForm.industry;
+                    const lines = [
+                      "--- BUSINESS INFORMATION ---",
+                      `Business Name: ${clientForm.name || ""}`,
+                      `Business Niche: ${niche || ""}`,
+                      `Business Description: ${clientForm.businessDescription || ""}`,
+                      `Primary Domain: ${clientForm.domain || ""}`,
+                      `Industry: ${industry || ""}`,
+                      "",
+                      "--- LOCATION INFORMATION ---",
+                      `Business Address: ${clientForm.businessAddress || ""}`,
+                      `Primary Location City: ${clientForm.primaryLocationCity || ""}`,
+                      `Primary Location State: ${clientForm.primaryLocationState || ""}`,
+                      `Service Radius: ${clientForm.serviceRadius || ""}`,
+                      `Areas Served: ${clientForm.serviceAreasServed || ""}`,
+                      "",
+                      "--- CONTACT INFORMATION ---",
+                      `Phone Number: ${clientForm.phoneNumber || ""}`,
+                      `Email: ${clientForm.emailAddress || ""}`,
+                      "",
+                      "--- WEBSITE LOGIN INFO ---",
+                      `Website Login URL: ${clientForm.loginUrl || ""}`,
+                      `Website Username: ${clientForm.loginUsername || ""}`,
+                      `Website Password: ${clientForm.loginPassword ? "••••••••" : ""}`,
+                      "",
+                      "--- CAMPAIGN TYPE ---",
+                      `Campaign Type: ${clientForm.campaignType || ""}`,
+                      "",
+                      "--- GOOGLE BUSINESS PROFILE ---",
+                      `Google Business Profile Category: ${clientForm.gbpPrimaryCategory || ""}`,
+                      `Secondary GBP Categories: ${clientForm.gbpSecondaryCategories || ""}`,
+                    ];
+                    if (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") {
+                      lines.push("", "--- STATUS ---", `Status: ${clientForm.clientStatus || ""}`);
+                    }
+                    const text = lines.join("\n");
+                    navigator.clipboard.writeText(text).then(
+                      () => toast.success("Copied to clipboard"),
+                      () => toast.error("Failed to copy")
+                    );
+                  }}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  title="Copy all information"
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy Text
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingClient(null);
+                    setClientForm(EMPTY_CLIENT_FORM);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <form onSubmit={handleUpdateClient} className="flex-1 min-h-0 flex flex-col">
@@ -2228,7 +2281,7 @@ const ClientsPage = () => {
                 {user?.role === "SUPER_ADMIN" && (
                   <>
                     <section className="border-t border-gray-200 pt-6">
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION A: KEYWORD ALLOCATION</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">KEYWORD ALLOCATION</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Number of Keywords for Campaign</label>
@@ -2258,7 +2311,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION B: GEOLOCATION DATA</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">GEOLOCATION DATA</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
@@ -2288,7 +2341,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION C: SEO ROADMAP</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SEO ROADMAP</h3>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Section</label>
                         <textarea
@@ -2303,7 +2356,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SUPER ADMIN SECTION D: MANAGED SERVICE STATUS</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">MANAGED SERVICE STATUS</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Managed Service Status</label>

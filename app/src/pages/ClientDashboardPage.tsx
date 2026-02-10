@@ -58,7 +58,9 @@ function getUploadFileUrl(url: string | undefined): string {
     return url;
   }
 }
-import { Client } from "@/store/slices/clientSlice";
+import { Client, updateClient } from "@/store/slices/clientSlice";
+import { clientToFormState, formStateToUpdatePayload } from "@/lib/clientAccountForm";
+import ClientAccountFormModal, { EMPTY_CLIENT_FORM } from "@/components/ClientAccountFormModal";
 import { addDays, endOfWeek, format, startOfWeek, subDays } from "date-fns";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -576,6 +578,9 @@ const ClientDashboardPage: React.FC = () => {
 
   // Client-specific report creation modal state
   const [showClientReportModal, setShowClientReportModal] = useState(false);
+  const [showViewClientModal, setShowViewClientModal] = useState(false);
+  const [viewClientForm, setViewClientForm] = useState(EMPTY_CLIENT_FORM);
+  const [viewClientSaving, setViewClientSaving] = useState(false);
   const [clientReportFrequency, setClientReportFrequency] = useState<"weekly" | "biweekly" | "monthly">("monthly");
   const [clientReportDayOfWeek, setClientReportDayOfWeek] = useState(1); // Monday
   const [clientReportDayOfMonth, setClientReportDayOfMonth] = useState(1);
@@ -1632,6 +1637,13 @@ const ClientDashboardPage: React.FC = () => {
 
     fetchClient();
   }, [clientId, client, navigate]);
+
+  // Sync view client form when modal opens (same fields as Edit Client modal)
+  useEffect(() => {
+    if (showViewClientModal && client) {
+      setViewClientForm(clientToFormState(client));
+    }
+  }, [showViewClientModal, client]);
 
   // Check GA4 connection status and handle OAuth callback
   useEffect(() => {
@@ -3764,6 +3776,16 @@ const ClientDashboardPage: React.FC = () => {
                   <span className="font-medium text-gray-700">Industry:</span> {client.industry}
                 </div>
               )}
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowViewClientModal(true)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors"
+                >
+                  <Info className="h-4 w-4" />
+                  View Client Information
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -7004,6 +7026,49 @@ const ClientDashboardPage: React.FC = () => {
                 confirmText="Remove"
                 cancelText="Cancel"
                 variant="danger"
+              />
+
+              {/* View / Edit Client Information Modal (same layout as Edit Client in Clients page) */}
+              <ClientAccountFormModal
+                open={showViewClientModal && !!client}
+                title={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "") ? "Edit Client" : "Client Information"}
+                subtitle="Account information"
+                form={viewClientForm}
+                setForm={setViewClientForm}
+                canEdit={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")}
+                showStatus={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"}
+                onClose={() => setShowViewClientModal(false)}
+                onSave={
+                  ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")
+                    ? async () => {
+                        if (!client) return;
+                        setViewClientSaving(true);
+                        try {
+                          const data = formStateToUpdatePayload(viewClientForm, {
+                            includeStatus: user?.role === "SUPER_ADMIN" || user?.role === "ADMIN",
+                          });
+                          await dispatch(updateClient({ id: client.id, data }) as any).unwrap();
+                          setClient((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  name: viewClientForm.name,
+                                  domain: viewClientForm.domain,
+                                  industry: viewClientForm.industry === "Other" ? viewClientForm.industryOther : viewClientForm.industry,
+                                }
+                              : null
+                          );
+                          setShowViewClientModal(false);
+                          toast.success("Client updated successfully.");
+                        } catch (e: any) {
+                          toast.error(e?.message || "Failed to update client.");
+                        } finally {
+                          setViewClientSaving(false);
+                        }
+                      }
+                    : undefined
+                }
+                saving={viewClientSaving}
               />
 
               {/* GA4 Property Selection Modal */}
