@@ -3191,31 +3191,34 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const handleSelectGoogleAdsAccount = async (customer: { customerId: string; customerName: string }) => {
+  const handleSelectGoogleAdsAccount = async (customer: { customerId: string; customerName: string; isManager?: boolean }) => {
     if (!clientId) return;
-    try {
-      setLoadingGoogleAdsChildAccounts(true);
-      setGoogleAdsChildAccounts([]);
-      const res = await api.get(`/clients/${clientId}/google-ads/child-accounts`, {
-        params: { customerId: customer.customerId },
-      });
-      const children = res.data?.children || [];
-      if (children.length > 0) {
-        setGoogleAdsSelectedManager({ customerId: customer.customerId, customerName: customer.customerName });
-        setGoogleAdsChildAccounts(children);
-      } else {
-        await handleSubmitGoogleAdsCustomerId(customer.customerId);
-      }
-    } catch (error: any) {
-      if (error.response?.status === 400 || error.response?.data?.message?.includes('customer')) {
-        await handleSubmitGoogleAdsCustomerId(customer.customerId);
-      } else {
+    // If this is a manager (MCC), fetch child accounts so user can pick the client account with PPC data
+    if (customer.isManager) {
+      try {
+        setLoadingGoogleAdsChildAccounts(true);
+        setGoogleAdsChildAccounts([]);
+        const res = await api.get(`/clients/${clientId}/google-ads/child-accounts`, {
+          params: { customerId: customer.customerId },
+        });
+        const children = res.data?.children || [];
+        if (children.length > 0) {
+          setGoogleAdsSelectedManager({ customerId: customer.customerId, customerName: customer.customerName });
+          setGoogleAdsChildAccounts(children);
+        } else {
+          setGoogleAdsSelectedManager({ customerId: customer.customerId, customerName: customer.customerName });
+          setGoogleAdsChildAccounts([]);
+        }
+      } catch (error: any) {
         console.error("Failed to fetch child accounts:", error);
-        toast.error(error.response?.data?.message || "Failed to load accounts");
+        toast.error(error.response?.data?.message || "Failed to load client accounts under this manager");
+      } finally {
+        setLoadingGoogleAdsChildAccounts(false);
       }
-    } finally {
-      setLoadingGoogleAdsChildAccounts(false);
+      return;
     }
+    // Non-manager account: connect directly
+    await handleSubmitGoogleAdsCustomerId(customer.customerId);
   };
 
   const handleSubmitGoogleAdsCustomerId = async (selectedCustomerId?: string) => {
@@ -3226,9 +3229,11 @@ const ClientDashboardPage: React.FC = () => {
     }
     try {
       setGoogleAdsConnecting(true);
-      await api.post(`/clients/${clientId}/google-ads/connect`, {
-        customerId: customerIdToUse,
-      });
+      const body: { customerId: string; managerCustomerId?: string } = { customerId: customerIdToUse };
+      if (googleAdsSelectedManager) {
+        body.managerCustomerId = googleAdsSelectedManager.customerId;
+      }
+      await api.post(`/clients/${clientId}/google-ads/connect`, body);
       toast.success("Google Ads connected successfully!");
       setShowGoogleAdsModal(false);
       setGoogleAdsCustomerId("");
@@ -9949,7 +9954,14 @@ const ClientDashboardPage: React.FC = () => {
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex-1">
-                                <div className="font-medium text-gray-900">{customer.customerName}</div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-gray-900">{customer.customerName}</span>
+                                  {customer.isManager && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                      Manager account
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-sm text-gray-500 mt-1">
                                   Customer ID: {customer.customerId}
                                 </div>

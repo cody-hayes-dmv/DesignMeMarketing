@@ -2377,7 +2377,7 @@ router.get('/google-ads/callback', async (req, res) => {
                                     error: '${error}',
                                     errorDescription: '${errorDescription}'
                                 }, '*');
-                                setTimeout(() => window.close(), 3000);
+                                setTimeout(function(){ try { window.close(); } catch (e) {} }, 3000);
                             } else {
                                 window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(errorMessage)}';
                             }
@@ -2426,7 +2426,7 @@ router.get('/google-ads/callback', async (req, res) => {
                                     type: 'GOOGLE_ADS_OAUTH_ERROR',
                                     error: 'Missing authorization code or state'
                                 }, '*');
-                                setTimeout(() => window.close(), 2000);
+                                setTimeout(function(){ try { window.close(); } catch (e) {} }, 2000);
                             } else {
                                 window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=missing_code';
                             }
@@ -2509,13 +2509,23 @@ router.get('/google-ads/callback', async (req, res) => {
                     </head>
                     <body>
                         <div class="container">
-                            <div class="success">Google Ads connected! Closing...</div>
+                            <div class="success" id="msg">Google Ads connected! Closing...</div>
+                            <p class="text-sm text-gray-500 mt-2" id="fallback" style="display:none">You can close this window.</p>
                         </div>
                         <script>
                             if (window.opener) {
                                 window.opener.postMessage({ type: 'GOOGLE_ADS_OAUTH_SUCCESS' }, '*');
                                 try { window.opener.focus(); } catch (e) {}
-                                setTimeout(function() { window.close(); }, 150);
+                                setTimeout(function() {
+                                    try { window.close(); } catch (e) {}
+                                    var closed = false;
+                                    try { closed = window.closed; } catch (e) {}
+                                    if (!closed) {
+                                        var m = document.getElementById('msg'); var f = document.getElementById('fallback');
+                                        if (m) m.textContent = 'Google Ads connected!';
+                                        if (f) f.style.display = 'block';
+                                    }
+                                }, 200);
                             } else {
                                 window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients/${clientId}?google_ads_tokens_received=true';
                             }
@@ -2566,7 +2576,7 @@ router.get('/google-ads/callback', async (req, res) => {
                                     type: 'GOOGLE_ADS_OAUTH_ERROR',
                                     error: '${errorMsg.replace(/'/g, "\\'")}'
                                 }, '*');
-                                setTimeout(() => window.close(), 2000);
+                                setTimeout(function(){ try { window.close(); } catch (e) {} }, 2000);
                             } else {
                                 window.location.href = '${process.env.FRONTEND_URL || 'http://localhost:3001'}/agency/clients?google_ads_error=${encodeURIComponent(errorMsg)}';
                             }
@@ -2698,15 +2708,19 @@ router.get('/:id/google-ads/child-accounts', authenticateToken, async (req, res)
         console.error('Google Ads child accounts list error:', error);
         const msg = error.message || 'Internal server error';
         const isAuthError = /reconnect|authentication failed|token expired|token revoked|not connected|tokens not found/i.test(msg);
-        res.status(isAuthError ? 401 : 500).json({ message: msg });
+        if (isAuthError) {
+            return res.status(401).json({ message: msg });
+        }
+        // Don't return empty children on error - so frontend won't connect the manager by mistake; show error instead
+        return res.status(500).json({ message: msg });
     }
 });
 
-// Connect Google Ads with customer ID (after OAuth callback)
+// Connect Google Ads with customer ID (after OAuth callback). Optional managerCustomerId when connecting a client under an MCC.
 router.post('/:id/google-ads/connect', authenticateToken, async (req, res) => {
     try {
         const clientId = req.params.id;
-        const { customerId } = req.body;
+        const { customerId, managerCustomerId } = req.body;
 
         if (!customerId) {
             return res.status(400).json({ message: 'Customer ID is required' });
@@ -2730,12 +2744,14 @@ router.post('/:id/google-ads/connect', authenticateToken, async (req, res) => {
 
         // Normalize customer ID (remove dashes if present)
         const normalizedCustomerId = customerId.replace(/-/g, '');
+        const normalizedManagerId = managerCustomerId ? String(managerCustomerId).replace(/-/g, '') : null;
 
-        // Update client with customer ID
+        // Update client with customer ID and optional manager (MCC) ID when connecting a client account under an MCC
         await prisma.client.update({
             where: { id: clientId },
             data: {
                 googleAdsCustomerId: normalizedCustomerId,
+                googleAdsManagerCustomerId: normalizedManagerId,
                 googleAdsConnectedAt: new Date(),
             },
         });
@@ -2767,6 +2783,7 @@ router.post('/:id/google-ads/disconnect', authenticateToken, async (req, res) =>
                 googleAdsAccessToken: null,
                 googleAdsRefreshToken: null,
                 googleAdsCustomerId: null,
+                googleAdsManagerCustomerId: null,
                 googleAdsAccountEmail: null,
                 googleAdsConnectedAt: null,
             },

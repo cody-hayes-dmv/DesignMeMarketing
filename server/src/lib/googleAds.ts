@@ -173,6 +173,7 @@ export async function getGoogleAdsClient(clientId: string) {
       googleAdsAccessToken: true,
       googleAdsRefreshToken: true,
       googleAdsCustomerId: true,
+      googleAdsManagerCustomerId: true,
     },
   });
 
@@ -208,6 +209,7 @@ export async function getGoogleAdsClient(clientId: string) {
             googleAdsAccessToken: null,
             googleAdsRefreshToken: null,
             googleAdsCustomerId: null,
+            googleAdsManagerCustomerId: null,
             googleAdsConnectedAt: null,
           },
         });
@@ -235,6 +237,7 @@ export async function getGoogleAdsClient(clientId: string) {
   return {
     oauth2Client,
     customerId: client.googleAdsCustomerId,
+    managerCustomerId: client.googleAdsManagerCustomerId ?? undefined,
   };
 }
 
@@ -372,6 +375,19 @@ async function googleAdsSearchStream(
     return fetch(apiUrl, { method: 'POST', headers, body });
   };
 
+  // Use stored manager (MCC) ID first when we have one (user connected a client under this manager)
+  const storedManager = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { googleAdsManagerCustomerId: true },
+  }).then((c) => c?.googleAdsManagerCustomerId?.replace(/-/g, ''));
+  if (storedManager && storedManager !== selectedId) {
+    const response = await doRequest(storedManager);
+    const responseText = await response.text();
+    if (response.ok && !isLoginCustomerIdPermissionError(response, responseText)) {
+      return { response, responseText };
+    }
+  }
+
   let accessibleIds: string[] = [];
   try {
     accessibleIds = await getAccessibleCustomerIds(clientId);
@@ -418,6 +434,7 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
   customerName: string;
   currencyCode: string;
   timeZone: string;
+  isManager?: boolean;
 }>> {
   try {
     // Use getGoogleAdsClient to get credentials with token refresh (same as other API calls).
@@ -488,11 +505,13 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
 
           if (customerResponse.ok) {
             const customerData = await customerResponse.json();
+            const isManager = !!(customerData.manager === true || customerData.manager === 'true');
             return {
               customerId: customerId,
               customerName: customerData.descriptiveName || `Account ${customerId}`,
               currencyCode: customerData.currencyCode || 'USD',
               timeZone: customerData.timeZone || 'America/New_York',
+              isManager,
             };
           } else {
             // If detailed fetch fails, return basic info
@@ -504,20 +523,22 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
               customerName: `Account ${formattedId}`,
               currencyCode: 'USD',
               timeZone: 'America/New_York',
+              isManager: false,
             };
           }
         } catch (err: any) {
           console.warn(`[Google Ads] Failed to fetch details for customer ${customerId}:`, err.message);
           // Return basic info even if detail fetch fails
           const formattedId = customerId.length === 10 
-            ? `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
-            : customerId;
-          return {
-            customerId: customerId,
-            customerName: `Account ${formattedId}`,
-            currencyCode: 'USD',
-            timeZone: 'America/New_York',
-          };
+              ? `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
+              : customerId;
+            return {
+              customerId: customerId,
+              customerName: `Account ${formattedId}`,
+              currencyCode: 'USD',
+              timeZone: 'America/New_York',
+              isManager: false,
+            };
         }
       })
     );
@@ -540,61 +561,79 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
  * List child (client) accounts under a manager (MCC) account.
  * Used when the user selects a manager so they can pick which client account to connect.
  * Query runs against the manager customer ID; no login-customer-id needed.
+ * Returns [] if the account is not a manager or the API errors (caller can treat as "connect this account").
  */
 export async function listChildAccountsUnderManager(
   clientId: string,
   managerCustomerId: string
 ): Promise<Array<{ customerId: string; customerName: string; status: string }>> {
-  const { oauth2Client } = await getGoogleAdsClient(clientId);
-  const accessToken = oauth2Client.credentials.access_token;
-  if (!accessToken) {
-    throw new Error('Google Ads access token is not available. Please reconnect Google Ads.');
-  }
-  const managerId = managerCustomerId.replace(/-/g, '');
-  const apiUrl = `https://googleads.googleapis.com/v20/customers/${managerId}/googleAds:searchStream`;
-  const query = `
-    SELECT customer_client.id, customer_client.descriptive_name, customer_client.status
-    FROM customer_client
-    WHERE customer_client.status IN ('ENABLED', 'CANCELED')
-      AND customer_client.manager = false
-  `;
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      'developer-token': getGoogleAdsDeveloperToken(),
-    },
-    body: JSON.stringify({ query }),
-  });
-  const responseText = await response.text();
-  if (!response.ok) {
-    const detail = getGoogleAdsErrorMessage(responseText);
-    if (response.status === 401 || response.status === 403) {
-      throw new Error(detail);
-    }
-    throw new Error(`Google Ads API error (${response.status}): ${detail}`);
-  }
-  let data: any;
   try {
-    data = JSON.parse(responseText);
-  } catch {
-    const batches = responseText.trim().split('\n').filter(Boolean).map((line: string) => {
-      try { return JSON.parse(line); } catch { return null; }
-    }).filter(Boolean);
-    data = batches.length === 1 ? batches[0] : batches;
+    const { oauth2Client } = await getGoogleAdsClient(clientId);
+    const accessToken = oauth2Client.credentials.access_token;
+    if (!accessToken) {
+      throw new Error('Google Ads access token is not available. Please reconnect Google Ads.');
+    }
+    const managerId = managerCustomerId.replace(/-/g, '');
+    const apiUrl = `https://googleads.googleapis.com/v20/customers/${managerId}/googleAds:searchStream`;
+    const query = `
+    SELECT customer_client.id, customer_client.client_customer, customer_client.descriptive_name, customer_client.status, customer_client.level
+    FROM customer_client
+    WHERE customer_client.status IN ('ENABLED', 'CANCELED', 'CLOSED')
+      AND customer_client.manager = false
+      AND customer_client.level > 0
+  `;
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'developer-token': getGoogleAdsDeveloperToken(),
+      },
+      body: JSON.stringify({ query }),
+    });
+    const responseText = await response.text();
+    if (!response.ok) {
+      const detail = getGoogleAdsErrorMessage(responseText);
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(detail);
+      }
+      // Not a manager, or resource not available, or server error -> return no children so UI can connect this account
+      console.warn('[Google Ads] Child accounts not available for customer', managerId, response.status, detail);
+      return [];
+    }
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      const batches = responseText.trim().split('\n').filter(Boolean).map((line: string) => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean);
+      data = batches.length === 1 ? batches[0] : batches;
+    }
+    const results = getSearchStreamResults(data);
+    return results.map((row: any) => {
+      let id = row.customerClient?.id ?? row.customer_client?.id;
+      if (id == null) {
+        const resourceName = row.customerClient?.clientCustomer ?? row.customer_client?.client_customer ?? '';
+        const m = String(resourceName).match(/customers\/(\d+)/);
+        id = m ? m[1] : null;
+      }
+      const name = row.customerClient?.descriptiveName ?? row.customer_client?.descriptive_name ?? `Account ${id}`;
+      const status = row.customerClient?.status ?? row.customer_client?.status ?? 'UNKNOWN';
+      return {
+        customerId: id != null ? String(id) : '',
+        customerName: name,
+        status: status,
+      };
+    }).filter((c: { customerId: string }) => c.customerId);
+  } catch (err: any) {
+    const msg = err?.message ?? '';
+    if (/token|reconnect|authentication/i.test(msg)) {
+      throw err;
+    }
+    console.warn('[Google Ads] listChildAccountsUnderManager failed:', msg);
+    return [];
   }
-  const results = getSearchStreamResults(data);
-  return results.map((row: any) => {
-    const id = row.customerClient?.id ?? row.customer_client?.id;
-    const name = row.customerClient?.descriptiveName ?? row.customer_client?.descriptive_name ?? `Account ${id}`;
-    const status = row.customerClient?.status ?? row.customer_client?.status ?? 'UNKNOWN';
-    return {
-      customerId: id != null ? String(id) : '',
-      customerName: name,
-      status: status,
-    };
-  }).filter((c: { customerId: string }) => c.customerId);
 }
 
 /**
