@@ -2796,6 +2796,19 @@ router.post('/:id/google-ads/disconnect', authenticateToken, async (req, res) =>
     }
 });
 
+// Helper: return 400 for Google Ads "account not enabled / deactivated" so UI can show a clear message instead of 500
+function googleAdsApiErrorStatus(error: any): { status: number; message: string } {
+    const msg = error?.message || '';
+    const isAccountInactive = /not yet enabled|has been deactivated|can't be accessed|customer_not_enabled|CUSTOMER_NOT_ENABLED/i.test(msg);
+    if (isAccountInactive) {
+        return {
+            status: 400,
+            message: "The connected Google Ads account isn't active (not yet enabled or has been deactivated). Please disconnect and connect an active account.",
+        };
+    }
+    return { status: 500, message: msg || 'Failed to fetch Google Ads data' };
+}
+
 // Get Google Ads campaigns data
 router.get('/:id/google-ads/campaigns', authenticateToken, async (req, res) => {
     try {
@@ -2846,10 +2859,11 @@ router.get('/:id/google-ads/campaigns', authenticateToken, async (req, res) => {
         });
     } catch (error: any) {
         console.error('Google Ads campaigns fetch error:', error);
-        res.status(500).json({ 
+        const { status, message } = googleAdsApiErrorStatus(error);
+        return res.status(status).json({
             success: false,
-            message: error.message || 'Failed to fetch Google Ads campaigns data',
-            error: error.message 
+            message,
+            error: error.message,
         });
     }
 });
@@ -2898,7 +2912,8 @@ router.get('/:id/google-ads/ad-groups', authenticateToken, async (req, res) => {
         });
     } catch (error: any) {
         console.error('Google Ads ad groups fetch error:', error);
-        res.status(500).json({ message: error.message || 'Internal server error' });
+        const { status, message } = googleAdsApiErrorStatus(error);
+        return res.status(status).json({ message });
     }
 });
 
@@ -2946,7 +2961,8 @@ router.get('/:id/google-ads/keywords', authenticateToken, async (req, res) => {
         });
     } catch (error: any) {
         console.error('Google Ads keywords fetch error:', error);
-        res.status(500).json({ message: error.message || 'Internal server error' });
+        const { status, message } = googleAdsApiErrorStatus(error);
+        return res.status(status).json({ message });
     }
 });
 
@@ -2994,7 +3010,8 @@ router.get('/:id/google-ads/conversions', authenticateToken, async (req, res) =>
         });
     } catch (error: any) {
         console.error('Google Ads conversions fetch error:', error);
-        res.status(500).json({ message: error.message || 'Internal server error' });
+        const { status, message } = googleAdsApiErrorStatus(error);
+        return res.status(status).json({ message });
     }
 });
 

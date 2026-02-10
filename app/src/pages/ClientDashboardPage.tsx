@@ -2907,7 +2907,6 @@ const ClientDashboardPage: React.FC = () => {
 
           if (event.data.type === 'GA4_OAUTH_SUCCESS') {
             cleanupPopup();
-            closePopupSafely();
             toast.success('OAuth successful! Loading your GA4 properties...');
             setGa4Connecting(false);
             setGa4ConnectionError(null); // Clear any previous connection errors
@@ -2915,20 +2914,11 @@ const ClientDashboardPage: React.FC = () => {
             handleFetchGA4Properties();
           } else if (event.data.type === 'GA4_OAUTH_ERROR') {
             cleanupPopup();
-            closePopupSafely();
             toast.error(`GA4 connection failed: ${event.data.error || 'Unknown error'}`);
             setGa4Connecting(false);
           }
         };
         let manualCloseTimeout: number | null = null;
-
-        const closePopupSafely = () => {
-          try {
-            popup.close();
-          } catch (err) {
-            // Ignore COOP restrictions when closing
-          }
-        };
 
         const cleanupPopup = () => {
           if (messageListener) {
@@ -2942,11 +2932,9 @@ const ClientDashboardPage: React.FC = () => {
 
         window.addEventListener('message', messageListener);
 
-        // Set a maximum timeout (5 minutes) to prevent infinite waiting
-        // If no message is received, assume user closed the popup or connection failed
+        // Set a maximum timeout (5 minutes). Do not call popup.close() from opener - COOP blocks it
         manualCloseTimeout = window.setTimeout(() => {
           cleanupPopup();
-          closePopupSafely();
           if (ga4Connecting) {
             setGa4Connecting(false);
             toast.error('GA4 connection timed out. Please try again.');
@@ -3119,7 +3107,7 @@ const ClientDashboardPage: React.FC = () => {
 
           if (event.data.type === 'GOOGLE_ADS_OAUTH_SUCCESS') {
             cleanupPopup();
-            closePopupSafely();
+            // Do not call popup.close() from opener - Cross-Origin-Opener-Policy blocks it; the callback page closes the popup itself
             setGoogleAdsConnecting(false);
             setGoogleAdsConnectionError(null);
             // Refresh status in current window so Integrations shows "Select Google Ads account" or "Connected"
@@ -3129,20 +3117,11 @@ const ClientDashboardPage: React.FC = () => {
             });
           } else if (event.data.type === 'GOOGLE_ADS_OAUTH_ERROR') {
             cleanupPopup();
-            closePopupSafely();
             toast.error(`Google Ads connection failed: ${event.data.error || 'Unknown error'}`);
             setGoogleAdsConnecting(false);
           }
         };
         let manualCloseTimeout: number | null = null;
-
-        const closePopupSafely = () => {
-          try {
-            popup.close();
-          } catch (err) {
-            // Ignore COOP restrictions when closing
-          }
-        };
 
         const cleanupPopup = () => {
           if (messageListener) {
@@ -3155,10 +3134,9 @@ const ClientDashboardPage: React.FC = () => {
 
         window.addEventListener('message', messageListener);
 
-        // Cleanup after 10 minutes (do not use popup.closed - COOP can block it and trigger console errors)
+        // Cleanup after 10 minutes. Do not call popup.close() from opener - COOP blocks it; user can close the popup manually if needed
         manualCloseTimeout = window.setTimeout(() => {
           cleanupPopup();
-          closePopupSafely();
           setGoogleAdsConnecting(false);
         }, 10 * 60 * 1000);
       }
