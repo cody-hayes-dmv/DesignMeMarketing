@@ -10229,6 +10229,7 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     let teamMemberLimit = tierCtx.tierConfig?.maxTeamUsers ?? 10;
     if (teamMemberLimit === null) teamMemberLimit = 999999;
 
+    let clientsWithActiveManagedServices = 0;
     if (agencyIds.length > 0) {
       const addOns = await prisma.agencyAddOn.findMany({
         where: { agencyId: { in: agencyIds } },
@@ -10238,6 +10239,13 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
         if (a.addOnType === "extra_slots" && a.addOnOption === "5_slots") tierLimit += 5;
         if (a.addOnType === "credit_pack" && a.addOnOption === "100") researchLimit += 100;
         if (a.addOnType === "credit_pack" && a.addOnOption === "500") researchLimit += 500;
+      }
+      if (tierCtx.agencyId) {
+        const msRows = await prisma.managedService.findMany({
+          where: { agencyId: tierCtx.agencyId, status: "ACTIVE" },
+          select: { clientId: true },
+        });
+        clientsWithActiveManagedServices = new Set(msRows.map((r) => r.clientId)).size;
       }
     }
 
@@ -10273,6 +10281,7 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
         keywordsTracked: { used: keywordCount, limit: keywordLimit },
         researchCredits: { used: tierCtx.creditsUsed, limit: researchLimit },
         teamMembers: { used: tierCtx.teamMemberCount, limit: teamMemberLimit },
+        clientsWithActiveManagedServices,
       },
     });
   } catch (error: any) {

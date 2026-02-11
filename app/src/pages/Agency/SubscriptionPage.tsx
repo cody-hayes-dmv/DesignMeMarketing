@@ -33,6 +33,7 @@ interface SubscriptionData {
     keywordsTracked: { used: number; limit: number };
     researchCredits: { used: number; limit: number };
     teamMembers: { used: number; limit: number };
+    clientsWithActiveManagedServices?: number;
   };
 }
 
@@ -78,6 +79,7 @@ const SubscriptionPage = () => {
               keywordsTracked: res.data.usage?.keywordsTracked ?? defaultSubscription.usage.keywordsTracked,
               researchCredits: res.data.usage?.researchCredits ?? defaultSubscription.usage.researchCredits,
               teamMembers: res.data.usage?.teamMembers ?? defaultSubscription.usage.teamMembers,
+              clientsWithActiveManagedServices: res.data.usage?.clientsWithActiveManagedServices ?? 0,
             },
           });
         }
@@ -98,7 +100,9 @@ const SubscriptionPage = () => {
         ...options,
       });
       const url = res.data?.url;
+      const warning = res.data?.warning;
       if (url) {
+        if (warning) toast.info(warning);
         window.location.href = url;
       } else {
         toast.error(res.data?.message || "Billing portal is not available.");
@@ -113,6 +117,25 @@ const SubscriptionPage = () => {
   const handleManageBilling = () => openBillingPortal();
 
   const handleUpgradePlan = () => {
+    openBillingPortal({ flow: "subscription_update" });
+  };
+
+  const handlePlanChange = async (planId: string, direction: "upgrade" | "downgrade") => {
+    if (direction === "downgrade") {
+      setPortalLoading(true);
+      try {
+        const res = await api.post("/agencies/validate-plan-change", { targetPlan: planId });
+        if (res.data?.allowed === false && res.data?.message) {
+          toast.error(res.data.message);
+          return;
+        }
+      } catch (e: any) {
+        toast.error(e.response?.data?.message || "Could not validate plan change.");
+        return;
+      } finally {
+        setPortalLoading(false);
+      }
+    }
     openBillingPortal({ flow: "subscription_update" });
   };
 
@@ -233,6 +256,11 @@ const SubscriptionPage = () => {
                     {data.usage.clientDashboards.used >= data.usage.clientDashboards.limit && (
                       <p className="text-xs text-red-600 font-medium mt-0.5">Upgrade to add more</p>
                     )}
+                    {(data.usage.clientsWithActiveManagedServices ?? 0) > 0 && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {data.usage.clientsWithActiveManagedServices} with managed services
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
@@ -338,7 +366,7 @@ const SubscriptionPage = () => {
                       ) : isHigher ? (
                         <button
                           type="button"
-                          onClick={handleUpgradePlan}
+                          onClick={() => handlePlanChange(plan.id, "upgrade")}
                           disabled={portalLoading}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
                         >
@@ -347,7 +375,7 @@ const SubscriptionPage = () => {
                       ) : isLower ? (
                         <button
                           type="button"
-                          onClick={handleUpgradePlan}
+                          onClick={() => handlePlanChange(plan.id, "downgrade")}
                           disabled={portalLoading}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                         >

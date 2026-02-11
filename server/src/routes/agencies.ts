@@ -5,7 +5,7 @@ import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
-import { getTierConfig, type TierId } from '../lib/tiers.js';
+import { getTierConfig, AGENCY_TIER_IDS, type TierId } from '../lib/tiers.js';
 
 const router = express.Router();
 
@@ -648,6 +648,69 @@ router.post('/:agencyId/invite-specialist', authenticateToken, async (req, res) 
   }
 });
 
+// Validate whether the agency can change to a target plan (used before downgrade).
+// Tier, add-ons, and managed services are separate: downgrade is only allowed if total clients and
+// clients with active managed services are within the target plan's client limit.
+router.post('/validate-plan-change', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const targetPlan = typeof req.body?.targetPlan === 'string' ? req.body.targetPlan.trim().toLowerCase() : '';
+    if (!targetPlan || !AGENCY_TIER_IDS.includes(targetPlan as TierId)) {
+      return res.status(400).json({ message: 'Invalid target plan. Use one of: solo, starter, growth, pro, enterprise.' });
+    }
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'No agency found.' });
+    }
+    const agencyId = membership.agency.id;
+    const targetConfig = getTierConfig(targetPlan);
+    if (!targetConfig) {
+      return res.status(400).json({ message: 'Invalid target plan.' });
+    }
+    const targetLimit = targetConfig.maxDashboards;
+    const targetName = targetConfig.name;
+    if (targetLimit === null) {
+      return res.json({ allowed: true });
+    }
+    const agencyUserIds = await prisma.userAgency.findMany({
+      where: { agencyId },
+      select: { userId: true },
+    }).then((rows) => rows.map((r) => r.userId));
+    const totalClients = await prisma.client.count({
+      where: { userId: { in: agencyUserIds } },
+    });
+    const clientsWithActiveManagedServices = await prisma.managedService
+      .findMany({
+        where: { agencyId, status: 'ACTIVE' },
+        select: { clientId: true },
+      })
+      .then((rows) => new Set(rows.map((r) => r.clientId)).size);
+    if (totalClients > targetLimit) {
+      return res.json({
+        allowed: false,
+        reason: 'too_many_clients',
+        message: `You have ${totalClients} clients. The ${targetName} plan allows up to ${targetLimit}. Remove or reassign ${totalClients - targetLimit} clients before downgrading.`,
+      });
+    }
+    if (clientsWithActiveManagedServices > targetLimit) {
+      return res.json({
+        allowed: false,
+        reason: 'managed_services_over_limit',
+        message: `You have managed service active on ${clientsWithActiveManagedServices} clients. The ${targetName} plan allows up to ${targetLimit}. Please cancel managed services on ${clientsWithActiveManagedServices - targetLimit} clients before downgrading.`,
+      });
+    }
+    return res.json({ allowed: true });
+  } catch (err: any) {
+    console.error('Validate plan change error:', err);
+    res.status(500).json({ message: err?.message || 'Validation failed' });
+  }
+});
+
 // Create Stripe billing portal session (for Subscription page: Manage Billing / Upgrade / Downgrade)
 // Uses the current user's agency.stripeCustomerId (or creates one if missing). Fallback: STRIPE_AGENCY_CUSTOMER_ID. Never uses req.body for customer id.
 // Plan changes (upgrade/downgrade) are handled by Stripe's portal. Configure in Dashboard: Billing → Customer portal →
@@ -701,7 +764,37 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
         subscription_update: { subscription: membership.agency.stripeSubscriptionId },
       };
     }
-    const session = await stripe.billingPortal.sessions.create(sessionParams);
+    let session: { url: string };
+    try {
+      session = await stripe.billingPortal.sessions.create(sessionParams);
+    } catch (portalErr: any) {
+      const msg = String(portalErr?.message || portalErr?.raw?.message || '');
+      const subscriptionUpdateDisabled = /subscription update.*disabled|subscription_update.*disabled/i.test(msg);
+      const multipleItems = /multiple\s*[`']?items[`']?/i.test(msg);
+      const noPriceInPortalConfig = /no price in the portal configuration|quantity cannot be changed/i.test(msg);
+      const canFallbackToGeneralPortal =
+        openToSubscriptionUpdate &&
+        (subscriptionUpdateDisabled || multipleItems || noPriceInPortalConfig);
+      if (canFallbackToGeneralPortal) {
+        session = await stripe.billingPortal.sessions.create({
+          customer: customerId,
+          return_url: returnUrl,
+        });
+        let warning: string;
+        if (noPriceInPortalConfig) {
+          warning =
+            'Plan changes are not configured in the billing portal. Opening the main billing page. To allow plan changes, add your plan prices in Stripe Dashboard → Settings → Billing → Customer portal → Subscription plan changes.';
+        } else if (multipleItems) {
+          warning =
+            'Your subscription has add-ons, so the portal will open to the main billing page. You can update your plan or manage add-ons there.';
+        } else {
+          warning =
+            'Subscription plan changes are disabled in your Stripe Customer Portal. Enable "Subscription plan changes" in Stripe Dashboard → Settings → Billing → Customer portal to open directly to plan change.';
+        }
+        return res.json({ url: session.url, warning });
+      }
+      throw portalErr;
+    }
     res.json({ url: session.url });
   } catch (err: any) {
     console.error('Billing portal error:', err);
