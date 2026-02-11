@@ -209,8 +209,12 @@ const AgenciesPage = () => {
         }
         let paymentMethodId: string | undefined;
         if (createForm.billingOption === "charge") {
+            if (!stripePaymentRef.current) {
+                toast.error("Payment form is still loading. Please wait a moment and try again.");
+                return;
+            }
             try {
-                const id = await stripePaymentRef.current?.confirmAndGetPaymentMethod();
+                const id = await stripePaymentRef.current.confirmAndGetPaymentMethod();
                 if (!id) {
                     toast.error("Please complete the card details.");
                     return;
@@ -223,6 +227,7 @@ const AgenciesPage = () => {
         }
         const website = createForm.website.trim().startsWith("http") ? createForm.website.trim() : `https://${createForm.website.trim()}`;
         try {
+            console.log("[Create Agency] Sending request to API...");
             await dispatch(createAgency({
                 name: createForm.name.trim(),
                 website,
@@ -249,14 +254,14 @@ const AgenciesPage = () => {
                 primaryGoals: createForm.primaryGoals.length ? createForm.primaryGoals : undefined,
                 primaryGoalsOther: createForm.primaryGoalsOther || undefined,
                 currentTools: createForm.currentTools || undefined,
-            }) as any);
+            }) as any).unwrap();
             setCreateForm(initialCreateForm);
             setShowCreateModal(false);
             toast.success("Agency created. Set-password email sent to contact.");
             dispatch(fetchAgencies() as any);
             window.dispatchEvent(new CustomEvent("agency-created"));
         } catch (error: any) {
-            const msg = error?.message || error?.response?.data?.message || "Failed to create agency.";
+            const msg = error?.message ?? error?.response?.data?.message ?? "Failed to create agency.";
             toast.error(msg);
         }
     };

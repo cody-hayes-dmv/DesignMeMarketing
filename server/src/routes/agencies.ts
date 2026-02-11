@@ -158,6 +158,7 @@ router.post('/setup-intent', authenticateToken, async (req, res) => {
 
 router.post('/', authenticateToken, async (req, res) => {
   try {
+    console.log('[agencies] POST / – create agency attempt');
     if (req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can create agencies directly.' });
     }
@@ -193,6 +194,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
     if (billingOption === 'charge' && !paymentMethodId) {
       return res.status(400).json({ message: 'Payment method is required when billing type is Charge to Card.' });
+    }
+    if (billingOption === 'charge') {
+      const stripe = getStripe();
+      if (!stripe || !isStripeConfigured()) {
+        return res.status(400).json({ message: 'Stripe is not configured. Cannot create agency with Charge to Card. Set STRIPE_SECRET_KEY on the server.' });
+      }
     }
     if (!tier && billingOption !== 'manual_invoice') {
       return res.status(400).json({ message: 'Subscription tier is required' });
@@ -231,11 +238,47 @@ router.post('/', authenticateToken, async (req, res) => {
         ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
         : null;
 
+    // When "Charge to Card": create Stripe customer and attach payment method BEFORE creating agency (so we never create an agency without Stripe when required)
+    let stripeCustomerId: string | null = null;
+    if (billingOption === 'charge' && paymentMethodId) {
+      const stripe = getStripe();
+      if (stripe && isStripeConfigured()) {
+        try {
+          console.log('[agencies] Creating Stripe customer and attaching payment method...');
+          const customer = await stripe.customers.create({
+            email: contactEmail,
+            name: contactName || name,
+          });
+          await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id });
+          await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: paymentMethodId } });
+          stripeCustomerId = customer.id;
+        } catch (stripeErr: any) {
+          const code = stripeErr?.code || stripeErr?.type;
+          const rawMsg = String(stripeErr?.message || stripeErr?.raw?.message || '');
+          console.error('Stripe customer/payment attach failed:', code, rawMsg, stripeErr?.raw?.decline_code);
+          let userMessage: string;
+          if (/connection|ENOTFOUND|network|timeout/i.test(rawMsg)) {
+            userMessage = 'Could not reach Stripe. Check your internet connection and try again.';
+          } else if (code === 'resource_missing' || /No such payment_method|payment_method.*invalid/i.test(rawMsg)) {
+            userMessage = 'Payment method expired or invalid. Please close this form, open it again, and enter card details again.';
+          } else if (/already been attached|already attached/i.test(rawMsg)) {
+            userMessage = 'This card was already used. Please use a different card or try again in a moment.';
+          } else if (stripeErr?.decline_code || code === 'card_declined') {
+            userMessage = rawMsg || 'Card was declined. Try a different card or use test card 4242 4242 4242 4242 in test mode.';
+          } else {
+            userMessage = rawMsg || 'Failed to save card. Please try again.';
+          }
+          return res.status(400).json({ message: userMessage });
+        }
+      }
+    }
+
     const agency = await prisma.agency.create({
       data: {
         name,
         subdomain: subdomain?.trim() || null,
         billingType,
+        stripeCustomerId,
         website: website || null,
         industry: industry || null,
         agencySize: agencySize || null,
@@ -257,28 +300,13 @@ router.post('/', authenticateToken, async (req, res) => {
       },
       include: { _count: { select: { members: true } } },
     });
+    console.log('[agencies] Agency created:', agency.id, agency.name);
 
-    // When "Charge to Card": create Stripe customer and attach the payment method
-    if (billingOption === 'charge' && paymentMethodId) {
+    // Set Stripe customer metadata now that we have agency.id
+    if (stripeCustomerId) {
       const stripe = getStripe();
-      if (stripe && isStripeConfigured()) {
-        try {
-          const customer = await stripe.customers.create({
-            email: contactEmail,
-            name: contactName || name,
-            metadata: { agencyId: agency.id },
-          });
-          await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id });
-          await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: paymentMethodId } });
-          await prisma.agency.update({
-            where: { id: agency.id },
-            data: { stripeCustomerId: customer.id },
-          });
-        } catch (stripeErr: any) {
-          console.error('Stripe customer/payment attach failed:', stripeErr);
-          await prisma.agency.update({ where: { id: agency.id }, data: { stripeCustomerId: null } });
-          return res.status(400).json({ message: stripeErr?.message || 'Failed to attach payment method. Please try again.' });
-        }
+      if (stripe) {
+        stripe.customers.update(stripeCustomerId, { metadata: { agencyId: agency.id } }).catch((e) => console.warn('Stripe customer metadata update failed:', e?.message));
       }
     }
 
@@ -365,6 +393,7 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   } catch (error: any) {
     if (error.name === 'ZodError') {
+      console.log('[agencies] Create failed: validation', error.errors?.map((e: any) => e.path?.join('.') + ' ' + e.message));
       return res.status(400).json({ message: 'Invalid input', errors: error.errors });
     }
     if (error.code === 'P2002') {
