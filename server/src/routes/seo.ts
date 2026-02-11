@@ -9733,7 +9733,7 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
           return u && (u.startsWith("http://") || u.startsWith("https://")) ? u : (u ? `https://${u}` : "");
         }).filter(Boolean);
         if (targets.length > 0) {
-          const backlinksBody = [{ targets }];
+          const backlinksBody = [{ targets, rank_scale: "one_hundred" }];
           const blRes = await fetch("https://api.dataforseo.com/v3/backlinks/bulk_pages_summary/live", {
             method: "POST",
             headers: {
@@ -9752,7 +9752,8 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
               if (row && item) {
                 row.refDomains = item.referring_domains != null ? Number(item.referring_domains) : null;
                 row.backlinks = item.backlinks != null ? Number(item.backlinks) : null;
-                row.pageAs = item.rank != null ? Number(item.rank) : null;
+                const rawRank = item.rank != null ? Number(item.rank) : null;
+                row.pageAs = rawRank != null ? Math.min(100, Math.max(0, Math.round(rawRank))) : null;
               }
             });
           }

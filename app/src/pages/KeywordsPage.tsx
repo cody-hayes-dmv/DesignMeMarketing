@@ -13,6 +13,7 @@ import {
   Download,
   ChevronRight,
   ChevronDown,
+  X,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import html2canvas from "html2canvas";
@@ -128,7 +129,7 @@ const KeywordsPage: React.FC = () => {
     offset: number;
   } | null>(null);
   const [serpViewMode, setSerpViewMode] = useState<"url" | "domain">("url");
-  const [keywordIdeasExpanded, setKeywordIdeasExpanded] = useState<{ variations: boolean; questions: boolean }>({ variations: false, questions: false });
+  const [keywordIdeasModal, setKeywordIdeasModal] = useState<{ type: "variations" | "questions"; items: ResearchKeyword[] } | null>(null);
   const [keywordIdeas, setKeywordIdeas] = useState<{
     variations: ResearchKeyword[];
     questions: ResearchKeyword[];
@@ -956,7 +957,7 @@ const KeywordsPage: React.FC = () => {
                     {(() => {
                       const variations = keywordIdeas.variations;
                       const totalVol = variations.reduce((s, r) => s + (r.searchVolume || 0), 0);
-                      const showCount = keywordIdeasExpanded.variations ? variations.length : 5;
+                      const showCount = 5;
                       return (
                         <>
                           <p className="mt-1 text-2xl font-bold text-primary-600">{variations.length.toLocaleString()}</p>
@@ -988,8 +989,8 @@ const KeywordsPage: React.FC = () => {
                               </tbody>
                             </table>
                           </div>
-                          <button type="button" onClick={() => setKeywordIdeasExpanded((p) => ({ ...p, variations: !p.variations }))} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
-                            {keywordIdeasExpanded.variations ? "Show less" : `View all ${variations.length.toLocaleString()} keywords`}
+                          <button type="button" onClick={() => setKeywordIdeasModal({ type: "variations", items: variations })} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+                            View all {variations.length.toLocaleString()} keywords
                           </button>
                         </>
                       );
@@ -1000,7 +1001,7 @@ const KeywordsPage: React.FC = () => {
                     {(() => {
                       const questions = keywordIdeas.questions;
                       const totalVol = questions.reduce((s, r) => s + (r.searchVolume || 0), 0);
-                      const showCount = keywordIdeasExpanded.questions ? questions.length : 5;
+                      const showCount = 5;
                       return (
                         <>
                           <p className="mt-1 text-2xl font-bold text-primary-600">{questions.length.toLocaleString()}</p>
@@ -1032,8 +1033,8 @@ const KeywordsPage: React.FC = () => {
                               </tbody>
                             </table>
                           </div>
-                          <button type="button" onClick={() => setKeywordIdeasExpanded((p) => ({ ...p, questions: !p.questions }))} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
-                            {keywordIdeasExpanded.questions ? "Show less" : `View all ${questions.length.toLocaleString()} keywords`}
+                          <button type="button" onClick={() => setKeywordIdeasModal({ type: "questions", items: questions })} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+                            View all {questions.length.toLocaleString()} keywords
                           </button>
                         </>
                       );
@@ -1064,6 +1065,69 @@ const KeywordsPage: React.FC = () => {
                     <button type="button" className="mt-4 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
                       View all clusters
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal: All keywords (Variations or Questions) with optional Track for variations */}
+            {keywordIdeasModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setKeywordIdeasModal(null)}>
+                <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {keywordIdeasModal.type === "variations" ? "Keyword Variations" : "Questions"} — All {keywordIdeasModal.items.length.toLocaleString()} keywords
+                    </h3>
+                    <button type="button" onClick={() => setKeywordIdeasModal(null)} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700">
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  {keywordIdeasModal.type === "variations" && !assignClientId && (
+                    <div className="px-6 py-2 bg-amber-50 border-b border-amber-100 text-sm text-amber-800">
+                      Select a client in the research section above to track keywords.
+                    </div>
+                  )}
+                  <div className="flex-1 overflow-auto px-6 py-4">
+                    <table className="min-w-full text-sm">
+                      <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left py-3 font-semibold text-gray-700">Keywords</th>
+                          <th className="text-right py-3 font-semibold text-gray-700">Volume</th>
+                          <th className="text-right py-3 font-semibold text-gray-700">KD %</th>
+                          {keywordIdeasModal.type === "variations" && (
+                            <th className="text-right py-3 font-semibold text-gray-700 w-24">Action</th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {keywordIdeasModal.items.map((r) => (
+                          <tr key={r.keyword} className="hover:bg-gray-50">
+                            <td className="py-2 pr-4">
+                              <button type="button" onClick={() => { handleKeywordIdeaClick(r.keyword); setKeywordIdeasModal(null); }} className="text-primary-600 hover:underline text-left font-medium">
+                                {r.keyword}
+                              </button>
+                            </td>
+                            <td className="py-2 text-right text-gray-700">{formatCompact(r.searchVolume)}</td>
+                            <td className="py-2 text-right">
+                              <span className={`inline-block w-2 h-2 rounded-full mr-1 align-middle ${(r.difficulty ?? 0) >= 70 ? "bg-red-500" : (r.difficulty ?? 0) >= 40 ? "bg-amber-500" : "bg-green-500"}`} />
+                              {r.difficulty ?? "—"}
+                            </td>
+                            {keywordIdeasModal.type === "variations" && (
+                              <td className="py-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssignSingle(r)}
+                                  disabled={!assignClientId || assigningKeywords}
+                                  className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                                >
+                                  Track
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>
