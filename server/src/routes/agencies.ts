@@ -758,42 +758,67 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
       customer: customerId,
       return_url: returnUrl,
     };
+    let useSubscriptionUpdateFlow = false;
     if (openToSubscriptionUpdate && membership.agency.stripeSubscriptionId) {
-      sessionParams.flow_data = {
-        type: 'subscription_update',
-        subscription_update: { subscription: membership.agency.stripeSubscriptionId },
-      };
+      try {
+        const sub = await stripe.subscriptions.retrieve(membership.agency.stripeSubscriptionId, {
+          expand: ['items.data'],
+        });
+        const itemCount = sub.items?.data?.length ?? 0;
+        if (itemCount === 1) {
+          useSubscriptionUpdateFlow = true;
+          sessionParams.flow_data = {
+            type: 'subscription_update',
+            subscription_update: { subscription: membership.agency.stripeSubscriptionId },
+          };
+        }
+      } catch (e) {
+        // If we can't fetch subscription, skip flow_data and open general portal
+      }
     }
     let session: { url: string };
     try {
       session = await stripe.billingPortal.sessions.create(sessionParams);
     } catch (portalErr: any) {
-      const msg = String(portalErr?.message || portalErr?.raw?.message || '');
-      const subscriptionUpdateDisabled = /subscription update.*disabled|subscription_update.*disabled/i.test(msg);
-      const multipleItems = /multiple\s*[`']?items[`']?/i.test(msg);
-      const noPriceInPortalConfig = /no price in the portal configuration|quantity cannot be changed/i.test(msg);
-      const canFallbackToGeneralPortal =
-        openToSubscriptionUpdate &&
-        (subscriptionUpdateDisabled || multipleItems || noPriceInPortalConfig);
-      if (canFallbackToGeneralPortal) {
-        session = await stripe.billingPortal.sessions.create({
-          customer: customerId,
-          return_url: returnUrl,
-        });
-        let warning: string;
-        if (noPriceInPortalConfig) {
-          warning =
-            'Plan changes are not configured in the billing portal. Opening the main billing page. To allow plan changes, add your plan prices in Stripe Dashboard → Settings → Billing → Customer portal → Subscription plan changes.';
-        } else if (multipleItems) {
-          warning =
-            'Your subscription has add-ons, so the portal will open to the main billing page. You can update your plan or manage add-ons there.';
-        } else {
-          warning =
-            'Subscription plan changes are disabled in your Stripe Customer Portal. Enable "Subscription plan changes" in Stripe Dashboard → Settings → Billing → Customer portal to open directly to plan change.';
+      if (openToSubscriptionUpdate) {
+        try {
+          session = await stripe.billingPortal.sessions.create({
+            customer: customerId,
+            return_url: returnUrl,
+          });
+          const msg = String(portalErr?.message || portalErr?.raw?.message || '');
+          let warning: string;
+          if (/no price in the portal configuration|quantity cannot be changed/i.test(msg)) {
+            warning =
+              'Plan changes are not configured in the billing portal. Opening the main billing page. To allow plan changes, add your plan prices in Stripe Dashboard → Settings → Billing → Customer portal → Subscription plan changes.';
+          } else if (/multiple\s*[`']?items[`']?/i.test(msg)) {
+            warning =
+              'Your subscription has add-ons or managed services, so the portal will open to the main billing page. You can update your plan, payment method, or manage items there.';
+          } else if (/subscription update.*disabled|subscription_update.*disabled/i.test(msg)) {
+            warning =
+              'Subscription plan changes are disabled in your Stripe Customer Portal. Enable "Subscription plan changes" in Stripe Dashboard → Settings → Billing → Customer portal to open directly to plan change.';
+          } else {
+            warning =
+              'Opening the billing portal. You can update your plan, payment method, or view invoices there.';
+          }
+          return res.json({ url: session.url, warning });
+        } catch (fallbackErr: any) {
+          console.error('Billing portal fallback error:', fallbackErr);
+          return res.status(200).json({
+            url: null,
+            message:
+              'Your subscription has add-ons or managed services. Use "Manage Billing" to open the billing portal, where you can update your plan or payment method.',
+          });
         }
-        return res.json({ url: session.url, warning });
       }
       throw portalErr;
+    }
+    if (openToSubscriptionUpdate && !useSubscriptionUpdateFlow) {
+      return res.json({
+        url: session.url,
+        warning:
+          'Your subscription has add-ons or managed services. The portal will open to the main billing page where you can update your plan, payment method, or manage items.',
+      });
     }
     res.json({ url: session.url });
   } catch (err: any) {
