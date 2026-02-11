@@ -6,6 +6,11 @@ import { sendEmail } from '../lib/email.js';
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 import { getTierConfig, AGENCY_TIER_IDS, type TierId } from '../lib/tiers.js';
+import {
+  getPriceIdForTier,
+  findBasePlanSubscriptionItem,
+  syncAgencyTierFromStripe,
+} from '../lib/stripeTierSync.js';
 
 const router = express.Router();
 
@@ -708,6 +713,82 @@ router.post('/validate-plan-change', authenticateToken, async (req, res) => {
   } catch (err: any) {
     console.error('Validate plan change error:', err);
     res.status(500).json({ message: err?.message || 'Validation failed' });
+  }
+});
+
+// Change base plan directly via Stripe API (works with multi-item subscriptions: only the plan item is updated).
+// Validates downgrade (client counts, managed services) then updates the subscription item for the base plan.
+router.post('/change-plan', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const targetPlan = typeof req.body?.targetPlan === 'string' ? req.body.targetPlan.trim().toLowerCase() : '';
+    if (!targetPlan || !AGENCY_TIER_IDS.includes(targetPlan as TierId)) {
+      return res.status(400).json({ message: 'Invalid target plan. Use one of: solo, starter, growth, pro, enterprise.' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'No agency found.' });
+    }
+    const agency = membership.agency;
+    const subId = agency.stripeSubscriptionId;
+    if (!subId) {
+      return res.status(400).json({ message: 'No active subscription. Subscribe to a plan first.' });
+    }
+    const targetPriceId = getPriceIdForTier(targetPlan as TierId);
+    if (!targetPriceId) {
+      return res.status(400).json({ message: `Plan "${targetPlan}" is not configured in billing. Contact support.` });
+    }
+    const targetConfig = getTierConfig(targetPlan);
+    if (targetConfig?.maxDashboards != null) {
+      const agencyId = agency.id;
+      const agencyUserIds = await prisma.userAgency.findMany({
+        where: { agencyId },
+        select: { userId: true },
+      }).then((rows) => rows.map((r) => r.userId));
+      const totalClients = await prisma.client.count({ where: { userId: { in: agencyUserIds } } });
+      const clientsWithManaged = await prisma.managedService
+        .findMany({ where: { agencyId, status: 'ACTIVE' }, select: { clientId: true } })
+        .then((rows) => new Set(rows.map((r) => r.clientId)).size);
+      if (totalClients > targetConfig.maxDashboards) {
+        return res.status(400).json({
+          message: `You have ${totalClients} clients. The ${targetConfig.name} plan allows up to ${targetConfig.maxDashboards}. Remove or reassign clients before downgrading.`,
+        });
+      }
+      if (clientsWithManaged > targetConfig.maxDashboards) {
+        return res.status(400).json({
+          message: `You have managed service on ${clientsWithManaged} clients. The ${targetConfig.name} plan allows up to ${targetConfig.maxDashboards}. Cancel managed services on ${clientsWithManaged - targetConfig.maxDashboards} clients before downgrading.`,
+        });
+      }
+    }
+    let sub: { items: { data: import('stripe').Stripe.SubscriptionItem[] } };
+    try {
+      sub = await stripe.subscriptions.retrieve(subId, { expand: ['items.data.price'] }) as any;
+    } catch (e: any) {
+      return res.status(400).json({ message: 'Could not load subscription. It may have been canceled.' });
+    }
+    const items = sub.items?.data ?? [];
+    const basePlan = findBasePlanSubscriptionItem(items);
+    if (!basePlan) {
+      return res.status(400).json({ message: 'No plan found on this subscription. Use Manage Billing to change plan.' });
+    }
+    if (basePlan.priceId === targetPriceId) {
+      return res.status(400).json({ message: 'You are already on this plan.' });
+    }
+    await stripe.subscriptionItems.update(basePlan.itemId, { price: targetPriceId });
+    await syncAgencyTierFromStripe(agency.id);
+    return res.json({ success: true, message: 'Plan updated. Your subscription will reflect the change shortly.' });
+  } catch (err: any) {
+    console.error('Change plan error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to change plan' });
   }
 });
 

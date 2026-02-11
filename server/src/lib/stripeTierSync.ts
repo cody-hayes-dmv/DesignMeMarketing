@@ -28,6 +28,31 @@ export function getTierFromSubscriptionItems(items: Stripe.SubscriptionItem[]): 
   return null;
 }
 
+/** Return Stripe Price ID for a given tier from env (e.g. STRIPE_PRICE_PLAN_STARTER). */
+export function getPriceIdForTier(tierId: TierId): string | null {
+  const entry = PLAN_PRICE_TO_TIER.find((e) => e.tierId === tierId);
+  if (!entry) return null;
+  const priceId = process.env[entry.envKey];
+  return typeof priceId === "string" && priceId.length > 0 ? priceId : null;
+}
+
+/**
+ * Find the subscription item that represents the base plan (first item whose price is a STRIPE_PRICE_PLAN_*).
+ * Used to change only the base plan when subscription has multiple items (add-ons, managed services).
+ */
+export function findBasePlanSubscriptionItem(
+  items: Stripe.SubscriptionItem[]
+): { itemId: string; priceId: string } | null {
+  const planPriceIds = new Set(
+    PLAN_PRICE_TO_TIER.map((e) => process.env[e.envKey]).filter(Boolean) as string[]
+  );
+  for (const item of items) {
+    const priceId = typeof item.price === "string" ? item.price : item.price?.id;
+    if (priceId && planPriceIds.has(priceId)) return { itemId: item.id, priceId };
+  }
+  return null;
+}
+
 /**
  * Fetch the agency's current subscription from Stripe and update agency.subscriptionTier
  * (and stripeSubscriptionId if we got sub from list). Call when loading subscription page

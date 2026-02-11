@@ -62,33 +62,34 @@ const SubscriptionPage = () => {
     }
   }, [loading]);
 
-  useEffect(() => {
-    const fetchSubscription = async () => {
-      try {
-        const res = await api.get("/seo/agency/subscription").catch(() => ({ data: null }));
-        if (res?.data && typeof res.data === "object") {
-          setData({
-            currentPlan: res.data.currentPlan ?? defaultSubscription.currentPlan,
-            currentPlanPrice: res.data.currentPlanPrice ?? defaultSubscription.currentPlanPrice,
-            nextBillingDate: res.data.nextBillingDate ?? defaultSubscription.nextBillingDate,
-            paymentMethod: res.data.paymentMethod ?? defaultSubscription.paymentMethod,
-            trialEndsAt: res.data.trialEndsAt ?? null,
-            trialDaysLeft: res.data.trialDaysLeft ?? null,
-            usage: {
-              clientDashboards: res.data.usage?.clientDashboards ?? defaultSubscription.usage.clientDashboards,
-              keywordsTracked: res.data.usage?.keywordsTracked ?? defaultSubscription.usage.keywordsTracked,
-              researchCredits: res.data.usage?.researchCredits ?? defaultSubscription.usage.researchCredits,
-              teamMembers: res.data.usage?.teamMembers ?? defaultSubscription.usage.teamMembers,
-              clientsWithActiveManagedServices: res.data.usage?.clientsWithActiveManagedServices ?? 0,
-            },
-          });
-        }
-      } catch {
-        // keep default
-      } finally {
-        setLoading(false);
+  const fetchSubscription = async () => {
+    try {
+      const res = await api.get("/seo/agency/subscription").catch(() => ({ data: null }));
+      if (res?.data && typeof res.data === "object") {
+        setData({
+          currentPlan: res.data.currentPlan ?? defaultSubscription.currentPlan,
+          currentPlanPrice: res.data.currentPlanPrice ?? defaultSubscription.currentPlanPrice,
+          nextBillingDate: res.data.nextBillingDate ?? defaultSubscription.nextBillingDate,
+          paymentMethod: res.data.paymentMethod ?? defaultSubscription.paymentMethod,
+          trialEndsAt: res.data.trialEndsAt ?? null,
+          trialDaysLeft: res.data.trialDaysLeft ?? null,
+          usage: {
+            clientDashboards: res.data.usage?.clientDashboards ?? defaultSubscription.usage.clientDashboards,
+            keywordsTracked: res.data.usage?.keywordsTracked ?? defaultSubscription.usage.keywordsTracked,
+            researchCredits: res.data.usage?.researchCredits ?? defaultSubscription.usage.researchCredits,
+            teamMembers: res.data.usage?.teamMembers ?? defaultSubscription.usage.teamMembers,
+            clientsWithActiveManagedServices: res.data.usage?.clientsWithActiveManagedServices ?? 0,
+          },
+        });
       }
-    };
+    } catch {
+      // keep default
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchSubscription();
   }, []);
 
@@ -121,20 +122,24 @@ const SubscriptionPage = () => {
   };
 
   const handlePlanChange = async (planId: string, direction: "upgrade" | "downgrade") => {
-    if (direction === "downgrade") {
-      setPortalLoading(true);
-      try {
-        const res = await api.post("/agencies/validate-plan-change", { targetPlan: planId });
-        if (res.data?.allowed === false && res.data?.message) {
-          toast.error(res.data.message);
-          return;
-        }
-      } catch (e: any) {
-        toast.error(e.response?.data?.message || "Could not validate plan change.");
+    setPortalLoading(true);
+    try {
+      const res = await api.post("/agencies/change-plan", { targetPlan: planId });
+      if (res.data?.success) {
+        toast.success(res.data?.message ?? "Plan updated.");
+        await fetchSubscription();
         return;
-      } finally {
-        setPortalLoading(false);
       }
+    } catch (e: any) {
+      const msg = e.response?.data?.message;
+      if (msg) {
+        toast.error(msg);
+        return;
+      }
+      toast.error("Could not change plan. Try opening Manage Billing to change plan in Stripe.");
+      return;
+    } finally {
+      setPortalLoading(false);
     }
     openBillingPortal({ flow: "subscription_update" });
   };
