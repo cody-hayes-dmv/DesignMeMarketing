@@ -238,9 +238,10 @@ router.post('/', authenticateToken, async (req, res) => {
         ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
         : null;
 
-    // When "Charge to Card": create Stripe customer and attach payment method BEFORE creating agency (so we never create an agency without Stripe when required)
+    // When "Charge to Card": create Stripe customer, attach payment method, create subscription for tier, THEN create agency
     let stripeCustomerId: string | null = null;
-    if (billingOption === 'charge' && paymentMethodId) {
+    let stripeSubscriptionId: string | null = null;
+    if (billingOption === 'charge' && paymentMethodId && tier) {
       const stripe = getStripe();
       if (stripe && isStripeConfigured()) {
         try {
@@ -252,10 +253,29 @@ router.post('/', authenticateToken, async (req, res) => {
           await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id });
           await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: paymentMethodId } });
           stripeCustomerId = customer.id;
+
+          // Create subscription for the selected tier (so Stripe has customer + product/subscription)
+          const tierPriceEnvKey = `STRIPE_PRICE_PLAN_${tier.toUpperCase().replace('-', '_')}`;
+          const tierPriceId = (process.env as Record<string, string | undefined>)[tierPriceEnvKey];
+          if (!tierPriceId) {
+            console.error('[agencies] Missing Stripe price for tier:', tierPriceEnvKey);
+            return res.status(400).json({
+              message: `Billing is not configured for tier "${tier}". Add ${tierPriceEnvKey} to server .env with the Stripe Price ID for this plan.`,
+            });
+          }
+          console.log('[agencies] Creating Stripe subscription for tier:', tier);
+          const subscription = await stripe.subscriptions.create({
+            customer: customer.id,
+            items: [{ price: tierPriceId }],
+            default_payment_method: paymentMethodId,
+            payment_behavior: 'error_if_incomplete',
+            payment_settings: { save_default_payment_method: 'on_subscription' },
+          });
+          stripeSubscriptionId = subscription.id;
         } catch (stripeErr: any) {
           const code = stripeErr?.code || stripeErr?.type;
           const rawMsg = String(stripeErr?.message || stripeErr?.raw?.message || '');
-          console.error('Stripe customer/payment attach failed:', code, rawMsg, stripeErr?.raw?.decline_code);
+          console.error('Stripe customer/subscription failed:', code, rawMsg, stripeErr?.raw?.decline_code);
           let userMessage: string;
           if (/connection|ENOTFOUND|network|timeout/i.test(rawMsg)) {
             userMessage = 'Could not reach Stripe. Check your internet connection and try again.';
@@ -266,7 +286,7 @@ router.post('/', authenticateToken, async (req, res) => {
           } else if (stripeErr?.decline_code || code === 'card_declined') {
             userMessage = rawMsg || 'Card was declined. Try a different card or use test card 4242 4242 4242 4242 in test mode.';
           } else {
-            userMessage = rawMsg || 'Failed to save card. Please try again.';
+            userMessage = rawMsg || 'Failed to save card or create subscription. Please try again.';
           }
           return res.status(400).json({ message: userMessage });
         }
@@ -279,6 +299,7 @@ router.post('/', authenticateToken, async (req, res) => {
         subdomain: subdomain?.trim() || null,
         billingType,
         stripeCustomerId,
+        stripeSubscriptionId,
         website: website || null,
         industry: industry || null,
         agencySize: agencySize || null,
