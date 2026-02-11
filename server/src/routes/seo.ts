@@ -5,6 +5,7 @@ import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
 import jwt from "jsonwebtoken";
 import { getAgencyTierContext, canAddTargetKeyword, hasResearchCredits, useResearchCredits } from "../lib/agencyLimits.js";
 import { getTierConfig, getRankRefreshIntervalMs, getAiRefreshIntervalMs } from "../lib/tiers.js";
+import { syncAgencyTierFromStripe } from "../lib/stripeTierSync.js";
 
 const router = express.Router();
 
@@ -10191,6 +10192,7 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
 });
 
 // Get agency subscription overview (current plan, usage, next billing)
+// Syncs agency.subscriptionTier from Stripe when loading so upgrades/downgrades in Stripe are reflected even if webhook didn't run.
 router.get("/agency/subscription", authenticateToken, async (req, res) => {
   try {
     let accessibleClientIds: string[] = [];
@@ -10218,7 +10220,13 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
       accessibleClientIds = clients.map((c) => c.id);
     }
 
-    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    let tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    if (tierCtx.agencyId) {
+      const { updated } = await syncAgencyTierFromStripe(tierCtx.agencyId);
+      if (updated) {
+        tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+      }
+    }
     const keywordCount = tierCtx.totalKeywords;
 
     let tierLimit = tierCtx.tierConfig?.maxDashboards ?? 10;

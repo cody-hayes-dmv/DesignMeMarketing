@@ -2,29 +2,10 @@ import express from "express";
 import Stripe from "stripe";
 import { getStripe } from "../lib/stripe.js";
 import { prisma } from "../lib/prisma.js";
-import { normalizeTierId, type TierId } from "../lib/tiers.js";
+import { normalizeTierId } from "../lib/tiers.js";
+import { getTierFromSubscriptionItems } from "../lib/stripeTierSync.js";
 
 const router = express.Router();
-
-/** Map Stripe Price ID (env value) to our tier id for syncing subscription -> agency.subscriptionTier */
-const PLAN_PRICE_TO_TIER: { envKey: string; tierId: TierId }[] = [
-  { envKey: "STRIPE_PRICE_PLAN_ENTERPRISE", tierId: "enterprise" },
-  { envKey: "STRIPE_PRICE_PLAN_PRO", tierId: "pro" },
-  { envKey: "STRIPE_PRICE_PLAN_GROWTH", tierId: "growth" },
-  { envKey: "STRIPE_PRICE_PLAN_STARTER", tierId: "starter" },
-  { envKey: "STRIPE_PRICE_PLAN_SOLO", tierId: "solo" },
-  { envKey: "STRIPE_PRICE_PLAN_BUSINESS_PRO", tierId: "business_pro" },
-  { envKey: "STRIPE_PRICE_PLAN_BUSINESS_LITE", tierId: "business_lite" },
-];
-
-function getTierFromSubscriptionItems(items: Stripe.SubscriptionItem[]): TierId | null {
-  const priceIds = new Set(items.map((i) => (typeof i.price === "string" ? i.price : i.price?.id)).filter(Boolean));
-  for (const { envKey, tierId } of PLAN_PRICE_TO_TIER) {
-    const priceId = process.env[envKey];
-    if (priceId && priceIds.has(priceId)) return tierId;
-  }
-  return null;
-}
 
 /**
  * Stripe webhook handler. Expects raw body (mount with express.raw).
