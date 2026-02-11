@@ -16,6 +16,8 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
 const stripePromise = stripePk ? loadStripe(stripePk) : null;
 
+const CREATE_AGENCY_DRAFT_KEY = "createAgencyDraft";
+
 type StripePaymentHandle = { confirmAndGetPaymentMethod: () => Promise<string | null> };
 
 const StripePaymentSection = forwardRef<StripePaymentHandle, { clientSecret: string }>(function StripePaymentSection({ clientSecret }, ref) {
@@ -27,19 +29,26 @@ const StripePaymentSection = forwardRef<StripePaymentHandle, { clientSecret: str
       // Stripe requires elements.submit() before confirmSetup() (validates Payment Element first)
       const { error: submitError } = await elements.submit();
       if (submitError) throw new Error(submitError.message ?? "Please complete the card details.");
-      const { error, setupIntent } = await stripe.confirmSetup({
+      const result = await stripe.confirmSetup({
         elements,
         clientSecret,
         confirmParams: { return_url: window.location.href },
       });
-      if (error) throw new Error(error.message ?? "Payment failed");
+      if (result.error) throw new Error(result.error.message ?? "Payment failed");
+      const setupIntent = (result as { setupIntent?: { payment_method?: string | { id?: string } } }).setupIntent;
       const pm = setupIntent?.payment_method;
       return typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id ?? null;
     },
   }));
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-      <PaymentElement options={{ layout: "tabs" }} />
+      <PaymentElement
+        options={{
+          layout: "tabs",
+          paymentMethodOrder: ["card"],
+          wallets: { applePay: "never", googlePay: "never" },
+        }}
+      />
     </div>
   );
 });
@@ -160,6 +169,99 @@ const AgenciesPage = () => {
         dispatch(fetchAgencies() as any);
     }, [dispatch]);
 
+    const handledStripeRedirect = useRef(false);
+    // When Stripe redirects back after 3DS etc., get payment method from server and complete agency creation
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const setupIntentId = params.get("setup_intent");
+        const redirectStatus = params.get("redirect_status");
+        if (redirectStatus !== "succeeded" || !setupIntentId || !setupIntentId.startsWith("seti_")) return;
+        if (handledStripeRedirect.current) return;
+        handledStripeRedirect.current = true;
+
+        const raw = sessionStorage.getItem(CREATE_AGENCY_DRAFT_KEY);
+        const cleanUrl = () => {
+            params.delete("setup_intent");
+            params.delete("setup_intent_client_secret");
+            params.delete("redirect_status");
+            const q = params.toString();
+            window.history.replaceState({}, "", window.location.pathname + (q ? "?" + q : ""));
+        };
+
+        if (!raw) {
+            cleanUrl();
+            toast.error("Session expired. Please fill the form and try again.");
+            return;
+        }
+
+        let draft: { createForm: typeof initialCreateForm };
+        try {
+            draft = JSON.parse(raw);
+        } catch {
+            sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
+            cleanUrl();
+            toast.error("Invalid session. Please try again.");
+            return;
+        }
+
+        api
+            .post("/agencies/setup-intent/retrieve", { setupIntentId })
+            .then((res) => {
+                const paymentMethodId = res.data?.paymentMethodId;
+                if (!paymentMethodId) {
+                    sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
+                    cleanUrl();
+                    toast.error("Could not retrieve payment method. Please try again.");
+                    return;
+                }
+                const f = draft.createForm;
+                const website = f.website.trim().startsWith("http") ? f.website.trim() : `https://${f.website.trim()}`;
+                return dispatch(
+                    createAgency({
+                        name: f.name.trim(),
+                        website,
+                        industry: f.industry || undefined,
+                        agencySize: f.agencySize || undefined,
+                        numberOfClients: f.numberOfClients === "" ? undefined : Number(f.numberOfClients),
+                        contactName: f.contactName.trim(),
+                        contactEmail: f.contactEmail.trim(),
+                        contactPhone: f.contactPhone || undefined,
+                        contactJobTitle: f.contactJobTitle || undefined,
+                        streetAddress: f.streetAddress || undefined,
+                        city: f.city || undefined,
+                        state: f.state || undefined,
+                        zip: f.zip || undefined,
+                        country: f.country || undefined,
+                        subdomain: f.subdomain?.trim() || undefined,
+                        billingOption: f.billingOption as "charge" | "no_charge" | "manual_invoice",
+                        paymentMethodId,
+                        tier: f.tier || undefined,
+                        customPricing: f.billingOption === "manual_invoice" && f.customPricing !== "" ? Number(f.customPricing) : undefined,
+                        internalNotes: f.internalNotes || undefined,
+                        referralSource: f.referralSource || undefined,
+                        referralSourceOther: f.referralSource === "referral" ? f.referralSourceOther : undefined,
+                        primaryGoals: (f.primaryGoals?.length ? f.primaryGoals : undefined) as string[] | undefined,
+                        primaryGoalsOther: f.primaryGoalsOther || undefined,
+                        currentTools: f.currentTools || undefined,
+                    }) as any
+                )
+                    .unwrap()
+                    .then(() => {
+                        sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
+                        cleanUrl();
+                        toast.success("Agency created. Set-password email sent to contact.");
+                        dispatch(fetchAgencies() as any);
+                        window.dispatchEvent(new CustomEvent("agency-created"));
+                    });
+            })
+            .catch((err: any) => {
+                sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
+                cleanUrl();
+                const msg = err?.response?.data?.message ?? err?.message ?? "Could not verify payment. Please try again.";
+                toast.error(msg);
+            });
+    }, [dispatch]);
+
     useEffect(() => {
         if (!showCreateModal || createForm.billingOption !== "charge") {
             setSetupIntentClientSecret(null);
@@ -214,6 +316,7 @@ const AgenciesPage = () => {
                 return;
             }
             try {
+                sessionStorage.setItem(CREATE_AGENCY_DRAFT_KEY, JSON.stringify({ createForm }));
                 const id = await stripePaymentRef.current.confirmAndGetPaymentMethod();
                 if (!id) {
                     toast.error("Please complete the card details.");
@@ -257,6 +360,7 @@ const AgenciesPage = () => {
             }) as any).unwrap();
             setCreateForm(initialCreateForm);
             setShowCreateModal(false);
+            sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
             toast.success("Agency created. Set-password email sent to contact.");
             dispatch(fetchAgencies() as any);
             window.dispatchEvent(new CustomEvent("agency-created"));
