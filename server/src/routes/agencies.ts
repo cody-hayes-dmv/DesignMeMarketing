@@ -288,7 +288,8 @@ router.post('/', authenticateToken, async (req, res) => {
         await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: paymentMethodId } });
         stripeCustomerId = customer.id;
 
-        // Create subscription for the selected tier (use default_incomplete so subscription is created even if first invoice needs 3DS etc.)
+        // Create subscription for the selected tier. Use error_if_incomplete so the first invoice must be paid
+        // for the subscription to be created — we only create the agency when the subscription is active.
         const tierPriceEnvKey = `STRIPE_PRICE_PLAN_${tier.toUpperCase().replace(/-/g, '_')}`;
         const tierPriceId = (process.env as Record<string, string | undefined>)[tierPriceEnvKey];
         if (!tierPriceId || typeof tierPriceId !== 'string' || !tierPriceId.startsWith('price_')) {
@@ -302,9 +303,15 @@ router.post('/', authenticateToken, async (req, res) => {
           customer: customer.id,
           items: [{ price: tierPriceId }],
           default_payment_method: paymentMethodId,
-          payment_behavior: 'default_incomplete',
+          payment_behavior: 'error_if_incomplete',
           payment_settings: { save_default_payment_method: 'on_subscription' },
         });
+        if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+          await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+          return res.status(400).json({
+            message: 'The first payment could not be completed. Try a different card or use test card 4242 4242 4242 4242. If your card requires verification, complete it and try again.',
+          });
+        }
         stripeSubscriptionId = subscription.id;
         console.log('[agencies] Stripe subscription created:', subscription.id, 'status=', subscription.status);
       } catch (stripeErr: any) {
@@ -643,12 +650,15 @@ router.post('/:agencyId/invite-specialist', authenticateToken, async (req, res) 
 
 // Create Stripe billing portal session (for Subscription page: Manage Billing / Upgrade / Downgrade)
 // Uses the current user's agency.stripeCustomerId (or creates one if missing). Fallback: STRIPE_AGENCY_CUSTOMER_ID. Never uses req.body for customer id.
+// Plan changes (upgrade/downgrade) are handled by Stripe's portal. Configure in Dashboard: Billing → Customer portal →
+// "Subscription plan changes": enable "Proration" so upgrades are charged immediately; set downgrades to "Take effect at end of billing period".
 router.post('/billing-portal', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
     }
     const returnUrl = (req.body && req.body.returnUrl) || `${req.body?.origin || req.get('origin') || 'http://localhost:3000'}/agency/subscription`;
+    const openToSubscriptionUpdate = !!(req.body && req.body.flow === 'subscription_update');
     const stripe = getStripe();
     if (!stripe || !isStripeConfigured()) {
       return res.status(400).json({ url: null, message: 'Billing is not configured. Contact support.' });
@@ -681,10 +691,17 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
       });
     }
 
-    const session = await stripe.billingPortal.sessions.create({
+    const sessionParams: Parameters<typeof stripe.billingPortal.sessions.create>[0] = {
       customer: customerId,
       return_url: returnUrl,
-    });
+    };
+    if (openToSubscriptionUpdate && membership.agency.stripeSubscriptionId) {
+      sessionParams.flow_data = {
+        type: 'subscription_update',
+        subscription_update: { subscription: membership.agency.stripeSubscriptionId },
+      };
+    }
+    const session = await stripe.billingPortal.sessions.create(sessionParams);
     res.json({ url: session.url });
   } catch (err: any) {
     console.error('Billing portal error:', err);
@@ -1276,6 +1293,17 @@ router.patch('/managed-services/:id/cancel', authenticateToken, async (req, res)
 
     const now = new Date();
     const wasActive = row.status === 'ACTIVE';
+    const stripeSubscriptionItemId = (row as { stripeSubscriptionItemId?: string | null }).stripeSubscriptionItemId;
+    if (wasActive && stripeSubscriptionItemId) {
+      const stripe = getStripe();
+      if (stripe) {
+        try {
+          await stripe.subscriptionItems.del(stripeSubscriptionItemId);
+        } catch (e: any) {
+          console.warn('Stripe managed service subscription item delete failed:', e?.message);
+        }
+      }
+    }
     await prisma.$transaction([
       prisma.managedService.update({
         where: { id },

@@ -90,11 +90,12 @@ const SubscriptionPage = () => {
     fetchSubscription();
   }, []);
 
-  const handleManageBilling = async () => {
+  const openBillingPortal = async (options?: { flow?: "subscription_update" }) => {
     setPortalLoading(true);
     try {
       const res = await api.post("/agencies/billing-portal", {
         returnUrl: window.location.href,
+        ...options,
       });
       const url = res.data?.url;
       if (url) {
@@ -109,8 +110,10 @@ const SubscriptionPage = () => {
     }
   };
 
+  const handleManageBilling = () => openBillingPortal();
+
   const handleUpgradePlan = () => {
-    handleManageBilling();
+    openBillingPortal({ flow: "subscription_update" });
   };
 
   const handleViewInvoiceHistory = async () => {
@@ -344,7 +347,7 @@ const SubscriptionPage = () => {
                       ) : isLower ? (
                         <button
                           type="button"
-                          onClick={handleManageBilling}
+                          onClick={handleUpgradePlan}
                           disabled={portalLoading}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                         >
