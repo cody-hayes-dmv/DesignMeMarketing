@@ -114,6 +114,7 @@ const createAgencySchema = z.object({
   country: z.string().optional(),
   subdomain: z.string().optional(),
   billingOption: z.enum(['charge', 'no_charge', 'manual_invoice']),
+  paymentMethodId: z.string().optional(), // required when billingOption === 'charge' (Stripe Payment Element)
   tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise', 'business_lite', 'business_pro']).optional(),
   customPricing: z.coerce.number().optional().nullable(),
   internalNotes: z.string().optional(),
@@ -132,6 +133,28 @@ const createAgencySchema = z.object({
     return false;
   }
 }, { message: 'Agency website must be a valid URL', path: ['website'] });
+
+// Create a SetupIntent for collecting a payment method when creating an agency with "Charge to Card"
+// Super Admin only. No customer yet; payment method will be attached to the new agency's Stripe customer on create.
+router.post('/setup-intent', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Set STRIPE_SECRET_KEY.' });
+    }
+    const setupIntent = await stripe.setupIntents.create({
+      usage: 'off_session',
+      payment_method_types: ['card'],
+    });
+    res.json({ clientSecret: setupIntent.client_secret });
+  } catch (err: any) {
+    console.error('SetupIntent error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to create setup intent' });
+  }
+});
 
 router.post('/', authenticateToken, async (req, res) => {
   try {
@@ -157,6 +180,7 @@ router.post('/', authenticateToken, async (req, res) => {
       country,
       subdomain,
       billingOption,
+      paymentMethodId,
       tier,
       customPricing,
       internalNotes,
@@ -167,6 +191,9 @@ router.post('/', authenticateToken, async (req, res) => {
       currentTools,
     } = body;
 
+    if (billingOption === 'charge' && !paymentMethodId) {
+      return res.status(400).json({ message: 'Payment method is required when billing type is Charge to Card.' });
+    }
     if (!tier && billingOption !== 'manual_invoice') {
       return res.status(400).json({ message: 'Subscription tier is required' });
     }
@@ -230,6 +257,30 @@ router.post('/', authenticateToken, async (req, res) => {
       },
       include: { _count: { select: { members: true } } },
     });
+
+    // When "Charge to Card": create Stripe customer and attach the payment method
+    if (billingOption === 'charge' && paymentMethodId) {
+      const stripe = getStripe();
+      if (stripe && isStripeConfigured()) {
+        try {
+          const customer = await stripe.customers.create({
+            email: contactEmail,
+            name: contactName || name,
+            metadata: { agencyId: agency.id },
+          });
+          await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id });
+          await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: paymentMethodId } });
+          await prisma.agency.update({
+            where: { id: agency.id },
+            data: { stripeCustomerId: customer.id },
+          });
+        } catch (stripeErr: any) {
+          console.error('Stripe customer/payment attach failed:', stripeErr);
+          await prisma.agency.update({ where: { id: agency.id }, data: { stripeCustomerId: null } });
+          return res.status(400).json({ message: stripeErr?.message || 'Failed to attach payment method. Please try again.' });
+        }
+      }
+    }
 
     const agencyUser = await prisma.user.create({
       data: {

@@ -1,7 +1,9 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useImperativeHandle, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
@@ -10,6 +12,37 @@ import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+
+const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
+const stripePromise = stripePk ? loadStripe(stripePk) : null;
+
+type StripePaymentHandle = { confirmAndGetPaymentMethod: () => Promise<string | null> };
+
+const StripePaymentSection = forwardRef<StripePaymentHandle, { clientSecret: string }>(function StripePaymentSection({ clientSecret }, ref) {
+  const stripe = useStripe();
+  const elements = useElements();
+  useImperativeHandle(ref, () => ({
+    async confirmAndGetPaymentMethod() {
+      if (!stripe || !elements) return null;
+      // Stripe requires elements.submit() before confirmSetup() (validates Payment Element first)
+      const { error: submitError } = await elements.submit();
+      if (submitError) throw new Error(submitError.message ?? "Please complete the card details.");
+      const { error, setupIntent } = await stripe.confirmSetup({
+        elements,
+        clientSecret,
+        confirmParams: { return_url: window.location.href },
+      });
+      if (error) throw new Error(error.message ?? "Payment failed");
+      const pm = setupIntent?.payment_method;
+      return typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id ?? null;
+    },
+  }));
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <PaymentElement options={{ layout: "tabs" }} />
+    </div>
+  );
+});
 
 interface AgencyMember {
   id: string;
@@ -120,11 +153,29 @@ const AgenciesPage = () => {
         currentTools: "",
     };
     const [createForm, setCreateForm] = useState(initialCreateForm);
-    const hasPaymentMethod = true; // TODO: from platform billing API when available
+    const [setupIntentClientSecret, setSetupIntentClientSecret] = useState<string | null>(null);
+    const stripePaymentRef = useRef<StripePaymentHandle>(null);
 
     useEffect(() => {
         dispatch(fetchAgencies() as any);
     }, [dispatch]);
+
+    useEffect(() => {
+        if (!showCreateModal || createForm.billingOption !== "charge") {
+            setSetupIntentClientSecret(null);
+            return;
+        }
+        if (!stripePk) return;
+        let cancelled = false;
+        api.post("/agencies/setup-intent")
+            .then((res) => {
+                if (!cancelled && res.data?.clientSecret) setSetupIntentClientSecret(res.data.clientSecret);
+            })
+            .catch(() => {
+                if (!cancelled) toast.error("Could not load payment form.");
+            });
+        return () => { cancelled = true; };
+    }, [showCreateModal, createForm.billingOption]);
 
     const handleCreateAgency = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -152,6 +203,24 @@ const AgenciesPage = () => {
             toast.error("Please select a subscription tier.");
             return;
         }
+        if (createForm.billingOption === "charge" && (!stripePk || !setupIntentClientSecret)) {
+            toast.error("Payment form is not ready. Add VITE_STRIPE_PUBLISHABLE_KEY or try again.");
+            return;
+        }
+        let paymentMethodId: string | undefined;
+        if (createForm.billingOption === "charge") {
+            try {
+                const id = await stripePaymentRef.current?.confirmAndGetPaymentMethod();
+                if (!id) {
+                    toast.error("Please complete the card details.");
+                    return;
+                }
+                paymentMethodId = id;
+            } catch (err: any) {
+                toast.error(err?.message ?? "Payment failed. Please check card details.");
+                return;
+            }
+        }
         const website = createForm.website.trim().startsWith("http") ? createForm.website.trim() : `https://${createForm.website.trim()}`;
         try {
             await dispatch(createAgency({
@@ -171,6 +240,7 @@ const AgenciesPage = () => {
                 country: createForm.country || undefined,
                 subdomain: createForm.subdomain?.trim() || undefined,
                 billingOption: createForm.billingOption,
+                paymentMethodId,
                 tier: createForm.tier || undefined,
                 customPricing: createForm.billingOption === "manual_invoice" && createForm.customPricing !== "" ? Number(createForm.customPricing) : undefined,
                 internalNotes: createForm.internalNotes || undefined,
@@ -1032,15 +1102,15 @@ const AgenciesPage = () => {
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type *</label>
                                             <div className="space-y-2">
-                                                {hasPaymentMethod && (
-                                                    <label className="flex items-center gap-2">
-                                                        <input type="radio" name="billingOption" value="charge" checked={createForm.billingOption === "charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "charge" })} className="text-primary-600" />
-                                                        <span>Charge to Card</span>
-                                                    </label>
-                                                )}
+                                                <label className="flex items-center gap-2">
+                                                    <input type="radio" name="billingOption" value="charge" checked={createForm.billingOption === "charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "charge" })} className="text-primary-600" />
+                                                    <span>Charge to Card</span>
+                                                    <span className="text-xs text-gray-500">(requires payment method)</span>
+                                                </label>
                                                 <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "no_charge" })} className="text-primary-600" />
                                                     <span>No Charge – Free Account</span>
+                                                    <span className="text-xs text-gray-500">(comped)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="manual_invoice" checked={createForm.billingOption === "manual_invoice"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "manual_invoice" })} className="text-primary-600" />
@@ -1048,6 +1118,20 @@ const AgenciesPage = () => {
                                                 </label>
                                             </div>
                                         </div>
+                                        {createForm.billingOption === "charge" && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">Card details</label>
+                                                {!stripePk ? (
+                                                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Add <code className="px-1 bg-amber-100 rounded">VITE_STRIPE_PUBLISHABLE_KEY</code> to the app environment to collect payment methods.</p>
+                                                ) : setupIntentClientSecret && stripePromise ? (
+                                                    <Elements stripe={stripePromise} options={{ clientSecret: setupIntentClientSecret }}>
+                                                        <StripePaymentSection ref={stripePaymentRef} clientSecret={setupIntentClientSecret} />
+                                                    </Elements>
+                                                ) : (
+                                                    <p className="text-sm text-gray-500">Loading payment form…</p>
+                                                )}
+                                            </div>
+                                        )}
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier *</label>
                                             <select value={createForm.tier} onChange={(e) => setCreateForm({ ...createForm, tier: e.target.value as typeof createForm.tier })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">

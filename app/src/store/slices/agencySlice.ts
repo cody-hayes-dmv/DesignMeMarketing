@@ -69,6 +69,7 @@ export const createAgency = createAsyncThunk(
     country,
     subdomain,
     billingOption,
+    paymentMethodId,
     tier,
     customPricing,
     internalNotes,
@@ -94,6 +95,7 @@ export const createAgency = createAsyncThunk(
     country?: string;
     subdomain?: string;
     billingOption: "charge" | "no_charge" | "manual_invoice";
+    paymentMethodId?: string;
     tier?: "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro";
     customPricing?: number | null;
     internalNotes?: string;
@@ -121,6 +123,7 @@ export const createAgency = createAsyncThunk(
         country,
         subdomain,
         billingOption,
+        paymentMethodId,
         tier,
         customPricing,
         internalNotes,
