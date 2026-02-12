@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
@@ -55,6 +56,7 @@ interface AgencyMe {
   tierId: string | null;
   allowedAddOns: AllowedAddOns;
   basePriceMonthlyUsd: number | null;
+  accountActivated?: boolean;
 }
 
 const AddOnsPage = () => {
@@ -84,6 +86,7 @@ const AddOnsPage = () => {
         tierId: res.data?.tierId ?? null,
         allowedAddOns: res.data?.allowedAddOns ?? { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] },
         basePriceMonthlyUsd: res.data?.basePriceMonthlyUsd ?? null,
+        accountActivated: res.data?.accountActivated !== false,
       });
     } catch {
       setAgencyMe(null);
@@ -144,6 +147,18 @@ const AddOnsPage = () => {
         <h1 className="text-2xl font-bold text-gray-900">Add-Ons & Upgrades</h1>
         <p className="text-gray-600 mt-1">Expand your capabilities without changing your plan</p>
       </header>
+
+      {agencyMe && agencyMe.accountActivated === false && (
+        <section className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-amber-800 text-sm">
+            <strong>Activate your account first.</strong> Add a payment method in{" "}
+            <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
+              Subscription & Billing
+            </Link>{" "}
+            to add add-ons. The 7-day free trial is for reporting only; add-ons and managed plans are paid when added or approved.
+          </p>
+        </section>
+      )}
 
       {/* Your plan & overview */}
       <section className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-6">
@@ -206,7 +221,7 @@ const AddOnsPage = () => {
                     <button
                       type="button"
                       onClick={() => addAddOn("extra_dashboards", pack.option)}
-                      disabled={!!purchasing}
+                      disabled={!!purchasing || agencyMe?.accountActivated === false}
                       className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
                     >
                       {purchasing === `extra_dashboards-${pack.option}` ? (
@@ -231,7 +246,7 @@ const AddOnsPage = () => {
                   <button
                     type="button"
                     onClick={() => addAddOn("extra_keywords_tracked", pack.option)}
-                    disabled={!!purchasing}
+                    disabled={!!purchasing || agencyMe?.accountActivated === false}
                     className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
                   >
                     {purchasing === `extra_keywords_tracked-${pack.option}` ? (
@@ -255,7 +270,7 @@ const AddOnsPage = () => {
                   <button
                     type="button"
                     onClick={() => addAddOn("extra_keyword_lookups", pack.option)}
-                    disabled={!!purchasing}
+                    disabled={!!purchasing || agencyMe?.accountActivated === false}
                     className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
                   >
                     {purchasing === `extra_keyword_lookups-${pack.option}` ? (

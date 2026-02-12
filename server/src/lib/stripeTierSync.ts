@@ -88,12 +88,13 @@ export async function syncAgencyTierFromStripe(agencyId: string): Promise<{ upda
   if (!sub && agency.stripeCustomerId) {
     const list = await stripe.subscriptions.list({
       customer: agency.stripeCustomerId,
-      status: "active",
-      limit: 1,
+      status: "all",
+      limit: 5,
     });
-    sub = list.data[0] ?? null;
+    sub = list.data.find((s) => s.status === "active" || s.status === "trialing") ?? list.data[0] ?? null;
   }
-  if (!sub || sub.status !== "active") {
+  const subscriptionValid = sub && (sub.status === "active" || sub.status === "trialing");
+  if (!subscriptionValid) {
     if (agency.subscriptionTier != null || agency.stripeSubscriptionId != null) {
       await prisma.agency.update({
         where: { id: agencyId },

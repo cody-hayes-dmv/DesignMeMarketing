@@ -115,6 +115,7 @@ const ManagedServicesPage = () => {
   const dispatch = useDispatch();
   const { clients } = useSelector((state: RootState) => state.client);
   const [tier, setTier] = useState<string>("starter");
+  const [accountActivated, setAccountActivated] = useState<boolean>(true);
   const [activeServices, setActiveServices] = useState<ActiveService[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -145,6 +146,7 @@ const ManagedServicesPage = () => {
         api.get(`/agencies/managed-services?${cacheBuster}`).catch(() => ({ data: [] })),
       ]);
       if (subRes?.data?.currentPlan) setTier(subRes.data.currentPlan);
+      if (typeof subRes?.data?.accountActivated === "boolean") setAccountActivated(subRes.data.accountActivated);
       if (Array.isArray(listRes?.data)) setActiveServices(listRes.data);
     } catch {
       // keep defaults
@@ -273,11 +275,23 @@ const ManagedServicesPage = () => {
         <p className="text-lg text-primary-600 font-medium mt-1">White-label fulfillment by Design ME Marketing</p>
       </header>
 
+      {!accountActivated && (
+        <section className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-amber-800 text-sm">
+            <strong>Activate your account first.</strong> Add a payment method in{" "}
+            <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
+              Subscription & Billing
+            </Link>{" "}
+            to request managed services. The 7-day free trial is for reporting only; managed plans are paid when approved.
+          </p>
+        </section>
+      )}
+
       {/* Overview */}
       <section className="mb-10 rounded-xl border border-gray-200 bg-gray-50 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-2">Overview</h2>
         <p className="text-gray-700 max-w-3xl">
-          Agencies can activate managed SEO and automation services for their clients through the dashboard. When activated, Design ME Marketing fulfills the work.
+          Agencies can activate managed SEO and automation services for their clients through the dashboard. When activated, Design ME Marketing fulfills the work. Payment for managed services is charged when your request is approved.
         </p>
       </section>
 
@@ -305,7 +319,8 @@ const ManagedServicesPage = () => {
                 <button
                   type="button"
                   onClick={() => openActivateModal(pkg)}
-                  className="w-full py-2.5 rounded-lg font-medium bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+                  disabled={!accountActivated}
+                  className="w-full py-2.5 rounded-lg font-medium bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {pkg.buttonLabel}
                 </button>

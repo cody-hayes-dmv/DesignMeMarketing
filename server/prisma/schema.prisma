@@ -231,6 +231,7 @@ model Client {
   managedServiceEndDate      DateTime?             @db.Date
   belongsToAgencyId     String?
   isAgencyOwnDashboard   Boolean                  @default(false)
+  dashboardShareToken    String?                  @unique @db.VarChar(64) // Permanent token for shared dashboard link (fixed URL, never expires)
   aiSearchSerpCache     AiSearchSerpCache?
   backlinkTimeseries    BacklinkTimeseries[]
   backlinks             Backlink[]

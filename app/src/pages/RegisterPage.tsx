@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { register, clearError } from "@/store/slices/authSlice";
@@ -13,10 +13,13 @@ import {
   Building2,
 } from "lucide-react";
 import zoesiLogo from "@/assets/zoesi-blue.png";
-import AgencyRegisterModal from "@/components/AgencyRegisterModal";
+import AgencyRegisterModal, { AGENCY_REGISTER_FORM_KEY } from "@/components/AgencyRegisterModal";
+import api from "@/lib/api";
+import toast from "react-hot-toast";
 
 const RegisterPage = () => {
   const dispatch = useDispatch();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { loading, error } = useSelector((state: RootState) => state.auth);
   const [formData, setFormData] = useState({
     email: "",
@@ -28,10 +31,47 @@ const RegisterPage = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [agencyModalOpen, setAgencyModalOpen] = useState(false);
+  const [agencySignupComplete, setAgencySignupComplete] = useState(false);
+  const handledStripeReturn = useRef(false);
 
   useEffect(() => {
     dispatch(clearError());
   }, [dispatch]);
+
+  // After Stripe 3DS redirect: complete agency registration with stored form + retrieved payment method
+  useEffect(() => {
+    const setupIntentId = searchParams.get("setup_intent");
+    const redirectStatus = searchParams.get("redirect_status");
+    if (redirectStatus !== "succeeded" || !setupIntentId || !setupIntentId.startsWith("seti_") || handledStripeReturn.current) return;
+    const stored = sessionStorage.getItem(AGENCY_REGISTER_FORM_KEY);
+    if (!stored) {
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    handledStripeReturn.current = true;
+    (async () => {
+      try {
+        const retrieveRes = await api.post("/agencies/setup-intent-public/retrieve", { setupIntentId });
+        const paymentMethodId = retrieveRes.data?.paymentMethodId;
+        if (!paymentMethodId) {
+          toast.error("Could not complete payment. Please try again.");
+          setSearchParams({}, { replace: true });
+          sessionStorage.removeItem(AGENCY_REGISTER_FORM_KEY);
+          return;
+        }
+        const payload = JSON.parse(stored);
+        await api.post("/agencies/register", { ...payload, paymentMethodId });
+        sessionStorage.removeItem(AGENCY_REGISTER_FORM_KEY);
+        setSearchParams({}, { replace: true });
+        setAgencySignupComplete(true);
+        toast.success("Agency account created. Check your email to verify. Your 7-day free trial (reporting only) starts now.");
+      } catch (err: any) {
+        toast.error(err?.response?.data?.message || "Failed to complete signup. Please try again.");
+        setSearchParams({}, { replace: true });
+        sessionStorage.removeItem(AGENCY_REGISTER_FORM_KEY);
+      }
+    })();
+  }, [searchParams, setSearchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +122,34 @@ const RegisterPage = () => {
               We've sent a verification link to{" "}
               <strong>{formData.email}</strong>. Please check your email and
               click the link to verify your account.
+            </p>
+            <Link
+              to="/login"
+              className="inline-flex items-center space-x-2 text-primary-600 hover:text-primary-700 font-medium transition-colors"
+            >
+              <span>Back to Sign In</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (agencySignupComplete) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
+        <div className="max-w-md w-full">
+          <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+            <div className="flex justify-center mb-6">
+              <div className="bg-secondary-100 w-16 h-16 rounded-full flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-secondary-600" />
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-4">
+              Agency account created
+            </h1>
+            <p className="text-gray-600 mb-6">
+              Please check your email to verify your account. Your 7-day free trial for reporting (keywords, research, etc.) starts now. You&apos;ll be billed after the trial. To add managed services, activate a plan from your dashboard—payment for managed services is due when the plan is approved.
             </p>
             <Link
               to="/login"

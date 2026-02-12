@@ -1,7 +1,50 @@
-import React, { useState } from "react";
-import { X, User, Mail, Lock, Eye, EyeOff } from "lucide-react";
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import { X, User, Mail, Lock, Eye, EyeOff, CreditCard, Loader2 } from "lucide-react";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
+
+const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
+const stripePromise = stripePk ? loadStripe(stripePk) : null;
+
+export const AGENCY_REGISTER_FORM_KEY = "agencyRegisterForm";
+
+type PaymentSectionHandle = { confirmAndGetPaymentMethod: () => Promise<string | null> };
+
+const StripePaymentSection = forwardRef<PaymentSectionHandle, { clientSecret: string; returnUrl: string }>(
+  function StripePaymentSection({ clientSecret, returnUrl }, ref) {
+    const stripe = useStripe();
+    const elements = useElements();
+    useImperativeHandle(ref, () => ({
+      async confirmAndGetPaymentMethod() {
+        if (!stripe || !elements) return null;
+        const { error: submitError } = await elements.submit();
+        if (submitError) throw new Error(submitError.message ?? "Please complete the card details.");
+        const result = await stripe.confirmSetup({
+          elements,
+          clientSecret,
+          confirmParams: { return_url: returnUrl },
+        });
+        if (result.error) throw new Error(result.error.message ?? "Payment failed");
+        const setupIntent = (result as { setupIntent?: { payment_method?: string | { id?: string } } }).setupIntent;
+        const pm = setupIntent?.payment_method;
+        return typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id ?? null;
+      },
+    }));
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <PaymentElement
+          options={{
+            layout: "tabs",
+            paymentMethodOrder: ["card"],
+            wallets: { applePay: "never", googlePay: "never" },
+          }}
+        />
+      </div>
+    );
+  }
+);
 
 interface AgencyRegisterModalProps {
   open: boolean;
@@ -71,6 +114,40 @@ const initialForm = {
   currentTools: "",
 };
 
+const buildRegisterPayload = (form: typeof initialForm) => {
+  const website =
+    form.website.trim().startsWith("http")
+      ? form.website.trim()
+      : `https://${form.website.trim()}`;
+  const toolsList = form.currentTools
+    ? form.currentTools.split(",").map((t) => t.trim()).filter(Boolean)
+    : [];
+  return {
+    name: form.name.trim(),
+    website,
+    industry: form.industry || undefined,
+    agencySize: form.agencySize || undefined,
+    numberOfClients: form.numberOfClients === "" ? undefined : Number(form.numberOfClients),
+    contactName: form.contactName.trim(),
+    contactEmail: form.contactEmail.trim(),
+    contactPhone: form.contactPhone || undefined,
+    contactJobTitle: form.contactJobTitle || undefined,
+    streetAddress: form.streetAddress || undefined,
+    city: form.city || undefined,
+    state: form.state || undefined,
+    zip: form.zip || undefined,
+    country: form.country || undefined,
+    subdomain: form.subdomain?.trim() || undefined,
+    password: form.password,
+    passwordConfirm: form.passwordConfirm,
+    referralSource: form.referralSource || undefined,
+    referralSourceOther: form.referralSource === "referral" ? form.referralSourceOther : undefined,
+    primaryGoals: form.primaryGoals?.length ? form.primaryGoals : undefined,
+    primaryGoalsOther: form.primaryGoalsOther || undefined,
+    currentTools: toolsList.length ? toolsList.join(", ") : undefined,
+  };
+};
+
 const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
   open,
   onClose,
@@ -80,6 +157,21 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [setupClientSecret, setSetupClientSecret] = useState<string | null>(null);
+  const [setupIntentError, setSetupIntentError] = useState<string | null>(null);
+  const stripePaymentRef = useRef<PaymentSectionHandle>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setSetupClientSecret(null);
+    setSetupIntentError(null);
+    api
+      .post("/agencies/setup-intent-public")
+      .then((res) => setSetupClientSecret(res.data?.clientSecret ?? null))
+      .catch((err: any) =>
+        setSetupIntentError(err?.response?.data?.message || "Could not load payment form. Try again later.")
+      );
+  }, [open]);
 
   const handleChange = (field: string, value: string | number | string[]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -95,55 +187,34 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
       toast.error("Password must be at least 6 characters");
       return;
     }
+    if (!setupClientSecret || !stripePromise || !stripePaymentRef.current) {
+      toast.error("Payment form is not ready. Please wait or refresh.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const website =
-        form.website.trim().startsWith("http")
-          ? form.website.trim()
-          : `https://${form.website.trim()}`;
-      const toolsList = form.currentTools
-        ? form.currentTools
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean)
-        : [];
-      await api.post("/agencies/register", {
-        name: form.name.trim(),
-        website,
-        industry: form.industry || undefined,
-        agencySize: form.agencySize || undefined,
-        numberOfClients:
-          form.numberOfClients === "" ? undefined : Number(form.numberOfClients),
-        contactName: form.contactName.trim(),
-        contactEmail: form.contactEmail.trim(),
-        contactPhone: form.contactPhone || undefined,
-        contactJobTitle: form.contactJobTitle || undefined,
-        streetAddress: form.streetAddress || undefined,
-        city: form.city || undefined,
-        state: form.state || undefined,
-        zip: form.zip || undefined,
-        country: form.country || undefined,
-        subdomain: form.subdomain?.trim() || undefined,
-        password: form.password,
-        passwordConfirm: form.passwordConfirm,
-        referralSource: form.referralSource || undefined,
-        referralSourceOther:
-          form.referralSource === "referral" ? form.referralSourceOther : undefined,
-        primaryGoals:
-          form.primaryGoals?.length ? form.primaryGoals : undefined,
-        primaryGoalsOther: form.primaryGoalsOther || undefined,
-        currentTools: toolsList.length ? toolsList.join(", ") : undefined,
-      });
+      const payload = buildRegisterPayload(form);
+      sessionStorage.setItem(AGENCY_REGISTER_FORM_KEY, JSON.stringify(payload));
+      const paymentMethodId = await stripePaymentRef.current.confirmAndGetPaymentMethod();
+      sessionStorage.removeItem(AGENCY_REGISTER_FORM_KEY);
+      if (!paymentMethodId) {
+        toast.error("Could not get payment method. Please try again.");
+        setSubmitting(false);
+        return;
+      }
+      await api.post("/agencies/register", { ...payload, paymentMethodId });
       toast.success(
-        "Agency account created. Please check your email to verify your account."
+        "Agency account created. Please check your email to verify your account. Your 7-day free trial (reporting only) starts now; you'll be billed after the trial."
       );
       setForm(initialForm);
       onClose();
       onSuccess?.();
     } catch (err: any) {
-      toast.error(
-        err?.response?.data?.message || "Failed to create agency account"
-      );
+      const msg = err?.message || err?.response?.data?.message || "Failed to create agency account";
+      if (err?.message && /redirect|redirected/i.test(String(err.message))) {
+        return;
+      }
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -500,6 +571,42 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
               </div>
             </section>
 
+            {/* Section E: Payment – required to activate 7-day free trial (reporting only); auto-bills after trial */}
+            <section>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <CreditCard className="h-4 w-4" />
+                PAYMENT (Required to activate account)
+              </h3>
+              <p className="text-sm text-gray-600 mb-3">
+                Add a card to start your <strong>7-day free trial</strong> for reporting (keywords, research, etc.). You won&apos;t be charged until after the trial. Managed services are paid when approved—you need an active account to request them.
+              </p>
+              {setupIntentError && (
+                <div className="mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+                  {setupIntentError}
+                </div>
+              )}
+              {!stripePk && (
+                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  Payment is required to sign up. If you don&apos;t see the card form, the site may be in setup. Please try again later or contact support.
+                </p>
+              )}
+              {stripePk && setupClientSecret && stripePromise && (
+                <Elements stripe={stripePromise} options={{ clientSecret: setupClientSecret }}>
+                  <StripePaymentSection
+                    ref={stripePaymentRef}
+                    clientSecret={setupClientSecret}
+                    returnUrl={typeof window !== "undefined" ? window.location.href : ""}
+                  />
+                </Elements>
+              )}
+              {stripePk && !setupIntentError && !setupClientSecret && (
+                <div className="flex items-center gap-2 text-gray-500 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading payment form...
+                </div>
+              )}
+            </section>
+
             {/* Section F: Additional Questions */}
             <section>
               <h3 className="text-sm font-semibold text-gray-900 mb-3">
@@ -750,7 +857,10 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
                 !form.contactName.trim() ||
                 !form.contactEmail.trim() ||
                 !passwordsMatch ||
-                !isPasswordValid
+                !isPasswordValid ||
+                !setupClientSecret ||
+                !!setupIntentError ||
+                !stripePk
               }
               className="flex-1 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >

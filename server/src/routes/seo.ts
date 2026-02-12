@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import express from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
@@ -1681,23 +1682,22 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
   }
 });
 
-// Generate shareable link token for a client (permanent)
+// Generate shareable link token for a client (fixed, permanent, never expires)
 router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
 
-    // Check if user has access to this client
     const client = await prisma.client.findUnique({
       where: { id: clientId },
-      include: {
+      select: {
+        id: true,
+        dashboardShareToken: true,
         user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+          select: {
+            memberships: { select: { agencyId: true } },
+          },
+        },
+      },
     });
 
     if (!client) {
@@ -1707,11 +1707,11 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
     const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
     const userMemberships = await prisma.userAgency.findMany({
       where: { userId: req.user.userId },
-      select: { agencyId: true }
+      select: { agencyId: true },
     });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    let hasAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
     if (!hasAccess) {
       const cu = await prisma.clientUser.findFirst({
         where: { clientId, userId: req.user.userId, status: "ACTIVE" },
@@ -1724,16 +1724,14 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const secret = getJwtSecret();
-    const token = jwt.sign(
-      {
-        type: "client_share",
-        clientId,
-        issuedBy: req.user.userId
-      },
-      secret
-      // No expiresIn = permanent token
-    );
+    let token = client.dashboardShareToken;
+    if (!token) {
+      token = crypto.randomBytes(32).toString("hex");
+      await prisma.client.update({
+        where: { id: clientId },
+        data: { dashboardShareToken: token },
+      });
+    }
 
     res.json({ token });
   } catch (error) {
@@ -1743,7 +1741,6 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
 });
 
 // Public: Shared dashboard by token (no auth)
-// Helper function to verify share token
 function verifyShareToken(token: string): { clientId: string } | null {
   const secret = getJwtSecret();
   try {
@@ -1757,10 +1754,19 @@ function verifyShareToken(token: string): { clientId: string } | null {
   }
 }
 
+async function resolveShareToken(token: string): Promise<{ clientId: string } | null> {
+  const byDb = await prisma.client.findUnique({
+    where: { dashboardShareToken: token },
+    select: { id: true },
+  });
+  if (byDb) return { clientId: byDb.id };
+  return verifyShareToken(token);
+}
+
 router.get("/share/:token/dashboard", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2068,7 +2074,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
 router.get("/share/:token/top-pages", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2124,7 +2130,7 @@ router.get("/share/:token/top-pages", async (req, res) => {
 router.get("/share/:token/backlinks", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2202,7 +2208,7 @@ router.get("/share/:token/backlinks", async (req, res) => {
 router.get("/share/:token/backlinks/timeseries", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2259,7 +2265,7 @@ router.get("/share/:token/backlinks/timeseries", async (req, res) => {
 router.get("/share/:token/traffic-sources", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2370,7 +2376,7 @@ router.get("/share/:token/traffic-sources", async (req, res) => {
 router.get("/share/:token/events/top", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2438,7 +2444,7 @@ router.get("/share/:token/events/top", async (req, res) => {
 router.get("/share/:token/visitor-sources", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2494,7 +2500,7 @@ router.get("/share/:token/visitor-sources", async (req, res) => {
 router.get("/share/:token/ranked-keywords", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -2567,7 +2573,7 @@ router.get("/share/:token/ranked-keywords", async (req, res) => {
 router.get("/share/:token/ranked-keywords/history", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -6078,7 +6084,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 router.get("/share/:token/ai-search-visibility", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }
@@ -10471,7 +10477,10 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     let tierLimit = tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
     const keywordLimit =
-      tierCtx.tierConfig?.keywordsPerDashboard ?? tierCtx.tierConfig?.keywordsTotal ?? 500;
+      tierCtx.effectiveKeywordCap ??
+      tierCtx.tierConfig?.keywordsPerDashboard ??
+      tierCtx.tierConfig?.keywordsTotal ??
+      500;
     let researchLimit = tierCtx.creditsLimit;
     let teamMemberLimit = tierCtx.tierConfig?.maxTeamUsers ?? 10;
     if (teamMemberLimit === null) teamMemberLimit = 999999;
@@ -10506,11 +10515,13 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     let trialDaysLeft: number | null = null;
     let billingType: string | null = null;
     let trialExpired = false;
+    let accountActivated = false;
     if (tierCtx.agencyId) {
       const agency = await prisma.agency.findUnique({
         where: { id: tierCtx.agencyId },
-        select: { trialEndsAt: true, billingType: true },
+        select: { trialEndsAt: true, billingType: true, stripeCustomerId: true },
       });
+      accountActivated = !!agency?.stripeCustomerId;
       if (agency?.trialEndsAt && agency.trialEndsAt > new Date()) {
         trialEndsAt = agency.trialEndsAt.toISOString();
         trialDaysLeft = Math.max(0, Math.ceil((agency.trialEndsAt.getTime() - Date.now()) / 86400000));
@@ -10521,6 +10532,7 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
 
     res.json({
       currentPlan: tierCtx.tierConfig?.id ?? "solo",
+      accountActivated,
       billingType: billingType ?? undefined,
       trialExpired: trialExpired || undefined,
       currentPlanPrice: currentPlanPrice ?? undefined,
@@ -10670,7 +10682,7 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
 router.get("/share/:token/target-keywords", async (req, res) => {
   try {
     const { token } = req.params;
-    const tokenData = verifyShareToken(token);
+    const tokenData = await resolveShareToken(token);
     if (!tokenData) {
       return res.status(401).json({ message: "Invalid or expired share link" });
     }

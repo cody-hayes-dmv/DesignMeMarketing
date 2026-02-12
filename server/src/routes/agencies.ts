@@ -140,7 +140,8 @@ const createAgencySchema = z.object({
   }
 }, { message: 'Agency website must be a valid URL', path: ['website'] });
 
-// Self-registration: same fields as create (sections A–D, F), no billing; password required (no invite link).
+// Self-registration: same fields as create (sections A–D, F), plus payment method to activate 7-day reporting trial; password required.
+// paymentMethodId is required so the agency activates with CC on file; after 7-day trial they are auto-billed for the reporting plan.
 const registerAgencySchema = z.object({
   name: z.string().min(1, 'Agency name is required'),
   website: z.string().min(1, 'Agency website is required'),
@@ -159,6 +160,7 @@ const registerAgencySchema = z.object({
   subdomain: z.string().optional(),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   passwordConfirm: z.string().min(1, 'Please confirm your password'),
+  paymentMethodId: z.string().min(1, 'Payment method is required to activate your 7-day free trial'),
   referralSource: z.string().optional(),
   referralSourceOther: z.string().optional(),
   primaryGoals: z.array(z.string()).optional(),
@@ -176,6 +178,53 @@ const registerAgencySchema = z.object({
 }, { message: 'Agency website must be a valid URL', path: ['website'] }).refine((data) => data.password === data.passwordConfirm, {
   message: 'Passwords do not match',
   path: ['passwordConfirm'],
+});
+
+// Public SetupIntent for agency self-registration (no auth). Used to collect CC so the 7-day reporting trial can auto-bill after trial.
+router.post('/setup-intent-public', async (req, res) => {
+  try {
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(503).json({
+        message: 'Signup is temporarily unavailable. Payment setup is in progress. Please try again later or contact support.',
+      });
+    }
+    const setupIntent = await stripe.setupIntents.create({
+      usage: 'off_session',
+      payment_method_types: ['card'],
+    });
+    res.json({ clientSecret: setupIntent.client_secret });
+  } catch (err: any) {
+    console.error('SetupIntent (public) error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to create setup intent' });
+  }
+});
+
+// After 3DS redirect: retrieve payment method from a succeeded SetupIntent (public, no auth). Used to complete registration after redirect.
+router.post('/setup-intent-public/retrieve', async (req, res) => {
+  try {
+    const { setupIntentId } = req.body;
+    if (!setupIntentId || typeof setupIntentId !== 'string' || !setupIntentId.startsWith('seti_')) {
+      return res.status(400).json({ message: 'Valid setupIntentId is required' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(503).json({ message: 'Payment setup is in progress. Please try again later.' });
+    }
+    const si = await stripe.setupIntents.retrieve(setupIntentId);
+    if (si.status !== 'succeeded') {
+      return res.status(400).json({ message: 'Setup was not completed. Please try again.' });
+    }
+    const pm = si.payment_method;
+    const paymentMethodId = typeof pm === 'string' ? pm : (pm as { id?: string } | null)?.id;
+    if (!paymentMethodId) {
+      return res.status(400).json({ message: 'No payment method found. Please try again.' });
+    }
+    res.json({ paymentMethodId });
+  } catch (err: any) {
+    console.error('SetupIntent (public) retrieve error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to retrieve payment method' });
+  }
 });
 
 // Create a SetupIntent for collecting a payment method when creating an agency with "Charge to Card"
@@ -227,7 +276,7 @@ router.post('/setup-intent/retrieve', authenticateToken, async (req, res) => {
   }
 });
 
-// Public agency self-registration (no auth). Creates agency + user with password; no billing (free tier).
+// Public agency self-registration (no auth). Requires CC to activate 7-day free trial (reporting only); after trial, auto-bills reporting plan.
 router.post('/register', async (req, res) => {
   try {
     const body = registerAgencySchema.parse(req.body);
@@ -248,6 +297,7 @@ router.post('/register', async (req, res) => {
       country,
       subdomain,
       password,
+      paymentMethodId,
       referralSource,
       referralSourceOther,
       primaryGoals,
@@ -272,6 +322,13 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'A user with this contact email already exists' });
     }
 
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(503).json({
+        message: 'Signup is temporarily unavailable. Payment setup is in progress. Please try again later or contact support.',
+      });
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
     const websiteNormalized = website.trim().startsWith('http') ? website.trim() : `https://${website.trim()}`;
     const onboardingData = (referralSource || (primaryGoals && primaryGoals.length) || currentTools || referralSourceOther || primaryGoalsOther)
@@ -283,14 +340,61 @@ router.post('/register', async (req, res) => {
         })
       : null;
 
-    // Agency self-registration uses "No Charge – Free Account" (same as Super Admin no_charge): free billing + 7-day trial
+    // 7-day free trial for reporting features only; CC required so we can auto-bill after trial.
     const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const reportingTier: TierId = 'solo';
+    const tierPriceId = getPriceIdForTier(reportingTier);
+    if (!tierPriceId || !tierPriceId.startsWith('price_')) {
+      console.error('[agencies] register: missing STRIPE_PRICE_PLAN_SOLO for reporting trial');
+      return res.status(503).json({ message: 'Signup is temporarily unavailable. Please try again later or contact support.' });
+    }
+
+    let stripeCustomerId: string | null = null;
+    let stripeSubscriptionId: string | null = null;
+    try {
+      const customer = await stripe.customers.create({
+        email: contactEmail,
+        name: contactName || name,
+      });
+      await stripe.paymentMethods.attach(paymentMethodId, { customer: customer.id });
+      await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: paymentMethodId } });
+      stripeCustomerId = customer.id;
+
+      const subscription = await stripe.subscriptions.create({
+        customer: customer.id,
+        items: [{ price: tierPriceId, quantity: 1 }],
+        default_payment_method: paymentMethodId,
+        trial_period_days: 7,
+        payment_settings: { save_default_payment_method: 'on_subscription' },
+      });
+      if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+        await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+        return res.status(400).json({
+          message: 'Could not set up your trial. Try a different card or use test card 4242 4242 4242 4242.',
+        });
+      }
+      stripeSubscriptionId = subscription.id;
+    } catch (stripeErr: any) {
+      const code = stripeErr?.code || stripeErr?.type;
+      const rawMsg = String(stripeErr?.message || stripeErr?.raw?.message || '');
+      console.error('Agency register Stripe failed:', code, rawMsg);
+      if (stripeErr?.decline_code || code === 'card_declined') {
+        return res.status(400).json({ message: rawMsg || 'Card was declined. Try a different card.' });
+      }
+      if (/No such payment_method|invalid/i.test(rawMsg)) {
+        return res.status(400).json({ message: 'Payment method invalid or expired. Please enter your card again.' });
+      }
+      return res.status(400).json({ message: rawMsg || 'Failed to save card. Please try again.' });
+    }
 
     const agency = await prisma.agency.create({
       data: {
         name,
         subdomain: subdomain?.trim() || null,
-        billingType: 'free',
+        billingType: 'paid',
+        stripeCustomerId,
+        stripeSubscriptionId,
+        subscriptionTier: reportingTier,
         website: websiteNormalized,
         industry: industry || null,
         agencySize: agencySize || null,
@@ -304,7 +408,6 @@ router.post('/register', async (req, res) => {
         state: state || null,
         zip: zip || null,
         country: country || null,
-        subscriptionTier: null,
         customPricing: null,
         internalNotes: null,
         onboardingData,
@@ -312,6 +415,12 @@ router.post('/register', async (req, res) => {
       },
       include: { _count: { select: { members: true } } },
     });
+
+    if (stripeCustomerId) {
+      stripe.customers.update(stripeCustomerId, { metadata: { agencyId: agency.id } }).catch((e: any) =>
+        console.warn('Stripe customer metadata update failed:', e?.message)
+      );
+    }
 
     const agencyUser = await prisma.user.create({
       data: {
@@ -1029,8 +1138,9 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
     const agency = membership.agency;
 
     let customerId = agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
+    let didCreateCustomer = false;
     if (!customerId) {
-      const email = agency.contactEmail ?? (await prisma.user.findUnique({                       
+      const email = agency.contactEmail ?? (await prisma.user.findUnique({
         where: { id: membership.userId },
         select: { email: true },
       }).then((u) => u?.email ?? undefined));
@@ -1040,10 +1150,9 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
         metadata: { agencyId: agency.id },
       });
       customerId = customer.id;
-      await prisma.agency.update({
-        where: { id: agency.id },
-        data: { stripeCustomerId: customerId },
-      });
+      didCreateCustomer = true;
+      // Do NOT persist stripeCustomerId here. Only persist after we successfully create the portal session,
+      // so that a failed "Choose a plan" click does not unlock Managed Services / Add-Ons (accountActivated).
     }
 
     const sessionParams: Parameters<typeof stripe.billingPortal.sessions.create>[0] = {
@@ -1093,6 +1202,12 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
             warning =
               'Opening the billing portal. You can update your plan, payment method, or view invoices there.';
           }
+          if (didCreateCustomer) {
+            await prisma.agency.update({
+              where: { id: agency.id },
+              data: { stripeCustomerId: customerId },
+            });
+          }
           return res.json({ url: session.url, warning });
         } catch (fallbackErr: any) {
           console.error('Billing portal fallback error:', fallbackErr);
@@ -1105,6 +1220,14 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
       }
       throw portalErr;
     }
+    // Only persist new Stripe customer after we successfully created the portal session.
+    // This prevents a failed "Choose a plan" from unlocking Managed Services / Add-Ons (accountActivated).
+    if (didCreateCustomer) {
+      await prisma.agency.update({
+        where: { id: agency.id },
+        data: { stripeCustomerId: customerId },
+      });
+    }
     if (openToSubscriptionUpdate && !useSubscriptionUpdateFlow) {
       return res.json({
         url: session.url,
@@ -1115,9 +1238,15 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
     res.json({ url: session.url });
   } catch (err: any) {
     console.error('Billing portal error:', err);
+    const rawMsg = String(err?.message || err?.raw?.message || '');
+    const isFreeTrialNoSubscription = !membership?.agency?.stripeSubscriptionId && !membership?.agency?.stripeCustomerId;
+    const message =
+      isFreeTrialNoSubscription && rawMsg
+        ? `Could not open billing portal. Your account is on a free trial with no payment method. Ensure Stripe Customer Portal allows customers to add a payment method and subscribe (Stripe Dashboard → Settings → Billing → Customer portal). If the problem persists, contact support. (${rawMsg})`
+        : err?.message || 'Failed to open billing portal';
     res.status(500).json({
       url: null,
-      message: err?.message || 'Failed to open billing portal',
+      message,
     });
   }
 });
@@ -1156,6 +1285,7 @@ router.get('/me', authenticateToken, async (req, res) => {
     const trialExpired = billingType === "free" && !trialActive;
 
     const tierId = tierConfig?.id ?? null;
+    const accountActivated = !!(membership.agency as { stripeCustomerId?: string | null }).stripeCustomerId;
     res.json({
       id: membership.agency.id,
       name: membership.agency.name,
@@ -1171,6 +1301,7 @@ router.get('/me', authenticateToken, async (req, res) => {
       trialDaysLeft,
       trialExpired: trialExpired || undefined,
       billingType: billingType ?? undefined,
+      accountActivated,
       allowedAddOns: getAllowedAddOnOptions(tierId as TierId | null),
       basePriceMonthlyUsd: tierConfig?.priceMonthlyUsd ?? null,
     });
@@ -1356,6 +1487,7 @@ const COMMISSION_BY_TIER: Record<string, number> = {
 };
 
 // Managed Services: activate → Status PENDING, email Super Admin. Billing starts only after Super Admin approves.
+// Agency must have activated their account (CC on file / stripeCustomerId) before they can request a managed plan.
 router.post('/managed-services', authenticateToken, async (req, res) => {
   try {
     const user = req.user;
@@ -1368,6 +1500,12 @@ router.post('/managed-services', authenticateToken, async (req, res) => {
     });
     if (!membership && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Access denied. No agency.' });
+    }
+    const agency = membership!.agency as { stripeCustomerId?: string | null };
+    if (!agency.stripeCustomerId) {
+      return res.status(403).json({
+        message: 'Activate your account first. Add a payment method in Subscription & Billing to unlock managed services. The 7-day free trial is for reporting only; managed plans are paid when approved.',
+      });
     }
     const agencyId = membership!.agencyId;
     const agencyName = membership!.agency.name;
@@ -1833,7 +1971,7 @@ const ADDON_OPTIONS: Record<string, Record<string, { displayName: string; detail
   },
 };
 
-// Add-Ons: add (Stripe + DB, update limits in app when applicable)
+// Add-Ons: add (Stripe + DB, update limits in app when applicable). Agency must have activated account (CC on file).
 router.post('/add-ons', authenticateToken, async (req, res) => {
   try {
     const membership = await prisma.userAgency.findFirst({
@@ -1842,6 +1980,12 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
     });
     if (!membership && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
+    }
+    const agency = membership!.agency as { stripeCustomerId?: string | null };
+    if (!agency.stripeCustomerId) {
+      return res.status(403).json({
+        message: 'Activate your account first. Add a payment method in Subscription & Billing to add add-ons. The 7-day free trial is for reporting only; add-ons and managed plans are paid when added or approved.',
+      });
     }
     const agencyId = membership!.agencyId;
     const body = addAddOnSchema.parse(req.body);
