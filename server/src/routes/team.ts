@@ -544,9 +544,21 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
         // If SUPER_ADMIN or ADMIN, can delete user completely (if not SUPER_ADMIN)
         if ((user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') && targetUser.role !== 'SUPER_ADMIN') {
-            // Delete user (cascade will handle memberships, etc.)
-            await prisma.user.delete({
-                where: { id: userId },
+            // Block if user owns any clients (Client.userId is required; cannot cascade delete clients)
+            const clientCount = await prisma.client.count({ where: { userId } });
+            if (clientCount > 0) {
+                return res.status(400).json({
+                    message: `Cannot delete user: they own ${clientCount} client dashboard(s). Reassign or remove those clients first.`,
+                });
+            }
+
+            await prisma.$transaction(async (tx) => {
+                // Clear FK references that don't have onDelete: Cascade
+                await tx.token.deleteMany({ where: { userId } });
+                await tx.task.updateMany({ where: { assigneeId: userId }, data: { assigneeId: null } });
+                await tx.task.updateMany({ where: { createdById: userId }, data: { createdById: null } });
+                await tx.clientUser.updateMany({ where: { invitedById: userId }, data: { invitedById: null } });
+                await tx.user.delete({ where: { id: userId } });
             });
 
             return res.json({ message: 'User deleted successfully' });
