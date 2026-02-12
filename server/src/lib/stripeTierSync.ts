@@ -94,7 +94,7 @@ export async function syncAgencyTierFromStripe(agencyId: string): Promise<{ upda
     sub = list.data.find((s) => s.status === "active" || s.status === "trialing") ?? list.data[0] ?? null;
   }
   const subscriptionValid = sub && (sub.status === "active" || sub.status === "trialing");
-  if (!subscriptionValid) {
+  if (!subscriptionValid || !sub) {
     if (agency.subscriptionTier != null || agency.stripeSubscriptionId != null) {
       await prisma.agency.update({
         where: { id: agencyId },

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2 } from "lucide-react";
+import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2, Download } from "lucide-react";
 import api from "@/lib/api";
 import { fetchClients, Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
@@ -52,6 +52,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         [clients]
     );
     const { user } = useSelector((state: RootState) => state.auth);
+    const isSpecialistView = user?.role === "SPECIALIST";
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
     const [assignableLoading, setAssignableLoading] = useState(false);
     const [assignableSearch, setAssignableSearch] = useState("");
@@ -517,59 +518,63 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                     {/* Proof/Attachments Section (same as Work Log) */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
-                        <input
-                            id="task-proof-file-input"
-                            type="file"
-                            multiple
-                            accept=".pdf,.doc,.docx,.xls,.xlsx,image/*,video/*,.txt,.csv"
-                            className="sr-only"
-                            aria-label="Upload task attachment"
-                            onChange={handleFileUpload}
-                        />
-                        <div className="mb-4">
-                            <label
-                                htmlFor="task-proof-file-input"
-                                className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 transition-colors"
-                            >
-                                <div className="flex flex-col items-center">
-                                    {uploading ? (
-                                        <Loader2 className="h-6 w-6 text-gray-400 mb-2 animate-spin" />
-                                    ) : (
-                                        <Upload className="h-6 w-6 text-gray-400 mb-2" />
-                                    )}
-                                    <span className="text-sm text-gray-600">
-                                        {uploading ? "Uploading…" : "Click to upload files (PDF, Word, Excel, images, etc.)"}
-                                    </span>
-                                    <span className="text-xs text-gray-500 mt-1">max 25MB per file</span>
+                        {!isSpecialistView && (
+                            <>
+                                <input
+                                    id="task-proof-file-input"
+                                    type="file"
+                                    multiple
+                                    accept=".pdf,.doc,.docx,.xls,.xlsx,image/*,video/*,.txt,.csv"
+                                    className="sr-only"
+                                    aria-label="Upload task attachment"
+                                    onChange={handleFileUpload}
+                                />
+                                <div className="mb-4">
+                                    <label
+                                        htmlFor="task-proof-file-input"
+                                        className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 transition-colors"
+                                    >
+                                        <div className="flex flex-col items-center">
+                                            {uploading ? (
+                                                <Loader2 className="h-6 w-6 text-gray-400 mb-2 animate-spin" />
+                                            ) : (
+                                                <Upload className="h-6 w-6 text-gray-400 mb-2" />
+                                            )}
+                                            <span className="text-sm text-gray-600">
+                                                {uploading ? "Uploading…" : "Click to upload files (PDF, Word, Excel, images, etc.)"}
+                                            </span>
+                                            <span className="text-xs text-gray-500 mt-1">max 25MB per file</span>
+                                        </div>
+                                    </label>
                                 </div>
-                            </label>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2 mb-4">
-                            <select
-                                value={urlType}
-                                onChange={(e) => setUrlType(e.target.value as "image" | "video" | "url")}
-                                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent sm:w-40"
-                            >
-                                <option value="url">URL</option>
-                                <option value="image">Image URL</option>
-                                <option value="video">Video URL</option>
-                            </select>
-                            <input
-                                type="url"
-                                value={urlInput}
-                                onChange={(e) => setUrlInput(e.target.value)}
-                                placeholder="Enter URL (e.g., https://example.com/image.png)"
-                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            />
-                            <button
-                                type="button"
-                                onClick={handleAddUrl}
-                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1 sm:w-auto"
-                            >
-                                <Plus className="h-4 w-4" />
-                                <span>Add</span>
-                            </button>
-                        </div>
+                                <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                                    <select
+                                        value={urlType}
+                                        onChange={(e) => setUrlType(e.target.value as "image" | "video" | "url")}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent sm:w-40"
+                                    >
+                                        <option value="url">URL</option>
+                                        <option value="image">Image URL</option>
+                                        <option value="video">Video URL</option>
+                                    </select>
+                                    <input
+                                        type="url"
+                                        value={urlInput}
+                                        onChange={(e) => setUrlInput(e.target.value)}
+                                        placeholder="Enter URL (e.g., https://example.com/image.png)"
+                                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleAddUrl}
+                                        className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1 sm:w-auto"
+                                    >
+                                        <Plus className="h-4 w-4" />
+                                        <span>Add</span>
+                                    </button>
+                                </div>
+                            </>
+                        )}
                         {proof.length > 0 ? (
                             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                                 {proof.map((item, index) => (
@@ -589,25 +594,24 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                                     href={getUploadFileUrl(item.value)}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        window.open(getUploadFileUrl(item.value), "_blank", "noopener,noreferrer");
-                                                        e.preventDefault();
-                                                    }}
-                                                    className="text-xs text-primary-600 hover:text-primary-800 truncate block"
+                                                    download={isSpecialistView ? (item.name || "attachment") : undefined}
+                                                    className="text-xs text-primary-600 hover:text-primary-800 truncate block inline-flex items-center gap-1"
                                                 >
+                                                    {isSpecialistView && <Download className="h-3.5 w-3.5 flex-shrink-0" />}
                                                     {item.name || item.value}
                                                 </a>
                                             </div>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleRemoveProof(index)}
-                                            className="ml-2 p-1 text-red-600 hover:text-red-800 flex-shrink-0"
-                                            title="Remove"
-                                        >
-                                            <X className="h-4 w-4" />
-                                        </button>
+                                        {!isSpecialistView && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveProof(index)}
+                                                className="ml-2 p-1 text-red-600 hover:text-red-800 flex-shrink-0"
+                                                title="Remove"
+                                            >
+                                                <X className="h-4 w-4" />
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
                             </div>

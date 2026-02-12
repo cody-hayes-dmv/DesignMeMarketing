@@ -1116,6 +1116,7 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
 // Plan changes (upgrade/downgrade) are handled by Stripe's portal. Configure in Dashboard: Billing → Customer portal →
 // "Subscription plan changes": enable "Proration" so upgrades are charged immediately; set downgrades to "Take effect at end of billing period".
 router.post('/billing-portal', authenticateToken, async (req, res) => {
+  let agency: { id: string; stripeCustomerId: string | null; stripeSubscriptionId: string | null; [key: string]: any } | null = null;
   try {
     if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
@@ -1135,7 +1136,7 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
       return res.status(404).json({ url: null, message: 'No agency found.' });
     }
 
-    const agency = membership.agency;
+    agency = membership.agency;
 
     let customerId = agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
     let didCreateCustomer = false;
@@ -1239,7 +1240,7 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
   } catch (err: any) {
     console.error('Billing portal error:', err);
     const rawMsg = String(err?.message || err?.raw?.message || '');
-    const isFreeTrialNoSubscription = !membership?.agency?.stripeSubscriptionId && !membership?.agency?.stripeCustomerId;
+    const isFreeTrialNoSubscription = !agency?.stripeSubscriptionId && !agency?.stripeCustomerId;
     const message =
       isFreeTrialNoSubscription && rawMsg
         ? `Could not open billing portal. Your account is on a free trial with no payment method. Ensure Stripe Customer Portal allows customers to add a payment method and subscribe (Stripe Dashboard → Settings → Billing → Customer portal). If the problem persists, contact support. (${rawMsg})`
