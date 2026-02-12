@@ -715,15 +715,16 @@ const ShareDashboardPage: React.FC = () => {
         </div>
       </nav>
 
-      {/* Dashboard Content */}
+      {/* Dashboard Content - single wrapper so Recharts/React don't hit removeChild on transition */}
       <div className="p-8 space-y-8">
-        {loading ? (
-          <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">
-            <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-            Loading shared dashboard...
-          </div>
-        ) : (
-          <div ref={dashboardContentRef} className="space-y-8">
+        <div ref={dashboardContentRef} className="space-y-8">
+          {loading ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+              Loading shared dashboard...
+            </div>
+          ) : (
+            <>
             {/* Report View - GA4 Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-xl border border-gray-200">
@@ -1218,8 +1219,9 @@ const ShareDashboardPage: React.FC = () => {
                 })()}
               </div>
             </div>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
