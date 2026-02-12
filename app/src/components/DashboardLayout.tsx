@@ -1,19 +1,37 @@
-import React, { useState } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useLocation, Link } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
 import Sidebar from "./Sidebar";
 import NotificationBell from "./NotificationBell";
+import api from "@/lib/api";
+import { CreditCard, AlertTriangle } from "lucide-react";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
+interface AgencyMe {
+  id?: string;
+  trialExpired?: boolean;
+  isBusinessTier?: boolean;
+}
+
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [agencyMe, setAgencyMe] = useState<AgencyMe | null>(null);
   const { user } = useSelector((state: RootState) => state.auth);
   const isClientPortal = location.pathname.startsWith("/client/");
+  const isAgencyRoute = location.pathname.startsWith("/agency/");
+
+  useEffect(() => {
+    if (isAgencyRoute && (user?.role === "AGENCY" || user?.role === "ADMIN")) {
+      api.get("/agencies/me").then((r) => setAgencyMe(r.data)).catch(() => setAgencyMe(null));
+    } else {
+      setAgencyMe(null);
+    }
+  }, [isAgencyRoute, user?.role]);
 
   // Get page title based on current route
   const getPageTitle = () => {
@@ -60,6 +78,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     return <div className="min-h-screen bg-gray-50">{children}</div>;
   }
 
+  const trialExpired = isAgencyRoute && agencyMe?.trialExpired === true;
+  const onSubscriptionPage = location.pathname === "/agency/subscription";
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar
@@ -67,16 +88,48 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
       <div
-        // Sidebar is `fixed` (out of flow). Use padding-left instead of margin-left
-        // so we don't create horizontal overflow (especially on smaller screens).
         className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}
       >
         <div className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
           {user?.role === "SUPER_ADMIN" && <NotificationBell />}
         </div>
+        {trialExpired && (
+          <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
+            <p className="text-sm font-medium text-amber-800 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+              Trial ended. Contact support to add a paid plan to continue.
+            </p>
+            <Link
+              to="/agency/subscription"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700"
+            >
+              <CreditCard className="h-4 w-4" />
+              Subscription
+            </Link>
+          </div>
+        )}
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          {children}
+          {trialExpired && !onSubscriptionPage ? (
+            <div className="p-8 flex items-center justify-center min-h-[60vh]">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 max-w-md text-center">
+                <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">Trial ended</h2>
+                <p className="text-gray-600 mb-6">
+                  Your free trial has ended. Contact support to add a paid plan to continue using the agency panel.
+                </p>
+                <Link
+                  to="/agency/subscription"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 text-white font-medium hover:bg-primary-700"
+                >
+                  <CreditCard className="h-4 w-4" />
+                  Go to Subscription
+                </Link>
+              </div>
+            </div>
+          ) : (
+            children
+          )}
         </div>
       </div>
     </div>

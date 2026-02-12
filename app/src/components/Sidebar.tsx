@@ -39,11 +39,11 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const dispatch = useDispatch();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const { user } = useSelector((state: RootState) => state.auth);
-  const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean } | null>(null);
+  const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean; trialExpired?: boolean } | null>(null);
   const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "AGENCY";
 
   useEffect(() => {
-    if (user?.role === "AGENCY") {
+    if (user?.role === "AGENCY" || user?.role === "ADMIN") {
       api.get("/agencies/me").then((r) => setAgencyMe(r.data)).catch(() => setAgencyMe(null));
     } else {
       setAgencyMe(null);

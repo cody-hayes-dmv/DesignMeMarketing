@@ -247,10 +247,10 @@ const AgencyDashboardPage = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600">Active Clients</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {stats.totalProjects} / {stats.tierLimit ?? 10}
+                  {stats.totalProjects} / {(stats.tierLimit ?? 10) + 1}
                 </p>
                 {(() => {
-                  const limit = stats.tierLimit ?? 10;
+                  const limit = (stats.tierLimit ?? 10) + 1;
                   const used = stats.totalProjects;
                   const slotsLeft = limit - used;
                   if (slotsLeft <= 0) {

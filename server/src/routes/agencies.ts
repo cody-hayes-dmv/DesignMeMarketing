@@ -811,14 +811,15 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
     const membership = await prisma.userAgency.findFirst({
       where: { userId: req.user.userId },
       include: { agency: true },
-    });                                                                                                                       
+    });
     if (!membership?.agency) {
       return res.status(404).json({ url: null, message: 'No agency found.' });
-    }                                                                     
-                                                                                                                                                                                           
-    let customerId = membership.agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
+    }
+
+    const agency = membership.agency;
+
+    let customerId = agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
     if (!customerId) {
-      const agency = membership.agency;
       const email = agency.contactEmail ?? (await prisma.user.findUnique({                       
         where: { id: membership.userId },
         select: { email: true },
@@ -840,9 +841,9 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
       return_url: returnUrl,
     };
     let useSubscriptionUpdateFlow = false;
-    if (openToSubscriptionUpdate && membership.agency.stripeSubscriptionId) {
+    if (openToSubscriptionUpdate && agency.stripeSubscriptionId) {
       try {
-        const sub = await stripe.subscriptions.retrieve(membership.agency.stripeSubscriptionId, {
+        const sub = await stripe.subscriptions.retrieve(agency.stripeSubscriptionId, {
           expand: ['items.data'],
         });
         const itemCount = sub.items?.data?.length ?? 0;
@@ -850,7 +851,7 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
           useSubscriptionUpdateFlow = true;
           sessionParams.flow_data = {
             type: 'subscription_update',
-            subscription_update: { subscription: membership.agency.stripeSubscriptionId },
+            subscription_update: { subscription: agency.stripeSubscriptionId },
           };
         }
       } catch (e) {
@@ -941,6 +942,8 @@ router.get('/me', authenticateToken, async (req, res) => {
       trialEndsAt && trialEndsAt > now
         ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000))
         : null;
+    const billingType = membership.agency.billingType ?? null;
+    const trialExpired = billingType === "free" && !trialActive;
 
     const tierId = tierConfig?.id ?? null;
     res.json({
@@ -956,6 +959,8 @@ router.get('/me', authenticateToken, async (req, res) => {
       trialEndsAt: trialEndsAt?.toISOString() ?? null,
       trialActive: !!trialActive,
       trialDaysLeft,
+      trialExpired: trialExpired || undefined,
+      billingType: billingType ?? undefined,
       allowedAddOns: getAllowedAddOnOptions(tierId as TierId | null),
       basePriceMonthlyUsd: tierConfig?.priceMonthlyUsd ?? null,
     });

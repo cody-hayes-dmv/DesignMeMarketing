@@ -3986,6 +3986,10 @@ router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) 
 
 // Refresh agency dashboard data from DataForSEO (SUPER_ADMIN only)
 router.post("/agency/dashboard/refresh", authenticateToken, async (req, res) => {
+  const refreshTierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+  if (refreshTierCtx.trialExpired) {
+    return res.status(403).json({ message: "Trial ended. Contact support to add a paid plan to continue." });
+  }
   try {
     // Only SUPER_ADMIN can refresh data
     if (req.user.role !== "SUPER_ADMIN") {
@@ -10500,19 +10504,25 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
 
     let trialEndsAt: string | null = null;
     let trialDaysLeft: number | null = null;
+    let billingType: string | null = null;
+    let trialExpired = false;
     if (tierCtx.agencyId) {
       const agency = await prisma.agency.findUnique({
         where: { id: tierCtx.agencyId },
-        select: { trialEndsAt: true },
+        select: { trialEndsAt: true, billingType: true },
       });
       if (agency?.trialEndsAt && agency.trialEndsAt > new Date()) {
         trialEndsAt = agency.trialEndsAt.toISOString();
         trialDaysLeft = Math.max(0, Math.ceil((agency.trialEndsAt.getTime() - Date.now()) / 86400000));
       }
+      billingType = agency?.billingType ?? null;
+      trialExpired = agency?.billingType === "free" && (agency?.trialEndsAt == null || agency.trialEndsAt <= new Date());
     }
 
     res.json({
       currentPlan: tierCtx.tierConfig?.id ?? "solo",
+      billingType: billingType ?? undefined,
+      trialExpired: trialExpired || undefined,
       currentPlanPrice: currentPlanPrice ?? undefined,
       nextBillingDate: nextBilling.toISOString().split("T")[0],
       paymentMethod: { last4: "4242", brand: "Visa" },

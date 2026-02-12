@@ -1,9 +1,13 @@
 import { prisma } from "./prisma.js";
 import { getTierConfig, type TierConfig } from "./tiers.js";
 
+const TRIAL_EXPIRED_MESSAGE = "Trial ended. Contact support to add a paid plan to continue.";
+
 export interface AgencyTierContext {
   agencyId: string | null;
   agency: { id: string; subscriptionTier: string | null; keywordResearchCreditsUsed: number; keywordResearchCreditsResetAt: Date | null } | null;
+  /** True when agency is free (no-charge) and trial period has ended */
+  trialExpired: boolean;
   tierConfig: TierConfig | null;
   /** Number of client dashboards accessible (for limit check) */
   dashboardCount: number;
@@ -55,6 +59,7 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
   const emptyContext: AgencyTierContext = {
     agencyId: null,
     agency: null,
+    trialExpired: false,
     tierConfig: null,
   dashboardCount: 0,
   totalKeywords: 0,
@@ -106,6 +111,8 @@ async function getTargetKeywordCounts(clientIds: string[]) {
         select: {
           id: true,
           subscriptionTier: true,
+          billingType: true,
+          trialEndsAt: true,
           keywordResearchCreditsUsed: true,
           keywordResearchCreditsResetAt: true,
         },
@@ -118,6 +125,10 @@ async function getTargetKeywordCounts(clientIds: string[]) {
   }
 
   const agency = membership.agency;
+  const now = new Date();
+  const trialExpired =
+    agency.billingType === "free" &&
+    (agency.trialEndsAt == null || agency.trialEndsAt <= now);
   const tierConfig = getTierConfig(agency.subscriptionTier);
 
   // Clients accessible by any user in this agency (same logic as dashboard)
@@ -198,6 +209,7 @@ async function getTargetKeywordCounts(clientIds: string[]) {
   return {
     agencyId: agency.id,
     agency: { ...agency, keywordResearchCreditsUsed: creditsUsed },
+    trialExpired,
     tierConfig: tierConfig ?? null,
     dashboardCount,
     totalKeywords,
@@ -217,6 +229,7 @@ async function getTargetKeywordCounts(clientIds: string[]) {
  * Check if user can add one more dashboard. Returns { allowed, message }.
  */
 export function canAddDashboard(ctx: AgencyTierContext): { allowed: boolean; message?: string } {
+  if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
   const max = ctx.effectiveMaxDashboards ?? ctx.tierConfig.maxDashboards;
   if (max === null) return { allowed: true };
@@ -238,6 +251,7 @@ export function canAddKeywords(
   clientId: string,
   addCount: number
 ): { allowed: boolean; message?: string } {
+  if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
   const currentForClient = ctx.keywordsByClient.get(clientId) ?? 0;
   const totalAfter = ctx.totalKeywords + addCount;
@@ -264,6 +278,7 @@ export function canAddKeywords(
  * Check if user can add more target keywords (same limits as canAddKeywords but using target keyword counts).
  */
 export function canAddTargetKeyword(ctx: AgencyTierContext, clientId: string): { allowed: boolean; message?: string } {
+  if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
   const currentForClient = ctx.targetKeywordsByClient.get(clientId) ?? 0;
   const cap = ctx.effectiveKeywordCap;
@@ -288,6 +303,7 @@ export function canAddTargetKeyword(ctx: AgencyTierContext, clientId: string): {
  * Check if user can add more team members.
  */
 export function canAddTeamMember(ctx: AgencyTierContext): { allowed: boolean; message?: string } {
+  if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
   const max = ctx.tierConfig.maxTeamUsers;
   if (max === null) return { allowed: true };
@@ -304,6 +320,7 @@ export function canAddTeamMember(ctx: AgencyTierContext): { allowed: boolean; me
  * Check if user has keyword research credits remaining.
  */
 export function hasResearchCredits(ctx: AgencyTierContext, need: number = 1): { allowed: boolean; message?: string } {
+  if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
   if (ctx.creditsUsed + need > ctx.creditsLimit) {
     return {

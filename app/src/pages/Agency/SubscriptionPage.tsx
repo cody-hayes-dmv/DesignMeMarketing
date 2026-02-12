@@ -28,6 +28,8 @@ interface SubscriptionData {
   paymentMethod: { last4: string; brand: string } | null;
   trialEndsAt?: string | null;
   trialDaysLeft?: number | null;
+  billingType?: string | null;
+  trialExpired?: boolean;
   usage: {
     clientDashboards: { used: number; limit: number };
     keywordsTracked: { used: number; limit: number };
@@ -73,6 +75,8 @@ const SubscriptionPage = () => {
           paymentMethod: res.data.paymentMethod ?? defaultSubscription.paymentMethod,
           trialEndsAt: res.data.trialEndsAt ?? null,
           trialDaysLeft: res.data.trialDaysLeft ?? null,
+          billingType: res.data.billingType ?? null,
+          trialExpired: res.data.trialExpired ?? false,
           usage: {
             clientDashboards: res.data.usage?.clientDashboards ?? defaultSubscription.usage.clientDashboards,
             keywordsTracked: res.data.usage?.keywordsTracked ?? defaultSubscription.usage.keywordsTracked,
@@ -180,6 +184,7 @@ const SubscriptionPage = () => {
     ? `•••• ${data.paymentMethod.last4} (${(data.paymentMethod.brand || "").charAt(0).toUpperCase() + (data.paymentMethod.brand || "").slice(1).toLowerCase()})`
     : "—";
   const hasTrial = data.trialDaysLeft != null && data.trialDaysLeft > 0;
+  const trialExpired = data.trialExpired === true;
 
   const planOrder = ["solo", "starter", "growth", "pro", "enterprise"];
   const currentIndex = planOrder.indexOf(data.currentPlan);
@@ -194,10 +199,28 @@ const SubscriptionPage = () => {
         </div>
       ) : (
         <>
-          {hasTrial && (
+          {trialExpired && (
+            <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200">
+              <p className="text-sm font-medium text-red-800 mb-3">
+                Your free trial has ended. Choose a paid plan below to continue using the agency panel, or contact support.
+              </p>
+              <button
+                type="button"
+                onClick={handleUpgradePlan}
+                disabled={portalLoading}
+                className="px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
+              >
+                Choose a paid plan
+              </button>
+            </div>
+          )}
+          {hasTrial && !trialExpired && (
             <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
               <p className="text-sm font-medium text-amber-800">
-                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Choose a paid plan before it ends to keep your account active.
+                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial.
+                {data.billingType === "free"
+                  ? " Choose a paid plan before it ends to keep your account active."
+                  : " Choose a paid plan before it ends to keep your account active."}
               </p>
               <button
                 type="button"
