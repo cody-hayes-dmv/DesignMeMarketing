@@ -1311,7 +1311,14 @@ const KeywordsPage: React.FC = () => {
       )}
 
       {activeTab === "tracked" && (
-        <DomainResearchView clients={clients} clientsError={clientsError} />
+        <DomainResearchView
+          clients={clients}
+          clientsError={clientsError}
+          onGetTopics={(domain) => {
+            setActiveTab("research");
+            setResearchSeed(domain || "");
+          }}
+        />
       )}
 
     </div>

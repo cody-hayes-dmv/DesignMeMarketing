@@ -264,10 +264,10 @@ router.post('/', authenticateToken, async (req, res) => {
         })
       : null;
 
-    // Super Admin–created agencies: 14-day trial only when no charge (free tier / choose later)
+    // Super Admin–created agencies: 7-day trial only when no charge (free tier / choose later)
     const trialEndsAt =
       billingOption === "no_charge"
-        ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+        ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         : null;
 
     // When "Charge to Card": create Stripe customer, attach payment method, create subscription for tier, THEN create agency
@@ -402,7 +402,7 @@ router.post('/', authenticateToken, async (req, res) => {
       },
     });
 
-    // Automatic agency dashboard: one client dashboard for the agency itself (counts toward their slot)
+    // Automatic agency dashboard: one client dashboard for the agency itself (does not count toward tier limit)
     const agencyDashboardName = `${name} - Agency Website`;
     const agencyDashboardDomain = `agency-${agency.id}.internal`;
     try {
@@ -811,15 +811,15 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
     const membership = await prisma.userAgency.findFirst({
       where: { userId: req.user.userId },
       include: { agency: true },
-    });
+    });                                                                                                                       
     if (!membership?.agency) {
       return res.status(404).json({ url: null, message: 'No agency found.' });
-    }
-
+    }                                                                     
+                                                                                                                                                                                           
     let customerId = membership.agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
     if (!customerId) {
       const agency = membership.agency;
-      const email = agency.contactEmail ?? (await prisma.user.findUnique({
+      const email = agency.contactEmail ?? (await prisma.user.findUnique({                       
         where: { id: membership.userId },
         select: { email: true },
       }).then((u) => u?.email ?? undefined));

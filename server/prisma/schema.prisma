@@ -554,17 +554,18 @@ model BacklinkTimeseries {
 }
 
 model AiSearchSerpCache {
-  id                   String   @id @default(cuid())
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  fetchedAt            DateTime
-  checkedKeywords      Int      @default(0)
-  aiOverviewCitedPages Int      @default(0)
-  aiModeCitedPages     Int      @default(0)
-  aiOverviewCitedUrls  String?  @db.LongText
-  aiModeCitedUrls      String?  @db.LongText
-  clientId             String   @unique
-  client               Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  id                      String   @id @default(cuid())
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  fetchedAt               DateTime
+  checkedKeywords         Int      @default(0)
+  aiOverviewCitedPages    Int      @default(0)
+  aiModeCitedPages        Int      @default(0)
+  aiOverviewCitedUrls     String?  @db.LongText
+  aiModeCitedUrls         String?  @db.LongText
+  topCitedSourcesByDomain String?  @db.LongText
+  clientId                String   @unique
+  client                  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@index([clientId, updatedAt])
   @@map("ai_search_serp_cache")

@@ -55,8 +55,9 @@ function getOAuth2Client() {
 export function getGA4AuthUrl(clientId: string): string {
   const oauth2Client = getOAuth2Client();
   const scopes = [
-    'https://www.googleapis.com/auth/analytics.readonly', // This scope covers both Data API and Admin API (read-only)
-    'https://www.googleapis.com/auth/userinfo.email', // Required to get user email
+    'https://www.googleapis.com/auth/analytics.readonly', // Data API read access
+    'https://www.googleapis.com/auth/analytics.edit',     // Admin API: list accounts & properties
+    'https://www.googleapis.com/auth/userinfo.email',    // Required to get user email
   ];
 
   const redirectUri = process.env.GA4_REDIRECT_URI || `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/clients/ga4/callback`;

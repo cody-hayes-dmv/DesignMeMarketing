@@ -144,8 +144,8 @@ export function buildShareDashboardUrl(clientId: string): string | null {
   const secret = process.env.JWT_SECRET || "change_me_secret";
   const token = jwt.sign(
     { type: "client_share", clientId, issuedBy: "report_scheduler" },
-    secret,
-    { expiresIn: "7d" }
+    secret
+    // No expiresIn = permanent token
   );
   return `${frontendUrl}/share/${encodeURIComponent(token)}`;
 }

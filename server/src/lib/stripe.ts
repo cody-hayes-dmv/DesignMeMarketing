@@ -87,7 +87,7 @@ export const CATEGORY_LABELS: Record<MrrCategory | "other", string> = {
   managed_domination: "Authority Builder (Managed)",
   managed_market_domination: "Market Domination (Managed)",
   managed_custom: "Custom (Managed)",
-  addon_slots: "Extra Slots",
+  addon_slots: "Add Ons",
   addon_mappacks: "Map Packs",
   addon_creditpacks: "Credit Packs",
   addon_dashboards: "Extra Client Dashboards",

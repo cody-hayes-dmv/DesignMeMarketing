@@ -118,6 +118,39 @@ export async function fetchGA4AiSearchVisibility(
     console.warn("[GA4] AI Search visibility: failed to fetch landing pages", e);
   }
 
+  // Sessions by country (for AI sources only)
+  const countriesByCode = new Map<string, { visibility: number; mentions: number }>();
+  try {
+    const [countryRes] = await analytics.runReport({
+      property: propertyId,
+      dateRanges: [{ startDate: startDateStr, endDate: endDateStr }],
+      dimensions: [{ name: "sessionManualSource" }, { name: "country" }],
+      metrics: [{ name: "sessions" }],
+      orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+      limit: 500,
+    });
+    const aiSessionsTotal = providers.chatgpt.sessions + providers.gemini.sessions;
+    const rows: any[] = Array.isArray(countryRes?.rows) ? countryRes.rows : [];
+    for (const row of rows) {
+      const source = row?.dimensionValues?.[0]?.value || "";
+      const provider = matchProvider(source);
+      if (!provider) continue;
+      const countryCode = (row?.dimensionValues?.[1]?.value || "").toUpperCase() || "XX";
+      const sessions = Number(row?.metricValues?.[0]?.value || 0) || 0;
+      const existing = countriesByCode.get(countryCode) ?? { visibility: 0, mentions: 0 };
+      existing.mentions += sessions;
+      countriesByCode.set(countryCode, existing);
+    }
+    if (aiSessionsTotal > 0) {
+      for (const [code, data] of countriesByCode.entries()) {
+        data.visibility = Math.round((data.mentions / aiSessionsTotal) * 100);
+        countriesByCode.set(code, data);
+      }
+    }
+  } catch (e) {
+    console.warn("[GA4] AI Search visibility: failed to fetch sessions by country", e);
+  }
+
   return {
     totalSessions,
     providers: {
@@ -132,6 +165,10 @@ export async function fetchGA4AiSearchVisibility(
         citedPages: providers.gemini.citedPages.size,
       },
     },
+    countries: Array.from(countriesByCode.entries())
+      .map(([countryCode, data]) => ({ countryCode, visibility: data.visibility, mentions: data.mentions }))
+      .filter((c) => c.mentions > 0)
+      .sort((a, b) => b.mentions - a.mentions),
   };
 }
 

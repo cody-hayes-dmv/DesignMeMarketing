@@ -3151,9 +3151,11 @@ const ClientDashboardPage: React.FC = () => {
     if (!clientId) return;
     try {
       setLoadingGoogleAdsCustomers(true);
-      // clientOnly=true: flattened list of client accounts only (no managers), so user picks an account that has PPC data in one step
+      setGoogleAdsSelectedManager(null);
+      setGoogleAdsChildAccounts([]);
+      // Fetch raw list (managers + standalone) so we can show manager -> client picker when needed
       const res = await api.get(`/clients/${clientId}/google-ads/customers`, {
-        params: { clientOnly: 'true' },
+        params: { clientOnly: 'false' },
       });
       const customers = res.data?.customers || [];
       
@@ -3172,10 +3174,33 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
-  const handleSelectGoogleAdsAccount = async (customer: { customerId: string; customerName: string; managerCustomerId?: string | null }) => {
+  const handleSelectGoogleAdsAccount = async (customer: { customerId: string; customerName: string; managerCustomerId?: string | null; isManager?: boolean }) => {
     if (!clientId) return;
-    // Client-only list: every item is a client account (with optional managerCustomerId when under MCC); connect in one step
-    await handleSubmitGoogleAdsCustomerId(customer.customerId, customer.managerCustomerId ?? undefined);
+    if (customer.isManager) {
+      // Manager account: fetch child accounts and show picker so user can select which client to connect
+      try {
+        setLoadingGoogleAdsChildAccounts(true);
+        setGoogleAdsSelectedManager({ customerId: customer.customerId, customerName: customer.customerName });
+        const res = await api.get(`/clients/${clientId}/google-ads/child-accounts`, {
+          params: { customerId: customer.customerId },
+        });
+        const children = res.data?.children || [];
+        setGoogleAdsChildAccounts(children);
+        if (children.length === 0) {
+          toast.error("No client accounts found under this manager.");
+        }
+      } catch (error: any) {
+        console.error("Failed to fetch child accounts:", error);
+        toast.error(error.response?.data?.message || "Failed to load client accounts");
+        setGoogleAdsSelectedManager(null);
+        setGoogleAdsChildAccounts([]);
+      } finally {
+        setLoadingGoogleAdsChildAccounts(false);
+      }
+    } else {
+      // Standalone client account: connect directly
+      await handleSubmitGoogleAdsCustomerId(customer.customerId, customer.managerCustomerId ?? undefined);
+    }
   };
 
   const handleSubmitGoogleAdsCustomerId = async (selectedCustomerId?: string, managerCustomerId?: string | null) => {
@@ -9832,7 +9857,7 @@ const ClientDashboardPage: React.FC = () => {
                         {googleAdsChildAccounts.map((child) => (
                           <button
                             key={child.customerId}
-                            onClick={() => handleSubmitGoogleAdsCustomerId(child.customerId)}
+                            onClick={() => handleSubmitGoogleAdsCustomerId(child.customerId, googleAdsSelectedManager?.customerId)}
                             disabled={googleAdsConnecting}
                             className="w-full text-left p-4 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                           >
@@ -9887,7 +9912,7 @@ const ClientDashboardPage: React.FC = () => {
             ) : (
               <>
                 <p className="text-sm text-gray-600 mb-4">
-                  Select a Google Ads client account to connect. These are the accounts that can have PPC data (standalone accounts and client accounts under your manager accounts).
+                  Select a Google Ads account to connect. Manager accounts will show their client accounts for selection. Standalone accounts connect directly.
                 </p>
                 {loadingGoogleAdsCustomers ? (
                   <div className="flex items-center justify-center py-8">

@@ -2440,7 +2440,7 @@ const ClientsPage = () => {
               </button>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Share this link to give others access to view the client dashboard. The link will expire in 7 days.
+              Share this link to give others access to view the client dashboard. The link does not expire.
             </p>
             <div className="flex items-center gap-2 mb-4">
               <input

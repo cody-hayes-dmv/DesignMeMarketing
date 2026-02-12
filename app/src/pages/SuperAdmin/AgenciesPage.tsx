@@ -1219,7 +1219,7 @@ const AgenciesPage = () => {
                                                 <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "no_charge" })} className="text-primary-600" />
                                                     <span>No Charge – Free Account</span>
-                                                    <span className="text-xs text-gray-500">(comped)</span>
+                                                    <span className="text-xs text-gray-500">(comped, 7-day trial)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="manual_invoice" checked={createForm.billingOption === "manual_invoice"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "manual_invoice" })} className="text-primary-600" />

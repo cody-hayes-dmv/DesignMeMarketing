@@ -128,10 +128,11 @@ async function getTargetKeywordCounts(clientIds: string[]) {
 
   const clients = await prisma.client.findMany({
     where: { userId: { in: agencyUserIds } },
-    select: { id: true },
+    select: { id: true, isAgencyOwnDashboard: true },
   });
   const clientIds = clients.map((c) => c.id);
-  const dashboardCount = clientIds.length;
+  // Default agency dashboard (isAgencyOwnDashboard) does not count toward tier limit
+  const dashboardCount = clients.filter((c) => !c.isAgencyOwnDashboard).length;
 
   const keywordCounts = await prisma.keyword.groupBy({
     by: ["clientId"],
