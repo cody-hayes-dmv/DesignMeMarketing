@@ -10474,35 +10474,25 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     }
     const keywordCount = tierCtx.totalKeywords;
 
-    let tierLimit = tierCtx.tierConfig?.maxDashboards ?? 10;
+    // Use tierCtx limits (plan + add-ons from getAgencyTierContext) so Subscription page matches rest of app
+    let tierLimit = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
     const keywordLimit =
       tierCtx.effectiveKeywordCap ??
       tierCtx.tierConfig?.keywordsPerDashboard ??
       tierCtx.tierConfig?.keywordsTotal ??
       500;
-    let researchLimit = tierCtx.creditsLimit;
+    const researchLimit = tierCtx.creditsLimit;
     let teamMemberLimit = tierCtx.tierConfig?.maxTeamUsers ?? 10;
     if (teamMemberLimit === null) teamMemberLimit = 999999;
 
     let clientsWithActiveManagedServices = 0;
-    if (agencyIds.length > 0) {
-      const addOns = await prisma.agencyAddOn.findMany({
-        where: { agencyId: { in: agencyIds } },
-        select: { addOnType: true, addOnOption: true },
+    if (tierCtx.agencyId) {
+      const msRows = await prisma.managedService.findMany({
+        where: { agencyId: tierCtx.agencyId, status: "ACTIVE" },
+        select: { clientId: true },
       });
-      for (const a of addOns) {
-        if (a.addOnType === "extra_slots" && a.addOnOption === "5_slots") tierLimit += 5;
-        if (a.addOnType === "credit_pack" && a.addOnOption === "100") researchLimit += 100;
-        if (a.addOnType === "credit_pack" && a.addOnOption === "500") researchLimit += 500;
-      }
-      if (tierCtx.agencyId) {
-        const msRows = await prisma.managedService.findMany({
-          where: { agencyId: tierCtx.agencyId, status: "ACTIVE" },
-          select: { clientId: true },
-        });
-        clientsWithActiveManagedServices = new Set(msRows.map((r) => r.clientId)).size;
-      }
+      clientsWithActiveManagedServices = new Set(msRows.map((r) => r.clientId)).size;
     }
 
     const nextBilling = new Date();

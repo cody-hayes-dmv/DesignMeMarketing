@@ -57,6 +57,7 @@ interface AgencyMe {
   allowedAddOns: AllowedAddOns;
   basePriceMonthlyUsd: number | null;
   accountActivated?: boolean;
+  trialActive?: boolean;
 }
 
 const AddOnsPage = () => {
@@ -87,6 +88,7 @@ const AddOnsPage = () => {
         allowedAddOns: res.data?.allowedAddOns ?? { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] },
         basePriceMonthlyUsd: res.data?.basePriceMonthlyUsd ?? null,
         accountActivated: res.data?.accountActivated !== false,
+        trialActive: res.data?.trialActive === true,
       });
     } catch {
       setAgencyMe(null);
@@ -148,14 +150,26 @@ const AddOnsPage = () => {
         <p className="text-gray-600 mt-1">Expand your capabilities without changing your plan</p>
       </header>
 
-      {agencyMe && agencyMe.accountActivated === false && (
+      {agencyMe && (agencyMe.accountActivated === false || agencyMe.trialActive) && (
         <section className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-amber-800 text-sm">
-            <strong>Activate your account first.</strong> Add a payment method in{" "}
-            <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
-              Subscription & Billing
-            </Link>{" "}
-            to add add-ons. The 7-day free trial is for reporting only; add-ons and managed plans are paid when added or approved.
+            {agencyMe.trialActive ? (
+              <>
+                <strong>Add-ons are not available during your 7-day free trial.</strong> The trial is for reporting only. Subscribe to a plan in{" "}
+                <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
+                  Subscription & Billing
+                </Link>{" "}
+                or wait until your trial ends to add add-ons.
+              </>
+            ) : (
+              <>
+                <strong>Activate your account first.</strong> Add a payment method in{" "}
+                <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
+                  Subscription & Billing
+                </Link>{" "}
+                to add add-ons. The 7-day free trial is for reporting only; add-ons and managed plans are paid when added or approved.
+              </>
+            )}
           </p>
         </section>
       )}
@@ -221,7 +235,7 @@ const AddOnsPage = () => {
                     <button
                       type="button"
                       onClick={() => addAddOn("extra_dashboards", pack.option)}
-                      disabled={!!purchasing || agencyMe?.accountActivated === false}
+                      disabled={!!purchasing || agencyMe?.accountActivated === false || agencyMe?.trialActive === true}
                       className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
                     >
                       {purchasing === `extra_dashboards-${pack.option}` ? (
@@ -246,7 +260,7 @@ const AddOnsPage = () => {
                   <button
                     type="button"
                     onClick={() => addAddOn("extra_keywords_tracked", pack.option)}
-                    disabled={!!purchasing || agencyMe?.accountActivated === false}
+                    disabled={!!purchasing || agencyMe?.accountActivated === false || agencyMe?.trialActive === true}
                     className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
                   >
                     {purchasing === `extra_keywords_tracked-${pack.option}` ? (
@@ -270,7 +284,7 @@ const AddOnsPage = () => {
                   <button
                     type="button"
                     onClick={() => addAddOn("extra_keyword_lookups", pack.option)}
-                    disabled={!!purchasing || agencyMe?.accountActivated === false}
+                    disabled={!!purchasing || agencyMe?.accountActivated === false || agencyMe?.trialActive === true}
                     className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
                   >
                     {purchasing === `extra_keyword_lookups-${pack.option}` ? (

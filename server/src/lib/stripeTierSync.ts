@@ -95,7 +95,9 @@ export async function syncAgencyTierFromStripe(agencyId: string): Promise<{ upda
   }
   const subscriptionValid = sub && (sub.status === "active" || sub.status === "trialing");
   if (!subscriptionValid || !sub) {
-    if (agency.subscriptionTier != null || agency.stripeSubscriptionId != null) {
+    // Only clear tier when they had a Stripe subscription that is now invalid. Do not clear
+    // subscriptionTier when the agency never had one (e.g. No Charge / Manual Invoice set by Super Admin).
+    if (agency.stripeSubscriptionId != null) {
       await prisma.agency.update({
         where: { id: agencyId },
         data: { subscriptionTier: null, stripeSubscriptionId: null },

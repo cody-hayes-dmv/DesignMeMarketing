@@ -1057,9 +1057,15 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     if (!membership?.agency) {
       return res.status(404).json({ message: 'No agency found.' });
     }
-    const agency = membership.agency;
+    const agency = membership.agency as { stripeSubscriptionId: string | null; billingType?: string | null };
     const subId = agency.stripeSubscriptionId;
+    const billingType = agency.billingType ?? null;
     if (!subId) {
+      if (billingType === 'free' || billingType === 'custom') {
+        return res.status(400).json({
+          message: 'Your account uses No Charge or Manual Invoice billing. Plan changes are managed by your administrator. Contact your administrator or support.',
+        });
+      }
       return res.status(400).json({ message: 'No active subscription. Subscribe to a plan first.' });
     }
     const targetPriceId = getPriceIdForTier(targetPlan as TierId);
@@ -1137,6 +1143,14 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
     }
 
     agency = membership.agency;
+
+    const billingType = (agency as { billingType?: string | null }).billingType ?? null;
+    if (billingType === 'free' || billingType === 'custom') {
+      return res.status(200).json({
+        url: null,
+        message: 'Billing is managed by your administrator (No Charge or Manual Invoice account). Contact your administrator for billing or plan questions.',
+      });
+    }
 
     let customerId = agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
     let didCreateCustomer = false;
@@ -1502,10 +1516,16 @@ router.post('/managed-services', authenticateToken, async (req, res) => {
     if (!membership && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Access denied. No agency.' });
     }
-    const agency = membership!.agency as { stripeCustomerId?: string | null };
+    const agency = membership!.agency as { stripeCustomerId?: string | null; trialEndsAt?: Date | null };
     if (!agency.stripeCustomerId) {
       return res.status(403).json({
         message: 'Activate your account first. Add a payment method in Subscription & Billing to unlock managed services. The 7-day free trial is for reporting only; managed plans are paid when approved.',
+      });
+    }
+    const onFreeTrial = agency.trialEndsAt && agency.trialEndsAt > new Date();
+    if (onFreeTrial) {
+      return res.status(403).json({
+        message: 'Managed services are not available during the 7-day free trial. Subscribe to a plan or wait until your trial ends to request managed services.',
       });
     }
     const agencyId = membership!.agencyId;
@@ -1982,10 +2002,16 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
     if (!membership && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
     }
-    const agency = membership!.agency as { stripeCustomerId?: string | null };
+    const agency = membership!.agency as { stripeCustomerId?: string | null; trialEndsAt?: Date | null };
     if (!agency.stripeCustomerId) {
       return res.status(403).json({
         message: 'Activate your account first. Add a payment method in Subscription & Billing to add add-ons. The 7-day free trial is for reporting only; add-ons and managed plans are paid when added or approved.',
+      });
+    }
+    const onFreeTrial = agency.trialEndsAt && agency.trialEndsAt > new Date();
+    if (onFreeTrial) {
+      return res.status(403).json({
+        message: 'Add-ons are not available during the 7-day free trial. Subscribe to a plan or wait until your trial ends to add add-ons.',
       });
     }
     const agencyId = membership!.agencyId;

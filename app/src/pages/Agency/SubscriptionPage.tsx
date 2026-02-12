@@ -185,6 +185,10 @@ const SubscriptionPage = () => {
     : "—";
   const hasTrial = data.trialDaysLeft != null && data.trialDaysLeft > 0;
   const trialExpired = data.trialExpired === true;
+  const billingManagedByAdmin = data.billingType === "free" || data.billingType === "custom";
+  // No Charge: show admin-managed message only after trial ends. Manual Invoice: always.
+  const showAdminManagedMessage =
+    (data.billingType === "free" && trialExpired) || data.billingType === "custom";
 
   const planOrder = ["solo", "starter", "growth", "pro", "enterprise"];
   const currentIndex = planOrder.indexOf(data.currentPlan);
@@ -199,7 +203,14 @@ const SubscriptionPage = () => {
         </div>
       ) : (
         <>
-          {trialExpired && (
+          {showAdminManagedMessage && (
+            <div className="mb-6 p-4 rounded-xl bg-blue-50 border border-blue-200">
+              <p className="text-sm font-medium text-blue-800">
+                Your account is set up as <strong>{data.billingType === "custom" ? "Manual Invoice (Enterprise)" : "No Charge – Free Account"}</strong>. Billing and plan changes are managed by your administrator. Contact your administrator for billing or plan questions.
+              </p>
+            </div>
+          )}
+          {trialExpired && !billingManagedByAdmin && (
             <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200">
               <p className="text-sm font-medium text-red-800 mb-3">
                 Your free trial has ended. Choose a paid plan below to continue using the agency panel, or contact support.
@@ -214,13 +225,24 @@ const SubscriptionPage = () => {
               </button>
             </div>
           )}
-          {hasTrial && !trialExpired && (
+          {trialExpired && data.billingType === "free" && (
             <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
               <p className="text-sm font-medium text-amber-800">
-                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial.
-                {data.billingType === "free"
-                  ? " Choose a paid plan before it ends to keep your account active."
-                  : " Choose a paid plan before it ends to keep your account active."}
+                Your free trial has ended. Contact your administrator for plan or billing questions.
+              </p>
+            </div>
+          )}
+          {hasTrial && !trialExpired && data.billingType === "free" && (
+            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-800">
+                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Your account is set up as No Charge; billing and plan changes are managed by your administrator after the trial.
+              </p>
+            </div>
+          )}
+          {hasTrial && !trialExpired && data.billingType !== "free" && (
+            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-800">
+                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Choose a paid plan before it ends to keep your account active.
               </p>
               <button
                 type="button"
@@ -325,7 +347,7 @@ const SubscriptionPage = () => {
                 <button
                   type="button"
                   onClick={handleUpgradePlan}
-                  disabled={portalLoading}
+                  disabled={portalLoading || billingManagedByAdmin}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
                 >
                   {portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronUp className="h-4 w-4" />}
@@ -334,7 +356,7 @@ const SubscriptionPage = () => {
                 <button
                   type="button"
                   onClick={handleManageBilling}
-                  disabled={portalLoading}
+                  disabled={portalLoading || billingManagedByAdmin}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
                 >
                   {portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
@@ -343,7 +365,7 @@ const SubscriptionPage = () => {
                 <button
                   type="button"
                   onClick={handleViewInvoiceHistory}
-                  disabled={invoicesLoading}
+                  disabled={invoicesLoading || billingManagedByAdmin}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
                 >
                   {invoicesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -357,7 +379,9 @@ const SubscriptionPage = () => {
           <section className="mt-10">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Available Plans</h2>
             <p className="text-sm text-gray-500 mb-6">
-              Plan changes use Stripe&apos;s billing portal. Upgrades are prorated and take effect immediately. Downgrades take effect at the next billing cycle.
+              {billingManagedByAdmin
+                ? "Plan changes are managed by your administrator. Contact your administrator to change your plan."
+                : "Plan changes use Stripe's billing portal. Upgrades are prorated and take effect immediately. Downgrades take effect at the next billing cycle."}
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               {PLANS.map((plan) => {
@@ -395,7 +419,7 @@ const SubscriptionPage = () => {
                         <button
                           type="button"
                           onClick={() => handlePlanChange(plan.id, "upgrade")}
-                          disabled={portalLoading}
+                          disabled={portalLoading || billingManagedByAdmin}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
                         >
                           Upgrade
@@ -404,7 +428,7 @@ const SubscriptionPage = () => {
                         <button
                           type="button"
                           onClick={() => handlePlanChange(plan.id, "downgrade")}
-                          disabled={portalLoading}
+                          disabled={portalLoading || billingManagedByAdmin}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                         >
                           <ChevronDown className="h-4 w-4" /> Downgrade
@@ -413,7 +437,7 @@ const SubscriptionPage = () => {
                         <button
                           type="button"
                           onClick={handleManageBilling}
-                          disabled={portalLoading}
+                          disabled={portalLoading || billingManagedByAdmin}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                         >
                           Select
@@ -427,11 +451,13 @@ const SubscriptionPage = () => {
           </section>
 
           <section id="invoices" className="mt-10 scroll-mt-6 pt-6 border-t border-gray-200">
-            <p className="text-sm text-gray-500 mb-2">Past invoices are available in the billing portal.</p>
+            <p className="text-sm text-gray-500 mb-2">
+              {billingManagedByAdmin ? "Invoices are managed by your administrator." : "Past invoices are available in the billing portal."}
+            </p>
             <button
               type="button"
               onClick={handleViewInvoiceHistory}
-              disabled={invoicesLoading || portalLoading}
+              disabled={invoicesLoading || portalLoading || billingManagedByAdmin}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
             >
               {invoicesLoading || portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}

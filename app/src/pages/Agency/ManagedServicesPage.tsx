@@ -116,6 +116,7 @@ const ManagedServicesPage = () => {
   const { clients } = useSelector((state: RootState) => state.client);
   const [tier, setTier] = useState<string>("starter");
   const [accountActivated, setAccountActivated] = useState<boolean>(true);
+  const [trialActive, setTrialActive] = useState<boolean>(false);
   const [activeServices, setActiveServices] = useState<ActiveService[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -141,12 +142,17 @@ const ManagedServicesPage = () => {
     if (showRefreshing) setRefreshing(true);
     try {
       const cacheBuster = `_=${Date.now()}`;
-      const [subRes, listRes] = await Promise.all([
+      const [meRes, subRes, listRes] = await Promise.all([
+        api.get("/agencies/me").catch(() => ({ data: null })),
         api.get("/seo/agency/subscription").catch(() => ({ data: null })),
         api.get(`/agencies/managed-services?${cacheBuster}`).catch(() => ({ data: [] })),
       ]);
+      // Use /agencies/me for trial/activation (same source as AddOnsPage) so state is correct after refresh
+      if (meRes?.data) {
+        if (typeof meRes.data.accountActivated === "boolean") setAccountActivated(meRes.data.accountActivated);
+        setTrialActive(meRes.data.trialActive === true);
+      }
       if (subRes?.data?.currentPlan) setTier(subRes.data.currentPlan);
-      if (typeof subRes?.data?.accountActivated === "boolean") setAccountActivated(subRes.data.accountActivated);
       if (Array.isArray(listRes?.data)) setActiveServices(listRes.data);
     } catch {
       // keep defaults
@@ -275,14 +281,26 @@ const ManagedServicesPage = () => {
         <p className="text-lg text-primary-600 font-medium mt-1">White-label fulfillment by Design ME Marketing</p>
       </header>
 
-      {!accountActivated && (
+      {(!accountActivated || trialActive) && (
         <section className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-amber-800 text-sm">
-            <strong>Activate your account first.</strong> Add a payment method in{" "}
-            <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
-              Subscription & Billing
-            </Link>{" "}
-            to request managed services. The 7-day free trial is for reporting only; managed plans are paid when approved.
+            {trialActive ? (
+              <>
+                <strong>Managed services are not available during your 7-day free trial.</strong> The trial is for reporting only. Subscribe to a plan in{" "}
+                <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
+                  Subscription & Billing
+                </Link>{" "}
+                or wait until your trial ends to request managed services.
+              </>
+            ) : (
+              <>
+                <strong>Activate your account first.</strong> Add a payment method in{" "}
+                <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
+                  Subscription & Billing
+                </Link>{" "}
+                to request managed services. The 7-day free trial is for reporting only; managed plans are paid when approved.
+              </>
+            )}
           </p>
         </section>
       )}
@@ -319,7 +337,7 @@ const ManagedServicesPage = () => {
                 <button
                   type="button"
                   onClick={() => openActivateModal(pkg)}
-                  disabled={!accountActivated}
+                  disabled={!accountActivated || trialActive}
                   className="w-full py-2.5 rounded-lg font-medium bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {pkg.buttonLabel}
