@@ -46,10 +46,13 @@ function App() {
     }
   }, [dispatch]);
 
-  // Defer Toaster mount to avoid removeChild race with initial route/portals (Recharts, createPortal)
+  // Defer Toaster mount to avoid removeChild race with initial route/portals and with
+  // browser extensions that inject into the DOM on production (see React #17256).
   const [toasterReady, setToasterReady] = useState(false);
   useEffect(() => {
-    const t = window.setTimeout(() => setToasterReady(true), 0);
+    const t = window.setTimeout(() => {
+      requestAnimationFrame(() => setToasterReady(true));
+    }, 100);
     return () => window.clearTimeout(t);
   }, []);
 
