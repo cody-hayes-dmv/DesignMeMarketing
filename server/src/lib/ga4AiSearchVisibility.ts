@@ -32,6 +32,7 @@ export async function fetchGA4AiSearchVisibility(
       citedPages: number;
     }
   >;
+  countries: Array<{ countryCode: string; visibility: number; mentions: number }>;
 }> {
   const client = await prisma.client.findUnique({
     where: { id: clientId },
@@ -45,6 +46,7 @@ export async function fetchGA4AiSearchVisibility(
         chatgpt: { sessions: 0, users: 0, citedPages: 0 },
         gemini: { sessions: 0, users: 0, citedPages: 0 },
       },
+      countries: [],
     };
   }
 
