@@ -107,6 +107,7 @@ server.on("listening", async () => {
   const { processScheduledReports, refreshAllGA4Data } = await import("./lib/reportScheduler.js");
   const { autoSyncBacklinksForStaleClients } = await import("./routes/seo.js");
   const { archiveCanceledClientsPastEndDate } = await import("./lib/clientStatusWorkflow.js");
+  const { processRecurringTaskRules } = await import("./routes/tasks.js");
 
   // Run immediately on startup (for testing)
   processScheduledReports().catch(console.error);
@@ -159,6 +160,13 @@ server.on("listening", async () => {
   } else {
     console.log("Backlinks auto-sync disabled (ENABLE_DATAFORSEO_BACKLINKS_AUTO_SYNC=false)");
   }
+
+  // Recurring tasks: create task instances from active rules (every minute)
+  processRecurringTaskRules().catch(console.error);
+  setInterval(() => {
+    processRecurringTaskRules().catch(console.error);
+  }, 60 * 1000);
+  console.log("Recurring task scheduler started (runs every minute)");
 });
 
 server.on("error", (err: any) => {

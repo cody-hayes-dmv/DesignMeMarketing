@@ -53,6 +53,40 @@ const bulkCreateTaskSchema = z.object({
   }))
 });
 
+const frequencyEnum = z.enum(["WEEKLY", "MONTHLY", "QUARTERLY", "SEMIANNUAL"]);
+const createRecurringTaskSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  category: z.string().optional(),
+  status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+  priority: z.string().optional(),
+  estimatedHours: z.number().int().positive().optional(),
+  assigneeId: z.string().optional(),
+  clientId: z.string().optional(),
+  proof: z.array(proofItemSchema).optional(),
+  frequency: frequencyEnum,
+  dayOfWeek: z.number().int().min(0).max(6).optional(), // 0=Sunday, for WEEKLY
+  dayOfMonth: z.number().int().min(1).max(31).optional(), // for MONTHLY/QUARTERLY/SEMIANNUAL
+  firstRunAt: z.coerce.date(), // when to create the first task (and base for recurrence)
+});
+
+const updateRecurringTaskSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  category: z.string().optional(),
+  status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+  priority: z.string().optional(),
+  estimatedHours: z.number().int().positive().optional(),
+  assigneeId: z.string().optional().nullable(),
+  clientId: z.string().optional().nullable(),
+  proof: z.array(proofItemSchema).optional(),
+  frequency: frequencyEnum.optional(),
+  dayOfWeek: z.number().int().min(0).max(6).optional().nullable(),
+  dayOfMonth: z.number().int().min(1).max(31).optional().nullable(),
+  firstRunAt: z.coerce.date().optional(),
+  nextRunAt: z.coerce.date().optional(),
+});
+
 // Common include for consistency
 const taskInclude = {
   assignee: { select: { id: true, name: true, email: true } },
@@ -74,6 +108,45 @@ const taskInclude = {
 const commentBodySchema = z.object({
   body: z.string().min(1).max(5000),
 });
+
+/** Advance nextRunAt by one interval based on frequency and day settings */
+function addRecurrenceInterval(from: Date, frequency: string, dayOfWeek: number | null, dayOfMonth: number | null): Date {
+  const next = new Date(from);
+  switch (frequency) {
+    case "WEEKLY": {
+      next.setDate(next.getDate() + 7);
+      if (dayOfWeek != null) next.setDate(next.getDate() - next.getDay() + dayOfWeek);
+      return next;
+    }
+    case "MONTHLY": {
+      next.setMonth(next.getMonth() + 1);
+      if (dayOfMonth != null) {
+        const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+        next.setDate(Math.min(dayOfMonth, lastDay));
+      }
+      return next;
+    }
+    case "QUARTERLY": {
+      next.setMonth(next.getMonth() + 3);
+      if (dayOfMonth != null) {
+        const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+        next.setDate(Math.min(dayOfMonth, lastDay));
+      }
+      return next;
+    }
+    case "SEMIANNUAL": {
+      next.setMonth(next.getMonth() + 6);
+      if (dayOfMonth != null) {
+        const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+        next.setDate(Math.min(dayOfMonth, lastDay));
+      }
+      return next;
+    }
+    default:
+      next.setMonth(next.getMonth() + 1);
+      return next;
+  }
+}
 
 async function getTaskForAccess(taskId: string) {
   return prisma.task.findUnique({
@@ -115,6 +188,7 @@ function canAccessTask(user: any, task: any) {
 router.get("/", authenticateToken, async (req, res) => {
   try {
     const clientIdParam = typeof req.query.clientId === "string" ? req.query.clientId : undefined;
+    const assigneeMe = req.query.assigneeMe === "true" || req.query.assigneeMe === "1";
 
     // Specialist: only tasks assigned to them (own task list)
     if (req.user.role === "SPECIALIST") {
@@ -131,8 +205,11 @@ router.get("/", authenticateToken, async (req, res) => {
 
     let tasks;
     if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
+      const where: any = {};
+      if (clientIdParam) where.clientId = clientIdParam;
+      if (assigneeMe) where.assigneeId = req.user.userId;
       tasks = await prisma.task.findMany({
-        where: clientIdParam ? { clientId: clientIdParam } : undefined,
+        where: Object.keys(where).length ? where : undefined,
         include: taskInclude,
         orderBy: { createdAt: "desc" },
       });
@@ -261,6 +338,225 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Fetch client work log error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// ---------- Recurring task rules ----------
+// List recurring rules (agency-scoped)
+router.get("/recurring", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    let agencyIds: string[] = [];
+    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
+      const agencies = await prisma.agency.findMany({ select: { id: true } });
+      agencyIds = agencies.map((a) => a.id);
+    } else {
+      const memberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      agencyIds = memberships.map((m) => m.agencyId);
+    }
+    if (agencyIds.length === 0) {
+      return res.json([]);
+    }
+    const rules = await prisma.recurringTaskRule.findMany({
+      where: { agencyId: { in: agencyIds } },
+      orderBy: { nextRunAt: "asc" },
+      include: {
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+    return res.json(rules);
+  } catch (error) {
+    console.error("List recurring rules error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Create recurring rule
+router.post("/recurring", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const parsed = createRecurringTaskSchema.parse(req.body);
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+    });
+    let agencyId: string | undefined = membership?.agencyId;
+    if (!agencyId && (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN")) {
+      agencyId = (await prisma.agency.findFirst())?.id ?? undefined;
+    }
+    if (!agencyId) {
+      return res.status(400).json({ message: "No agency found." });
+    }
+    const rule = await prisma.recurringTaskRule.create({
+      data: {
+        agencyId,
+        createdById: req.user.userId,
+        title: parsed.title,
+        description: parsed.description,
+        category: parsed.category,
+        status: parsed.status ?? "TODO",
+        priority: parsed.priority,
+        estimatedHours: parsed.estimatedHours,
+        assigneeId: parsed.assigneeId,
+        clientId: parsed.clientId,
+        proof: parsed.proof?.length ? JSON.stringify(parsed.proof) : null,
+        frequency: parsed.frequency,
+        dayOfWeek: parsed.dayOfWeek ?? null,
+        dayOfMonth: parsed.dayOfMonth ?? null,
+        nextRunAt: parsed.firstRunAt,
+        isActive: true,
+      },
+      include: { createdBy: { select: { id: true, name: true, email: true } } },
+    });
+    return res.status(201).json(rule);
+  } catch (error: any) {
+    console.error("Create recurring rule error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid data", errors: error.errors });
+    }
+    return res.status(500).json({ message: "Failed to create recurring rule" });
+  }
+});
+
+// Update recurring rule
+router.put("/recurring/:id", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { id } = req.params;
+    const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
+    if (!rule) return res.status(404).json({ message: "Resource not found." });
+    let canAccess = false;
+    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
+    else {
+      const membership = await prisma.userAgency.findFirst({
+        where: { userId: req.user.userId, agencyId: rule.agencyId },
+      });
+      canAccess = Boolean(membership);
+    }
+    if (!canAccess) return res.status(403).json({ message: "Access denied" });
+
+    const parsed = updateRecurringTaskSchema.parse(req.body);
+    const nextRun = parsed.nextRunAt ?? parsed.firstRunAt ?? rule.nextRunAt;
+    const data: Record<string, unknown> = {};
+    if (parsed.title !== undefined) data.title = parsed.title;
+    if (parsed.description !== undefined) data.description = parsed.description;
+    if (parsed.category !== undefined) data.category = parsed.category;
+    if (parsed.status !== undefined) data.status = parsed.status;
+    if (parsed.priority !== undefined) data.priority = parsed.priority;
+    if (parsed.estimatedHours !== undefined) data.estimatedHours = parsed.estimatedHours;
+    if (parsed.assigneeId !== undefined) data.assigneeId = parsed.assigneeId;
+    if (parsed.clientId !== undefined) data.clientId = parsed.clientId;
+    if (parsed.proof !== undefined) data.proof = parsed.proof?.length ? JSON.stringify(parsed.proof) : null;
+    if (parsed.frequency !== undefined) data.frequency = parsed.frequency;
+    if (parsed.dayOfWeek !== undefined) data.dayOfWeek = parsed.dayOfWeek;
+    if (parsed.dayOfMonth !== undefined) data.dayOfMonth = parsed.dayOfMonth;
+    data.nextRunAt = nextRun;
+
+    const updated = await prisma.recurringTaskRule.update({
+      where: { id },
+      data: data as any,
+      include: { createdBy: { select: { id: true, name: true, email: true } } },
+    });
+    return res.json(updated);
+  } catch (error: any) {
+    console.error("Update recurring rule error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid data", errors: error.errors });
+    }
+    if (error?.code === "P2025") return res.status(404).json({ message: "Resource not found." });
+    return res.status(500).json({ message: "Failed to update recurring task" });
+  }
+});
+
+// Stop recurrence (set isActive = false)
+router.patch("/recurring/:id/stop", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { id } = req.params;
+    const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
+    if (!rule) return res.status(404).json({ message: "Recurring rule not found" });
+    let canAccess = false;
+    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
+    else {
+      const membership = await prisma.userAgency.findFirst({
+        where: { userId: req.user.userId, agencyId: rule.agencyId },
+      });
+      canAccess = Boolean(membership);
+    }
+    if (!canAccess) return res.status(403).json({ message: "Access denied" });
+    await prisma.recurringTaskRule.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    return res.json({ message: "Recurrence stopped", id });
+  } catch (error) {
+    console.error("Stop recurrence error:", error);
+    res.status(500).json({ message: "Failed to stop recurrence" });
+  }
+});
+
+// Resume recurrence (set isActive = true)
+router.patch("/recurring/:id/resume", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { id } = req.params;
+    const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
+    if (!rule) return res.status(404).json({ message: "Recurring rule not found" });
+    let canAccess = false;
+    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
+    else {
+      const membership = await prisma.userAgency.findFirst({
+        where: { userId: req.user.userId, agencyId: rule.agencyId },
+      });
+      canAccess = Boolean(membership);
+    }
+    if (!canAccess) return res.status(403).json({ message: "Access denied" });
+    await prisma.recurringTaskRule.update({
+      where: { id },
+      data: { isActive: true },
+    });
+    return res.json({ message: "Recurrence resumed", id });
+  } catch (error) {
+    console.error("Resume recurrence error:", error);
+    res.status(500).json({ message: "Failed to resume recurrence" });
+  }
+});
+
+// Delete recurring rule (remove permanently)
+router.delete("/recurring/:id", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === "SPECIALIST") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { id } = req.params;
+    const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
+    if (!rule) return res.status(404).json({ message: "Recurring rule not found" });
+    let canAccess = false;
+    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
+    else {
+      const membership = await prisma.userAgency.findFirst({
+        where: { userId: req.user.userId, agencyId: rule.agencyId },
+      });
+      canAccess = Boolean(membership);
+    }
+    if (!canAccess) return res.status(403).json({ message: "Access denied" });
+    await prisma.recurringTaskRule.delete({ where: { id } });
+    return res.status(204).send();
+  } catch (error) {
+    console.error("Delete recurring rule error:", error);
+    res.status(500).json({ message: "Failed to remove recurring task" });
   }
 });
 
@@ -619,5 +915,47 @@ router.post("/bulk", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Failed to create tasks" });
   }
 });
+
+/** Process due recurring rules: create task and advance nextRunAt. Call from server cron. */
+export async function processRecurringTaskRules(): Promise<void> {
+  const now = new Date();
+  const due = await prisma.recurringTaskRule.findMany({
+    where: { isActive: true, nextRunAt: { lte: now } },
+    orderBy: { nextRunAt: "asc" },
+  });
+  for (const rule of due) {
+    try {
+      const dueDate = new Date(rule.nextRunAt);
+      await prisma.task.create({
+        data: {
+          title: rule.title,
+          description: rule.description,
+          category: rule.category,
+          priority: rule.priority,
+          estimatedHours: rule.estimatedHours,
+          assigneeId: rule.assigneeId,
+          clientId: rule.clientId,
+          agencyId: rule.agencyId,
+          createdById: rule.createdById,
+          status: rule.status ?? "TODO",
+          proof: rule.proof,
+          dueDate,
+        },
+      });
+      const nextRunAt = addRecurrenceInterval(
+        dueDate,
+        rule.frequency,
+        rule.dayOfWeek,
+        rule.dayOfMonth
+      );
+      await prisma.recurringTaskRule.update({
+        where: { id: rule.id },
+        data: { nextRunAt },
+      });
+    } catch (err) {
+      console.error("[RecurringTasks] Failed to process rule", rule.id, err);
+    }
+  }
+}
 
 export default router;

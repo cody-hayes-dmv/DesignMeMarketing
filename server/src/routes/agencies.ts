@@ -1,5 +1,6 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
@@ -139,6 +140,44 @@ const createAgencySchema = z.object({
   }
 }, { message: 'Agency website must be a valid URL', path: ['website'] });
 
+// Self-registration: same fields as create (sections A–D, F), no billing; password required (no invite link).
+const registerAgencySchema = z.object({
+  name: z.string().min(1, 'Agency name is required'),
+  website: z.string().min(1, 'Agency website is required'),
+  industry: z.string().optional(),
+  agencySize: z.string().optional(),
+  numberOfClients: z.coerce.number().int().min(0).optional().nullable(),
+  contactName: z.string().min(1, 'Primary contact name is required'),
+  contactEmail: z.string().email('Valid contact email is required'),
+  contactPhone: z.string().optional(),
+  contactJobTitle: z.string().optional(),
+  streetAddress: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zip: z.string().optional(),
+  country: z.string().optional(),
+  subdomain: z.string().optional(),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  passwordConfirm: z.string().min(1, 'Please confirm your password'),
+  referralSource: z.string().optional(),
+  referralSourceOther: z.string().optional(),
+  primaryGoals: z.array(z.string()).optional(),
+  primaryGoalsOther: z.string().optional(),
+  currentTools: z.string().optional(),
+}).refine((data) => {
+  const w = data.website?.trim();
+  if (!w) return false;
+  try {
+    new URL(w.startsWith('http') ? w : `https://${w}`);
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: 'Agency website must be a valid URL', path: ['website'] }).refine((data) => data.password === data.passwordConfirm, {
+  message: 'Passwords do not match',
+  path: ['passwordConfirm'],
+});
+
 // Create a SetupIntent for collecting a payment method when creating an agency with "Charge to Card"
 // Super Admin only. No customer yet; payment method will be attached to the new agency's Stripe customer on create.
 router.post('/setup-intent', authenticateToken, async (req, res) => {
@@ -185,6 +224,177 @@ router.post('/setup-intent/retrieve', authenticateToken, async (req, res) => {
   } catch (err: any) {
     console.error('SetupIntent retrieve error:', err);
     res.status(500).json({ message: err?.message || 'Failed to retrieve setup intent' });
+  }
+});
+
+// Public agency self-registration (no auth). Creates agency + user with password; no billing (free tier).
+router.post('/register', async (req, res) => {
+  try {
+    const body = registerAgencySchema.parse(req.body);
+    const {
+      name,
+      website,
+      industry,
+      agencySize,
+      numberOfClients,
+      contactName,
+      contactEmail,
+      contactPhone,
+      contactJobTitle,
+      streetAddress,
+      city,
+      state,
+      zip,
+      country,
+      subdomain,
+      password,
+      referralSource,
+      referralSourceOther,
+      primaryGoals,
+      primaryGoalsOther,
+      currentTools,
+    } = body;
+
+    const existingAgency = await prisma.agency.findFirst({ where: { name } });
+    if (existingAgency) {
+      return res.status(400).json({ message: 'Agency with this name already exists' });
+    }
+
+    if (subdomain && subdomain.trim()) {
+      const existingSubdomain = await prisma.agency.findUnique({ where: { subdomain: subdomain.trim() } });
+      if (existingSubdomain) {
+        return res.status(400).json({ message: 'Subdomain already taken' });
+      }
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { email: contactEmail } });
+    if (existingUser) {
+      return res.status(400).json({ message: 'A user with this contact email already exists' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const websiteNormalized = website.trim().startsWith('http') ? website.trim() : `https://${website.trim()}`;
+    const onboardingData = (referralSource || (primaryGoals && primaryGoals.length) || currentTools || referralSourceOther || primaryGoalsOther)
+      ? JSON.stringify({
+          referralSource: referralSource === 'referral' ? referralSourceOther : referralSource,
+          primaryGoals: primaryGoals || [],
+          primaryGoalsOther: primaryGoalsOther || undefined,
+          currentTools: currentTools || undefined,
+        })
+      : null;
+
+    // Agency self-registration uses "No Charge – Free Account" (same as Super Admin no_charge): free billing + 7-day trial
+    const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const agency = await prisma.agency.create({
+      data: {
+        name,
+        subdomain: subdomain?.trim() || null,
+        billingType: 'free',
+        website: websiteNormalized,
+        industry: industry || null,
+        agencySize: agencySize || null,
+        numberOfClients: numberOfClients ?? null,
+        contactName: contactName || null,
+        contactEmail: contactEmail || null,
+        contactPhone: contactPhone || null,
+        contactJobTitle: contactJobTitle || null,
+        streetAddress: streetAddress || null,
+        city: city || null,
+        state: state || null,
+        zip: zip || null,
+        country: country || null,
+        subscriptionTier: null,
+        customPricing: null,
+        internalNotes: null,
+        onboardingData,
+        trialEndsAt,
+      },
+      include: { _count: { select: { members: true } } },
+    });
+
+    const agencyUser = await prisma.user.create({
+      data: {
+        email: contactEmail,
+        name: contactName,
+        passwordHash,
+        role: 'AGENCY',
+        verified: false,
+        invited: false,
+      },
+    });
+
+    await prisma.userAgency.create({
+      data: {
+        userId: agencyUser.id,
+        agencyId: agency.id,
+        agencyRole: 'OWNER',
+      },
+    });
+
+    const agencyDashboardName = `${name} - Agency Website`;
+    const agencyDashboardDomain = `agency-${agency.id}.internal`;
+    try {
+      await prisma.client.create({
+        data: {
+          name: agencyDashboardName,
+          domain: agencyDashboardDomain,
+          userId: agencyUser.id,
+          belongsToAgencyId: agency.id,
+          isAgencyOwnDashboard: true,
+          status: 'DASHBOARD_ONLY',
+          managedServiceStatus: 'none',
+        },
+      });
+    } catch (dashboardErr: any) {
+      console.warn('Agency register: auto dashboard create failed', dashboardErr?.message);
+    }
+
+    const verificationToken = jwt.sign(
+      { userId: agencyUser.id },
+      getJwtSecret(),
+      { expiresIn: '24h' }
+    );
+    await prisma.token.create({
+      data: {
+        type: 'EMAIL_VERIFY',
+        email: agencyUser.email,
+        token: verificationToken,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        userId: agencyUser.id,
+      },
+    });
+
+    const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify?token=${encodeURIComponent(verificationToken)}`;
+    try {
+      await sendEmail({
+        to: contactEmail,
+        subject: `Verify your email – ${name}`,
+        html: `
+          <h1>Verify your agency account</h1>
+          <p>Hi ${contactName || 'there'},</p>
+          <p>Thanks for signing up <strong>${name}</strong>. Please verify your email by clicking the link below (expires in 24 hours):</p>
+          <p><a href="${verifyUrl}">Verify my email</a></p>
+          <p>If the link doesn't work, copy and paste this URL into your browser:</p>
+          <p style="word-break:break-all">${verifyUrl}</p>
+        `,
+      });
+    } catch (emailErr: any) {
+      console.warn('Agency register: verification email failed', emailErr?.message);
+    }
+
+    res.status(201).json({
+      message: 'Agency account created. Please check your email to verify your account.',
+      agencyId: agency.id,
+    });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      const first = error.errors?.[0];
+      const msg = first ? (first.path?.join('.') + ' ' + first.message) : 'Invalid input';
+      return res.status(400).json({ message: msg });
+    }
+    console.error('Agency register error:', error);
+    res.status(500).json({ message: 'Failed to create agency account' });
   }
 });
 

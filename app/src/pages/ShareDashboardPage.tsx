@@ -112,6 +112,35 @@ const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
   Other: "#6366F1",
 };
 
+/** Catches chart/render errors (e.g. Recharts removeChild) and shows a fallback instead of breaking the page */
+class ShareDashboardErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="bg-white border border-amber-200 rounded-xl p-8 text-center">
+          <p className="text-amber-800 font-medium mb-2">Something went wrong displaying the dashboard.</p>
+          <p className="text-sm text-gray-600 mb-4">Try refreshing the page.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          >
+            Refresh page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const ShareDashboardPage: React.FC = () => {
   const { token } = useParams();
   const [loading, setLoading] = useState(true);
@@ -141,6 +170,16 @@ const ShareDashboardPage: React.FC = () => {
   const [exportingPdf, setExportingPdf] = useState(false);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
   const [dateRange, setDateRange] = useState("30");
+  // Defer mounting charts/content to avoid Recharts removeChild errors (DOM must be stable)
+  const [contentMounted, setContentMounted] = useState(false);
+  useEffect(() => {
+    if (loading) {
+      setContentMounted(false);
+    } else {
+      const t = window.setTimeout(() => setContentMounted(true), 50);
+      return () => window.clearTimeout(t);
+    }
+  }, [loading]);
 
   const handleExportPdf = useCallback(async () => {
     if (!dashboardContentRef.current) {
@@ -715,7 +754,7 @@ const ShareDashboardPage: React.FC = () => {
         </div>
       </nav>
 
-      {/* Dashboard Content - single wrapper so Recharts/React don't hit removeChild on transition */}
+      {/* Dashboard Content - defer chart mount by one frame to avoid Recharts removeChild */}
       <div className="p-8 space-y-8">
         <div ref={dashboardContentRef} className="space-y-8">
           {loading ? (
@@ -723,7 +762,13 @@ const ShareDashboardPage: React.FC = () => {
               <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
               Loading shared dashboard...
             </div>
+          ) : !contentMounted ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+              Preparing dashboard...
+            </div>
           ) : (
+            <ShareDashboardErrorBoundary>
             <>
             {/* Report View - GA4 Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1220,6 +1265,7 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
             </>
+            </ShareDashboardErrorBoundary>
           )}
         </div>
       </div>

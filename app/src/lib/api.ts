@@ -12,7 +12,7 @@ const ERROR_DEBOUNCE_MS = 2000; // Show same error max once per 2 seconds
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL,
-  timeout: 30000, // 30s so client dashboard / heavy SEO requests don't time out
+  timeout: 90000, // 90s for heavy SEO/GA4/dashboard requests
   headers: {
     "Content-Type": "application/json",
   },

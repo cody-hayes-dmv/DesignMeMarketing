@@ -102,7 +102,7 @@ const SuperAdminDashboard = () => {
     const fetchUpcoming = async () => {
       setUpcomingTasksLoading(true);
       try {
-        const res = await api.get("/tasks");
+        const res = await api.get("/tasks?assigneeMe=true");
         const list = Array.isArray(res.data) ? res.data : [];
         const notDone = list.filter((t: any) => t.status !== "DONE");
         const sorted = [...notDone].sort((a: any, b: any) => {

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "./store";
@@ -8,6 +8,7 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import VerifyPage from "./pages/VerifyPage";
 import SpecialistDashboard from "./pages/Specialist/SpecialistDashboardPage";
 import SpecialistClientsPage from "./pages/Specialist/SpecialistClientsPage";
 import SpecialistTeamPage from "./pages/Specialist/SpecialistTeamPage";
@@ -45,10 +46,15 @@ function App() {
     }
   }, [dispatch]);
 
-  // Show loading while checking auth on initial load
+  // Defer Toaster mount to avoid removeChild race with initial route/portals (Recharts, createPortal)
+  const [toasterReady, setToasterReady] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setToasterReady(true), 0);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  // Show loading while checking auth on initial load (must be after all hooks)
   const token = localStorage.getItem("token");
-  // Wait for auth to complete if we have a token but no user yet
-  // Only show loading if we're actually loading, not if auth failed
   if (token && !user && loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -134,31 +140,33 @@ function App() {
   };
 
   return (
-    <>
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          duration: 4000,
-          style: {
-            background: "#363636",
-            color: "#fff",
-          },
-          success: {
-            duration: 3000,
-            iconTheme: {
-              primary: "#10B981",
-              secondary: "#fff",
+    <div id="app-root" style={{ minHeight: "100vh" }}>
+      {toasterReady && (
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            duration: 4000,
+            style: {
+              background: "#363636",
+              color: "#fff",
             },
-          },
-          error: {
-            duration: 5000,
-            iconTheme: {
-              primary: "#EF4444",
-              secondary: "#fff",
+            success: {
+              duration: 3000,
+              iconTheme: {
+                primary: "#10B981",
+                secondary: "#fff",
+              },
             },
-          },
-        }}
-      />
+            error: {
+              duration: 5000,
+              iconTheme: {
+                primary: "#EF4444",
+                secondary: "#fff",
+              },
+            },
+          }}
+        />
+      )}
       <Routes>
       {/* Public share route - no auth required */}
       <Route path="/share/:token" element={<ShareDashboardPage />} />
@@ -189,6 +197,7 @@ function App() {
       />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/verify" element={<VerifyPage />} />
 
 
       {/* Specialist routes */}
@@ -354,7 +363,7 @@ function App() {
         }
       />
     </Routes>
-    </>
+    </div>
   );
 }
 

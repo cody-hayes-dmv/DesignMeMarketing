@@ -10,8 +10,10 @@ import {
   Eye,
   EyeOff,
   CheckCircle,
+  Building2,
 } from "lucide-react";
 import zoesiLogo from "@/assets/zoesi-blue.png";
+import AgencyRegisterModal from "@/components/AgencyRegisterModal";
 
 const RegisterPage = () => {
   const dispatch = useDispatch();
@@ -25,6 +27,7 @@ const RegisterPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [agencyModalOpen, setAgencyModalOpen] = useState(false);
 
   useEffect(() => {
     dispatch(clearError());
@@ -259,7 +262,31 @@ const RegisterPage = () => {
                 "Sign up"
               )}
             </button>
+
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-200" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-3 bg-white text-gray-500">or</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAgencyModalOpen(true)}
+              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold border-2 border-primary-600 text-primary-600 hover:bg-primary-50 transition-colors"
+            >
+              <Building2 className="h-5 w-5" />
+              Sign up as an agency
+            </button>
           </form>
+
+          <AgencyRegisterModal
+            open={agencyModalOpen}
+            onClose={() => setAgencyModalOpen(false)}
+            onSuccess={() => setAgencyModalOpen(false)}
+          />
 
           <div className="mt-6 text-center">
             <p className="text-gray-600">

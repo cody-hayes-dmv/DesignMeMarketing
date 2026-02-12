@@ -13,6 +13,9 @@ import {
     Filter,
     Search,
     ListTodo,
+    Repeat,
+    Play,
+    StopCircle,
     CheckCircle,
     CheckCheck,
     Globe,
@@ -35,7 +38,9 @@ import { getStatusBadge } from "@/utils";
 import KanbanBoard from "./KanbanBoard";
 import TaskModal from "@/components/TaskModal";
 import OnboardingTemplateModal from "@/components/OnboardingTemplateModal";
+import RecurringTaskModal from "@/components/RecurringTaskModal";
 import { fetchTasks, patchTaskStatus, deleteTask, updateTask } from "@/store/slices/taskSlice";
+import { fetchClients } from "@/store/slices/clientSlice";
 import { ROLE, Task } from "@/utils/types";
 import toast from "react-hot-toast";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -55,13 +60,32 @@ const TasksPage = () => {
     const [filterAssigneeId, setFilterAssigneeId] = useState<string>("all");
     const [taskListTab, setTaskListTab] = useState<"upcoming" | "completed">("upcoming");
     const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+    const [showRecurringModal, setShowRecurringModal] = useState(false);
+    const [recurringRules, setRecurringRules] = useState<Array<{
+      id: string;
+      title: string;
+      description?: string | null;
+      category?: string | null;
+      status?: string;
+      priority?: string | null;
+      estimatedHours?: number | null;
+      assigneeId?: string | null;
+      clientId?: string | null;
+      frequency: string;
+      nextRunAt: string;
+      isActive: boolean;
+      proof?: unknown;
+    }>>([]);
+    const [recurringRulesOpen, setRecurringRulesOpen] = useState(false);
+    const [editingRecurringRule, setEditingRecurringRule] = useState<typeof recurringRules[0] | null>(null);
     const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role?: string }>>([]);
     const [assignSelectedOpen, setAssignSelectedOpen] = useState(false);
     const [assignSelectedSpecialistId, setAssignSelectedSpecialistId] = useState<string>("");
     const [bulkAssigning, setBulkAssigning] = useState(false);
-    const { tasks } = useSelector((state: RootState) => state.task)
+    const { tasks } = useSelector((state: RootState) => state.task);
     const { user } = useSelector((state: RootState) => state.auth);
+    const { clients } = useSelector((state: RootState) => state.client);
 
     useEffect(() => {
         const clientId = searchParams.get("clientId");
@@ -239,6 +263,67 @@ const TasksPage = () => {
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
 
+    const fetchRecurringRules = () => {
+        if (!canCreate) return;
+        api.get("/tasks/recurring")
+            .then((res) => setRecurringRules(Array.isArray(res.data) ? res.data : []))
+            .catch(() => setRecurringRules([]));
+    };
+    useEffect(() => {
+        if (canCreate) fetchRecurringRules();
+    }, [canCreate]);
+    useEffect(() => {
+        if (recurringRulesOpen && canCreate && clients.length === 0) {
+            dispatch(fetchClients() as any);
+        }
+    }, [recurringRulesOpen, canCreate, clients.length, dispatch]);
+
+    const handleStopRecurrence = async (id: string) => {
+        try {
+            await api.patch(`/tasks/recurring/${id}/stop`);
+            toast.success("Recurrence stopped.");
+            fetchRecurringRules();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.message || "Failed to stop recurrence");
+        }
+    };
+
+    const handleResumeRecurrence = async (id: string) => {
+        try {
+            await api.patch(`/tasks/recurring/${id}/resume`);
+            toast.success("Recurrence resumed.");
+            fetchRecurringRules();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.message || "Failed to resume recurrence");
+        }
+    };
+
+    const [removeRecurringConfirm, setRemoveRecurringConfirm] = useState<{ isOpen: boolean; ruleId: string | null }>({
+        isOpen: false,
+        ruleId: null,
+    });
+    const handleRemoveRecurrence = (id: string) => setRemoveRecurringConfirm({ isOpen: true, ruleId: id });
+    const confirmRemoveRecurrence = async () => {
+        if (!removeRecurringConfirm.ruleId) return;
+        try {
+            await api.delete(`/tasks/recurring/${removeRecurringConfirm.ruleId}`);
+            toast.success("Recurring task removed.");
+            fetchRecurringRules();
+            setRemoveRecurringConfirm({ isOpen: false, ruleId: null });
+        } catch (e: any) {
+            toast.error(e?.response?.data?.message || "Failed to remove recurring task");
+            setRemoveRecurringConfirm({ isOpen: false, ruleId: null });
+        }
+    };
+
+    const frequencyLabel = (f: string) => {
+        if (f === "WEEKLY") return "Weekly";
+        if (f === "MONTHLY") return "Monthly";
+        if (f === "QUARTERLY") return "Quarterly";
+        if (f === "SEMIANNUAL") return "Every 6 months";
+        return f;
+    };
+
     return (
         <div className="p-8">
             {/* Header */}
@@ -258,13 +343,20 @@ const TasksPage = () => {
                     )}
                 </div>
                 {canCreate && (
-                    <div className="flex items-center space-x-3">
+                    <div className="flex flex-wrap items-center gap-3">
                         <button
                             onClick={() => setShowOnboardingModal(true)}
                             className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
                         >
                             <ListTodo className="h-5 w-5" />
                             <span>Onboarding Tasks</span>
+                        </button>
+                        <button
+                            onClick={() => { setEditingRecurringRule(null); setShowRecurringModal(true); }}
+                            className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
+                        >
+                            <Repeat className="h-5 w-5" />
+                            <span>Add Recurring Task</span>
                         </button>
                         <button
                             onClick={handleCreateClick}
@@ -427,6 +519,100 @@ const TasksPage = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Recurring tasks - above task list */}
+            {canCreate && (
+                <div className="bg-white rounded-xl border border-gray-200 mb-8 overflow-hidden">
+                    <button
+                        type="button"
+                        onClick={() => setRecurringRulesOpen((o) => !o)}
+                        className="flex items-center gap-2 text-left w-full px-6 py-4 hover:bg-gray-50 transition-colors"
+                    >
+                        <Repeat className="h-5 w-5 text-gray-500" />
+                        <span className="font-medium text-gray-900">Recurring tasks ({recurringRules.filter((r) => r.isActive).length} active)</span>
+                    </button>
+                    {recurringRulesOpen && (
+                        <div className="border-t border-gray-200 overflow-x-auto">
+                            {recurringRules.length === 0 ? (
+                                <div className="px-6 py-8 text-sm text-gray-500">No recurring tasks yet. Use “Add Recurring Task” above to create one.</div>
+                            ) : (
+                                <table className="w-full">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurrence</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due Date</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                        {recurringRules.map((r) => (
+                                            <tr key={r.id} className="hover:bg-gray-50">
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-col">
+                                                        <div className="text-sm font-medium text-gray-900">{r.title}</div>
+                                                        <div className="text-xs text-gray-500">{r.category ?? "—"}</div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{frequencyLabel(r.frequency)}</td>
+                                                <td className="px-6 py-4">
+                                                    {r.clientId ? (
+                                                        <div className="flex flex-col">
+                                                            <div className="flex items-center space-x-2">
+                                                                <Globe className="h-4 w-4 text-gray-400" />
+                                                                <span className="text-sm font-medium text-gray-900">{clients.find((c) => c.id === r.clientId)?.name ?? "—"}</span>
+                                                            </div>
+                                                            <div className="text-xs text-gray-500">{clients.find((c) => c.id === r.clientId)?.domain ?? ""}</div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-sm text-gray-400">No client</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className={`px-2 py-1 text-xs font-bold rounded-full ${r.isActive ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
+                                                        {r.isActive ? "Active" : "Stopped"}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    {r.assigneeId ? (assignableUsers.find((u) => u.id === r.assigneeId)?.name ?? assignableUsers.find((u) => u.id === r.assigneeId)?.email ?? "—") : "Unassigned"}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <div className="flex items-center">
+                                                        <Calendar className="h-4 w-4 mr-1 text-gray-400" />
+                                                        {format(new Date(r.nextRunAt), "MMM dd, yyyy")}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                    <div className="flex items-center space-x-2">
+                                                        {r.isActive ? (
+                                                            <button type="button" onClick={() => handleStopRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Stop recurrence">
+                                                                <StopCircle className="h-4 w-4" />
+                                                            </button>
+                                                        ) : (
+                                                            <button type="button" onClick={() => handleResumeRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Resume">
+                                                                <Play className="h-4 w-4" />
+                                                            </button>
+                                                        )}
+                                                        <button type="button" onClick={() => { setEditingRecurringRule(r); setShowRecurringModal(true); }} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Edit">
+                                                            <Edit className="h-4 w-4" />
+                                                        </button>
+                                                        <button type="button" onClick={() => handleRemoveRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Remove">
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Upcoming / Completed tabs (Super Admin only) */}
             {isSuperAdmin && (
@@ -725,6 +911,14 @@ const TasksPage = () => {
                 }}
             />
 
+            {/* Recurring Task Modal */}
+            <RecurringTaskModal
+                open={showRecurringModal}
+                setOpen={(v) => { setShowRecurringModal(v); if (!v) setEditingRecurringRule(null); }}
+                onSaved={fetchRecurringRules}
+                rule={editingRecurringRule}
+            />
+
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog
                 isOpen={deleteConfirm.isOpen}
@@ -733,6 +927,18 @@ const TasksPage = () => {
                 title="Delete Task"
                 message="Are you sure you want to delete this task? This action cannot be undone and all task data will be permanently removed."
                 confirmText="Delete"
+                cancelText="Cancel"
+                variant="danger"
+            />
+
+            {/* Remove Recurring Task Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={removeRecurringConfirm.isOpen}
+                onClose={() => setRemoveRecurringConfirm({ isOpen: false, ruleId: null })}
+                onConfirm={confirmRemoveRecurrence}
+                title="Remove Recurring Task"
+                message="Are you sure you want to remove this recurring task? It will no longer create new tasks. This cannot be undone."
+                confirmText="Remove"
                 cancelText="Cancel"
                 variant="danger"
             />
