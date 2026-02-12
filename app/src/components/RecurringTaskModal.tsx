@@ -39,9 +39,11 @@ interface RecurringTaskModalProps {
   setOpen: (open: boolean) => void;
   onSaved?: () => void;
   rule?: RecurringRuleForEdit | null;
+  /** When opening for "add", prefill client (e.g. from Work Log on a client dashboard). */
+  defaultClientId?: string;
 }
 
-const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, onSaved, rule }) => {
+const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, onSaved, rule, defaultClientId }) => {
   const isEdit = Boolean(rule?.id);
   const dispatch = useDispatch();
   const { clients } = useSelector((state: RootState) => state.client);
@@ -120,8 +122,10 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
       });
       setProof(proofList as ProofItem[]);
       setAssigneeDisplay("");
+    } else if (open && defaultClientId) {
+      setForm((prev) => ({ ...prev, clientId: defaultClientId }));
     }
-  }, [open, rule]);
+  }, [open, rule, defaultClientId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;

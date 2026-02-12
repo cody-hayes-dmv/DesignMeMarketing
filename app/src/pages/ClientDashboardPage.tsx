@@ -39,6 +39,9 @@ import {
   Video,
   Link as LinkIcon,
   Calendar,
+  Repeat,
+  Play,
+  StopCircle,
 } from "lucide-react";
 import api from "@/lib/api";
 
@@ -77,6 +80,8 @@ import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import OnboardingTemplateModal from "@/components/OnboardingTemplateModal";
 import ClientKeywordsManager from "@/components/ClientKeywordsManager";
+import WorkLogRecurringModal from "@/components/WorkLogRecurringModal";
+import type { WorkLogRecurringRuleForEdit } from "@/components/WorkLogRecurringModal";
 
 interface TrafficSourceSlice {
   name: string;
@@ -600,6 +605,11 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogLoading, setWorkLogLoading] = useState(false);
   const [workLogError, setWorkLogError] = useState<string | null>(null);
   const [workLogModalOpen, setWorkLogModalOpen] = useState(false);
+  const [showRecurringTaskModal, setShowRecurringTaskModal] = useState(false);
+  const [workLogRecurringRules, setWorkLogRecurringRules] = useState<Array<WorkLogRecurringRuleForEdit & { nextRunAt: string; isActive: boolean; frequency: string }>>([]);
+  const [workLogRecurringRulesOpen, setWorkLogRecurringRulesOpen] = useState(false);
+  const [editingWorkLogRecurringRule, setEditingWorkLogRecurringRule] = useState<WorkLogRecurringRuleForEdit | null>(null);
+  const [workLogRecurringRemoveConfirm, setWorkLogRecurringRemoveConfirm] = useState<{ isOpen: boolean; ruleId: string | null }>({ isOpen: false, ruleId: null });
   const [workLogModalMode, setWorkLogModalMode] = useState<"create" | "edit" | "view">("create");
   const [selectedWorkLogTaskId, setSelectedWorkLogTaskId] = useState<string | null>(null);
   type WorkLogAttachment = { type: string; value: string; name?: string };
@@ -640,7 +650,7 @@ const ClientDashboardPage: React.FC = () => {
   }, [workLogModalOpen]);
 
   useEffect(() => {
-    if (!workLogModalOpen) return;
+    if (!workLogModalOpen && !workLogRecurringRulesOpen) return;
     let cancelled = false;
     const q = assignableSearch.trim();
     setAssignableLoading(true);
@@ -656,7 +666,7 @@ const ClientDashboardPage: React.FC = () => {
         if (!cancelled) setAssignableLoading(false);
       });
     return () => { cancelled = true; };
-  }, [workLogModalOpen, assignableSearch]);
+  }, [workLogModalOpen, workLogRecurringRulesOpen, assignableSearch]);
 
   useEffect(() => {
     if (!assignToOpen) return;
@@ -925,11 +935,72 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [clientId]);
 
+  const fetchWorkLogRecurringRules = useCallback(() => {
+    if (!clientId) return;
+    api
+      .get("/tasks/recurring")
+      .then((res) => {
+        const list = Array.isArray(res.data) ? res.data : [];
+        setWorkLogRecurringRules(list.filter((r: { clientId?: string | null }) => r.clientId === clientId));
+      })
+      .catch(() => setWorkLogRecurringRules([]));
+  }, [clientId]);
+
+  const workLogRecurringFrequencyLabel = (freq: string) => {
+    switch (freq) {
+      case "WEEKLY": return "Weekly";
+      case "MONTHLY": return "Monthly";
+      case "QUARTERLY": return "Quarterly";
+      case "SEMIANNUAL": return "Every 6 months";
+      default: return freq || "—";
+    }
+  };
+
+  const handleWorkLogStopRecurrence = async (id: string) => {
+    try {
+      await api.patch(`/tasks/recurring/${id}/stop`);
+      toast.success("Recurrence stopped.");
+      fetchWorkLogRecurringRules();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast.error(err?.response?.data?.message || "Failed to stop recurrence");
+    }
+  };
+
+  const handleWorkLogResumeRecurrence = async (id: string) => {
+    try {
+      await api.patch(`/tasks/recurring/${id}/resume`);
+      toast.success("Recurrence resumed.");
+      fetchWorkLogRecurringRules();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast.error(err?.response?.data?.message || "Failed to resume recurrence");
+    }
+  };
+
+  const handleWorkLogRemoveRecurrence = (id: string) => {
+    setWorkLogRecurringRemoveConfirm({ isOpen: true, ruleId: id });
+  };
+
+  const confirmWorkLogRemoveRecurrence = async () => {
+    if (!workLogRecurringRemoveConfirm.ruleId) return;
+    try {
+      await api.delete(`/tasks/recurring/${workLogRecurringRemoveConfirm.ruleId}`);
+      toast.success("Recurring task removed.");
+      fetchWorkLogRecurringRules();
+      setWorkLogRecurringRemoveConfirm({ isOpen: false, ruleId: null });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast.error(err?.response?.data?.message || "Failed to remove recurring task");
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "dashboard" && dashboardSection === "worklog") {
       fetchWorkLog();
+      fetchWorkLogRecurringRules();
     }
-  }, [activeTab, dashboardSection, fetchWorkLog]);
+  }, [activeTab, dashboardSection, fetchWorkLog, fetchWorkLogRecurringRules]);
 
   const taskStatusLabel = (s: TaskStatus) => {
     switch (s) {
@@ -1088,7 +1159,7 @@ const ClientDashboardPage: React.FC = () => {
       assigneeId: workLogForm.assigneeId.trim() || undefined,
       status: workLogForm.status,
       clientId,
-      proof: proofItems,
+      proof: proofItems ?? [],
     };
 
     if (!titleValue) {
@@ -6428,12 +6499,107 @@ const ClientDashboardPage: React.FC = () => {
                                 >
                                   Add onboarding task
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWorkLogAddMenuOpen(false);
+                                    setEditingWorkLogRecurringRule(null);
+                                    setShowRecurringTaskModal(true);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                  Add a recurring task
+                                </button>
                               </div>
                             )}
                           </div>
                         )}
                       </div>
                     </div>
+                    {/* Recurring tasks (this client) */}
+                    {!reportOnly && (
+                      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setWorkLogRecurringRulesOpen((o) => !o)}
+                          className="w-full flex items-center gap-2 px-6 py-3 text-left hover:bg-gray-50 transition-colors"
+                        >
+                          <Repeat className="h-5 w-5 text-gray-500" />
+                          <span className="font-medium text-gray-900">
+                            Recurring tasks ({workLogRecurringRules.filter((r) => r.isActive).length} active)
+                          </span>
+                          <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${workLogRecurringRulesOpen ? "rotate-180" : ""}`} />
+                        </button>
+                        {workLogRecurringRulesOpen && (
+                          <div className="border-t border-gray-200 overflow-x-auto">
+                            {workLogRecurringRules.length === 0 ? (
+                              <div className="px-6 py-8 text-sm text-gray-500">
+                                No recurring tasks yet. Use “Add a recurring task” above to create one.
+                              </div>
+                            ) : (
+                              <table className="w-full">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurrence</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next due</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {workLogRecurringRules.map((r) => (
+                                    <tr key={r.id} className="hover:bg-gray-50">
+                                      <td className="px-6 py-4">
+                                        <div className="flex flex-col">
+                                          <div className="text-sm font-medium text-gray-900">{r.title}</div>
+                                          <div className="text-xs text-gray-500">{r.category ?? "—"}</div>
+                                        </div>
+                                      </td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workLogRecurringFrequencyLabel(r.frequency)}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        <div className="flex items-center">
+                                          <Calendar className="h-4 w-4 mr-1 text-gray-400" />
+                                          {format(new Date(r.nextRunAt), "MMM dd, yyyy")}
+                                        </div>
+                                      </td>
+                                      <td className="px-6 py-4 whitespace-nowrap">
+                                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${r.isActive ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
+                                          {r.isActive ? "Active" : "Stopped"}
+                                        </span>
+                                      </td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {r.assigneeId ? (assignableUsers.find((u) => u.id === r.assigneeId)?.name ?? assignableUsers.find((u) => u.id === r.assigneeId)?.email ?? "—") : "Unassigned"}
+                                      </td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                        <div className="flex items-center space-x-2">
+                                          {r.isActive ? (
+                                            <button type="button" onClick={() => handleWorkLogStopRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Stop recurrence">
+                                              <StopCircle className="h-4 w-4" />
+                                            </button>
+                                          ) : (
+                                            <button type="button" onClick={() => handleWorkLogResumeRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Resume">
+                                              <Play className="h-4 w-4" />
+                                            </button>
+                                          )}
+                                          <button type="button" onClick={() => { setEditingWorkLogRecurringRule(r); setShowRecurringTaskModal(true); }} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Edit">
+                                            <Edit className="h-4 w-4" />
+                                          </button>
+                                          <button type="button" onClick={() => handleWorkLogRemoveRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Remove">
+                                            <Trash2 className="h-4 w-4" />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/* Upcoming / Completed tabs */}
                     <div className="flex gap-1 border-b border-gray-200">
                       <button
@@ -6874,6 +7040,37 @@ const ClientDashboardPage: React.FC = () => {
                     fetchWorkLog();
                   }}
                   initialClientId={clientId ?? undefined}
+                />
+              )}
+
+              {/* Recurring task modal (from Work Log "Add a recurring task" / Edit in recurring table) */}
+              {!reportOnly && clientId && (
+                <WorkLogRecurringModal
+                  open={showRecurringTaskModal}
+                  setOpen={(open) => {
+                    setShowRecurringTaskModal(open);
+                    if (!open) setEditingWorkLogRecurringRule(null);
+                  }}
+                  onSaved={() => {
+                    fetchWorkLog();
+                    fetchWorkLogRecurringRules();
+                    setShowRecurringTaskModal(false);
+                    setEditingWorkLogRecurringRule(null);
+                  }}
+                  clientId={clientId}
+                  rule={editingWorkLogRecurringRule}
+                />
+              )}
+              {/* Confirm remove recurring task (Work Log section) */}
+              {!reportOnly && (
+                <ConfirmDialog
+                  isOpen={workLogRecurringRemoveConfirm.isOpen}
+                  onClose={() => setWorkLogRecurringRemoveConfirm({ isOpen: false, ruleId: null })}
+                  onConfirm={confirmWorkLogRemoveRecurrence}
+                  title="Remove recurring task"
+                  message="Are you sure you want to remove this recurring task? This cannot be undone."
+                  confirmText="Remove"
+                  variant="danger"
                 />
               )}
 
