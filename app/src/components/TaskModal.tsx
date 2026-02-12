@@ -4,11 +4,26 @@ import React, { useState, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send } from "lucide-react";
+import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { fetchClients, Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
 import ConfirmDialog from "@/components/ConfirmDialog";
+
+function getUploadFileUrl(url: string | undefined): string {
+    if (!url || typeof url !== "string") return url || "#";
+    const match = url.match(/\/uploads\/([^/?]+)/);
+    if (!match) return url;
+    const filename = match[1];
+    const apiBase = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "");
+    if (!apiBase) return url;
+    try {
+        const base = new URL(apiBase);
+        return `${base.origin}/api/upload/${encodeURIComponent(filename)}`;
+    } catch {
+        return url;
+    }
+}
 
 interface TaskModalProps {
     title: string;
@@ -113,21 +128,21 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             for (let i = 0; i < files.length; i++) {
                 formData.append("files", files[i]);
             }
-
-            // Content-Type will be set automatically by browser for FormData
-            const response = await api.post("/upload/multiple", formData);
-            
-            // Ensure response data is an array
+            const response = await api.post("/upload/worklog", formData);
             const uploadedFiles = Array.isArray(response.data) ? response.data : [response.data];
+            const items: ProofItem[] = (uploadedFiles as { type?: string; value: string; name?: string }[])
+                .filter((raw) => raw && typeof raw.value === "string")
+                .map((raw) => ({ type: (raw.type as "image" | "video" | "url") || "url", value: raw.value, name: raw.name }));
 
-            setProof((prev) => [...prev, ...uploadedFiles]);
-            toast.success("Files uploaded successfully!");
+            if (items.length > 0) {
+                setProof((prev) => [...prev, ...items]);
+                toast.success(items.length === 1 ? "File uploaded successfully!" : "Files uploaded successfully!");
+            }
         } catch (error: any) {
             console.error("Upload error:", error);
-            // Toast is already shown by API interceptor
         } finally {
             setUploading(false);
-            e.target.value = ""; // Reset input
+            e.target.value = "";
         }
     };
 
@@ -499,36 +514,36 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         </div>
                     </div>
 
-                    {/* Proof/Attachments Section */}
+                    {/* Proof/Attachments Section (same as Work Log) */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Proof / Attachments
-                        </label>
-                        
-                        {/* File Upload */}
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
+                        <input
+                            id="task-proof-file-input"
+                            type="file"
+                            multiple
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,image/*,video/*,.txt,.csv"
+                            className="sr-only"
+                            aria-label="Upload task attachment"
+                            onChange={handleFileUpload}
+                        />
                         <div className="mb-4">
-                            <label className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 transition-colors">
+                            <label
+                                htmlFor="task-proof-file-input"
+                                className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 transition-colors"
+                            >
                                 <div className="flex flex-col items-center">
-                                    <Upload className="h-6 w-6 text-gray-400 mb-2" />
+                                    {uploading ? (
+                                        <Loader2 className="h-6 w-6 text-gray-400 mb-2 animate-spin" />
+                                    ) : (
+                                        <Upload className="h-6 w-6 text-gray-400 mb-2" />
+                                    )}
                                     <span className="text-sm text-gray-600">
-                                        {uploading ? "Uploading..." : "Click to upload images or videos"}
+                                        {uploading ? "Uploading…" : "Click to upload files (PDF, Word, Excel, images, etc.)"}
                                     </span>
-                                    <span className="text-xs text-gray-500 mt-1">
-                                        PNG, JPG, GIF, MP4, WebM (max 50MB)
-                                    </span>
+                                    <span className="text-xs text-gray-500 mt-1">max 25MB per file</span>
                                 </div>
-                                <input
-                                    type="file"
-                                    className="hidden"
-                                    accept="image/*,video/*"
-                                    multiple
-                                    onChange={handleFileUpload}
-                                    disabled={uploading}
-                                />
                             </label>
                         </div>
-
-                        {/* URL Input */}
                         <div className="flex flex-col sm:flex-row gap-2 mb-4">
                             <select
                                 value={urlType}
@@ -549,15 +564,13 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <button
                                 type="button"
                                 onClick={handleAddUrl}
-                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center space-x-1 sm:w-auto"
+                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1 sm:w-auto"
                             >
                                 <Plus className="h-4 w-4" />
                                 <span>Add</span>
                             </button>
                         </div>
-
-                        {/* Proof Items Display */}
-                        {proof.length > 0 && (
+                        {proof.length > 0 ? (
                             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                                 {proof.map((item, index) => (
                                     <div
@@ -567,24 +580,39 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                         <div className="flex items-center space-x-3 flex-1 min-w-0">
                                             {item.type === "image" && <Image className="h-5 w-5 text-blue-600 flex-shrink-0" />}
                                             {item.type === "video" && <Video className="h-5 w-5 text-purple-600 flex-shrink-0" />}
-                                            {item.type === "url" && <LinkIcon className="h-5 w-5 text-green-600 flex-shrink-0" />}
+                                            {(item.type === "url" || !item.type) && <LinkIcon className="h-5 w-5 text-green-600 flex-shrink-0" />}
                                             <div className="flex-1 min-w-0">
                                                 <div className="text-sm font-medium text-gray-900 truncate">
-                                                    {item.name || item.value}
+                                                    {item.name || item.value || "Attachment"}
                                                 </div>
-                                                <div className="text-xs text-gray-500 truncate">{item.value}</div>
+                                                <a
+                                                    href={getUploadFileUrl(item.value)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        window.open(getUploadFileUrl(item.value), "_blank", "noopener,noreferrer");
+                                                        e.preventDefault();
+                                                    }}
+                                                    className="text-xs text-primary-600 hover:text-primary-800 truncate block"
+                                                >
+                                                    {item.name || item.value}
+                                                </a>
                                             </div>
                                         </div>
                                         <button
                                             type="button"
                                             onClick={() => handleRemoveProof(index)}
-                                            className="ml-2 p-1 text-red-600 hover:text-red-800 transition-colors flex-shrink-0"
+                                            className="ml-2 p-1 text-red-600 hover:text-red-800 flex-shrink-0"
+                                            title="Remove"
                                         >
                                             <X className="h-4 w-4" />
                                         </button>
                                     </div>
                                 ))}
                             </div>
+                        ) : (
+                            <p className="text-sm text-gray-500">No attachments</p>
                         )}
                     </div>
 
