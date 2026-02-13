@@ -604,7 +604,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     <div className="space-y-6">
       {/* Search / client selector - Semrush-style */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 border-b border-gray-200 bg-gray-50/50">
+        <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 border-b border-gray-200 bg-gradient-to-r from-primary-50/60 via-blue-50/40 to-indigo-50/40">
           <div ref={searchContainerRef} className="relative flex-1 max-w-xl">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
@@ -669,7 +670,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
         </div>
 
         {selectedClient && (
-          <div className="px-4 py-4 flex flex-wrap items-center justify-between gap-3 bg-white border-b border-gray-100">
+          <div className="px-4 py-4 flex flex-wrap items-center justify-between gap-3 bg-white border-b border-gray-100 border-l-4 border-l-primary-500">
             <h2 className="text-xl font-semibold text-gray-900">
               Domain Overview for {selectedClient.domain || selectedClient.name} /
             </h2>
@@ -684,8 +685,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       )}
 
       {!selectedClientId && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
-          <Search className="mx-auto h-12 w-12 text-gray-300" />
+        <div className="bg-amber-50/60 rounded-xl border border-amber-200/80 border-l-4 border-l-amber-500 shadow-sm p-12 text-center">
+          <Search className="mx-auto h-12 w-12 text-amber-400" />
           <p className="mt-4 text-gray-600">
             {searchQuery.trim()
               ? filteredClients.length === 0
@@ -697,7 +698,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       )}
 
       {selectedClientId && loading && !overview && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 flex items-center justify-center">
+        <div className="bg-primary-50/60 rounded-xl border border-primary-200/80 border-l-4 border-l-primary-500 shadow-sm p-12 flex items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
         </div>
       )}
@@ -1223,46 +1224,46 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
           {/* Section: Organic Research - match reference: header US, Top Organic Keywords, Key Topics, Keywords by Intent, Position Distribution, Competitors, Map */}
           <section>
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-2">
-              <h3 className="text-base font-semibold text-gray-900">Organic Research</h3>
-              <Globe className="h-4 w-4 text-gray-500" />
-              <span className="text-sm font-medium text-gray-600">US</span>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-primary-500">
+            <div className="px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 flex items-center gap-2">
+              <h3 className="text-base font-semibold text-white">Organic Research</h3>
+              <Globe className="h-4 w-4 text-white/90" />
+              <span className="text-sm font-medium text-white/90">US</span>
             </div>
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 bg-primary-50/20">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="overflow-hidden rounded-lg border border-gray-200">
-                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50 flex items-center justify-between">
+                <div className="overflow-hidden rounded-lg border border-gray-200 border-l-4 border-l-blue-500 bg-blue-50/40">
+                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-blue-50 to-white flex items-center justify-between">
                     Top Organic Keywords {(overview.topOrganicKeywords?.length ?? 0).toLocaleString()}
                   </h4>
                   <div className="overflow-x-auto max-h-72 overflow-y-auto">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
-                      <thead className="bg-gray-50 sticky top-0">
+                      <thead className="bg-gradient-to-r from-blue-100 to-indigo-100 sticky top-0">
                         <tr>
-                          <th className="px-4 py-2 text-left font-medium text-gray-700">Keyword</th>
-                          <th className="px-4 py-2 text-left font-medium text-gray-700">
+                          <th className="px-4 py-2 text-left font-medium text-gray-800">Keyword</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-800">
                             <span className="inline-flex items-center gap-0.5">Intent <ChevronUp className="h-3 w-3" /><ChevronDown className="h-3 w-3" /></span>
                           </th>
-                          <th className="px-4 py-2 text-left font-medium text-gray-700">Pos.</th>
-                          <th className="px-4 py-2 text-left font-medium text-gray-700">Volume</th>
-                          <th className="px-4 py-2 text-left font-medium text-gray-700">CPC (U...)</th>
-                          <th className="px-4 py-2 text-left font-medium text-gray-700">
+                          <th className="px-4 py-2 text-left font-medium text-gray-800">Pos.</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-800">Volume</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-800">CPC (U...)</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-800">
                             <span className="inline-flex items-center gap-0.5">Traffic <ChevronUp className="h-3 w-3" /><ChevronDown className="h-3 w-3" /></span>
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200">
+                      <tbody className="divide-y divide-gray-200 bg-white/80">
                         {(overview.topOrganicKeywords?.length ?? 0) === 0 ? (
                           <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-500">No keywords yet</td></tr>
                         ) : (
                           (overview.topOrganicKeywords ?? []).slice(0, 10).map((k, i) => (
-                            <tr key={i} className="hover:bg-gray-50">
+                            <tr key={i} className="hover:bg-blue-50/50">
                               <td className="px-4 py-2">
                                 <a
                                   href={k.url ? (k.url.startsWith("http") ? k.url : `https://${k.url}`) : `https://www.google.com/search?q=${encodeURIComponent(k.keyword)}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline truncate max-w-[200px]"
+                                  className="inline-flex items-center gap-1.5 text-blue-600 hover:text-indigo-700 hover:underline truncate max-w-[200px]"
                                   title={k.keyword}
                                 >
                                   <FileText className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
@@ -1283,13 +1284,13 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </table>
                   </div>
                   <div className="px-4 py-3 border-t border-gray-100">
-                    <button type="button" onClick={() => setTopKeywordsModalOpen(true)} className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
+                    <button type="button" onClick={() => setTopKeywordsModalOpen(true)} className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-medium hover:from-blue-700 hover:to-indigo-700 shadow-sm">
                       View details
                     </button>
                   </div>
                 </div>
-                <div className="rounded-lg border border-gray-200 overflow-hidden bg-gradient-to-b from-purple-50/50 to-white">
-                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50 flex items-center gap-2">
+                <div className="rounded-lg border border-gray-200 border-l-4 border-l-purple-500 overflow-hidden bg-gradient-to-b from-purple-50/60 to-white">
+                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-purple-50 to-white flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-purple-500" />
                     Key Topics
                   </h4>
@@ -1313,7 +1314,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     <button
                       type="button"
                       onClick={() => onGetTopics?.(overview.client?.domain ?? "")}
-                      className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700"
+                      className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 shadow-sm"
                     >
                       Get topics
                     </button>
@@ -1321,8 +1322,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                 </div>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="rounded-lg border border-gray-200 overflow-hidden">
-                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">Keywords by Intent</h4>
+                <div className="rounded-lg border border-gray-200 border-l-4 border-l-teal-500 overflow-hidden bg-teal-50/40">
+                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-teal-50 to-white">Keywords by Intent</h4>
                   <div className="p-4">
                     <div className="h-8 w-full flex rounded overflow-hidden mb-4">
                       {intentData.map((d, i) => (
@@ -1353,13 +1354,13 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </table>
                   </div>
                   <div className="px-4 py-3 border-t border-gray-100">
-                    <button type="button" onClick={() => setIntentModalOpen(true)} className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
+                    <button type="button" onClick={() => setIntentModalOpen(true)} className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 shadow-sm">
                       View details
                     </button>
                   </div>
                 </div>
-                <div className="rounded-lg border border-gray-200 overflow-hidden">
-                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">Organic Position Distribution</h4>
+                <div className="rounded-lg border border-gray-200 border-l-4 border-l-indigo-500 overflow-hidden bg-indigo-50/40">
+                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-indigo-50 to-white">Organic Position Distribution</h4>
                   <div className="p-4 min-h-[200px] h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={positionBarDataOrganic} margin={{ top: 8, right: 24, left: 0, bottom: 24 }}>
@@ -1374,27 +1375,27 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                 </div>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="rounded-lg border border-gray-200 overflow-hidden">
-                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">
+                <div className="rounded-lg border border-gray-200 border-l-4 border-l-amber-500 overflow-hidden bg-amber-50/40">
+                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-amber-50 to-white">
                     Main Organic Competitors {(overview.totalCompetitorsCount ?? overview.organicCompetitors?.length ?? 0).toLocaleString() || "—"}
                   </h4>
                   {(overview.organicCompetitors?.length ?? 0) > 0 ? (
                     <>
                       <div className="overflow-x-auto max-h-64 overflow-y-auto">
                         <table className="min-w-full divide-y divide-gray-200 text-sm">
-                          <thead className="bg-gray-50 sticky top-0">
+                          <thead className="bg-gradient-to-r from-amber-100 to-orange-100 sticky top-0">
                             <tr>
-                              <th className="px-4 py-2 text-left font-medium text-gray-700">Competitor</th>
-                              <th className="px-4 py-2 text-left font-medium text-gray-700">
-                                <span className="inline-flex items-center gap-1">Com. Level <Filter className="h-3 w-3 text-gray-400" /></span>
+                              <th className="px-4 py-2 text-left font-medium text-gray-800">Competitor</th>
+                              <th className="px-4 py-2 text-left font-medium text-gray-800">
+                                <span className="inline-flex items-center gap-1">Com. Level <Filter className="h-3 w-3 text-gray-500" /></span>
                               </th>
-                              <th className="px-4 py-2 text-right font-medium text-gray-700">Com. Keywords</th>
-                              <th className="px-4 py-2 text-right font-medium text-gray-700">SE Keywords</th>
+                              <th className="px-4 py-2 text-right font-medium text-gray-800">Com. Keywords</th>
+                              <th className="px-4 py-2 text-right font-medium text-gray-800">SE Keywords</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-200">
+                          <tbody className="divide-y divide-gray-200 bg-white/80">
                             {overview.organicCompetitors!.map((c, i) => (
-                              <tr key={i} className="hover:bg-gray-50">
+                              <tr key={i} className="hover:bg-amber-50/50">
                                 <td className="px-4 py-2">
                                   <a href={`https://${c.competitor}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
                                     {c.competitor}
@@ -1418,7 +1419,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                         </table>
                       </div>
                       <div className="px-4 py-3 border-t border-gray-100">
-                        <button type="button" onClick={() => setCompetitorsModalOpen(true)} className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
+                        <button type="button" onClick={() => setCompetitorsModalOpen(true)} className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 shadow-sm">
                           View details
                         </button>
                       </div>
@@ -1427,8 +1428,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     <div className="p-8 text-center text-gray-500 text-sm">Find your direct competitors</div>
                   )}
                 </div>
-                <div className="rounded-lg border border-gray-200 overflow-hidden">
-                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">Competitive Positioning Map</h4>
+                <div className="rounded-lg border border-gray-200 border-l-4 border-l-emerald-500 overflow-hidden bg-emerald-50/40">
+                  <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-emerald-50 to-white">Competitive Positioning Map</h4>
                   <div className="p-4">
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 mb-3 text-xs">
                       {competitorMapData.map((d, i) => (
@@ -1470,31 +1471,33 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
           {/* Section: Advertising Research - real data */}
           <section>
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <h3 className="px-6 py-4 border-b border-gray-200 text-base font-semibold text-gray-900">
-              Advertising Research
-            </h3>
-            <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-emerald-500">
+            <div className="px-6 py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600">
+              <h3 className="text-base font-semibold text-white">
+                Advertising Research
+              </h3>
+            </div>
+            <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6 bg-emerald-50/20">
+              <div className="rounded-lg border border-gray-200 border-l-4 border-l-cyan-500 overflow-hidden bg-cyan-50/40">
+                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-cyan-50 to-white">
                   Top Paid Keywords {(overview.topPaidKeywords?.length ?? 0).toLocaleString()}
                 </h4>
                 {(overview.topPaidKeywords?.length ?? 0) > 0 ? (
                   <>
                     <div className="overflow-x-auto max-h-64 overflow-y-auto">
                       <table className="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead className="bg-gray-50 sticky top-0">
+                        <thead className="bg-gradient-to-r from-cyan-100 to-teal-100 sticky top-0">
                           <tr>
-                            <th className="px-4 py-2 text-left font-medium text-gray-700">Keyword</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-700">Clicks</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-700">Impr.</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-700">Cost</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-700">CTR %</th>
+                            <th className="px-4 py-2 text-left font-medium text-gray-800">Keyword</th>
+                            <th className="px-4 py-2 text-right font-medium text-gray-800">Clicks</th>
+                            <th className="px-4 py-2 text-right font-medium text-gray-800">Impr.</th>
+                            <th className="px-4 py-2 text-right font-medium text-gray-800">Cost</th>
+                            <th className="px-4 py-2 text-right font-medium text-gray-800">CTR %</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200">
+                        <tbody className="divide-y divide-gray-200 bg-white/80">
                           {(overview.topPaidKeywords ?? []).slice(0, 10).map((k, i) => (
-                            <tr key={i} className="hover:bg-gray-50">
+                            <tr key={i} className="hover:bg-cyan-50/50">
                               <td className="px-4 py-2 text-gray-900 truncate max-w-[180px]">{k.keyword}</td>
                               <td className="px-4 py-2 text-right text-gray-600 tabular-nums">{k.clicks.toLocaleString()}</td>
                               <td className="px-4 py-2 text-right text-gray-600 tabular-nums">{k.impressions.toLocaleString()}</td>
@@ -1516,8 +1519,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   </div>
                 )}
               </div>
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">Paid Position Distribution</h4>
+              <div className="rounded-lg border border-gray-200 border-l-4 border-l-teal-500 overflow-hidden bg-teal-50/40">
+                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-teal-50 to-white">Paid Position Distribution</h4>
                 {overview.paidPositionDistribution && (overview.paidPositionDistribution.top4 + overview.paidPositionDistribution.top10 + overview.paidPositionDistribution.page2 + overview.paidPositionDistribution.pos21Plus) > 0 ? (
                   <div className="p-4 h-48">
                     <ResponsiveContainer width="100%" height="100%">
@@ -1542,25 +1545,25 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   <div className="p-8 text-center text-gray-500 text-sm">No paid position data yet</div>
                 )}
               </div>
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">
+              <div className="rounded-lg border border-gray-200 border-l-4 border-l-orange-500 overflow-hidden bg-orange-50/40">
+                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-orange-50 to-white">
                   Main Paid Competitors {(overview.totalPaidCompetitorsCount ?? overview.mainPaidCompetitors?.length ?? 0).toLocaleString() || "—"}
                 </h4>
                 {(overview.mainPaidCompetitors?.length ?? 0) > 0 ? (
                   <>
                     <div className="overflow-x-auto max-h-48 overflow-y-auto">
                       <table className="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead className="bg-gray-50 sticky top-0">
+                        <thead className="bg-gradient-to-r from-orange-100 to-amber-100 sticky top-0">
                           <tr>
-                            <th className="px-4 py-2 text-left font-medium text-gray-700">Competitor</th>
-                            <th className="px-4 py-2 text-left font-medium text-gray-700">Com. Level</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-700">Com. Keywords</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-700">SE Keywords</th>
+                            <th className="px-4 py-2 text-left font-medium text-gray-800">Competitor</th>
+                            <th className="px-4 py-2 text-left font-medium text-gray-800">Com. Level</th>
+                            <th className="px-4 py-2 text-right font-medium text-gray-800">Com. Keywords</th>
+                            <th className="px-4 py-2 text-right font-medium text-gray-800">SE Keywords</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200">
+                        <tbody className="divide-y divide-gray-200 bg-white/80">
                           {(overview.mainPaidCompetitors ?? []).slice(0, 8).map((c, i) => (
-                            <tr key={i} className="hover:bg-gray-50">
+                            <tr key={i} className="hover:bg-orange-50/50">
                               <td className="px-4 py-2">
                                 <a href={`https://${c.competitor}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
                                   {c.competitor}
@@ -1584,8 +1587,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   <div className="p-8 text-center text-gray-500 text-sm">No paid competitor data</div>
                 )}
               </div>
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">Paid Competitive Map</h4>
+              <div className="rounded-lg border border-gray-200 border-l-4 border-l-emerald-500 overflow-hidden bg-emerald-50/40">
+                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-emerald-50 to-white">Paid Competitive Map</h4>
                 <div className="p-4">
                   <div className="h-48 flex items-center justify-center">
                     {overview.metrics.paidSearch.keywords > 0 || (overview.topPaidKeywords?.length ?? 0) > 0 ? (
@@ -1600,8 +1603,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   </div>
                 </div>
               </div>
-              <div className="lg:col-span-2 rounded-lg border border-gray-200 overflow-hidden">
-                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gray-50">Sample Text Ads</h4>
+              <div className="lg:col-span-2 rounded-lg border border-gray-200 border-l-4 border-l-sky-500 overflow-hidden bg-sky-50/40">
+                <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-sky-50 to-white">Sample Text Ads</h4>
                 <div className="p-8 text-center text-gray-500 text-sm">
                   <p>Ad copy preview requires Google Ads connection.</p>
                   <p className="text-xs mt-1">Connect Google Ads in Client Settings to view your responsive search ads.</p>
@@ -1613,23 +1616,24 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
           {/* Section: Backlinks - match reference: filters, Export, Follow/Nofollow labels, Backlink Types bars, Top Anchors, Referring Domains, Title & URL */}
           <section>
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center gap-3">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Link2 className="h-5 w-5" />
+          <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white">
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Link2 className="h-5 w-5 text-white/90" />
                 Backlinks
               </h3>
-              <span className="inline-flex items-center gap-1.5 text-sm text-gray-500">
+              <span className="inline-flex items-center gap-1.5 text-sm text-white/85">
                 <Globe className="h-4 w-4" />
                 Worldwide
               </span>
-              <span className="inline-flex items-center gap-1.5 text-sm text-gray-500">
+              <span className="inline-flex items-center gap-1.5 text-sm text-white/85">
                 <Calendar className="h-4 w-4" />
                 All time
               </span>
             </div>
+            <div className="p-6 space-y-6 bg-violet-50/20">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 rounded-lg border border-gray-200 overflow-hidden">
+              <div className="lg:col-span-2 rounded-lg border border-gray-200 overflow-hidden border-l-4 border-l-violet-500 bg-white">
                 <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
                   <h4 className="font-medium text-gray-900">Backlinks</h4>
                   <button
@@ -1882,6 +1886,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   </tbody>
                 </table>
               </div>
+            </div>
             </div>
           </div>
         </section>

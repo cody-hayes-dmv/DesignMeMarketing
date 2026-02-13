@@ -120,20 +120,23 @@ const FinancialOverviewPage: React.FC = () => {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">Financial Overview</h2>
-        <button
-          onClick={handleRefresh}
-          disabled={mrrLoading || activityLoading}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${mrrLoading || activityLoading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+      <div className="mb-6 rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+        <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
+        <div className="flex items-center justify-between gap-4 px-6 py-4 bg-gradient-to-r from-primary-50/60 via-blue-50/40 to-indigo-50/40 border-l-4 border-l-primary-500">
+          <h2 className="text-xl font-semibold text-gray-900">Financial Overview</h2>
+          <button
+            onClick={handleRefresh}
+            disabled={mrrLoading || activityLoading}
+            className="inline-flex items-center gap-2 rounded-lg border border-primary-200 bg-white px-4 py-2 text-sm font-medium text-primary-700 shadow-sm hover:bg-primary-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${mrrLoading || activityLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {notConfigured && (
-        <div className="mb-6 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
+        <div className="mb-6 flex items-center gap-3 rounded-lg border border-amber-200 border-l-4 border-l-amber-500 bg-amber-50 p-4 text-amber-800">
           <AlertCircle className="h-5 w-5 shrink-0" />
           <p className="text-sm">
             Stripe is not configured. Set <code className="rounded bg-amber-100 px-1">STRIPE_SECRET_KEY</code>
@@ -143,11 +146,14 @@ const FinancialOverviewPage: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         {/* Left Panel - MRR Breakdown */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-2 text-lg font-semibold text-gray-900">Monthly Recurring Revenue Breakdown</h3>
-          <p className="mb-4 text-sm text-gray-500">
-            Platform subscriptions by tier • Managed services by package • Add-ons (extra slots, map packs, credit packs). Click a segment to see accounts.
-          </p>
+        <div className="rounded-xl border border-gray-200 border-l-4 border-l-primary-500 bg-white shadow-sm overflow-hidden">
+          <div className="px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600">
+            <h3 className="text-lg font-semibold text-white">Monthly Recurring Revenue Breakdown</h3>
+            <p className="mt-1 text-sm text-white/90">
+              Platform subscriptions by tier • Managed services by package • Add-ons. Click a segment to see accounts.
+            </p>
+          </div>
+          <div className="p-6 bg-primary-50/20">
 
           {mrrLoading ? (
             <div className="flex h-64 items-center justify-center">
@@ -155,9 +161,9 @@ const FinancialOverviewPage: React.FC = () => {
             </div>
           ) : mrrData?.configured && mrrData.segments.length > 0 ? (
             <>
-              <div className="mb-6 flex items-center justify-center rounded-xl bg-primary-600 py-6">
+              <div className="mb-6 flex items-center justify-center rounded-xl bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 py-6 shadow-md">
                 <div className="text-center">
-                  <p className="text-sm font-medium text-primary-100">Total MRR</p>
+                  <p className="text-sm font-medium text-white/90">Total MRR</p>
                   <p className="text-4xl font-bold tracking-tight text-white">{formatCurrency(mrrData.totalMrr)}</p>
                 </div>
               </div>
@@ -208,7 +214,7 @@ const FinancialOverviewPage: React.FC = () => {
                   <button
                     key={s.category}
                     onClick={() => setSelectedSegment(s)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-primary-200 bg-primary-50/60 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-primary-100 hover:border-primary-300"
                   >
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
                     {s.label}: {formatCurrency(s.mrr)}
@@ -217,21 +223,25 @@ const FinancialOverviewPage: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500">
-              <DollarSign className="mb-2 h-12 w-12 text-gray-300" />
+            <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500 rounded-lg border border-gray-200 border-l-4 border-l-amber-500 bg-amber-50/40">
+              <DollarSign className="mb-2 h-12 w-12 text-amber-400" />
               <p className="text-sm">
                 {mrrData?.configured ? "No subscription data yet." : mrrData?.message || "Configure Stripe to view MRR."}
               </p>
             </div>
           )}
+          </div>
         </div>
 
         {/* Right Panel - Subscription Activity */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-2 text-lg font-semibold text-gray-900">Subscription Activity (Last 30 Days)</h3>
-          <p className="mb-4 text-sm text-gray-500">
-            Green: new subscriptions / upgrades. Red: cancellations / downgrades.
-          </p>
+        <div className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 bg-white shadow-sm overflow-hidden">
+          <div className="px-6 py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600">
+            <h3 className="text-lg font-semibold text-white">Subscription Activity (Last 30 Days)</h3>
+            <p className="mt-1 text-sm text-white/90">
+              Green: new subscriptions / upgrades. Red: cancellations / downgrades.
+            </p>
+          </div>
+          <div className="p-6 bg-emerald-50/20">
 
           {activityLoading ? (
             <div className="flex h-64 items-center justify-center">
@@ -284,24 +294,24 @@ const FinancialOverviewPage: React.FC = () => {
                 )}
               </div>
 
-              <div className="mt-6 grid grid-cols-3 gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">New MRR added</p>
-                  <p className="mt-1 text-xl font-bold text-green-600">
+              <div className="mt-6 grid grid-cols-3 gap-4">
+                <div className="rounded-lg border border-gray-200 border-l-4 border-l-emerald-500 bg-emerald-50/50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-600">New MRR added</p>
+                  <p className="mt-1 text-xl font-bold text-emerald-600">
                     +{formatCurrency(activityData.newMrrAdded)}
                   </p>
                 </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Churned MRR</p>
+                <div className="rounded-lg border border-gray-200 border-l-4 border-l-red-500 bg-red-50/50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-600">Churned MRR</p>
                   <p className="mt-1 text-xl font-bold text-red-600">
                     -{formatCurrency(activityData.churnedMrr)}
                   </p>
                 </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Net change</p>
+                <div className={`rounded-lg border border-gray-200 border-l-4 p-4 ${activityData.netChange >= 0 ? "border-l-teal-500 bg-teal-50/50" : "border-l-amber-500 bg-amber-50/50"}`}>
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-600">Net change</p>
                   <p
                     className={`mt-1 text-xl font-bold ${
-                      activityData.netChange >= 0 ? "text-green-600" : "text-red-600"
+                      activityData.netChange >= 0 ? "text-teal-600" : "text-amber-600"
                     }`}
                   >
                     {activityData.netChange >= 0 ? "+" : ""}
@@ -311,35 +321,36 @@ const FinancialOverviewPage: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500">
-              <TrendingUp className="mb-2 h-12 w-12 text-gray-300" />
+            <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500 rounded-lg border border-gray-200 border-l-4 border-l-amber-500 bg-amber-50/40">
+              <TrendingUp className="mb-2 h-12 w-12 text-amber-400" />
               <p className="text-sm">{activityData?.message || "Configure Stripe to view activity."}</p>
             </div>
           )}
+          </div>
         </div>
       </div>
 
       {/* Modal: Accounts in selected segment */}
       {selectedSegment && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h4 className="font-semibold text-gray-900">
+          <div className="max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl border-l-4 border-l-primary-500">
+            <div className="flex items-center justify-between bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 px-6 py-4">
+              <h4 className="font-semibold text-white">
                 {selectedSegment.label} — {selectedSegment.count} account(s)
               </h4>
               <button
                 onClick={() => setSelectedSegment(null)}
-                className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                className="rounded-lg p-1 text-white/90 hover:bg-white/20 hover:text-white"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="max-h-96 overflow-y-auto p-6">
+            <div className="max-h-96 overflow-y-auto p-6 bg-gray-50/50">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase text-gray-500">
-                    <th className="pb-2">Account</th>
-                    <th className="pb-2 text-right">MRR</th>
+                  <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase text-gray-700 bg-gradient-to-r from-primary-50 to-blue-50">
+                    <th className="px-1 pb-2 pt-1">Account</th>
+                    <th className="px-1 pb-2 pt-1 text-right">MRR</th>
                   </tr>
                 </thead>
                 <tbody>

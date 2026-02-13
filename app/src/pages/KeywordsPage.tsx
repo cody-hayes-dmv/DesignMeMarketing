@@ -568,7 +568,7 @@ const KeywordsPage: React.FC = () => {
               type="button"
               onClick={handleExportKeywordResearchPdf}
               disabled={exportingPdf}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 shadow-sm"
             >
               {exportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               Export as PDF
@@ -576,8 +576,10 @@ const KeywordsPage: React.FC = () => {
           </div>
           <form
             onSubmit={handleResearchSubmit}
-            className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 space-y-6"
+            className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-primary-500"
           >
+            <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
+            <div className="p-8 space-y-6 bg-gradient-to-br from-primary-50/40 via-blue-50/30 to-indigo-50/30">
             {/* PDF export: show values as plain text so content is not clipped */}
             <div className="hidden pdf-export-metrics-values grid grid-cols-1 lg:grid-cols-5 gap-4 text-sm text-gray-900">
               <div className="lg:col-span-2">
@@ -664,7 +666,7 @@ const KeywordsPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={researchLoading}
-                className="inline-flex items-center rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60 shadow-md hover:shadow-lg transition-all duration-200"
+                className="inline-flex items-center rounded-xl bg-gradient-to-r from-primary-600 to-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60 shadow-md hover:shadow-lg transition-all duration-200"
               >
                 {researchLoading ? (
                   <>
@@ -679,20 +681,21 @@ const KeywordsPage: React.FC = () => {
                 )}
               </button>
             </div>
+            </div>
           </form>
 
           {researchError && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 flex items-start gap-2">
+            <div className="rounded-lg border border-amber-200 border-l-4 border-l-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-700 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 mt-0.5" />
               <span>{researchError}</span>
             </div>
           )}
 
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="flex flex-col gap-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white p-6 md:flex-row md:items-center md:justify-between">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-blue-500">
+            <div className="flex flex-col gap-4 border-b border-gray-200 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 p-6 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Keyword Suggestions</h2>
-                <p className="text-sm text-gray-500">
+                <h2 className="text-lg font-semibold text-white">Keyword Suggestions</h2>
+                <p className="text-sm text-white/90">
                   Select keywords and assign them to a client to start tracking their rankings.
                 </p>
               </div>
@@ -748,7 +751,7 @@ const KeywordsPage: React.FC = () => {
                   type="button"
                   onClick={handleAssignSelected}
                   disabled={assigningKeywords || Object.values(selectedSuggestions).every((value) => !value)}
-                  className="inline-flex h-11 items-center rounded-xl border-2 border-primary-300 bg-white px-5 text-sm font-semibold text-primary-700 hover:bg-primary-50 hover:border-primary-400 disabled:opacity-60 shadow-sm hover:shadow transition-all duration-200"
+                  className="inline-flex h-11 items-center rounded-xl border-2 border-white/80 bg-white px-5 text-sm font-semibold text-primary-700 hover:bg-white/95 disabled:opacity-60 shadow-sm transition-all duration-200"
                 >
                   {assigningKeywords ? (
                     <>
@@ -766,28 +769,28 @@ const KeywordsPage: React.FC = () => {
             </div>
 
             {assignMessage && (
-              <div className="mx-6 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+              <div className="mx-6 mt-4 rounded-lg border border-blue-200 border-l-4 border-l-blue-500 bg-blue-50 px-4 py-3 text-sm text-blue-700">
                 {assignMessage}
               </div>
             )}
 
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                <thead className="bg-gradient-to-r from-primary-100 via-blue-100 to-indigo-100">
                   <tr>
                     <th className="px-6 py-4">
                       <span className="sr-only">Select</span>
                     </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
                       Keyword
                     </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
                       Search volume
                     </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
                       CPC (USD)
                     </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
                       Difficulty
                     </th>
                     <th className="px-6 py-4">
@@ -813,7 +816,7 @@ const KeywordsPage: React.FC = () => {
                     </tr>
                   ) : (
                     researchResults.map((result) => (
-                      <tr key={result.keyword} className="hover:bg-gray-50 transition-colors duration-150">
+                      <tr key={result.keyword} className="hover:bg-blue-50/50 transition-colors duration-150">
                         <td className="px-6 py-4">
                           <input
                             type="checkbox"
@@ -844,7 +847,7 @@ const KeywordsPage: React.FC = () => {
                             type="button"
                             onClick={() => handleAssignSingle(result)}
                             disabled={assigningKeywords}
-                            className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 transition-all duration-150 shadow-sm hover:shadow"
+                            className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-60 transition-all duration-150 shadow-sm"
                           >
                             Track
                           </button>
@@ -858,15 +861,18 @@ const KeywordsPage: React.FC = () => {
 
             {/* Keyword Detail (4 cards) - screenshot 1: Volume & KD, Global Volume, Intent & Trend, CPC & Competitive Density */}
             {researchResults.length > 0 && (keywordDetail || keywordDetailLoading) && (
-              <div className="border-t border-gray-200 p-6 bg-white">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Keyword: {researchSeed || keywordDetail?.keyword}</h3>
+              <div className="border-t border-gray-200 p-6 bg-gradient-to-r from-blue-50/40 to-indigo-50/30">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="w-1 h-6 rounded-full bg-gradient-to-b from-primary-500 to-indigo-500" aria-hidden />
+                  Keyword: {researchSeed || keywordDetail?.keyword}
+                </h3>
                 {keywordDetailLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
                   </div>
                 ) : keywordDetail ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="bg-blue-50/40 rounded-xl border border-gray-200 border-l-4 border-l-blue-500 p-5 shadow-sm">
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Volume & Keyword Difficulty</p>
                       <p className="mt-2 text-2xl font-bold text-gray-900 inline-flex items-center gap-1.5">
                         {formatCompact(keywordDetail.searchVolume)}
@@ -892,7 +898,7 @@ const KeywordsPage: React.FC = () => {
                         );
                       })()}
                     </div>
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="bg-teal-50/40 rounded-xl border border-gray-200 border-l-4 border-l-teal-500 p-5 shadow-sm">
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Global Volume</p>
                       <p className="mt-2 text-2xl font-bold text-gray-900">{formatCompact(keywordDetail.globalVolume)}</p>
                       <div className="mt-3 space-y-2">
@@ -927,7 +933,7 @@ const KeywordsPage: React.FC = () => {
                         })()}
                       </div>
                     </div>
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="bg-amber-50/40 rounded-xl border border-gray-200 border-l-4 border-l-amber-500 p-5 shadow-sm">
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Intent & Trend</p>
                       <span className="mt-2 inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-medium">{keywordDetail.intent}</span>
                       <div className="mt-3 h-24">
@@ -945,7 +951,7 @@ const KeywordsPage: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="bg-indigo-50/40 rounded-xl border border-gray-200 border-l-4 border-l-indigo-500 p-5 shadow-sm">
                       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">CPC & Competitive Density</p>
                       <p className="mt-2 text-2xl font-bold text-gray-900">${keywordDetail.cpc?.toFixed(2) ?? "0.00"}</p>
                       <p className="mt-1 text-sm text-gray-600">Competitive density: {keywordDetail.competition?.toFixed(2) ?? "—"}</p>
@@ -960,10 +966,13 @@ const KeywordsPage: React.FC = () => {
 
             {/* Keyword Ideas — all data from DataForSEO (variations, questions, strategy) */}
             {researchResults.length > 0 && (
-              <div className="border-t border-gray-200 p-6 bg-white">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Keyword Ideas</h3>
+              <div className="border-t border-gray-200 p-6 bg-gradient-to-r from-violet-50/30 via-purple-50/20 to-fuchsia-50/30">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="w-1 h-6 rounded-full bg-gradient-to-b from-violet-500 to-fuchsia-500" aria-hidden />
+                  Keyword Ideas
+                </h3>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="rounded-xl border border-gray-200 p-5 shadow-sm bg-white">
+                  <div className="rounded-xl border border-gray-200 border-l-4 border-l-blue-500 p-5 shadow-sm bg-blue-50/40">
                     <h4 className="font-semibold text-gray-900">Keyword Variations</h4>
                     {(() => {
                       const variations = keywordIdeas.variations;
@@ -1000,14 +1009,14 @@ const KeywordsPage: React.FC = () => {
                               </tbody>
                             </table>
                           </div>
-                          <button type="button" onClick={() => setKeywordIdeasModal({ type: "variations", items: variations })} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+                          <button type="button" onClick={() => setKeywordIdeasModal({ type: "variations", items: variations })} className="mt-3 w-full rounded-lg border border-blue-200 bg-blue-100 py-2 text-sm font-medium text-blue-800 hover:bg-blue-200 transition-colors">
                             View all {variations.length.toLocaleString()} keywords
                           </button>
                         </>
                       );
                     })()}
                   </div>
-                  <div className="rounded-xl border border-gray-200 p-5 shadow-sm bg-white">
+                  <div className="rounded-xl border border-gray-200 border-l-4 border-l-purple-500 p-5 shadow-sm bg-purple-50/40">
                     <h4 className="font-semibold text-gray-900">Questions</h4>
                     {(() => {
                       const questions = keywordIdeas.questions;
@@ -1044,14 +1053,14 @@ const KeywordsPage: React.FC = () => {
                               </tbody>
                             </table>
                           </div>
-                          <button type="button" onClick={() => setKeywordIdeasModal({ type: "questions", items: questions })} className="mt-3 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+                          <button type="button" onClick={() => setKeywordIdeasModal({ type: "questions", items: questions })} className="mt-3 w-full rounded-lg border border-purple-200 bg-purple-100 py-2 text-sm font-medium text-purple-800 hover:bg-purple-200 transition-colors">
                             View all {questions.length.toLocaleString()} keywords
                           </button>
                         </>
                       );
                     })()}
                   </div>
-                  <div className="rounded-xl border border-gray-200 p-5 shadow-sm bg-white">
+                  <div className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 p-5 shadow-sm bg-emerald-50/40">
                     <h4 className="font-semibold text-gray-900">Keyword Strategy</h4>
                     <p className="mt-1 text-sm text-gray-600">Get topics, pillar and subpages <strong>automatically</strong></p>
                     <div className="mt-4 flex flex-col items-center">
@@ -1073,7 +1082,7 @@ const KeywordsPage: React.FC = () => {
                         })}
                       </div>
                     </div>
-                    <button type="button" className="mt-4 w-full rounded-lg border border-gray-200 bg-gray-100 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+                    <button type="button" className="mt-4 w-full rounded-lg border border-emerald-200 bg-emerald-100 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-200 transition-colors">
                       View all clusters
                     </button>
                   </div>
@@ -1146,9 +1155,12 @@ const KeywordsPage: React.FC = () => {
 
             {/* SERP Analysis - screenshot 3: Domain/URL tabs, Results, SERP Features, pagination, expandable sections, Export */}
             {researchResults.length > 0 && (serpAnalysis || serpAnalysisLoading) && (
-              <div className="border-t border-gray-200 p-6 bg-white">
+              <div className="border-t border-gray-200 p-6 bg-gradient-to-r from-slate-50/60 via-gray-50/40 to-slate-50/60">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">SERP Analysis</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <span className="w-1 h-6 rounded-full bg-gradient-to-b from-slate-500 to-gray-600" aria-hidden />
+                    SERP Analysis
+                  </h3>
                   <div className="flex items-center gap-2 flex-wrap">
                     <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
                       <button type="button" onClick={() => setSerpViewMode("domain")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${serpViewMode === "domain" ? "bg-primary-600 text-white" : "text-gray-700 hover:bg-gray-200"}`}>Domain</button>
