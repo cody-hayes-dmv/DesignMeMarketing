@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X, Info } from "lucide-react";
+import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X, Info, Download } from "lucide-react";
 import { format } from "date-fns";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
@@ -244,6 +244,52 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     return current - previous;
   };
 
+  const serpFeatureLabels: Record<string, string> = {
+    local_pack: "Google Maps",
+    featured_snippet: "Featured Snippet",
+    video: "Video",
+    images: "Google Images",
+    people_also_ask: "People Also Ask",
+    related_searches: "Related Searches",
+    knowledge_graph: "Knowledge Graph",
+    shopping: "Shopping",
+    organic: "Organic",
+  };
+
+  const escapeCsvCell = (value: string): string => {
+    const s = String(value ?? "");
+    if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const handleExportCsv = useCallback(() => {
+    const headers = ["Keyword", "Location", "Date Added", "Google", "Google Change", "Google SERP Features", "Google URL"];
+    const rows = sortedKeywords.map((kw) => {
+      const change = getPositionChange(kw.googlePosition, kw.previousPosition);
+      const changeStr = change === null ? "" : String(change);
+      const serpTypes = toStringArray(kw.serpItemTypes);
+      const serpStr = serpTypes.map((t) => serpFeatureLabels[t] || t).filter(Boolean).join(", ");
+      return [
+        escapeCsvCell(kw.keyword),
+        escapeCsvCell(kw.locationName || "United States"),
+        kw.createdAt ? format(new Date(kw.createdAt), "MMM d, yyyy") : "",
+        kw.googlePosition != null ? String(kw.googlePosition) : "",
+        changeStr,
+        escapeCsvCell(serpStr),
+        escapeCsvCell(kw.googleUrl || ""),
+      ];
+    });
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `target-keywords-${clientId || "export"}-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Target keywords exported to CSV");
+  }, [sortedKeywords, clientId]);
+
   const getSERPFeaturesIcons = (serpItemTypes: string[] | null, isRanking: boolean) => {
     if (!serpItemTypes || serpItemTypes.length === 0) return null;
     const items = toStringArray(serpItemTypes);
@@ -344,6 +390,18 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
           </div>
           <div className="flex items-center space-x-2">
             {headerActions}
+            {keywords.length > 0 && (
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                data-pdf-hide="true"
+                className="bg-primary-600 text-white px-3 py-1.5 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2 text-sm"
+                title="Export target keywords to CSV"
+              >
+                <Download className="h-3 w-3" />
+                <span>Export</span>
+              </button>
+            )}
             {enableRefresh && user?.role === "SUPER_ADMIN" && !isReadOnly && (
               <button
                 type="button"
