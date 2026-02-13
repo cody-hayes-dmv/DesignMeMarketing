@@ -12,17 +12,31 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+/**
+ * Sanitize filename for URL-safe storage and downloads (no spaces or problematic chars).
+ * Replaces spaces and other unsafe characters with hyphens so links work on all platforms.
+ */
+function sanitizeFilenameForUrl(name: string): string {
+  return name
+    .replace(/\s+/g, "-")
+    .replace(/[#%?&=[\]{}|\\<>"']/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "file";
+}
+
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    // Generate unique filename: timestamp-random-originalname
+    // Generate unique filename: timestamp-random-sanitized-name (no spaces for URL-safe downloads)
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname);
-    const name = path.basename(file.originalname, ext);
-    cb(null, `${name}-${uniqueSuffix}${ext}`);
+    const baseName = path.basename(file.originalname, ext);
+    const safeName = sanitizeFilenameForUrl(baseName);
+    cb(null, `${safeName}-${uniqueSuffix}${ext}`);
   },
 });
 

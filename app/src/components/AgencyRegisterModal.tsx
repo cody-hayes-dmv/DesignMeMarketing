@@ -231,13 +231,13 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col my-8">
-        <div className="flex justify-between items-center p-6 border-b border-gray-200 shrink-0">
-          <h2 className="text-xl font-bold text-gray-900">Sign up as an agency</h2>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col my-8 overflow-hidden border-l-4 border-l-primary-500">
+        <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 shrink-0">
+          <h2 className="text-xl font-bold text-white">Sign up as an agency</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg"
+            className="p-2 text-white/90 hover:bg-white/20 rounded-lg transition-colors"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -245,9 +245,9 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
-          <div className="p-6 overflow-y-auto space-y-6 flex-1">
+          <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-gradient-to-b from-blue-50/30 to-white">
             {/* Section A: Agency Information */}
-            <section>
+            <section className="rounded-xl border border-gray-200 border-l-4 border-l-blue-500 bg-blue-50/40 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">
                 AGENCY INFORMATION (Required)
               </h3>
@@ -334,7 +334,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
             </section>
 
             {/* Section B: Primary Contact + Password */}
-            <section>
+            <section className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 bg-emerald-50/40 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">
                 PRIMARY CONTACT (Required)
               </h3>
@@ -479,7 +479,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
             </section>
 
             {/* Section C: Business Address */}
-            <section>
+            <section className="rounded-xl border border-gray-200 border-l-4 border-l-amber-500 bg-amber-50/30 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">
                 BUSINESS ADDRESS (Optional)
               </h3>
@@ -553,7 +553,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
             </section>
 
             {/* Section D: Subdomain */}
-            <section>
+            <section className="rounded-xl border border-gray-200 border-l-4 border-l-teal-500 bg-teal-50/30 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">
                 WHITE LABEL SUBDOMAIN (Optional)
               </h3>
@@ -576,9 +576,9 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
             </section>
 
             {/* Section E: Payment – required to activate 7-day free trial (reporting only); auto-bills after trial */}
-            <section>
+            <section className="rounded-xl border border-gray-200 border-l-4 border-l-violet-500 bg-violet-50/30 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <CreditCard className="h-4 w-4" />
+                <CreditCard className="h-4 w-4 text-violet-600" />
                 PAYMENT (Required to activate account)
               </h3>
               <p className="text-sm text-gray-600 mb-3">
@@ -612,7 +612,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
             </section>
 
             {/* Section F: Additional Questions */}
-            <section>
+            <section className="rounded-xl border border-gray-200 border-l-4 border-l-sky-500 bg-sky-50/30 p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">
                 ADDITIONAL QUESTIONS (Optional)
               </h3>
@@ -844,11 +844,11 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
             </section>
           </div>
 
-          <div className="flex gap-3 p-6 border-t border-gray-200 shrink-0">
+          <div className="flex gap-3 p-6 border-t border-gray-200 shrink-0 bg-gray-50/50">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              className="flex-1 px-4 py-2.5 border-2 border-amber-300 rounded-lg text-amber-800 font-medium hover:bg-amber-50 transition-colors"
             >
               Cancel
             </button>
@@ -866,7 +866,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
                 !!setupIntentError ||
                 !stripePk
               }
-              className="flex-1 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white rounded-lg font-semibold hover:from-primary-700 hover:via-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all"
             >
               {submitting ? "Creating account..." : "Create agency account"}
             </button>

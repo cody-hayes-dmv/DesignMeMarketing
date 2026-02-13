@@ -107,12 +107,13 @@ const RegisterPage = () => {
 
   if (registrationSuccess) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
+      <div className="min-h-screen bg-gradient-to-br from-primary-50 via-blue-50 to-indigo-50 flex items-center justify-center px-4">
         <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-l-4 border-l-emerald-500 p-8 text-center">
+            <div className="h-1.5 w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 mb-6" aria-hidden />
             <div className="flex justify-center mb-6">
-              <div className="bg-secondary-100 w-16 h-16 rounded-full flex items-center justify-center">
-                <CheckCircle className="h-8 w-8 text-secondary-600" />
+              <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-emerald-600" />
               </div>
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-4">
@@ -125,7 +126,7 @@ const RegisterPage = () => {
             </p>
             <Link
               to="/login"
-              className="inline-flex items-center space-x-2 text-primary-600 hover:text-primary-700 font-medium transition-colors"
+              className="inline-flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-semibold transition-colors"
             >
               <span>Back to Sign In</span>
             </Link>
@@ -137,12 +138,13 @@ const RegisterPage = () => {
 
   if (agencySignupComplete) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
+      <div className="min-h-screen bg-gradient-to-br from-primary-50 via-blue-50 to-indigo-50 flex items-center justify-center px-4">
         <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-l-4 border-l-violet-500 p-8 text-center">
+            <div className="h-1.5 w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 mb-6" aria-hidden />
             <div className="flex justify-center mb-6">
-              <div className="bg-secondary-100 w-16 h-16 rounded-full flex items-center justify-center">
-                <CheckCircle className="h-8 w-8 text-secondary-600" />
+              <div className="bg-violet-100 w-16 h-16 rounded-full flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-violet-600" />
               </div>
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-4">
@@ -153,7 +155,7 @@ const RegisterPage = () => {
             </p>
             <Link
               to="/login"
-              className="inline-flex items-center space-x-2 text-primary-600 hover:text-primary-700 font-medium transition-colors"
+              className="inline-flex items-center space-x-2 text-violet-600 hover:text-violet-700 font-semibold transition-colors"
             >
               <span>Back to Sign In</span>
             </Link>
@@ -164,9 +166,11 @@ const RegisterPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-blue-50 to-indigo-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-l-4 border-l-primary-500">
+          <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
+          <div className="p-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
               <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
@@ -195,7 +199,7 @@ const RegisterPage = () => {
                   name="name"
                   value={formData.name}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 focus:border-blue-500 transition-colors"
                   placeholder="Enter your full name"
                   required
                 />
@@ -217,7 +221,7 @@ const RegisterPage = () => {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 focus:border-blue-500 transition-colors"
                   placeholder="Enter your email"
                   required
                 />
@@ -239,7 +243,7 @@ const RegisterPage = () => {
                   name="password"
                   value={formData.password}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 focus:border-blue-500 transition-colors"
                   placeholder="Create a password"
                   required
                 />
@@ -258,7 +262,7 @@ const RegisterPage = () => {
               {formData.password && (
                 <p
                   className={`text-xs mt-1 ${
-                    isPasswordValid ? "text-secondary-600" : "text-red-600"
+                    isPasswordValid ? "text-emerald-600" : "text-red-600"
                   }`}
                 >
                   Password must be at least 6 characters
@@ -281,7 +285,7 @@ const RegisterPage = () => {
                   name="confirmPassword"
                   value={formData.confirmPassword}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 focus:border-blue-500 transition-colors"
                   placeholder="Confirm your password"
                   required
                 />
@@ -300,7 +304,7 @@ const RegisterPage = () => {
               {formData.confirmPassword && (
                 <p
                   className={`text-xs mt-1 ${
-                    passwordsMatch ? "text-secondary-600" : "text-red-600"
+                    passwordsMatch ? "text-emerald-600" : "text-red-600"
                   }`}
                 >
                   {passwordsMatch
@@ -311,7 +315,7 @@ const RegisterPage = () => {
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <div className="bg-red-50 border border-red-200 border-l-4 border-l-red-500 text-red-700 px-4 py-3 rounded-lg">
                 {error}
               </div>
             )}
@@ -319,7 +323,7 @@ const RegisterPage = () => {
             <button
               type="submit"
               disabled={loading || !passwordsMatch || !isPasswordValid}
-              className="w-full bg-primary-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98]"
+              className="w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-primary-700 hover:via-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98] shadow-md"
             >
               {loading ? (
                 <div className="flex items-center justify-center space-x-2">
@@ -336,14 +340,14 @@ const RegisterPage = () => {
                 <div className="w-full border-t border-gray-200" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-3 bg-white text-gray-500">or</span>
+                <span className="px-3 bg-white text-gray-500 font-medium">or</span>
               </div>
             </div>
 
             <button
               type="button"
               onClick={() => setAgencyModalOpen(true)}
-              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold border-2 border-primary-600 text-primary-600 hover:bg-primary-50 transition-colors"
+              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition-colors shadow-sm"
             >
               <Building2 className="h-5 w-5" />
               Sign up as an agency
@@ -361,7 +365,7 @@ const RegisterPage = () => {
               Already have an account?{" "}
               <Link
                 to="/login"
-                className="text-primary-600 hover:text-primary-700 font-medium transition-colors"
+                className="text-blue-600 hover:text-blue-700 font-semibold transition-colors underline decoration-blue-500/50"
               >
                 Sign in here
               </Link>
@@ -371,14 +375,15 @@ const RegisterPage = () => {
           <div className="mt-6 pt-6 border-t border-gray-200 text-center">
             <p className="text-xs text-gray-500">
               By creating an account, you agree to our{" "}
-              <a href="#" className="text-primary-600 hover:text-primary-700">
+              <a href="#" className="text-blue-600 hover:text-blue-700 font-medium">
                 Terms of Service
               </a>{" "}
               and{" "}
-              <a href="#" className="text-primary-600 hover:text-primary-700">
+              <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">
                 Privacy Policy
               </a>
             </p>
+          </div>
           </div>
         </div>
       </div>

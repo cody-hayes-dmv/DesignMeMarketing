@@ -60,9 +60,11 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-blue-50 to-indigo-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden border-l-4 border-l-primary-500">
+          <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
+          <div className="p-8 pt-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
               <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
@@ -91,7 +93,7 @@ const LoginPage = () => {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 focus:border-blue-500 transition-colors"
                   placeholder="Enter your email"
                   required
                 />
@@ -113,7 +115,7 @@ const LoginPage = () => {
                   name="password"
                   value={formData.password}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 focus:border-blue-500 transition-colors"
                   placeholder="Enter your password"
                   required
                 />
@@ -132,7 +134,7 @@ const LoginPage = () => {
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <div className="bg-red-50 border border-red-200 border-l-4 border-l-red-500 text-red-700 px-4 py-3 rounded-lg">
                 {error}
               </div>
             )}
@@ -140,7 +142,7 @@ const LoginPage = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-primary-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98]"
+              className="w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-primary-700 hover:via-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98] shadow-md"
             >
               {loading ? (
                 <div className="flex items-center justify-center space-x-2">
@@ -158,7 +160,7 @@ const LoginPage = () => {
               Don't have an account?{" "}
               <Link
                 to="/register"
-                className="text-primary-600 hover:text-primary-700 font-medium transition-colors"
+                className="text-blue-600 hover:text-blue-700 font-semibold transition-colors underline decoration-blue-500/50"
                   state={location.state}
               >
                 Sign up here
@@ -169,10 +171,11 @@ const LoginPage = () => {
           <div className="mt-4 text-center">
             <Link
               to="/forgot-password"
-              className="text-sm text-gray-500 hover:text-primary-600 transition-colors"
+              className="text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors"
             >
               Forgot your password?
             </Link>
+          </div>
           </div>
         </div>
       </div>
