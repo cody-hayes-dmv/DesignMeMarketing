@@ -44,7 +44,7 @@ import { fetchClients } from "@/store/slices/clientSlice";
 import { ROLE, Task } from "@/utils/types";
 import toast from "react-hot-toast";
 import ConfirmDialog from "../components/ConfirmDialog";
-import api from "@/lib/api";
+import api, { getUploadFileUrl } from "@/lib/api";
 
 const TasksPage = () => {
     const dispatch = useDispatch();
@@ -753,7 +753,7 @@ const TasksPage = () => {
                                                             {proofList.map((item: any, idx: number) => (
                                                             <a
                                                                 key={idx}
-                                                                href={item.value}
+                                                                href={getUploadFileUrl(item.value)}
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
                                                                 className="flex items-center space-x-1 text-xs text-primary-600 hover:text-primary-800"

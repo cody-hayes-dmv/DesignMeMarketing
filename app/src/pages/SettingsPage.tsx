@@ -46,12 +46,14 @@ const SettingsPage = () => {
   });
   const [isBusinessTier, setIsBusinessTier] = useState(false);
 
-  const [notificationSettings, setNotificationSettings] = useState({
+  const defaults = {
     emailReports: true,
     rankingAlerts: true,
     weeklyDigest: false,
     teamUpdates: true,
-  });
+  };
+  const [notificationSettings, setNotificationSettings] = useState(defaults);
+  const [notificationSaving, setNotificationSaving] = useState(false);
 
   // Templates (onboarding)
   type TemplateTask = { id?: string; title: string; description: string | null; category: string | null; priority: string | null; estimatedHours: number | null; order: number };
@@ -100,6 +102,18 @@ const SettingsPage = () => {
       }));
     }
   }, [user]);
+
+  // Sync notification settings from user (from GET /auth/me)
+  useEffect(() => {
+    if (user?.notificationPreferences) {
+      setNotificationSettings({
+        emailReports: user.notificationPreferences.emailReports ?? true,
+        rankingAlerts: user.notificationPreferences.rankingAlerts ?? true,
+        weeklyDigest: user.notificationPreferences.weeklyDigest ?? false,
+        teamUpdates: user.notificationPreferences.teamUpdates ?? true,
+      });
+    }
+  }, [user?.notificationPreferences]);
 
   // Fetch manageable templates when Templates tab is active
   const fetchManageableTemplates = async () => {
@@ -700,16 +714,24 @@ const SettingsPage = () => {
                       </p>
                     </div>
                     <button
-                      onClick={() => {
-                        setNotificationSettings({
-                          ...notificationSettings,
-                          [key]: !value,
-                        });
-                        // TODO: Save to backend when endpoint is available
-                        toast.success("Notification preference updated");
+                      disabled={notificationSaving}
+                      onClick={async () => {
+                        const next = { ...notificationSettings, [key]: !value };
+                        setNotificationSettings(next);
+                        setNotificationSaving(true);
+                        try {
+                          await api.patch("/auth/me/notification-settings", next);
+                          toast.success("Notification preference saved");
+                          dispatch(checkAuth() as any);
+                        } catch (e: any) {
+                          setNotificationSettings(notificationSettings);
+                          toast.error(e?.response?.data?.message || "Failed to save");
+                        } finally {
+                          setNotificationSaving(false);
+                        }
                       }}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${value ? "bg-primary-600" : "bg-gray-200"
-                        }`}
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
                     >
                       <span
                         className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${value ? "translate-x-6" : "translate-x-1"

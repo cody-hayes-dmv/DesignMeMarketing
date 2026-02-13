@@ -197,6 +197,16 @@ router.get("/me", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const prefs = user.notificationPreferences as Record<string, boolean> | null;
+    const notificationPreferences = prefs && typeof prefs === "object"
+      ? {
+        emailReports: prefs.emailReports ?? true,
+        rankingAlerts: prefs.rankingAlerts ?? true,
+        weeklyDigest: prefs.weeklyDigest ?? false,
+        teamUpdates: prefs.teamUpdates ?? true,
+      }
+      : { emailReports: true, rankingAlerts: true, weeklyDigest: false, teamUpdates: true };
+
     res.json({
       id: user.id,
       email: user.email,
@@ -204,6 +214,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       role: user.role,
       verified: user.verified,
       invited: user.invited,
+      notificationPreferences,
       clientAccess: {
         clients: user.clientUsers.map((c) => ({
           clientId: c.clientId,
@@ -215,6 +226,43 @@ router.get("/me", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Get user error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+const notificationSettingsSchema = z.object({
+  emailReports: z.boolean().optional(),
+  rankingAlerts: z.boolean().optional(),
+  weeklyDigest: z.boolean().optional(),
+  teamUpdates: z.boolean().optional(),
+});
+
+// Update current user notification preferences
+router.patch("/me/notification-settings", authenticateToken, async (req, res) => {
+  try {
+    const body = notificationSettingsSchema.safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ message: "Invalid notification settings", errors: body.error.flatten() });
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { notificationPreferences: true },
+    });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const current = (user.notificationPreferences as Record<string, boolean>) || {};
+    const next = {
+      emailReports: body.data.emailReports ?? current.emailReports ?? true,
+      rankingAlerts: body.data.rankingAlerts ?? current.rankingAlerts ?? true,
+      weeklyDigest: body.data.weeklyDigest ?? current.weeklyDigest ?? false,
+      teamUpdates: body.data.teamUpdates ?? current.teamUpdates ?? true,
+    };
+    await prisma.user.update({
+      where: { id: req.user.userId },
+      data: { notificationPreferences: next },
+    });
+    return res.json({ notificationPreferences: next });
+  } catch (error) {
+    console.error("Update notification settings error:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 });
 

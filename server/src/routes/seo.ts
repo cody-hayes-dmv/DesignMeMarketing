@@ -60,6 +60,8 @@ async function resolveLocationCodeFromName(locationName: string): Promise<number
 // DataForSEO-billable refresh throttling + in-flight dedupe
 // Requirement: avoid repeated pulls (and billing) when users visit/refresh the same report/dashboard many times.
 const DATAFORSEO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+const VENDASTA_AUTO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // 48h for Vendasta clients
+const OTHER_CLIENTS_AUTO_REFRESH_TTL_MS = 40 * 60 * 60 * 1000; // 40h for other clients
 const inflightByKey = new Map<string, Promise<any>>();
 
 function coerceBoolean(value: unknown): boolean {
@@ -157,6 +159,18 @@ async function getLatestBacklinksUpdatedAt(clientId: string): Promise<Date | nul
   const b = latestBacklinkRow?.updatedAt ?? null;
   if (a && b) return a > b ? a : b;
   return a ?? b;
+}
+
+/** Latest DataForSEO update across traffic, ranked keywords, backlinks, top pages (for auto-refresh scheduling). */
+async function getDataForSeoLastUpdated(clientId: string): Promise<Date | null> {
+  const [traffic, ranked, backlinks, topPages] = await Promise.all([
+    getLatestTrafficSourceUpdatedAt(clientId),
+    getLatestRankedKeywordsHistoryUpdatedAt(clientId),
+    getLatestBacklinksUpdatedAt(clientId),
+    getLatestTopPagesUpdatedAt(clientId),
+  ]);
+  const dates = [traffic, ranked, backlinks, topPages].filter((d): d is Date => d != null);
+  return dates.length > 0 ? new Date(Math.max(...dates.map((d) => d.getTime()))) : null;
 }
 
 async function fetchGoogleAdsLocationsFromDataForSEO(): Promise<DataForSEOGoogleAdsLocation[]> {
@@ -1507,6 +1521,41 @@ export async function autoSyncBacklinksForStaleClients(params?: { batchSize?: nu
     }
   } finally {
     backlinksAutoSyncInFlight = false;
+  }
+}
+
+/** Auto-refresh SEO data: Vendasta clients every 48h, other clients every 40h. Runs dashboard, top pages, and backlinks refresh for due clients. */
+export async function autoRefreshSeoDataForDueClients(params?: { batchSize?: number }) {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) return;
+
+  const batchSize = Math.min(50, Math.max(1, Number(params?.batchSize ?? 5)));
+  const clients = await prisma.client.findMany({
+    where: { domain: { not: "" } },
+    select: { id: true, name: true, vendasta: true },
+    take: batchSize * 2,
+  });
+
+  let processed = 0;
+  for (const client of clients) {
+    if (processed >= batchSize) break;
+    try {
+      const lastUpdated = await getDataForSeoLastUpdated(client.id);
+      const ttlMs = client.vendasta ? VENDASTA_AUTO_REFRESH_TTL_MS : OTHER_CLIENTS_AUTO_REFRESH_TTL_MS;
+      const ageMs = lastUpdated ? Date.now() - lastUpdated.getTime() : ttlMs + 1;
+      if (ageMs < ttlMs) continue;
+
+      processed++;
+      await refreshBacklinksForClientInternal({ clientId: client.id, force: true }).catch((e: any) =>
+        console.warn(`[SEO Auto-Refresh] Backlinks for ${client.name || client.id}:`, e?.message || e)
+      );
+    } catch (e: any) {
+      console.warn(`[SEO Auto-Refresh] ${client.name || client.id}:`, e?.message || e);
+    }
+  }
+
+  if (processed > 0) {
+    console.log(`[SEO Auto-Refresh] Processed ${processed} client(s) (Vendasta 48h, others 40h).`);
   }
 }
 
@@ -5931,44 +5980,47 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 
     // ===== COMPETITOR ANALYSIS (Real Data) =====
     // Competitor domains already extracted above in parallel section
-    // Fetch competitor AI metrics
+    // Fetch current and previous period competitor AI metrics in parallel for trend
     let competitorMetricsMap = new Map<string, any>();
+    let previousCompetitorMetricsMap = new Map<string, any>();
     if (competitorDomains.length > 0) {
-      competitorMetricsMap = await fetchCompetitorAiMetrics(
-        competitorDomains,
-        locationCode,
-        languageCode,
-        dateFrom,
-        dateTo
-      );
+      const [currentMap, previousMap] = await Promise.all([
+        fetchCompetitorAiMetrics(competitorDomains, locationCode, languageCode, dateFrom, dateTo),
+        fetchCompetitorAiMetrics(competitorDomains, locationCode, languageCode, prevDateFrom, prevDateTo),
+      ]);
+      competitorMetricsMap = currentMap;
+      previousCompetitorMetricsMap = previousMap;
     }
 
-    // Build competitors array with real data
+    // Build competitors array with real data and trends
     const competitors: { domain: string; label: string; isLeader: boolean; isYou: boolean; score: number; trend: number | null }[] = [];
-    
-    // Add client (you)
+
+    // Add client (you) with trend from previous period
     competitors.push({
       domain: targetDomain,
       label: clientName,
       isLeader: false,
       isYou: true,
       score: Math.round(aiVisibilityScore),
-      trend: null,
+      trend: typeof aiVisibilityScoreTrend === "number" ? aiVisibilityScoreTrend : null,
     });
 
-    // Add competitors with real scores
+    // Add competitors with real scores and trend (current score - previous period score)
     for (const [compDomain, compData] of competitorMetricsMap.entries()) {
       const compLabel = compDomain.replace(/^www\./, "").split(".")[0]
         .split("-")
         .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
         .join(" ");
+      const prevData = previousCompetitorMetricsMap.get(compDomain);
+      const prevScore = prevData?.score != null ? Number(prevData.score) : null;
+      const trend = prevScore != null ? Math.round(compData.score - prevScore) : null;
       competitors.push({
         domain: compDomain,
         label: compLabel,
         isLeader: false,
         isYou: false,
         score: compData.score,
-        trend: null, // TODO: Calculate trend from previous period
+        trend,
       });
     }
 

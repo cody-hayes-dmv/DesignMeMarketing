@@ -938,6 +938,7 @@ const ShareDashboardPage: React.FC = () => {
                 title="Total Keywords Ranked"
                 subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
                 shareToken={token}
+                enableRefresh={false}
               />
             )}
 

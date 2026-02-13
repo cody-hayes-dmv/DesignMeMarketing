@@ -19,6 +19,7 @@ model User {
   invited        Boolean      @default(false)
   specialties    String?      @db.Text
   lastLoginAt    DateTime?
+  notificationPreferences Json?  // emailReports, rankingAlerts, weeklyDigest, teamUpdates
   clients        Client[]
   assignedTaksks Task[]       @relation("TaskAssignee")
   createdTass    Task[]       @relation("TaskCreator")

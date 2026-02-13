@@ -4371,7 +4371,7 @@ const ClientDashboardPage: React.FC = () => {
                         <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
@@ -4413,7 +4413,7 @@ const ClientDashboardPage: React.FC = () => {
                         <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
@@ -4455,7 +4455,7 @@ const ClientDashboardPage: React.FC = () => {
                         <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
@@ -4497,7 +4497,7 @@ const ClientDashboardPage: React.FC = () => {
                         <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
@@ -4601,6 +4601,7 @@ const ClientDashboardPage: React.FC = () => {
                 subtitle="Keywords relevant to this client's website based on DataForSEO analysis."
                 titleTooltip="Your money keywords - the most important search terms that drive qualified leads to your business. We track these daily to monitor and improve your rankings."
                 lastUpdatedLabel={formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}
+                enableRefresh={false}
               />
 
               <RankedKeywordsOverview
@@ -4610,6 +4611,7 @@ const ClientDashboardPage: React.FC = () => {
                 subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
                 titleTooltip="Shows every keyword you're ranking for in Google, broken down by position. Track how your visibility grows as more keywords move from page 2-3 onto page 1."
                 lastUpdatedLabel={formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}
+                enableRefresh={false}
               />
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -4879,28 +4881,6 @@ const ClientDashboardPage: React.FC = () => {
                      </p>
                      )}
                    </div>
-                  {user?.role === "SUPER_ADMIN" && (
-                    <button
-                      type="button"
-                      onClick={handleRefreshTopPages}
-                      disabled={refreshingTopPages}
-                      data-pdf-hide="true"
-                      className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
-                      title="Refresh top pages from DataForSEO"
-                    >
-                      {refreshingTopPages ? (
-                        <>
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          <span>Refreshing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="h-3 w-3" />
-                          <span>Refresh</span>
-                        </>
-                      )}
-                    </button>
-                  )}
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -5160,28 +5140,6 @@ const ClientDashboardPage: React.FC = () => {
                             <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}</p>
                           )}
                         </div>
-                        {user?.role === "SUPER_ADMIN" && (
-                          <button
-                            type="button"
-                            onClick={handleRefreshBacklinks}
-                            disabled={refreshingBacklinks}
-                            data-pdf-hide="true"
-                            className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
-                            title="Refresh backlinks from DataForSEO"
-                          >
-                            {refreshingBacklinks ? (
-                              <>
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                <span>Refreshing...</span>
-                              </>
-                            ) : (
-                              <>
-                                <RefreshCw className="h-3 w-3" />
-                                <span>Refresh</span>
-                              </>
-                            )}
-                          </button>
-                        )}
                       </div>
 
                       <div className="p-6 space-y-4">
@@ -9517,6 +9475,7 @@ const ClientDashboardPage: React.FC = () => {
                   clientName={client?.name}
                   title="Total Keywords Ranked"
                   subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
+                  enableRefresh={false}
                 />
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -9764,28 +9723,6 @@ const ClientDashboardPage: React.FC = () => {
                       <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
                       <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
                     </div>
-                    {user?.role === "SUPER_ADMIN" && (
-                      <button
-                        type="button"
-                        onClick={handleRefreshBacklinks}
-                        disabled={refreshingBacklinks}
-                        data-pdf-hide="true"
-                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
-                        title="Refresh backlinks from DataForSEO"
-                      >
-                        {refreshingBacklinks ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>Refreshing...</span>
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="h-3 w-3" />
-                            <span>Refresh</span>
-                          </>
-                        )}
-                      </button>
-                    )}
                   </div>
                   <div className="p-6 space-y-4">
                     {backlinksForChartLoading ? (

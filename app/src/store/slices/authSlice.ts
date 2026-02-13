@@ -2,6 +2,13 @@ import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
 import api from "../../lib/api";
 import { ROLE } from "@/utils/types";
 
+export interface NotificationPreferences {
+  emailReports: boolean;
+  rankingAlerts: boolean;
+  weeklyDigest: boolean;
+  teamUpdates: boolean;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -9,6 +16,7 @@ export interface User {
   role: ROLE;
   verified: boolean;
   invited: boolean;
+  notificationPreferences?: NotificationPreferences;
   clientAccess?: {
     clients: Array<{ clientId: string; role: string; status: string }>;
   };

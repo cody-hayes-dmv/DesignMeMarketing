@@ -105,7 +105,7 @@ server.on("listening", async () => {
 
   // Start report scheduler cron job (runs every hour)
   const { processScheduledReports, refreshAllGA4Data } = await import("./lib/reportScheduler.js");
-  const { autoSyncBacklinksForStaleClients } = await import("./routes/seo.js");
+  const { autoSyncBacklinksForStaleClients, autoRefreshSeoDataForDueClients } = await import("./routes/seo.js");
   const { archiveCanceledClientsPastEndDate } = await import("./lib/clientStatusWorkflow.js");
   const { processRecurringTaskRules } = await import("./routes/tasks.js");
 
@@ -159,6 +159,21 @@ server.on("listening", async () => {
     );
   } else {
     console.log("Backlinks auto-sync disabled (ENABLE_DATAFORSEO_BACKLINKS_AUTO_SYNC=false)");
+  }
+
+  // SEO data auto-refresh: Vendasta clients every 48h, other clients every 40h (dashboard/backlinks/top pages data)
+  const seoAutoRefreshEnabled = String(process.env.ENABLE_SEO_AUTO_REFRESH ?? "true").toLowerCase() === "true";
+  const seoAutoRefreshIntervalMinutes = Math.min(60 * 24, Math.max(30, Number(process.env.SEO_AUTO_REFRESH_INTERVAL_MINUTES ?? 60)));
+  if (seoAutoRefreshEnabled) {
+    setTimeout(() => {
+      autoRefreshSeoDataForDueClients({ batchSize: 5 }).catch(console.error);
+    }, 60 * 1000);
+    setInterval(() => {
+      autoRefreshSeoDataForDueClients({ batchSize: 5 }).catch(console.error);
+    }, seoAutoRefreshIntervalMinutes * 60 * 1000);
+    console.log(`SEO auto-refresh started (every ${seoAutoRefreshIntervalMinutes} min, Vendasta 48h / others 40h)`);
+  } else {
+    console.log("SEO auto-refresh disabled (ENABLE_SEO_AUTO_REFRESH=false)");
   }
 
   // Recurring tasks: create task instances from active rules (every minute)

@@ -62,6 +62,7 @@ interface TargetKeywordsOverviewProps {
   showHeader?: boolean;
   headerActions?: React.ReactNode;
   shareToken?: string;
+  enableRefresh?: boolean;
 }
 
 const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
@@ -75,6 +76,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   showHeader = true,
   headerActions,
   shareToken,
+  enableRefresh = true,
 }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const isReadOnly = Boolean(shareToken);
@@ -124,8 +126,9 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
         : await api.get(`/seo/target-keywords/${clientId}`);
       const list: TargetKeyword[] = res.data || [];
       setKeywords(list);
-      // On initial load, run refresh once (for ADMIN/SUPER_ADMIN) so GOOGLE/GOOGLE URL get populated
+      // On initial load, run refresh once (for ADMIN/SUPER_ADMIN) so GOOGLE/GOOGLE URL get populated (only when enableRefresh)
       if (
+        enableRefresh &&
         !shareToken &&
         clientId &&
         (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") &&
@@ -341,7 +344,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
           </div>
           <div className="flex items-center space-x-2">
             {headerActions}
-            {user?.role === "SUPER_ADMIN" && !isReadOnly && (
+            {enableRefresh && user?.role === "SUPER_ADMIN" && !isReadOnly && (
               <button
                 type="button"
                 onClick={handleRefresh}
@@ -386,7 +389,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
             <Search className="h-10 w-10 text-amber-600 mb-2" />
             <p className="text-sm font-medium text-amber-900">No target keywords available yet.</p>
             <p className="text-xs text-amber-800/80 mt-1">
-              {user?.role === "SUPER_ADMIN"
+              {enableRefresh && user?.role === "SUPER_ADMIN"
                 ? "Click Refresh to fetch keywords from DataForSEO."
                 : "Contact your administrator to refresh keyword data."}
             </p>
