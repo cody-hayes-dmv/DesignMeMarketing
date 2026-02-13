@@ -206,21 +206,26 @@ const ShareDashboardPage: React.FC = () => {
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-      let heightLeft = imgHeight;
-      let position = 0;
+      const headerHeightMm = 14;
+      const contentHeightMm = pageHeight - headerHeightMm;
+      const websiteName = dashboardSummary?.client?.name || dashboardSummary?.client?.domain || "Shared Dashboard";
 
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+      pdf.setFontSize(16);
+      pdf.setTextColor(30, 30, 30);
+      pdf.text(websiteName, pageWidth / 2, headerHeightMm / 2 + 4, { align: "center" });
 
-      while (heightLeft > 0) {
-        position -= pageHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+      // Fit entire dashboard on one page (size-auto): scale image to fit content area
+      let imgWidth = pageWidth;
+      let imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let x = 0;
+      if (imgHeight > contentHeightMm) {
+        const scale = contentHeightMm / imgHeight;
+        imgWidth = pageWidth * scale;
+        imgHeight = contentHeightMm;
+        x = (pageWidth - imgWidth) / 2;
       }
+      pdf.addImage(imgData, "PNG", x, headerHeightMm, imgWidth, imgHeight);
 
       const sanitizedName = dashboardSummary?.client?.name 
         ? dashboardSummary.client.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() 
@@ -632,11 +637,11 @@ const ShareDashboardPage: React.FC = () => {
     return "—";
   }, [dashboardSummary?.organicSearchEngagedSessions, fetchingSummary, dashboardSummary?.isGA4Connected]);
 
-  // First Time Visitors (same as New Users)
+  // First Time Visitors (same as New Users - match SEO Overview)
   const newUsersDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (dashboardSummary?.isGA4Connected !== true) return "—";
-    const value = dashboardSummary?.firstTimeVisitors ?? dashboardSummary?.newUsers;
+    const value = dashboardSummary?.newUsers;
     if (value !== null && value !== undefined) {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
@@ -644,7 +649,7 @@ const ShareDashboardPage: React.FC = () => {
       }
     }
     return "—";
-  }, [dashboardSummary?.firstTimeVisitors, dashboardSummary?.newUsers, fetchingSummary, dashboardSummary?.isGA4Connected]);
+  }, [dashboardSummary?.newUsers, fetchingSummary, dashboardSummary?.isGA4Connected]);
 
   // Engaged Visitors (same as Engaged Sessions from GA4)
   const keyEventsDisplay = useMemo(() => {
@@ -915,6 +920,15 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Target Keywords first (same order as Dashboard SEO Overview) */}
+            {dashboardSummary?.client?.id && token && (
+              <TargetKeywordsOverview
+                clientId={dashboardSummary.client.id}
+                clientName={dashboardSummary.client.name}
+                shareToken={token}
+              />
+            )}
+
             {/* Ranked Keywords Overview */}
             {dashboardSummary?.client?.id && token && (
               <RankedKeywordsOverview
@@ -925,16 +939,6 @@ const ShareDashboardPage: React.FC = () => {
                 shareToken={token}
               />
             )}
-
-            {/* Target Keywords (shared, read-only) */}
-            {dashboardSummary?.client?.id && token && (
-              <TargetKeywordsOverview
-                clientId={dashboardSummary.client.id}
-                clientName={dashboardSummary.client.name}
-                shareToken={token}
-              />
-            )}
-
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-white p-4 rounded-xl border border-gray-200">

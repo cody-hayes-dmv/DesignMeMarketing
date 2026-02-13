@@ -346,10 +346,21 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                 type="button"
                 onClick={handleRefresh}
                 disabled={refreshing || loading}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                data-pdf-hide="true"
+                className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                title="Refresh target keywords from DataForSEO"
               >
-                <RefreshCw className={`h-4 w-4 ${refreshing || loading ? "animate-spin text-primary-600" : ""}`} />
-                <span>Refresh</span>
+                {refreshing || loading ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Refreshing...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3 w-3" />
+                    <span>Refresh</span>
+                  </>
+                )}
               </button>
             )}
           </div>

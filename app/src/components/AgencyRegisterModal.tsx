@@ -160,6 +160,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
   const [setupClientSecret, setSetupClientSecret] = useState<string | null>(null);
   const [setupIntentError, setSetupIntentError] = useState<string | null>(null);
   const stripePaymentRef = useRef<PaymentSectionHandle>(null);
+  const registerInProgressRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -179,6 +180,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registerInProgressRef.current) return;
     if (form.password !== form.passwordConfirm) {
       toast.error("Passwords do not match");
       return;
@@ -191,6 +193,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
       toast.error("Payment form is not ready. Please wait or refresh.");
       return;
     }
+    registerInProgressRef.current = true;
     setSubmitting(true);
     try {
       const payload = buildRegisterPayload(form);
@@ -217,6 +220,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
       toast.error(msg);
     } finally {
       setSubmitting(false);
+      registerInProgressRef.current = false;
     }
   };
 

@@ -369,10 +369,21 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                 type="button"
                 onClick={handleRefresh}
                 disabled={refreshing || summaryLoading || historyLoading}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                data-pdf-hide="true"
+                className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm"
+                title="Refresh ranked keywords data"
               >
-                <RefreshCw className={`h-4 w-4 ${refreshing || summaryLoading || historyLoading ? "animate-spin text-primary-600" : ""}`} />
-                <span>Refresh</span>
+                {refreshing || summaryLoading || historyLoading ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Refreshing...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3 w-3" />
+                    <span>Refresh</span>
+                  </>
+                )}
               </button>
             )}
           </div>
@@ -414,15 +425,26 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                 {lastUpdated && <p className="text-gray-500">Last updated {lastUpdated}</p>}
               </div>
             </div>
-            {!showHeader && user?.role === "SUPER_ADMIN" && (
+            {!showHeader && user?.role === "SUPER_ADMIN" && enableRefresh && (
               <button
                 type="button"
                 onClick={handleRefresh}
                 disabled={refreshing || summaryLoading || historyLoading}
-                className="inline-flex items-center gap-2 self-start rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                data-pdf-hide="true"
+                className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed text-sm self-start"
+                title="Refresh ranked keywords data"
               >
-                <RefreshCw className={`h-4 w-4 ${refreshing || summaryLoading || historyLoading ? "animate-spin text-primary-600" : ""}`} />
-                <span>Refresh</span>
+                {refreshing || summaryLoading || historyLoading ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Refreshing...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3 w-3" />
+                    <span>Refresh</span>
+                  </>
+                )}
               </button>
             )}
           </div>

@@ -287,7 +287,7 @@ router.post('/register', async (req, res) => {
       agencySize,
       numberOfClients,
       contactName,
-      contactEmail,
+      contactEmail: rawContactEmail,
       contactPhone,
       contactJobTitle,
       streetAddress,
@@ -305,6 +305,9 @@ router.post('/register', async (req, res) => {
       currentTools,
     } = body;
 
+    // Normalize email so "New@Email.com" and "new@email.com" are treated the same (emails are case-insensitive).
+    const contactEmail = typeof rawContactEmail === 'string' ? rawContactEmail.trim().toLowerCase() : '';
+
     const existingAgency = await prisma.agency.findFirst({ where: { name } });
     if (existingAgency) {
       return res.status(400).json({ message: 'Agency with this name already exists' });
@@ -319,7 +322,9 @@ router.post('/register', async (req, res) => {
 
     const existingUser = await prisma.user.findUnique({ where: { email: contactEmail } });
     if (existingUser) {
-      return res.status(400).json({ message: 'A user with this contact email already exists' });
+      return res.status(400).json({
+        message: 'This email is already registered. Sign in instead or use a different email.',
+      });
     }
 
     const stripe = getStripe();
@@ -340,11 +345,37 @@ router.post('/register', async (req, res) => {
         })
       : null;
 
+    // Create user first (unique email). Prevents double-submit from creating two Stripe customers:
+    // a second request fails here and never reaches Stripe, so no orphan customer without payment method.
+    let agencyUser: { id: string; email: string };
+    try {
+      agencyUser = await prisma.user.create({
+        data: {
+          email: contactEmail,
+          name: contactName ?? name,
+          passwordHash,
+          role: 'AGENCY',
+          verified: false,
+          invited: false,
+        },
+      });
+    } catch (userErr: any) {
+      if (userErr?.code === 'P2002' && userErr?.meta?.target?.includes?.('email')) {
+        // Likely double submit: first request created the user, second hit unique constraint.
+        // Tell user to try signing in so they don't think signup failed.
+        return res.status(409).json({
+          message: 'An account with this email was just created or already exists. Try signing in.',
+        });
+      }
+      throw userErr;
+    }
+
     // 7-day free trial for reporting features only; CC required so we can auto-bill after trial.
     const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const reportingTier: TierId = 'solo';
     const tierPriceId = getPriceIdForTier(reportingTier);
     if (!tierPriceId || !tierPriceId.startsWith('price_')) {
+      await prisma.user.delete({ where: { id: agencyUser.id } }).catch(() => {});
       console.error('[agencies] register: missing STRIPE_PRICE_PLAN_SOLO for reporting trial');
       return res.status(503).json({ message: 'Signup is temporarily unavailable. Please try again later or contact support.' });
     }
@@ -369,20 +400,22 @@ router.post('/register', async (req, res) => {
       });
       if (subscription.status !== 'active' && subscription.status !== 'trialing') {
         await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+        await prisma.user.delete({ where: { id: agencyUser.id } }).catch(() => {});
         return res.status(400).json({
           message: 'Could not set up your trial. Try a different card or use test card 4242 4242 4242 4242.',
         });
       }
       stripeSubscriptionId = subscription.id;
     } catch (stripeErr: any) {
+      await prisma.user.delete({ where: { id: agencyUser.id } }).catch(() => {});
       const code = stripeErr?.code || stripeErr?.type;
       const rawMsg = String(stripeErr?.message || stripeErr?.raw?.message || '');
       console.error('Agency register Stripe failed:', code, rawMsg);
       if (stripeErr?.decline_code || code === 'card_declined') {
         return res.status(400).json({ message: rawMsg || 'Card was declined. Try a different card.' });
       }
-      if (/No such payment_method|invalid/i.test(rawMsg)) {
-        return res.status(400).json({ message: 'Payment method invalid or expired. Please enter your card again.' });
+      if (/No such payment_method|invalid|already been attached/i.test(rawMsg)) {
+        return res.status(400).json({ message: 'Payment method invalid or already used. Please enter your card again.' });
       }
       return res.status(400).json({ message: rawMsg || 'Failed to save card. Please try again.' });
     }
@@ -421,17 +454,6 @@ router.post('/register', async (req, res) => {
         console.warn('Stripe customer metadata update failed:', e?.message)
       );
     }
-
-    const agencyUser = await prisma.user.create({
-      data: {
-        email: contactEmail,
-        name: contactName,
-        passwordHash,
-        role: 'AGENCY',
-        verified: false,
-        invited: false,
-      },
-    });
 
     await prisma.userAgency.create({
       data: {

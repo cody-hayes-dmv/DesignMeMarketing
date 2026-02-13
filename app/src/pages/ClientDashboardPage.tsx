@@ -563,6 +563,12 @@ const ClientDashboardPage: React.FC = () => {
   const [visitorSourcesError, setVisitorSourcesError] = useState<string | null>(null);
   const [refreshingTopPages, setRefreshingTopPages] = useState(false);
   const [refreshingBacklinks, setRefreshingBacklinks] = useState(false);
+  const dashboardExportReadyRef = useRef({
+    refreshingDashboard: false,
+    refreshingTopPages: false,
+    refreshingBacklinks: false,
+    fetchingSummary: false,
+  });
   const [sendingReport, setSendingReport] = useState(false);
   const [expandedPageUrls, setExpandedPageUrls] = useState<Set<string>>(new Set());
   const [pageKeywords, setPageKeywords] = useState<Record<string, Array<{
@@ -1267,6 +1273,15 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    dashboardExportReadyRef.current = {
+      refreshingDashboard,
+      refreshingTopPages,
+      refreshingBacklinks,
+      fetchingSummary,
+    };
+  }, [refreshingDashboard, refreshingTopPages, refreshingBacklinks, fetchingSummary]);
+
   const handleExportPdf = useCallback(async () => {
     if (!dashboardContentRef.current) {
       toast.error("Switch to the Dashboard tab to export.");
@@ -1295,6 +1310,24 @@ const ClientDashboardPage: React.FC = () => {
 
     try {
       setExportingPdf(true);
+
+      const maxWaitMs = 60000;
+      const pollIntervalMs = 400;
+      const start = Date.now();
+      while (Date.now() - start < maxWaitMs) {
+        const r = dashboardExportReadyRef.current;
+        if (!r.refreshingDashboard && !r.refreshingTopPages && !r.refreshingBacklinks && !r.fetchingSummary) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+      const stillLoading = dashboardExportReadyRef.current;
+      if (stillLoading.refreshingDashboard || stillLoading.refreshingTopPages || stillLoading.refreshingBacklinks || stillLoading.fetchingSummary) {
+        toast.error("Export timed out. Please wait for the dashboard to finish loading and try again.");
+        setExportingPdf(false);
+        return;
+      }
+
       document.body.style.overflow = "hidden";
       element.classList.add("pdf-exporting");
 
@@ -1313,8 +1346,8 @@ const ClientDashboardPage: React.FC = () => {
         rightScrollEl.style.maxHeight = "none";
       }
 
-      // Allow layout to settle before snapshotting.
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Allow layout to settle and paint before snapshotting (longer delay so export captures finished content).
+      await new Promise((resolve) => setTimeout(resolve, 800));
 
       const canvas = await html2canvas(element, {
         scale: 2,
@@ -1325,27 +1358,37 @@ const ClientDashboardPage: React.FC = () => {
         scrollX: 0,
         scrollY: 0,
         backgroundColor: "#FFFFFF",
+        ignoreElements: (el) => {
+          if (el.getAttribute?.("data-pdf-hide") === "true") return true;
+          if (el.classList?.contains?.("cursor-help")) return true;
+          return false;
+        },
       });
 
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-      let heightLeft = imgHeight;
-      let position = 0;
+      const headerHeightMm = 14;
+      const contentHeightMm = pageHeight - headerHeightMm;
+      const websiteName = client?.name || client?.domain || "Dashboard";
 
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+      pdf.setFontSize(16);
+      pdf.setTextColor(30, 30, 30);
+      pdf.text(websiteName, pageWidth / 2, headerHeightMm / 2 + 4, { align: "center" });
 
-      while (heightLeft > 0) {
-        position -= pageHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+      // Fit entire dashboard on one page (size-auto): scale image to fit content area
+      let imgWidth = pageWidth;
+      let imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let x = 0;
+      if (imgHeight > contentHeightMm) {
+        const scale = contentHeightMm / imgHeight;
+        imgWidth = pageWidth * scale;
+        imgHeight = contentHeightMm;
+        x = (pageWidth - imgWidth) / 2;
       }
+      pdf.addImage(imgData, "PNG", x, headerHeightMm, imgWidth, imgHeight);
 
       const sanitizedName = client?.name ? client.name.replace(/\s+/g, "-").toLowerCase() : "client-dashboard";
       const fileName = `${sanitizedName}-${format(new Date(), "yyyyMMdd")}.pdf`;
@@ -3960,9 +4003,9 @@ const ClientDashboardPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleExportPdf}
-                      disabled={exportingPdf}
+                      disabled={exportingPdf || refreshingDashboard || refreshingTopPages || refreshingBacklinks || fetchingSummary}
                       className="bg-gray-100 text-gray-700 p-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
-                      title="Export"
+                      title={refreshingDashboard || refreshingTopPages || refreshingBacklinks || fetchingSummary ? "Wait for dashboard to finish loading before exporting" : "Export"}
                     >
                       {exportingPdf ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -4522,15 +4565,18 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
-                    Total Users Trending
-                    <span title="Daily chart showing all visitors (new + returning). Shows your overall website traffic momentum.">
-                      <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
-                    </span>
-                  </h3>
-                  {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                    <p className="text-xs text-gray-500 mt-0.5 mb-4">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
-                  )}
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      Total Users Trending
+                      <span title="Daily chart showing all visitors (new + returning). Shows your overall website traffic momentum.">
+                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                      </span>
+                    </h3>
+                    {fetchingSummary && <span className="text-xs text-gray-400">Updating...</span>}
+                    {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
+                      <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                    )}
+                  </div>
                   <div className="h-64">
                     {ga4Connected ? (
                       totalUsersTrendData.length > 0 ? (
@@ -5214,9 +5260,6 @@ const ClientDashboardPage: React.FC = () => {
                         <p className="text-sm text-gray-500 mt-0.5">
                           Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data source: DataForSEO. Numbers here may differ from other dashboard widgets that use different sources.
                         </p>
-                        {aiIntelligence && formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
-                          <p className="text-xs text-gray-500 mt-1">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
-                        )}
                       </div>
                     </div>
 
@@ -5237,60 +5280,69 @@ const ClientDashboardPage: React.FC = () => {
                     ) : aiIntelligence ? (
                       <>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm min-h-[140px] flex flex-col border-t-4 border-t-primary-500">
                             <div className="flex items-center gap-1.5">
-                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                                 AI Visibility Score
                                 <span className="ml-1 inline-flex align-middle" title="Overall score (0-100) measuring how often your business appears in AI search results. Higher is better.">
                                   <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
                                 </span>
                               </p>
                             </div>
-                            <p className="mt-1 text-2xl font-bold text-gray-900">
+                            <p className="mt-2 text-2xl font-bold text-gray-900">
                               {aiIntelligence.kpis?.aiVisibilityScore ?? 0} <span className="text-base font-normal text-gray-500">/100</span>
                             </p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
                               <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0} pts
                             </span>
                             {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
-                              <p className="text-xs text-gray-500 mt-2">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
+                              <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
                             )}
                           </div>
-                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm min-h-[140px] flex flex-col border-t-4 border-t-blue-500">
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                               Total AI Mentions
                               <span className="ml-1 inline-flex align-middle" title="Number of times your business was mentioned or recommended by AI platforms this period.">
                                 <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
                               </span>
                             </p>
-                            <p className="mt-1 text-2xl font-bold text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</p>
+                            <p className="mt-2 text-2xl font-bold text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
                               <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.totalAiMentionsTrend ?? 0}
                             </span>
+                            {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
+                              <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
+                            )}
                           </div>
-                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm min-h-[140px] flex flex-col border-t-4 border-t-emerald-500">
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                               AI Search Volume
                               <span className="ml-1 inline-flex align-middle" title="Total number of AI searches where your business could have appeared based on your industry and keywords.">
                                 <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
                               </span>
                             </p>
-                            <p className="mt-1 text-2xl font-bold text-gray-900">
+                            <p className="mt-2 text-2xl font-bold text-gray-900">
                               {(aiIntelligence.kpis?.aiSearchVolume ?? 0).toLocaleString()}
                             </p>
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
                               <TrendingUp className="h-3.5 w-3.5" />+{(aiIntelligence.kpis?.aiSearchVolumeTrend ?? 0).toLocaleString()}
                             </span>
+                            {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
+                              <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
+                            )}
                           </div>
-                          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm min-h-[140px] flex flex-col border-t-4 border-t-amber-500">
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                               Monthly Trend
                               <span className="ml-1 inline-flex align-middle" title="Percentage change in your AI visibility compared to last month.">
                                 <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
                               </span>
                             </p>
-                            <p className="mt-1 text-2xl font-bold text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</p>
+                            <p className="mt-2 text-2xl font-bold text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</p>
                             <p className="text-xs text-gray-500 mt-1">vs last month</p>
+                            {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
+                              <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
+                            )}
                           </div>
                         </div>
 
@@ -6149,35 +6201,43 @@ const ClientDashboardPage: React.FC = () => {
 
                 {dashboardSection === "backlinks" && (
                   <div className="space-y-6">
-                    <div className="sticky top-0 z-10 bg-gray-50 pb-3">
-                      <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
-                          Backlinks Overview
-                          <span title="Monitor all backlinks, new vs lost trends, and link quality. Use the table below to see each link and its quality. Data from DataForSEO.">
-                            <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
-                          </span>
-                        </h2>
-                        {!reportOnly && (
-                          <div className="flex items-center space-x-3">
-                            <button
-                              type="button"
-                              onClick={() => setImportBacklinksModalOpen(true)}
-                              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-                            >
-                              <Upload className="h-4 w-4" />
-                              <span>Import Backlink</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={openAddBacklink}
-                              className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
-                            >
-                              <Plus className="h-4 w-4" />
-                              <span>Add Backlink</span>
-                            </button>
-                          </div>
-                        )}
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-50 text-primary-600">
+                          <LinkIcon className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                            Backlinks Overview
+                            <span title="Monitor all backlinks, new vs lost trends, and link quality. Use the table below to see each link and its quality. Data from DataForSEO.">
+                              <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                            </span>
+                          </h2>
+                          <p className="text-sm text-gray-500 mt-0.5">
+                            Monitor all backlinks, new vs lost trends, and link quality. Data from DataForSEO.
+                          </p>
+                        </div>
                       </div>
+                      {!reportOnly && (
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setImportBacklinksModalOpen(true)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <Upload className="h-4 w-4" />
+                            <span>Import Backlink</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={openAddBacklink}
+                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span>Add Backlink</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -6465,21 +6525,35 @@ const ClientDashboardPage: React.FC = () => {
 
                 {dashboardSection === "worklog" && (
                   <div className="space-y-6">
-                    <div className="sticky top-0 z-10 bg-gray-50 pb-3">
-                      <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-semibold text-gray-900">Work Log</h2>
-                        {!reportOnly && (
-                          <div className="relative" ref={workLogAddMenuRef}>
-                            <button
-                              type="button"
-                              onClick={() => setWorkLogAddMenuOpen((o) => !o)}
-                              className="bg-primary-600 text-white px-3 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1"
-                              title="Add entry"
-                            >
-                              <Plus className="h-4 w-4" />
-                              <span className="text-sm font-medium">Add Entry</span>
-                              <ChevronDown className="h-4 w-4" />
-                            </button>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-50 text-primary-600">
+                          <Clock className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                            Work Log
+                            <span title="Log tasks, onboarding items, and recurring work for this client.">
+                              <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                            </span>
+                          </h2>
+                          <p className="text-sm text-gray-500 mt-0.5">
+                            Log tasks, onboarding items, and recurring work for this client.
+                          </p>
+                        </div>
+                      </div>
+                      {!reportOnly && (
+                        <div className="relative flex-shrink-0" ref={workLogAddMenuRef}>
+                          <button
+                            type="button"
+                            onClick={() => setWorkLogAddMenuOpen((o) => !o)}
+                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
+                            title="Add entry"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span>Add Entry</span>
+                            <ChevronDown className="h-4 w-4" />
+                          </button>
                             {workLogAddMenuOpen && (
                               <div className="absolute right-0 mt-1 w-52 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-20">
                                 <button
@@ -6514,7 +6588,6 @@ const ClientDashboardPage: React.FC = () => {
                             )}
                           </div>
                         )}
-                      </div>
                     </div>
                     {/* Recurring tasks (this client) */}
                     {!reportOnly && (
@@ -9092,7 +9165,7 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                     <div className="bg-green-50 rounded-lg p-4 border border-green-100">
                       <div className="text-xs font-medium text-green-600 mb-1">Organic Traffic</div>
-                      <div className="text-2xl font-bold text-green-900">{Number(serverReport?.organicSearchEngagedSessions ?? serverReport?.organicSessions ?? 0).toLocaleString()}</div>
+                      <div className="text-2xl font-bold text-green-900">{Number(serverReport?.organicSearchEngagedSessions ?? 0).toLocaleString()}</div>
                     </div>
                     <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
                       <div className="text-xs font-medium text-purple-600 mb-1">First Time Visitors</div>
@@ -9100,7 +9173,7 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                     <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
                       <div className="text-xs font-medium text-orange-600 mb-1">Engaged Visitors</div>
-                      <div className="text-2xl font-bold text-orange-900">{Number(serverReport?.engagedSessions ?? 0).toLocaleString()}</div>
+                      <div className="text-2xl font-bold text-orange-900">{Number(serverReport?.engagedVisitors ?? serverReport?.engagedSessions ?? 0).toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
@@ -9806,22 +9879,22 @@ const ClientDashboardPage: React.FC = () => {
                      const pdf = new jsPDF("p", "mm", "a4");
                      const pageWidth = pdf.internal.pageSize.getWidth();
                      const pageHeight = pdf.internal.pageSize.getHeight();
-                     const imgWidth = pageWidth;
-                     const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                     
-                     let heightLeft = imgHeight;
-                     let position = 0;
-                     
-                     pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-                     heightLeft -= pageHeight;
-                     
-                     while (heightLeft > 0) {
-                       position -= pageHeight;
-                       pdf.addPage();
-                       pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-                       heightLeft -= pageHeight;
+                     const headerHeightMm = 14;
+                     const contentHeightMm = pageHeight - headerHeightMm;
+                     let imgWidth = pageWidth;
+                     let imgHeight = (canvas.height * pageWidth) / canvas.width;
+                     let x = 0;
+                     if (imgHeight > contentHeightMm) {
+                       const scale = contentHeightMm / imgHeight;
+                       imgWidth = pageWidth * scale;
+                       imgHeight = contentHeightMm;
+                       x = (pageWidth - imgWidth) / 2;
                      }
-                     
+                     const reportTitle = selectedReport?.name || client?.name || client?.domain || "Report";
+                     pdf.setFontSize(16);
+                     pdf.setTextColor(30, 30, 30);
+                     pdf.text(reportTitle, pageWidth / 2, headerHeightMm / 2 + 4, { align: "center" });
+                     pdf.addImage(imgData, "PNG", x, headerHeightMm, imgWidth, imgHeight);
                      const sanitizedName = selectedReport?.name 
                        ? selectedReport.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() 
                        : "report";

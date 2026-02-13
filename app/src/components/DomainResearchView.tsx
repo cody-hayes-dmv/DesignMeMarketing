@@ -429,26 +429,24 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const margin = 14;
-      const imgWidth = pageWidth - margin * 2;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      const stepHeight = pageHeight - margin * 2;
-      const totalPages = Math.max(1, Math.ceil(imgHeight / stepHeight));
-      let heightLeft = imgHeight;
-      let position = margin;
-      let pageNum = 1;
-      pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-      pdf.setFontSize(9);
-      pdf.setTextColor(120, 120, 120);
-      pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
-      heightLeft -= stepHeight;
-      while (heightLeft > 0) {
-        position -= stepHeight;
-        pageNum += 1;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-        pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
-        heightLeft -= stepHeight;
+      const headerHeightMm = 14;
+      const contentHeightMm = pageHeight - margin * 2 - headerHeightMm;
+      const contentWidthMm = pageWidth - margin * 2;
+      let imgWidth = contentWidthMm;
+      let imgHeight = (canvas.height * contentWidthMm) / canvas.width;
+      let x = margin;
+      let y = margin + headerHeightMm;
+      if (imgHeight > contentHeightMm) {
+        const scale = contentHeightMm / imgHeight;
+        imgWidth = contentWidthMm * scale;
+        imgHeight = contentHeightMm;
+        x = margin + (contentWidthMm - imgWidth) / 2;
       }
+      const websiteName = overview?.client?.name || overview?.client?.domain || "AI Search";
+      pdf.setFontSize(16);
+      pdf.setTextColor(30, 30, 30);
+      pdf.text(websiteName, pageWidth / 2, margin + headerHeightMm / 2 + 4, { align: "center" });
+      pdf.addImage(imgData, "PNG", x, y, imgWidth, imgHeight);
       const domain = overview?.client?.domain ?? "ai-search";
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       pdf.save(`ai-search-${domain}-${dateStr}.pdf`);

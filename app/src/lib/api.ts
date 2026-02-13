@@ -43,6 +43,7 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url = error.config?.url ?? "";
     const isAuth = /\/auth\/(login|register|verify|forgot-password|reset-password)/i.test(url);
+    const isAgencyRegister = /\/agencies\/register/i.test(url);
     const isShare = /\/seo\/share\//i.test(url); // public shared dashboard endpoints
     
     // Get error message from response
@@ -54,8 +55,9 @@ api.interceptors.response.use(
     const lastShown = recentErrors.get(errorKey);
     
     // Don't show toast for auth errors (handled by login/register pages)
+    // Don't show for agency register (modal / RegisterPage handle it to avoid duplicate toasts)
     // Don't show global toasts for share endpoints (share page handles its own UX)
-    if (!isAuth && !isShare) {
+    if (!isAuth && !isAgencyRegister && !isShare) {
       // Only show toast if we haven't shown this exact error recently
       if (!lastShown || now - lastShown > ERROR_DEBOUNCE_MS) {
         recentErrors.set(errorKey, now);

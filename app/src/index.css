@@ -32,4 +32,22 @@
 .pdf-exporting [class*="gradient"] {
   background: #ffffff !important;
 }
+
+/* Keyword Research PDF: form (Seed keyword, Location, Language, Suggestions) – show values as plain text so content is not clipped */
+.keyword-research-export-root.pdf-exporting form.bg-white.rounded-xl.border {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.keyword-research-export-root.pdf-exporting .pdf-export-metrics-values {
+  display: grid !important;
+}
+.keyword-research-export-root.pdf-exporting .keyword-research-form-inputs {
+  display: none !important;
+}
+.keyword-research-export-root.pdf-exporting .pdf-export-metrics-values .border-b {
+  color: #111827;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
 /* Section spacing in PDF so page 1 / page 2 content isn’t cramped */

@@ -473,35 +473,27 @@ const KeywordsPage: React.FC = () => {
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 16;
-      const stepHeight = pageHeight - margin * 2;
-      const imgWidth = pageWidth - margin * 2;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const margin = 14;
+      const headerHeightMm = 14;
+      const contentHeightMm = pageHeight - margin * 2 - headerHeightMm;
+      const contentWidthMm = pageWidth - margin * 2;
+      let imgWidth = contentWidthMm;
+      let imgHeight = (canvas.height * contentWidthMm) / canvas.width;
+      let x = margin;
+      const y = margin + headerHeightMm;
+      if (imgHeight > contentHeightMm) {
+        const scale = contentHeightMm / imgHeight;
+        imgWidth = contentWidthMm * scale;
+        imgHeight = contentHeightMm;
+        x = margin + (contentWidthMm - imgWidth) / 2;
+      }
+      pdf.setFontSize(16);
+      pdf.setTextColor(30, 30, 30);
+      pdf.text("Keyword Research", pageWidth / 2, margin + headerHeightMm / 2 + 4, { align: "center" });
+      pdf.addImage(imgData, "PNG", x, y, imgWidth, imgHeight);
       const seed = (researchSeed || "keyword-research").replace(/\s+/g, "-").toLowerCase();
       const date = new Date();
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-
-      const totalContentPages = Math.max(1, Math.ceil(imgHeight / stepHeight));
-      let heightLeft = imgHeight;
-      let position = margin;
-      let pageNum = 1;
-      pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-      pdf.setFontSize(9);
-      pdf.setTextColor(120, 120, 120);
-      pdf.text(`Page ${pageNum} of ${totalContentPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
-      pdf.setTextColor(0, 0, 0);
-      heightLeft -= stepHeight;
-      while (heightLeft > 0) {
-        position -= stepHeight;
-        pageNum += 1;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-        pdf.setFontSize(9);
-        pdf.setTextColor(120, 120, 120);
-        pdf.text(`Page ${pageNum} of ${totalContentPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
-        pdf.setTextColor(0, 0, 0);
-        heightLeft -= stepHeight;
-      }
       pdf.save(`keyword-research-${seed}-${dateStr.replace(/-/g, "")}.pdf`);
       toast.success("Keyword Research exported as PDF.");
     } catch (err: any) {
@@ -569,7 +561,7 @@ const KeywordsPage: React.FC = () => {
       )}
 
       {activeTab === "research" && (
-        <div ref={keywordResearchPdfRef} className="space-y-6">
+        <div ref={keywordResearchPdfRef} className="keyword-research-export-root space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-2" data-pdf-hide="true">
             <span />
             <button
@@ -586,7 +578,26 @@ const KeywordsPage: React.FC = () => {
             onSubmit={handleResearchSubmit}
             className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 space-y-6"
           >
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            {/* PDF export: show values as plain text so content is not clipped */}
+            <div className="hidden pdf-export-metrics-values grid grid-cols-1 lg:grid-cols-5 gap-4 text-sm text-gray-900">
+              <div className="lg:col-span-2">
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Seed keyword or phrase</div>
+                <div className="py-1.5 border-b border-gray-200 min-h-[2.25rem]">{researchSeed || "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Location</div>
+                <div className="py-1.5 border-b border-gray-200 min-h-[2.25rem]">{LOCATION_OPTIONS.find((o) => o.code === researchLocation)?.name ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Language</div>
+                <div className="py-1.5 border-b border-gray-200 min-h-[2.25rem]">{LANGUAGE_OPTIONS.find((o) => o.code === researchLanguage)?.name ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Suggestions</div>
+                <div className="py-1.5 border-b border-gray-200 min-h-[2.25rem]">{researchLimit}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 keyword-research-form-inputs">
               <div className="lg:col-span-2">
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Seed keyword or phrase
@@ -646,7 +657,7 @@ const KeywordsPage: React.FC = () => {
                   />
               </div>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between" data-pdf-hide="true">
               <p className="text-xs text-gray-500">
                 Powered by DataForSEO Labs — we fetch live suggestions with search volume, CPC, and competition metrics.
               </p>
