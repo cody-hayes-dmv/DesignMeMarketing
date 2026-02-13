@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Upload, Plus, Loader2, Image, Video, Link as LinkIcon } from "lucide-react";
-import api from "@/lib/api";
+import api, { getUploadFileUrl } from "@/lib/api";
 import toast from "react-hot-toast";
 
 const FREQUENCIES = [
@@ -12,19 +12,6 @@ const FREQUENCIES = [
 
 type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
 type WorkLogAttachment = { type: string; value: string; name?: string };
-
-function getUploadFileUrl(url: string | undefined): string {
-  if (!url || typeof url !== "string") return url || "#";
-  const match = url.match(/\/uploads\/([^/?]+)/);
-  if (!match) return url;
-  const apiBase = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "");
-  try {
-    const base = new URL(apiBase);
-    return `${base.origin}/api/upload/${encodeURIComponent(match[1])}`;
-  } catch {
-    return url;
-  }
-}
 
 export type WorkLogRecurringRuleForEdit = {
   id: string;

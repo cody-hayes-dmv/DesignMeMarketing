@@ -5,6 +5,28 @@ import toast from "react-hot-toast";
 const BASE = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:5000");
 const baseURL = BASE ? new URL("/api", BASE).toString() : "/api";
 
+/**
+ * Resolve a stored upload URL to a download URL that hits the backend.
+ * Handles: /uploads/filename (legacy), full URLs with /uploads/ or /api/upload/.
+ * Use this for all attachment/upload links so production downloads work (backend URL is used).
+ */
+export function getUploadFileUrl(url: string | undefined): string {
+  if (!url || typeof url !== "string") return url || "#";
+  try {
+    const u = url.trim();
+    if (u.startsWith("#") || !u) return u || "#";
+    if (u.includes("/api/upload/")) return u;
+    const match = u.match(/\/uploads\/([^/?]+)/);
+    if (!match) return u;
+    const filename = match[1];
+    const origin = BASE ? new URL(BASE).origin : (typeof window !== "undefined" ? window.location.origin : "");
+    if (!origin) return u;
+    return `${origin}/api/upload/${encodeURIComponent(filename)}`;
+  } catch {
+    return url;
+  }
+}
+
 // Track recent errors to prevent duplicate toasts
 const recentErrors = new Map<string, number>();
 const ERROR_DEBOUNCE_MS = 2000; // Show same error max once per 2 seconds

@@ -43,24 +43,7 @@ import {
   Play,
   StopCircle,
 } from "lucide-react";
-import api from "@/lib/api";
-
-// Resolve upload URL: use /api/upload/:filename so the request hits the backend (avoids SPA serving index.html for /uploads/*)
-function getUploadFileUrl(url: string | undefined): string {
-  if (!url || typeof url !== "string") return url || "#";
-  const match = url.match(/\/uploads\/([^/?]+)/);
-  if (!match) return url;
-  const filename = match[1];
-  const apiBase = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "");
-  if (!apiBase) return url;
-  try {
-    const base = new URL(apiBase);
-    const apiOrigin = base.origin;
-    return `${apiOrigin}/api/upload/${encodeURIComponent(filename)}`;
-  } catch {
-    return url;
-  }
-}
+import api, { getUploadFileUrl } from "@/lib/api";
 import { Client, updateClient } from "@/store/slices/clientSlice";
 import { clientToFormState, formStateToUpdatePayload } from "@/lib/clientAccountForm";
 import ClientAccountFormModal, { EMPTY_CLIENT_FORM } from "@/components/ClientAccountFormModal";

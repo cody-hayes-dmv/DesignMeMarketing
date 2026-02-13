@@ -5,25 +5,10 @@ import DatePicker from "react-datepicker";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2, Download, CheckSquare } from "lucide-react";
-import api from "@/lib/api";
+import api, { getUploadFileUrl } from "@/lib/api";
 import { fetchClients, Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
 import ConfirmDialog from "@/components/ConfirmDialog";
-
-function getUploadFileUrl(url: string | undefined): string {
-    if (!url || typeof url !== "string") return url || "#";
-    const match = url.match(/\/uploads\/([^/?]+)/);
-    if (!match) return url;
-    const filename = match[1];
-    const apiBase = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "");
-    if (!apiBase) return url;
-    try {
-        const base = new URL(apiBase);
-        return `${base.origin}/api/upload/${encodeURIComponent(filename)}`;
-    } catch {
-        return url;
-    }
-}
 
 interface TaskModalProps {
     title: string;

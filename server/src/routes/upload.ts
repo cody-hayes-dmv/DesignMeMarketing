@@ -85,10 +85,10 @@ router.post("/", authenticateToken, upload.single("file"), (req, res) => {
       fileType = "video";
     }
 
-    // Return the file URL (configurable via BACKEND_URL or API_URL in .env)
-    const fileUrl = `/uploads/${req.file.filename}`;
-    const baseUrl = process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`;
-    const fullUrl = `${baseUrl.replace(/\/$/, "")}${fileUrl}`;
+    // Return download URL that always hits the backend (BACKEND_URL in production for correct domain)
+    const baseUrl = (process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    const downloadPath = `/api/upload/${req.file.filename}`;
+    const fullUrl = `${baseUrl}${downloadPath}`;
 
     res.json({
       type: fileType,
@@ -152,8 +152,7 @@ router.post("/worklog", authenticateToken, (req, res, next) => {
     }
     const baseUrl = (process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
     const results = files.map((file) => {
-      const fileUrl = `/uploads/${file.filename}`;
-      const fullUrl = `${baseUrl}${fileUrl}`;
+      const fullUrl = `${baseUrl}/api/upload/${file.filename}`;
       return { type: "url" as const, value: fullUrl, name: file.originalname };
     });
     res.json(results);
@@ -171,16 +170,13 @@ router.post("/multiple", authenticateToken, upload.array("files", 10), (req, res
     }
 
     const files = req.files as Express.Multer.File[];
+    const baseUrl = (process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
     const results = files.map((file) => {
       let fileType: "image" | "video" = "image";
       if (file.mimetype.startsWith("video/")) {
         fileType = "video";
       }
-
-      const fileUrl = `/uploads/${file.filename}`;
-      const baseUrl = (process.env.BACKEND_URL || process.env.API_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
-      const fullUrl = `${baseUrl}${fileUrl}`;
-
+      const fullUrl = `${baseUrl}/api/upload/${file.filename}`;
       return {
         type: fileType,
         value: fullUrl,
