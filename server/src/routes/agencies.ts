@@ -1079,7 +1079,7 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     if (!membership?.agency) {
       return res.status(404).json({ message: 'No agency found.' });
     }
-    const agency = membership.agency as { stripeSubscriptionId: string | null; billingType?: string | null };
+    const agency = membership.agency as { id: string; stripeSubscriptionId: string | null; billingType?: string | null };
     const subId = agency.stripeSubscriptionId;
     const billingType = agency.billingType ?? null;
     if (!subId) {
