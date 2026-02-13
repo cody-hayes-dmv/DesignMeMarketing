@@ -124,13 +124,13 @@ class ShareDashboardErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="bg-white border border-amber-200 rounded-xl p-8 text-center">
-          <p className="text-amber-800 font-medium mb-2">Something went wrong displaying the dashboard.</p>
-          <p className="text-sm text-gray-600 mb-4">Try refreshing the page.</p>
+        <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/80 p-8 text-center shadow-md">
+          <p className="text-amber-900 font-semibold mb-2">Something went wrong displaying the dashboard.</p>
+          <p className="text-sm text-amber-800/90 mb-4">Try refreshing the page.</p>
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-medium hover:from-amber-600 hover:to-orange-600 shadow-md"
           >
             Refresh page
           </button>
@@ -695,31 +695,32 @@ const ShareDashboardPage: React.FC = () => {
 
   if (!token) {
     return (
-      <div className="p-8">
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg">
-          Invalid share link.
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center p-8">
+        <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50 px-6 py-4 text-amber-900 shadow-md max-w-md">
+          <p className="font-semibold">Invalid share link.</p>
+          <p className="text-sm mt-1 text-amber-800/90">Please check the URL and try again.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-gray-50 to-slate-100">
       {/* Top Navbar */}
-      <nav className="bg-white border-b border-gray-200 px-8 py-4">
+      <nav className="bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 border-b-2 border-primary-500/50 px-8 py-4 shadow-lg">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">
+            <h1 className="text-xl font-bold text-white drop-shadow-sm">
               {dashboardSummary?.client?.name || "Shared Dashboard"}
             </h1>
             {dashboardSummary?.client?.domain && (
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-white/90 mt-1">
                 <span className="font-medium">Domain:</span>{" "}
                 <a
                   href={dashboardSummary.client.domain.startsWith("http") ? dashboardSummary.client.domain : `https://${dashboardSummary.client.domain}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-primary-600 hover:underline"
+                  className="text-white underline decoration-white/70 hover:decoration-white"
                 >
                   {dashboardSummary.client.domain}
                 </a>
@@ -730,7 +731,7 @@ const ShareDashboardPage: React.FC = () => {
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
-              className="border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="border-2 border-white/30 bg-white/15 text-white rounded-xl px-4 py-2 focus:ring-2 focus:ring-white/40 focus:border-white/50 focus:outline-none [&>option]:text-gray-900"
             >
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
@@ -741,7 +742,7 @@ const ShareDashboardPage: React.FC = () => {
               type="button"
               onClick={handleExportPdf}
               disabled={exportingPdf}
-              className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="bg-white/20 hover:bg-white/30 text-white border-2 border-white/40 px-4 py-2 rounded-xl font-medium transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {exportingPdf ? (
                 <>
@@ -763,96 +764,96 @@ const ShareDashboardPage: React.FC = () => {
       <div className="p-8 space-y-8">
         <div ref={dashboardContentRef} className="space-y-8">
           {loading ? (
-            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">
-              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-              Loading shared dashboard...
+            <div className="rounded-2xl border-l-4 border-primary-500 bg-primary-50/60 p-8 text-center text-primary-800 shadow-md">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3 text-primary-600" />
+              <p className="font-medium">Loading shared dashboard...</p>
             </div>
           ) : !contentMounted ? (
-            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">
-              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-              Preparing dashboard...
+            <div className="rounded-2xl border-l-4 border-blue-500 bg-blue-50/60 p-8 text-center text-blue-900 shadow-md">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3 text-blue-600" />
+              <p className="font-medium">Preparing dashboard...</p>
             </div>
           ) : (
             <ShareDashboardErrorBoundary>
             <>
             {/* Report View - GA4 Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/60 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Web Visitors</p>
+                    <p className="text-sm font-semibold text-blue-900">Web Visitors</p>
                     <p className="text-2xl font-bold text-gray-900">{activeUsersDisplay}</p>
                   </div>
-                  <Users className="h-8 w-8 text-blue-500" />
+                  <Users className="h-8 w-8 text-blue-600" />
                 </div>
                 {dashboardSummary?.isGA4Connected ? (
-                  <div className="mt-4 flex items-center space-x-2">
-                    <TrendingUp className="h-4 w-4 text-green-500" />
-                    <span className="text-sm text-green-600">Real-time data from GA4</span>
+                  <div className="mt-4 flex items-center space-x-2 text-emerald-700">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    <span className="text-sm font-medium">Real-time data from GA4</span>
                   </div>
                 ) : (
                   <div className="mt-4">
-                    <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                    <span className="text-xs text-blue-700/80">Connect GA4 to view data</span>
                   </div>
                 )}
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Organic Traffic</p>
+                    <p className="text-sm font-semibold text-emerald-900">Organic Traffic</p>
                     <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
                   </div>
-                  <Search className="h-8 w-8 text-green-500" />
+                  <Search className="h-8 w-8 text-emerald-600" />
                 </div>
                 {dashboardSummary?.isGA4Connected ? (
-                  <div className="mt-4 flex items-center space-x-2">
-                    <TrendingUp className="h-4 w-4 text-green-500" />
-                    <span className="text-sm text-green-600">Real-time data from GA4</span>
+                  <div className="mt-4 flex items-center space-x-2 text-emerald-700">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    <span className="text-sm font-medium">Real-time data from GA4</span>
                   </div>
                 ) : (
                   <div className="mt-4">
-                    <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                    <span className="text-xs text-emerald-800/80">Connect GA4 to view data</span>
                   </div>
                 )}
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-violet-500 bg-violet-50/60 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">First Time Visitors</p>
+                    <p className="text-sm font-semibold text-violet-900">First Time Visitors</p>
                     <p className="text-2xl font-bold text-gray-900">{newUsersDisplay}</p>
                   </div>
-                  <UserPlus className="h-8 w-8 text-purple-500" />
+                  <UserPlus className="h-8 w-8 text-violet-600" />
                 </div>
                 {dashboardSummary?.isGA4Connected ? (
-                  <div className="mt-4 flex items-center space-x-2">
-                    <TrendingUp className="h-4 w-4 text-green-500" />
-                    <span className="text-sm text-green-600">Real-time data from GA4</span>
+                  <div className="mt-4 flex items-center space-x-2 text-emerald-700">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    <span className="text-sm font-medium">Real-time data from GA4</span>
                   </div>
                 ) : (
                   <div className="mt-4">
-                    <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                    <span className="text-xs text-violet-800/80">Connect GA4 to view data</span>
                   </div>
                 )}
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/60 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Engaged Visitors</p>
+                    <p className="text-sm font-semibold text-amber-900">Engaged Visitors</p>
                     <p className="text-2xl font-bold text-gray-900">{keyEventsDisplay}</p>
                   </div>
-                  <Activity className="h-8 w-8 text-orange-500" />
+                  <Activity className="h-8 w-8 text-amber-600" />
                 </div>
                 {dashboardSummary?.isGA4Connected ? (
-                  <div className="mt-4 flex items-center space-x-2">
-                    <TrendingUp className="h-4 w-4 text-green-500" />
-                    <span className="text-sm text-green-600">Real-time data from GA4</span>
+                  <div className="mt-4 flex items-center space-x-2 text-emerald-700">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    <span className="text-sm font-medium">Real-time data from GA4</span>
                   </div>
                 ) : (
                   <div className="mt-4">
-                    <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                    <span className="text-xs text-amber-800/80">Connect GA4 to view data</span>
                   </div>
                 )}
               </div>
@@ -860,9 +861,9 @@ const ShareDashboardPage: React.FC = () => {
 
             {/* Trend Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-blue-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">New Users Trending</h3>
+                  <h3 className="text-lg font-semibold text-blue-900">New Users Trending</h3>
                   {fetchingSummary && <span className="text-xs text-gray-400">Updating...</span>}
                 </div>
                 <div className="h-64">
@@ -891,8 +892,8 @@ const ShareDashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Users Trending</h3>
+              <div className="rounded-xl border-l-4 border-emerald-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
+                <h3 className="text-lg font-semibold text-emerald-900 mb-4">Total Users Trending</h3>
                 <div className="h-64">
                   {dashboardSummary?.isGA4Connected ? (
                     totalUsersTrendData.length > 0 ? (
@@ -941,9 +942,9 @@ const ShareDashboardPage: React.FC = () => {
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-4 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-violet-500 bg-white p-4 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-900">Traffic Sources</h3>
+                  <h3 className="text-lg font-semibold text-violet-900">Traffic Sources</h3>
                 </div>
                 {trafficSourcesError && (
                   <p className="mb-3 text-sm text-rose-600">{trafficSourcesError}</p>
@@ -993,10 +994,9 @@ const ShareDashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white p-4 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-indigo-500 bg-white p-4 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-900">AI Search Visibility</h3>
-                  <span className="text-xs text-gray-500">Subscription active</span>
+                  <h3 className="text-lg font-semibold text-indigo-900">AI Search Visibility</h3>
                 </div>
 
                 {aiSearchError && <p className="mb-3 text-sm text-rose-600">{aiSearchError}</p>}
@@ -1043,9 +1043,9 @@ const ShareDashboardPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-teal-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Visitor Sources</h3>
+                  <h3 className="text-lg font-semibold text-teal-900">Visitor Sources</h3>
                 </div>
                 {visitorSourcesError && (
                   <p className="mb-4 text-sm text-rose-600">
@@ -1074,9 +1074,9 @@ const ShareDashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200">
+              <div className="rounded-xl border-l-4 border-amber-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Conversions</h3>
+                  <h3 className="text-lg font-semibold text-amber-900">Conversions</h3>
                 </div>
                 {topEventsError && (
                   <p className="mb-4 text-sm text-rose-600">
@@ -1106,9 +1106,9 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Top Pages</h3>
+            <div className="rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
+              <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-primary-50/50 to-blue-50/50">
+                <h3 className="text-lg font-semibold text-primary-900">Top Pages</h3>
                 {topPagesError && (
                   <p className="mt-2 text-sm text-rose-600">
                     {topPagesError}
@@ -1117,16 +1117,16 @@ const ShareDashboardPage: React.FC = () => {
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gradient-to-r from-primary-50/80 to-slate-100">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Page</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keywords</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Est. Traffic (ETV)</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 1</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 2-3</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 4-10</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Movement</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid Traffic</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Page</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Keywords</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Est. Traffic (ETV)</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Top 1</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Top 2-3</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Top 4-10</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Movement</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Paid Traffic</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -1217,11 +1217,11 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200">
-              <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+            <div className="rounded-xl border-l-4 border-emerald-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
+              <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-emerald-50/60 to-teal-50/50 flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">New Links</h3>
-                  <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
+                  <h3 className="text-lg font-semibold text-emerald-900">New Links</h3>
+                  <p className="text-sm text-emerald-800/80">Weekly backlinks acquired (last 4 weeks)</p>
                 </div>
               </div>
               <div className="p-6 space-y-4">

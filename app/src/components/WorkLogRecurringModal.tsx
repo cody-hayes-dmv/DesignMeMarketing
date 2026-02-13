@@ -264,61 +264,61 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
-      <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-gray-200">
-        <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">
+      <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden ring-2 ring-primary-200/80">
+        <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 bg-gradient-to-r from-teal-600 via-emerald-600 to-green-600 border-b-2 border-emerald-500/50">
+          <h3 className="text-lg font-bold text-white drop-shadow-sm">
             {isEdit ? "Edit Recurring Task" : "Add Recurring Task"}
           </h3>
-          <button type="button" onClick={() => setOpen(false)} className="p-2 text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={() => setOpen(false)} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-auto">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-auto bg-gradient-to-b from-slate-50/50 to-white">
           <div className="px-6 py-5 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-3">
+              <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
               <input
                 type="text"
                 maxLength={90}
                 value={form.title}
                 onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 transition-shadow"
                 placeholder="e.g. Optimized homepage title tags"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+            <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-3">
+              <label className="block text-sm font-semibold text-emerald-800 mb-1">Work Type</label>
               <input
                 type="text"
                 value={form.category}
                 onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 transition-shadow"
                 placeholder="e.g. Technical, Content, Link Building"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
+            <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-3">
+              <label className="block text-sm font-semibold text-amber-800 mb-1">Task</label>
               <div
                 ref={taskNotesRef}
                 contentEditable
                 suppressContentEditableWarning
                 onInput={(e) => setForm((p) => ({ ...p, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
-                className="min-h-[120px] w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-primary-500 prose prose-sm max-w-none"
+                className="min-h-[120px] w-full border-2 border-gray-200 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-400 prose prose-sm max-w-none transition-shadow"
                 data-placeholder="Add task details..."
                 style={{ outline: "none" }}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Due date / First run</label>
+            <div className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-3">
+              <label className="block text-sm font-semibold text-violet-800 mb-1">Due date / First run</label>
               <input
                 type="date"
                 value={form.dueDate}
                 onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 transition-shadow"
               />
             </div>
-            <div ref={assignToRef} className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Assign to</label>
+            <div ref={assignToRef} className="relative rounded-xl border-l-4 border-slate-400 bg-slate-50/50 p-3">
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Assign to</label>
               <input
                 type="text"
                 value={form.assigneeId ? assigneeDisplay : assignableSearch}
@@ -332,7 +332,7 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                 }}
                 onFocus={() => setAssignToOpen(true)}
                 placeholder="Search by name or email"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 transition-shadow"
               />
               {form.assigneeId && (
                 <button
@@ -343,13 +343,13 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                     setAssignableSearch("");
                     setAssignToOpen(true);
                   }}
-                  className="mt-1 text-sm text-gray-500 hover:text-gray-700"
+                  className="mt-1 text-sm text-slate-600 hover:text-primary-600 font-medium"
                 >
                   Clear
                 </button>
               )}
               {assignToOpen && (
-                <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border-2 border-primary-200 bg-white shadow-lg py-1">
                   {assignableLoading ? (
                     <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
                   ) : assignableUsers.length === 0 ? (
@@ -359,7 +359,7 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                       <li key={u.id}>
                         <button
                           type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex justify-between"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50 flex justify-between"
                           onClick={() => {
                             setForm((p) => ({ ...p, assigneeId: u.id }));
                             setAssigneeDisplay(u.name || u.email);
@@ -376,8 +376,8 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                 </ul>
               )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
+            <div className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-3">
+              <label className="block text-sm font-semibold text-indigo-800 mb-2">Proof / Attachments</label>
               <input
                 id="worklog-recurring-file"
                 type="file"
@@ -388,21 +388,21 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
               />
               <label
                 htmlFor="worklog-recurring-file"
-                className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500"
+                className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-violet-200 rounded-lg cursor-pointer hover:border-violet-400 hover:bg-violet-50/50 transition-colors"
               >
                 <div className="flex flex-col items-center">
-                  {uploading ? <Loader2 className="h-6 w-6 text-gray-400 animate-spin mb-2" /> : <Upload className="h-6 w-6 text-gray-400 mb-2" />}
-                  <span className="text-sm text-gray-600">
+                  {uploading ? <Loader2 className="h-6 w-6 text-violet-500 animate-spin mb-2" /> : <Upload className="h-6 w-6 text-violet-500 mb-2" />}
+                  <span className="text-sm text-violet-800/90">
                     {uploading ? "Uploading…" : "Click to upload files (PDF, Word, Excel, images, etc.)"}
                   </span>
-                  <span className="text-xs text-gray-500 mt-1">max 25MB per file</span>
+                  <span className="text-xs text-violet-600/80 mt-1">max 25MB per file</span>
                 </div>
               </label>
               <div className="flex flex-col sm:flex-row gap-2 mt-2">
                 <select
                   value={urlType}
                   onChange={(e) => setUrlType(e.target.value as "image" | "video" | "url")}
-                  className="px-3 py-2 border border-gray-300 rounded-lg sm:w-40 text-sm"
+                  className="px-3 py-2 border-2 border-gray-200 rounded-lg sm:w-40 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 transition-shadow"
                 >
                   <option value="url">URL</option>
                   <option value="image">Image URL</option>
@@ -413,9 +413,9 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
                   placeholder="Enter URL"
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 transition-shadow"
                 />
-                <button type="button" onClick={addUrl} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 flex items-center justify-center gap-1">
+                <button type="button" onClick={addUrl} className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 font-medium flex items-center justify-center gap-1 transition-colors">
                   <Plus className="h-4 w-4" />
                   Add
                 </button>
@@ -423,7 +423,7 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
               {form.attachments.length > 0 && (
                 <div className="mt-2 space-y-2 max-h-40 overflow-y-auto">
                   {form.attachments.map((att, i) => (
-                    <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border">
+                    <div key={i} className="flex items-center justify-between p-2 bg-violet-50/50 rounded-lg border border-violet-200">
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {att.type === "image" && <Image className="h-4 w-4 text-blue-600 flex-shrink-0" />}
                         {att.type === "video" && <Video className="h-4 w-4 text-purple-600 flex-shrink-0" />}
@@ -432,7 +432,7 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                           {att.name || att.value || "Attachment"}
                         </a>
                       </div>
-                      <button type="button" onClick={() => removeAttachment(i)} className="p-1 text-red-600 hover:text-red-800">
+                      <button type="button" onClick={() => removeAttachment(i)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors">
                         <X className="h-4 w-4" />
                       </button>
                     </div>
@@ -440,12 +440,12 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                 </div>
               )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-3">
+              <label className="block text-sm font-semibold text-blue-800 mb-1">Status</label>
               <select
                 value={form.status}
                 onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as TaskStatus }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 transition-shadow"
               >
                 <option value="TODO">Pending</option>
                 <option value="IN_PROGRESS">In Progress</option>
@@ -453,12 +453,12 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                 <option value="DONE">Completed</option>
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Recurrence</label>
+            <div className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-3">
+              <label className="block text-sm font-semibold text-teal-800 mb-1">Recurrence</label>
               <select
                 value={form.frequency}
                 onChange={(e) => setForm((p) => ({ ...p, frequency: e.target.value as (typeof FREQUENCIES)[number]["value"] }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500"
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 transition-shadow"
               >
                 {FREQUENCIES.map((f) => (
                   <option key={f.value} value={f.value}>
@@ -468,14 +468,14 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
               </select>
             </div>
           </div>
-          <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-            <button type="button" onClick={() => setOpen(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+          <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
+            <button type="button" onClick={() => setOpen(false)} className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors">
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting || !form.title.trim()}
-              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 disabled:opacity-50 transition-all shadow-md"
             >
               {submitting ? "Saving…" : isEdit ? "Update" : "Create"}
             </button>

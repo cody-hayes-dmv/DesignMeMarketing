@@ -430,35 +430,35 @@ const ReportsPage: React.FC = () => {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Report</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Generated</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recipients</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            <thead>
+              <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Report</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Type</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Project</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Last Generated</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Recipients</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-gray-50/50">
                     Loading reports...
                   </td>
                 </tr>
               ) : reports.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-amber-50/50">
                     No reports found. Create a report for a client first.
                   </td>
                 </tr>
               ) : (
                 reports
                   .filter(report => filterClientId === "all" || report.clientId === filterClientId)
-                  .map((report) => (
-                <tr key={report.id} className="hover:bg-gray-50">
+                  .map((report, index) => (
+                <tr key={report.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div>
                         <div className="text-sm font-medium text-gray-900">
@@ -499,17 +499,17 @@ const ReportsPage: React.FC = () => {
                         : "No recipients"}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleViewClick(report)}
-                          className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                          className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                           title="View report"
                         >
                         <Eye className="h-4 w-4" />
                       </button>
                         <button
                           onClick={() => handleShareClick(report)}
-                          className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                          className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                           title="Share report"
                         >
                         <Share2 className="h-4 w-4" />
@@ -520,7 +520,7 @@ const ReportsPage: React.FC = () => {
                               setSelectedReportForSend(report);
                               setShowSendModal(true);
                             }}
-                            className="p-1 text-gray-400 hover:text-secondary-600 transition-colors"
+                            className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                             title="Send report via email"
                           >
                             <Send className="h-4 w-4" />
@@ -528,7 +528,7 @@ const ReportsPage: React.FC = () => {
                         )}
                         <button
                           onClick={() => handleDeleteReport(report.id)}
-                          className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                          className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                           title="Delete report"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -545,46 +545,60 @@ const ReportsPage: React.FC = () => {
 
       {/* Generate Report Modal */}
       {showGenerateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Generate Report</h2>
-              <button onClick={() => setShowGenerateModal(false)} className="text-gray-400 hover:text-gray-600">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 max-w-md w-full mx-4 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold">Generate Report</h2>
+                  <p className="text-sm text-white/90">Choose client and period</p>
+                </div>
+              </div>
+              <button onClick={() => setShowGenerateModal(false)} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Client</label>
-                <select
-                  value={selectedClient || ""}
-                  onChange={(e) => setSelectedClient(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                >
-                  <option value="">Select a client</option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </select>
+            <div className="p-6 bg-gray-50/50">
+              <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5 space-y-4">
+                <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  Client & Period
+                </h3>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Client</label>
+                  <select
+                    value={selectedClient || ""}
+                    onChange={(e) => setSelectedClient(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <option value="">Select a client</option>
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Period</label>
+                  <select
+                    id="period"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    defaultValue="monthly"
+                  >
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Biweekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Period</label>
-                <select
-                  id="period"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                  defaultValue="monthly"
-                >
-                  <option value="weekly">Weekly</option>
-                  <option value="biweekly">Biweekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200 bg-gray-100/80 -mx-6 -mb-6 px-6 py-4 rounded-b-2xl">
                 <button
                   onClick={() => setShowGenerateModal(false)}
-                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                  className="px-4 py-2.5 border border-gray-300 bg-white text-gray-700 rounded-xl hover:bg-gray-50 font-medium"
                 >
                   Cancel
                 </button>
@@ -597,7 +611,7 @@ const ReportsPage: React.FC = () => {
                       toast.error("Please select a client");
                     }
                   }}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                  className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
                 >
                   Generate
                 </button>
@@ -818,119 +832,151 @@ const ScheduleReportModal: React.FC<{
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold">Schedule Report</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 max-w-lg w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+              <Calendar className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Schedule Report</h2>
+              <p className="text-sm text-white/90">Set up recurring report delivery</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Client</label>
-            <select
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              required
-            >
-              <option value="">Select a client</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
-            <select
-              value={frequency}
-              onChange={(e) => setFrequency(e.target.value as "weekly" | "biweekly" | "monthly")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              required
-            >
-              <option value="weekly">Weekly</option>
-              <option value="biweekly">Biweekly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-          </div>
-          {frequency !== "monthly" ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Day of Week</label>
-              <select
-                value={dayOfWeek}
-                onChange={(e) => setDayOfWeek(Number(e.target.value))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                required
-              >
-                {dayNames.map((day, index) => (
-                  <option key={index} value={index}>
-                    {day}
-                  </option>
-                ))}
-              </select>
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50 space-y-5">
+            <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                Client
+              </h3>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Client</label>
+                <select
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  required
+                >
+                  <option value="">Select a client</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          ) : (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Day of Month</label>
-              <input
-                type="number"
-                min="1"
-                max="31"
-                value={dayOfMonth}
-                onChange={(e) => setDayOfMonth(Number(e.target.value))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                required
-              />
+            <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Schedule
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+                  <select
+                    value={frequency}
+                    onChange={(e) => setFrequency(e.target.value as "weekly" | "biweekly" | "monthly")}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    required
+                  >
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Biweekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                {frequency !== "monthly" ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Day of Week</label>
+                    <select
+                      value={dayOfWeek}
+                      onChange={(e) => setDayOfWeek(Number(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      required
+                    >
+                      {dayNames.map((day, index) => (
+                        <option key={index} value={index}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Day of Month</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={dayOfMonth}
+                      onChange={(e) => setDayOfMonth(Number(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      required
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Time of Day</label>
+                  <input
+                    type="time"
+                    value={timeOfDay}
+                    onChange={(e) => setTimeOfDay(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+              </div>
             </div>
-          )}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Time of Day</label>
-            <input
-              type="time"
-              value={timeOfDay}
-              onChange={(e) => setTimeOfDay(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              required
-            />
+            <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                Recipients
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Recipients (comma-separated emails)
+                  </label>
+                  <input
+                    type="text"
+                    value={recipients}
+                    onChange={(e) => setRecipients(e.target.value)}
+                    placeholder="email1@example.com, email2@example.com"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email Subject (optional)</label>
+                  <input
+                    type="text"
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    placeholder="Custom email subject"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Recipients (comma-separated emails)
-            </label>
-            <input
-              type="text"
-              value={recipients}
-              onChange={(e) => setRecipients(e.target.value)}
-              placeholder="email1@example.com, email2@example.com"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Email Subject (optional)</label>
-            <input
-              type="text"
-              value={emailSubject}
-              onChange={(e) => setEmailSubject(e.target.value)}
-              placeholder="Custom email subject"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2"
-            />
-          </div>
-          <div className="flex justify-end space-x-3 mt-6">
+          <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              className="px-4 py-2.5 border border-gray-300 bg-white text-gray-700 rounded-xl hover:bg-gray-50 font-medium"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
             >
               {loading ? "Creating..." : "Create Schedule"}
             </button>

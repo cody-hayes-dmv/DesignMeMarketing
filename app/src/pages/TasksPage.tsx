@@ -537,20 +537,20 @@ const TasksPage = () => {
                                 <div className="px-6 py-8 text-sm text-gray-500">No recurring tasks yet. Use “Add Recurring Task” above to create one.</div>
                             ) : (
                                 <table className="w-full">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurrence</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due Date</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                    <thead>
+                                        <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Task</th>
+                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Recurrence</th>
+                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Client</th>
+                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Assignee</th>
+                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Due Date</th>
+                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
-                                        {recurringRules.map((r) => (
-                                            <tr key={r.id} className="hover:bg-gray-50">
+                                    <tbody className="divide-y divide-gray-100">
+                                        {recurringRules.map((r, idx) => (
+                                            <tr key={r.id} className={`transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                                                 <td className="px-6 py-4">
                                                     <div className="flex flex-col">
                                                         <div className="text-sm font-medium text-gray-900">{r.title}</div>
@@ -586,20 +586,20 @@ const TasksPage = () => {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <div className="flex items-center space-x-2">
+                                                    <div className="flex items-center gap-1">
                                                         {r.isActive ? (
-                                                            <button type="button" onClick={() => handleStopRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Stop recurrence">
+                                                            <button type="button" onClick={() => handleStopRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Stop recurrence">
                                                                 <StopCircle className="h-4 w-4" />
                                                             </button>
                                                         ) : (
-                                                            <button type="button" onClick={() => handleResumeRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Resume">
+                                                            <button type="button" onClick={() => handleResumeRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Resume">
                                                                 <Play className="h-4 w-4" />
                                                             </button>
                                                         )}
-                                                        <button type="button" onClick={() => { setEditingRecurringRule(r); setShowRecurringModal(true); }} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Edit">
+                                                        <button type="button" onClick={() => { setEditingRecurringRule(r); setShowRecurringModal(true); }} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Edit">
                                                             <Edit className="h-4 w-4" />
                                                         </button>
-                                                        <button type="button" onClick={() => handleRemoveRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Remove">
+                                                        <button type="button" onClick={() => handleRemoveRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Remove">
                                                             <Trash2 className="h-4 w-4" />
                                                         </button>
                                                     </div>
@@ -636,7 +636,7 @@ const TasksPage = () => {
 
             {/* Task View */}
             {(!enabled) ? (
-                <div className="bg-white rounded-xl border border-gray-200">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     {canCreate && selectedTaskIds.length > 0 && (
                         <div className="px-6 py-3 bg-primary-50 border-b border-primary-100 flex flex-wrap items-center gap-3">
                             <span className="text-sm font-medium text-primary-800">
@@ -691,10 +691,10 @@ const TasksPage = () => {
                     )}
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="bg-gray-50">
-                                <tr>
+                            <thead>
+                                <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
                                     {canCreate && (
-                                        <th className="px-4 py-3 text-left">
+                                        <th className="px-4 py-3.5 text-left border-l-4 border-transparent">
                                             <input
                                                 type="checkbox"
                                                 checked={displayedTasks.length > 0 && selectedTaskIds.length === displayedTasks.length}
@@ -703,17 +703,17 @@ const TasksPage = () => {
                                             />
                                         </th>
                                     )}
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due Date</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Task</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Client</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Assignee</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Due Date</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {displayedTasks.map((task) => (
-                                    <tr key={task.id} className={`hover:bg-gray-50 ${isOverdue(task.dueDate) ? 'bg-red-50' : ''}`}>
+                            <tbody className="divide-y divide-gray-100">
+                                {displayedTasks.map((task, index) => (
+                                    <tr key={task.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50 ${isOverdue(task.dueDate) ? 'bg-red-50/50' : ''}`}>
                                         {canCreate && (
                                             <td className="px-4 py-4">
                                                 <input
@@ -861,16 +861,16 @@ const TasksPage = () => {
                                             )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                            <div className="flex items-center space-x-2">
+                                            <div className="flex items-center gap-1">
                                                 <button
-                                                    className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                    className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                                                     onClick={() => handleEditClick(task)}
                                                     title="Edit task"
                                                 >
                                                     <Edit className="h-4 w-4" />
                                                 </button>
                                                 <button
-                                                    className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                                    className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                                     onClick={() => handleDeleteTask(task.id)}
                                                     title="Delete task"
                                                 >

@@ -298,67 +298,69 @@ const VendastaPage = () => {
 
       {/* Client View */}
       {(!enabled) ? (
-        <div className="bg-white rounded-xl border border-gray-200">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th 
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+              <thead>
+                <tr className="bg-gradient-to-r from-orange-50 via-amber-50 to-yellow-50 border-b-2 border-orange-200">
+                  <th
+                    className="px-6 py-3.5 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider cursor-pointer hover:from-orange-100 hover:via-amber-100 select-none border-l-4 border-orange-400 first:border-l-0"
                     onClick={() => handleSort("name")}
                   >
                     <div className="flex items-center gap-2">
                       Name
                       {sortField === "name" && (
-                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-orange-600" /> : <ArrowDown className="h-3.5 w-3.5 text-orange-600" />
                       )}
                     </div>
                   </th>
-                  <th 
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  <th
+                    className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider cursor-pointer hover:from-orange-100 select-none border-l-4 border-emerald-300"
                     onClick={() => handleSort("domain")}
                   >
                     <div className="flex items-center gap-2">
                       Domain
                       {sortField === "domain" && (
-                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-emerald-600" /> : <ArrowDown className="h-3.5 w-3.5 text-emerald-600" />
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
-                  <th 
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Agency</th>
+                  <th
+                    className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider cursor-pointer hover:from-orange-100 select-none border-l-4 border-violet-300"
                     onClick={() => handleSort("industry")}
                   >
                     <div className="flex items-center gap-2">
                       Industry
                       {sortField === "industry" && (
-                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-violet-600" /> : <ArrowDown className="h-3.5 w-3.5 text-violet-600" />
                       )}
                     </div>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Created Date</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="divide-y divide-gray-100">
                 {filteredClients.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-amber-50/50">
                       {searchTerm ? "No Vendasta clients found matching your search." : "No Vendasta clients yet. Move clients from the Clients page."}
                     </td>
                   </tr>
                 ) : (
-                  filteredClients.map((client) => (
-                    <tr key={client.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-xs flex items-center gap-1">
-                        <Store className="text-orange-600" size={18} />
-                        {client.name}
+                  filteredClients.map((client, index) => (
+                    <tr key={client.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-orange-50/40`}>
+                      <td className="px-6 py-4 whitespace-nowrap text-xs">
+                        <div className="flex items-center gap-2 font-semibold text-gray-900">
+                          <Store className="h-4 w-4 text-orange-500 shrink-0" />
+                          {client.name}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-xs">
                         <a
-                          className="text-sm text-gray-600 underline"
+                          className="text-sm font-medium text-primary-600 hover:text-primary-700 underline underline-offset-1 decoration-primary-300 hover:decoration-primary-500 transition-colors"
                           href={client.domain.startsWith("http") ? client.domain : `https://${client.domain}`}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -366,14 +368,14 @@ const VendastaPage = () => {
                           {client.domain}
                         </a>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-xs">
+                      <td className="px-6 py-4 whitespace-nowrap text-xs text-amber-800/90">
                         {client.agencyNames?.length ? (
                           client.agencyNames.map((name, i) => (
                             <span key={name}>
                               {i > 0 && ", "}
                               <Link
                                 to="/agency/agencies"
-                                className="text-primary-600 hover:text-primary-700 underline"
+                                className="text-primary-600 hover:text-primary-700 underline font-medium"
                               >
                                 {name}
                               </Link>
@@ -383,7 +385,11 @@ const VendastaPage = () => {
                           "—"
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-xs">{client.industry ?? "-"}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-xs">
+                        <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-violet-100 text-violet-800">
+                          {client.industry ?? "-"}
+                        </span>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {user?.role === "SUPER_ADMIN" ? (
                           <div 
@@ -439,19 +445,20 @@ const VendastaPage = () => {
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-xs">
+                      <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-600">
                         {client.createdAt ? format(new Date(client.createdAt), "yyyy-MM-dd") : "-"}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-xs">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center gap-1">
                           <button
-                            className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                            className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                             onClick={() => handleViewClick(client)}
+                            title="View"
                           >
                             <Eye className="h-4 w-4" />
                           </button>
                           <button
-                            className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                            className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                             onClick={() => handleShareClick(client)}
                             title="Share"
                           >
@@ -459,7 +466,7 @@ const VendastaPage = () => {
                           </button>
                           {user?.role === "SUPER_ADMIN" && (
                             <button
-                              className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                              className="p-2 rounded-lg text-gray-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                               onClick={() => handleAssignToAgency(client)}
                               title="Assign to Agency"
                             >
@@ -468,7 +475,7 @@ const VendastaPage = () => {
                           )}
                           {user?.role === "SUPER_ADMIN" && (
                             <button
-                              className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                              className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                               onClick={() => handleMoveBackToClients(client)}
                               title="Move Back to Clients"
                             >
@@ -476,14 +483,16 @@ const VendastaPage = () => {
                             </button>
                           )}
                           <button
-                            className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                            className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                             onClick={() => handleEditClick(client)}
+                            title="Edit"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
                           <button
-                            className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                            className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                             onClick={() => handleDeleteClient(client.id)}
+                            title="Delete"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>

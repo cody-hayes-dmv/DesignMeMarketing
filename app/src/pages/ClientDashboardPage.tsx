@@ -1668,40 +1668,44 @@ const ClientDashboardPage: React.FC = () => {
         toast.success("Shareable link copied to clipboard!");
         // Also show the URL so the user can see/open it
         toast.custom((t) => (
-          <div className={`max-w-xl w-full bg-white shadow-lg rounded-lg border border-gray-200 p-4 ${t.visible ? "animate-enter" : "animate-leave"}`}>
-            <p className="text-sm font-medium text-gray-900 mb-2">Share link generated</p>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-600 underline break-all"
-            >
-              {url}
-            </a>
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                className="px-3 py-1 text-xs rounded bg-primary-600 text-white hover:bg-primary-700"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(url);
-                  toast.success("Link copied");
-                }}
-              >
-                Copy
-              </button>
+          <div className={`max-w-xl w-full bg-white shadow-xl rounded-xl border-2 border-primary-200 overflow-hidden ${t.visible ? "animate-enter" : "animate-leave"}`}>
+            <div className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 px-4 py-3 border-b border-primary-200">
+              <p className="text-sm font-semibold text-primary-800">Share link generated</p>
+            </div>
+            <div className="p-4">
               <a
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3 py-1 text-xs rounded bg-gray-100 text-gray-800 hover:bg-gray-200"
+                className="text-xs text-primary-600 hover:text-primary-800 hover:underline break-all font-medium"
               >
-                Open
+                {url}
               </a>
-              <button
-                className="ml-auto px-3 py-1 text-xs rounded bg-gray-100 text-gray-800 hover:bg-gray-200"
-                onClick={() => toast.dismiss(t.id)}
-              >
-                Close
-              </button>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(url);
+                    toast.success("Link copied");
+                  }}
+                >
+                  Copy
+                </button>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors"
+                >
+                  Open
+                </a>
+                <button
+                  className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                  onClick={() => toast.dismiss(t.id)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         ), { duration: 10000 });
@@ -4334,28 +4338,28 @@ const ClientDashboardPage: React.FC = () => {
                 >
                 {dashboardSection === "seo" && (
                   <div className="space-y-8">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-50 text-primary-600">
+                    <div className="flex items-center gap-3 rounded-xl border-l-4 border-primary-500 bg-gradient-to-r from-primary-50/80 via-blue-50/60 to-indigo-50/50 px-5 py-4 shadow-sm">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600/90 text-white">
                         <Search className="h-5 w-5" />
                       </div>
                       <div>
-                        <h2 className="text-xl font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                        <h2 className="text-xl font-bold text-primary-900 inline-flex items-center gap-1.5">
                           SEO Overview
                           <span title="Traffic, keywords, backlinks, and conversions in one place. Data from GA4 and DataForSEO.">
-                            <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                            <Info className="h-4 w-4 text-primary-600 cursor-help" aria-hidden />
                           </span>
                         </h2>
-                        <p className="text-sm text-gray-500 mt-0.5">
+                        <p className="text-sm text-primary-800/80 mt-0.5">
                           Website traffic, organic performance, target keywords, and backlink trends.
                         </p>
                       </div>
                     </div>
                     {/* GA4 connection is managed in the Integration tab */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/60 p-6 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">
+                      <p className="text-sm font-semibold text-blue-900">
                         Web Visitors
                         <span className="ml-1.5 inline-flex align-middle" title="Total number of people who visited your website this month.">
                           <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
@@ -4368,36 +4372,36 @@ const ClientDashboardPage: React.FC = () => {
                         if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
                         const { text, isPositive } = formatPercentChange(curr, prev);
                         return (
-                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-semibold ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
                             {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                             {text}
                           </p>
                         );
                       })()}
                     </div>
-                    <Users className="h-8 w-8 text-blue-500" />
+                    <Users className="h-8 w-8 text-blue-600" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 space-y-0.5">
-                      <div className="flex items-center space-x-2">
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      <div className="flex items-center space-x-2 text-emerald-700">
+                        <TrendingUp className="h-4 w-4 text-emerald-500" />
+                        <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
                     <div className="mt-4">
-                      <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                      <span className="text-xs text-blue-700/80">Connect GA4 to view data</span>
                     </div>
                   )}
                 </div>
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60 p-6 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">
+                      <p className="text-sm font-semibold text-emerald-900">
                         Organic Traffic
                         <span className="ml-1.5 inline-flex align-middle" title="Visitors who found you through Google search (not paid ads). This shows how well your SEO is working.">
                           <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
@@ -4410,36 +4414,36 @@ const ClientDashboardPage: React.FC = () => {
                         if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
                         const { text, isPositive } = formatPercentChange(curr, prev);
                         return (
-                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-semibold ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
                             {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                             {text}
                           </p>
                         );
                       })()}
                     </div>
-                    <Search className="h-8 w-8 text-green-500" />
+                    <Search className="h-8 w-8 text-emerald-600" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 space-y-0.5">
-                      <div className="flex items-center space-x-2">
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      <div className="flex items-center space-x-2 text-emerald-700">
+                        <TrendingUp className="h-4 w-4 text-emerald-500" />
+                        <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
                     <div className="mt-4">
-                      <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                      <span className="text-xs text-emerald-800/80">Connect GA4 to view data</span>
                     </div>
                   )}
                 </div>
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-violet-500 bg-violet-50/60 p-6 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">
+                      <p className="text-sm font-semibold text-violet-900">
                         First Time Visitors
                         <span className="ml-1.5 inline-flex align-middle" title="Number of people visiting your website for the very first time this month.">
                           <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
@@ -4452,36 +4456,36 @@ const ClientDashboardPage: React.FC = () => {
                         if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
                         const { text, isPositive } = formatPercentChange(curr, prev);
                         return (
-                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-semibold ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
                             {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                             {text}
                           </p>
                         );
                       })()}
                     </div>
-                    <UserPlus className="h-8 w-8 text-purple-500" />
+                    <UserPlus className="h-8 w-8 text-violet-600" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 space-y-0.5">
-                      <div className="flex items-center space-x-2">
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      <div className="flex items-center space-x-2 text-emerald-700">
+                        <TrendingUp className="h-4 w-4 text-emerald-500" />
+                        <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
                     <div className="mt-4">
-                      <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                      <span className="text-xs text-violet-800/80">Connect GA4 to view data</span>
                     </div>
                   )}
                 </div>
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/60 p-6 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-gray-600">
+                      <p className="text-sm font-semibold text-amber-900">
                         Engaged Visitors
                         <span className="ml-1.5 inline-flex align-middle" title="Visitors who actively interacted with your site (spent time reading, clicked links, scrolled through pages).">
                           <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
@@ -4494,37 +4498,37 @@ const ClientDashboardPage: React.FC = () => {
                         if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
                         const { text, isPositive } = formatPercentChange(curr, prev);
                         return (
-                          <p className={`mt-1 flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                          <p className={`mt-1 flex items-center gap-1 text-sm font-semibold ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
                             {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                             {text}
                           </p>
                         );
                       })()}
                     </div>
-                    <Activity className="h-8 w-8 text-orange-500" />
+                    <Activity className="h-8 w-8 text-amber-600" />
                   </div>
                   {ga4Connected ? (
                     <div className="mt-4 space-y-0.5">
-                      <div className="flex items-center space-x-2">
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                        <span className="text-sm text-green-600">Real-time data from GA4</span>
+                      <div className="flex items-center space-x-2 text-emerald-700">
+                        <TrendingUp className="h-4 w-4 text-emerald-500" />
+                        <span className="text-sm font-medium">Real-time data from GA4</span>
                       </div>
                       {formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
-                        <p className="text-xs text-gray-500">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
+                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">{formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated)}</p>
                       )}
                     </div>
                   ) : (
                     <div className="mt-4">
-                      <span className="text-xs text-gray-500">Connect GA4 to view data</span>
+                      <span className="text-xs text-amber-800/80">Connect GA4 to view data</span>
                     </div>
                   )}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-blue-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                    <h3 className="text-lg font-semibold text-blue-900 inline-flex items-center gap-1.5">
                       New Users Trending
                       <span title="Daily chart showing how many first-time visitors you're getting. Helps spot growth patterns and traffic spikes.">
                         <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
@@ -4564,9 +4568,9 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-emerald-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                    <h3 className="text-lg font-semibold text-emerald-900 inline-flex items-center gap-1.5">
                       Total Users Trending
                       <span title="Daily chart showing all visitors (new + returning). Shows your overall website traffic momentum.">
                         <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
@@ -4626,12 +4630,12 @@ const ClientDashboardPage: React.FC = () => {
               />
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-violet-500 bg-white p-4 shadow-sm ring-1 ring-gray-200/80">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                    <h3 className="text-lg font-semibold text-violet-900 inline-flex items-center gap-1.5">
                       Traffic Sources
                       <span title="Shows where your website visitors are coming from: Google search, direct visits, other websites, social media, etc.">
-                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                        <Info className="h-4 w-4 text-violet-600 cursor-help" aria-hidden />
                       </span>
                     </h3>
                     {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
@@ -4714,12 +4718,12 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-indigo-500 bg-white p-4 shadow-sm ring-1 ring-gray-200/80">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                    <h3 className="text-lg font-semibold text-indigo-900 inline-flex items-center gap-1.5">
                       AI Search Visibility
                       <span title="How often your business appears when people ask AI tools (ChatGPT, Google AI, Perplexity) about services in your area.">
-                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                        <Info className="h-4 w-4 text-indigo-600 cursor-help" aria-hidden />
                       </span>
                     </h3>
                     {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
@@ -4771,12 +4775,12 @@ const ClientDashboardPage: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-teal-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                    <h3 className="text-lg font-semibold text-teal-900 inline-flex items-center gap-1.5">
                       Visitor Sources
                       <span title="Top websites and platforms sending people to your site.">
-                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                        <Info className="h-4 w-4 text-teal-600 cursor-help" aria-hidden />
                       </span>
                     </h3>
                     {ga4Connected && formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
@@ -4822,12 +4826,12 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                <div className="rounded-xl border-l-4 border-amber-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                    <h3 className="text-lg font-semibold text-amber-900 inline-flex items-center gap-1.5">
                       Conversions
                       <span title="Important actions visitors take on your site: form submissions, phone calls, button clicks, etc.">
-                        <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                        <Info className="h-4 w-4 text-amber-600 cursor-help" aria-hidden />
                       </span>
                     </h3>
                     {ga4Connected && formatLastUpdatedHours(dashboardSummary?.ga4LastUpdated) && (
@@ -4874,13 +4878,13 @@ const ClientDashboardPage: React.FC = () => {
               </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-gray-200">
-                <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <div className="rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
+                <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-primary-50/50 to-blue-50/50 flex items-center justify-between">
                    <div>
-                   <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                   <h3 className="text-lg font-semibold text-primary-900 inline-flex items-center gap-1.5">
                      Top Pages
                      <span title="Your most popular website pages and how visitors interact with them. Click any page to see every keyword it ranks for in Google.">
-                       <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                       <Info className="h-4 w-4 text-primary-600 cursor-help" aria-hidden />
                      </span>
                    </h3>
                    {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
@@ -4917,19 +4921,19 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gradient-to-r from-primary-50/80 to-slate-100">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Page</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keywords</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Est. Traffic (ETV)</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 1</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 2-3</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top 4-10</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Movement</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid Traffic</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Page</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Keywords</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Est. Traffic (ETV)</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Top 1</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Top 2-3</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Top 4-10</th>
+                        <th className="px-6 py-3 text-right text-xs font-semibold text-primary-800 uppercase tracking-wider">Movement</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Paid Traffic</th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody className="bg-white divide-y divide-gray-100">
                       {topPagesLoading ? (
                         <tr>
                           <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500">
@@ -5159,16 +5163,16 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
               </div>
 
-                    <div className="bg-white rounded-xl border border-gray-200">
-                      <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                    <div className="rounded-xl border-l-4 border-emerald-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
+                      <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-emerald-50/60 to-teal-50/50 flex items-center justify-between">
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                          <h3 className="text-lg font-semibold text-emerald-900 inline-flex items-center gap-1.5">
                             New Links
                             <span title="Total number of backlinks (other websites linking to yours) acquired each week. More quality backlinks help improve your Google rankings.">
-                              <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                              <Info className="h-4 w-4 text-emerald-600 cursor-help" aria-hidden />
                             </span>
                           </h3>
-                          <p className="text-sm text-gray-500">Weekly backlinks acquired (last 4 weeks)</p>
+                          <p className="text-sm text-emerald-800/80">Weekly backlinks acquired (last 4 weeks)</p>
                           {formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated) && (
                             <p className="text-xs text-gray-500 mt-0.5">{formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}</p>
                           )}
@@ -6342,17 +6346,17 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
+                          <thead>
+                            <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
                               {[
-                                { key: "sourceUrl" as const, label: "Source", tooltip: "The website that's linking to you." },
-                                { key: "anchorText" as const, label: "Anchor Text", tooltip: "The clickable text used in the link. Relevant anchor text helps Google understand what your page is about." },
-                                { key: "domainRating" as const, label: "Domain Rating", tooltip: "Authority score of the linking website (0-100). Higher scores mean more valuable links. Links from DR 50+ sites carry significant weight." },
-                                { key: "firstSeen" as const, label: "Publish Date", tooltip: "When the backlink was first discovered or published." },
-                              ].map(({ key, label, tooltip }) => (
+                                { key: "sourceUrl" as const, label: "Source", tooltip: "The website that's linking to you.", border: "border-primary-400 first:border-l-0", text: "text-primary-800" },
+                                { key: "anchorText" as const, label: "Anchor Text", tooltip: "The clickable text used in the link. Relevant anchor text helps Google understand what your page is about.", border: "border-emerald-300", text: "text-emerald-800" },
+                                { key: "domainRating" as const, label: "Domain Rating", tooltip: "Authority score of the linking website (0-100). Higher scores mean more valuable links. Links from DR 50+ sites carry significant weight.", border: "border-amber-300", text: "text-amber-800" },
+                                { key: "firstSeen" as const, label: "Publish Date", tooltip: "When the backlink was first discovered or published.", border: "border-violet-300", text: "text-violet-800" },
+                              ].map(({ key, label, tooltip, border, text }) => (
                                 <th
                                   key={key}
-                                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                                  className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none border-l-4 ${border} ${text} hover:from-primary-100 hover:via-blue-100`}
                                   onClick={() => {
                                     setBacklinksSortBy(key);
                                     setBacklinksOrder((prev) => (backlinksSortBy === key && prev === "desc" ? "asc" : "desc"));
@@ -6369,7 +6373,7 @@ const ClientDashboardPage: React.FC = () => {
                                   </span>
                                 </th>
                               ))}
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">
                                 <span className="inline-flex items-center gap-1">
                                   Type
                                   <span title="Whether the link was acquired naturally, manually built, or through other methods.">
@@ -6377,25 +6381,25 @@ const ClientDashboardPage: React.FC = () => {
                                   </span>
                                 </span>
                               </th>
-                              <th className="px-6 py-3"></th>
+                              <th className="px-6 py-3.5 border-l-4 border-transparent"></th>
                             </tr>
                           </thead>
-                          <tbody className="bg-white divide-y divide-gray-200">
+                          <tbody className="divide-y divide-gray-100">
                             {backlinksLoading ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-gray-500 bg-gray-50/50" colSpan={6}>
                                   Loading backlinks...
                                 </td>
                               </tr>
                             ) : backlinksError ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-rose-600 bg-rose-50/50" colSpan={6}>
                                   {backlinksError}
                                 </td>
                               </tr>
                             ) : backlinks.length === 0 ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-gray-500 bg-amber-50/50" colSpan={6}>
                                   {backlinksFilter === "all"
                                     ? "No backlinks found yet. If you’re a Super Admin, hit the top “Refresh” button to pull from DataForSEO."
                                     : backlinksFilter === "new"
@@ -6406,7 +6410,7 @@ const ClientDashboardPage: React.FC = () => {
                                 </td>
                               </tr>
                             ) : (
-                              backlinksPagination.rows.map((link) => {
+                              backlinksPagination.rows.map((link, index) => {
                                 const source = (() => {
                                   try {
                                     return new URL(link.sourceUrl).hostname || link.sourceUrl;
@@ -6424,29 +6428,33 @@ const ClientDashboardPage: React.FC = () => {
                                 })();
                                 const isManual = !link.firstSeen && !link.lastSeen;
                                 return (
-                                  <tr key={link.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{source}</td>
-                                    <td className="px-6 py-4 text-sm text-gray-500 whitespace-normal break-words max-w-[360px] align-top">
+                                  <tr key={link.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{source}</td>
+                                    <td className="px-6 py-4 text-sm text-emerald-800/90 whitespace-normal break-words max-w-[360px] align-top">
                                       {link.anchorText || "—"}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                      {typeof link.domainRating === "number" ? link.domainRating : "—"}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                      {typeof link.domainRating === "number" ? (
+                                        <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+                                          {link.domainRating}
+                                        </span>
+                                      ) : "—"}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{publishDate || "—"}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{publishDate || "—"}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                       <span
                                         className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                          isManual ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"
+                                          isManual ? "bg-blue-100 text-blue-800" : link.isLost ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"
                                         }`}
                                       >
                                         {isManual ? "Manual" : link.isLost ? "Lost" : "Natural"}
                                       </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                      <div className="inline-flex items-center gap-3">
+                                      <div className="inline-flex items-center gap-2">
                                         <button
                                           type="button"
-                                          className="text-primary-600 hover:text-primary-800"
+                                          className="px-2.5 py-1 rounded-lg text-primary-600 hover:bg-primary-50 font-medium"
                                           onClick={() => window.open(link.sourceUrl, "_blank", "noopener,noreferrer")}
                                         >
                                           View
@@ -6454,7 +6462,7 @@ const ClientDashboardPage: React.FC = () => {
                                         {!reportOnly && (
                                           <button
                                             type="button"
-                                            className="text-red-600 hover:text-red-800 inline-flex items-center gap-1"
+                                            className="px-2.5 py-1 rounded-lg text-red-600 hover:bg-red-50 font-medium inline-flex items-center gap-1"
                                             onClick={() => requestRemoveBacklink(link)}
                                           >
                                             Remove
@@ -6611,19 +6619,19 @@ const ClientDashboardPage: React.FC = () => {
                               </div>
                             ) : (
                               <table className="w-full">
-                                <thead className="bg-gray-50">
-                                  <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurrence</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next due</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignee</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                <thead>
+                                  <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Task</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Recurrence</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Next due</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Assignee</th>
+                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
                                   </tr>
                                 </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                  {workLogRecurringRules.map((r) => (
-                                    <tr key={r.id} className="hover:bg-gray-50">
+                                <tbody className="divide-y divide-gray-100">
+                                  {workLogRecurringRules.map((r, idx) => (
+                                    <tr key={r.id} className={`transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                                       <td className="px-6 py-4">
                                         <div className="flex flex-col">
                                           <div className="text-sm font-medium text-gray-900">{r.title}</div>
@@ -6646,20 +6654,20 @@ const ClientDashboardPage: React.FC = () => {
                                         {r.assigneeId ? (assignableUsers.find((u) => u.id === r.assigneeId)?.name ?? assignableUsers.find((u) => u.id === r.assigneeId)?.email ?? "—") : "Unassigned"}
                                       </td>
                                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                        <div className="flex items-center space-x-2">
+                                        <div className="flex items-center gap-1">
                                           {r.isActive ? (
-                                            <button type="button" onClick={() => handleWorkLogStopRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Stop recurrence">
+                                            <button type="button" onClick={() => handleWorkLogStopRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Stop recurrence">
                                               <StopCircle className="h-4 w-4" />
                                             </button>
                                           ) : (
-                                            <button type="button" onClick={() => handleWorkLogResumeRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Resume">
+                                            <button type="button" onClick={() => handleWorkLogResumeRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Resume">
                                               <Play className="h-4 w-4" />
                                             </button>
                                           )}
-                                          <button type="button" onClick={() => { setEditingWorkLogRecurringRule(r); setShowRecurringTaskModal(true); }} className="p-1.5 text-gray-400 hover:text-primary-600 transition-colors rounded" title="Edit">
+                                          <button type="button" onClick={() => { setEditingWorkLogRecurringRule(r); setShowRecurringTaskModal(true); }} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Edit">
                                             <Edit className="h-4 w-4" />
                                           </button>
-                                          <button type="button" onClick={() => handleWorkLogRemoveRecurrence(r.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded" title="Remove">
+                                          <button type="button" onClick={() => handleWorkLogRemoveRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Remove">
                                             <Trash2 className="h-4 w-4" />
                                           </button>
                                         </div>
@@ -6698,29 +6706,29 @@ const ClientDashboardPage: React.FC = () => {
                         Completed
                       </button>
                     </div>
-                    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                       <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due date</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned to</th>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        <table className="min-w-full">
+                          <thead>
+                            <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                              <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Title</th>
+                              <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Work Type</th>
+                              <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Due date</th>
+                              <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Assigned to</th>
+                              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                              <th className="px-6 py-3.5 text-right text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
                             </tr>
                           </thead>
-                          <tbody className="bg-white divide-y divide-gray-200">
+                          <tbody className="divide-y divide-gray-100">
                             {workLogLoading ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-gray-500 bg-gray-50/50" colSpan={6}>
                                   Loading work log...
                                 </td>
                               </tr>
                             ) : workLogError ? (
                               <tr>
-                                <td className="px-6 py-6 text-sm text-rose-600" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-rose-600 bg-rose-50/50" colSpan={6}>
                                   {workLogError}
                                 </td>
                               </tr>
@@ -6731,13 +6739,13 @@ const ClientDashboardPage: React.FC = () => {
                               if (filtered.length === 0) {
                                 return (
                                   <tr>
-                                    <td className="px-6 py-6 text-sm text-gray-500" colSpan={6}>
+                                    <td className="px-6 py-8 text-sm text-gray-500 bg-amber-50/50" colSpan={6}>
                                       {workLogListTab === "completed" ? "No completed entries yet." : "No upcoming entries."}
                                     </td>
                                   </tr>
                                 );
                               }
-                              return filtered.map((task) => {
+                              return filtered.map((task, index) => {
                                 const dueDateRaw = (task as any).dueDate;
                                 const dueDateStr = dueDateRaw
                                   ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10))
@@ -6746,13 +6754,13 @@ const ClientDashboardPage: React.FC = () => {
                                 const titleText = (task.description || task.title || "").trim();
                                 const titleDisplay = titleText.length > 90 ? `${titleText.slice(0, 90)}…` : titleText;
                                 return (
-                                  <tr key={task.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 text-sm text-gray-900 max-w-xs align-top">
+                                  <tr key={task.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
+                                    <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs align-top">
                                       <span className="block truncate" title={titleText || undefined}>{titleDisplay || "—"}</span>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{workType}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{dueDateStr}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">{workType}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{dueDateStr}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-violet-800/90">
                                       {task.assignee ? (task.assignee.name || task.assignee.email) : "—"}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
@@ -6762,10 +6770,11 @@ const ClientDashboardPage: React.FC = () => {
                                         {taskStatusLabel(task.status)}
                                       </span>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                      <div className="inline-flex items-center gap-1 justify-end">
                                       <button
                                         type="button"
-                                        className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
+                                        className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                                         title="View entry"
                                         onClick={() => openWorkLogView(task.id)}
                                       >
@@ -6775,7 +6784,7 @@ const ClientDashboardPage: React.FC = () => {
                                         <>
                                           <button
                                             type="button"
-                                            className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
+                                            className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                                             title="Edit entry"
                                             onClick={() => openWorkLogEdit(task.id)}
                                           >
@@ -6783,7 +6792,7 @@ const ClientDashboardPage: React.FC = () => {
                                           </button>
                                           <button
                                             type="button"
-                                            className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
+                                            className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                             title="Delete entry"
                                             onClick={() => handleDeleteWorkLog(task.id, task.title)}
                                           >
@@ -6791,6 +6800,7 @@ const ClientDashboardPage: React.FC = () => {
                                           </button>
                                         </>
                                       )}
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -6812,9 +6822,9 @@ const ClientDashboardPage: React.FC = () => {
                     className="absolute inset-0 bg-black/50"
                     onClick={() => setWorkLogModalOpen(false)}
                   />
-                  <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-gray-200">
-                    <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200">
-                      <h3 className="text-lg font-semibold text-gray-900">
+                  <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden ring-2 ring-primary-200/80">
+                    <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 border-b-2 border-teal-500/50">
+                      <h3 className="text-lg font-bold text-white drop-shadow-sm">
                         {workLogModalMode === "create"
                           ? "Add Work Log Entry"
                           : workLogModalMode === "edit"
@@ -6824,46 +6834,46 @@ const ClientDashboardPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setWorkLogModalOpen(false)}
-                        className="p-2 text-gray-400 hover:text-gray-600"
+                        className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                       >
                         <X className="h-5 w-5" />
                       </button>
                     </div>
 
-                    <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
+                    <div className="flex-1 min-h-0 overflow-auto overflow-x-auto bg-gradient-to-b from-slate-50/50 to-white">
                       <div className="px-6 py-5 space-y-4 min-w-0">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                      <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-3">
+                        <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
                         <input
                           type="text"
                           maxLength={90}
                           value={workLogForm.description}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
                           disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow"
                           placeholder="e.g. Optimized homepage title tags"
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                      <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-3">
+                        <label className="block text-sm font-semibold text-emerald-800 mb-1">Work Type</label>
                         <input
                           type="text"
                           value={workLogForm.category}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
                           disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 disabled:bg-gray-50 transition-shadow"
                           placeholder="e.g. Technical, Content, Link Building"
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
+                      <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-3">
+                        <label className="block text-sm font-semibold text-amber-800 mb-1">Task</label>
                         {workLogModalMode !== "view" && (
-                          <div className="flex flex-wrap gap-1 mb-1 p-1 border border-gray-200 rounded-t-lg bg-gray-50">
-                            <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-gray-300 rounded hover:bg-gray-200" title="Bold">B</button>
-                            <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Bullet list">• List</button>
-                            <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Numbered list">1. List</button>
+                          <div className="flex flex-wrap gap-1 mb-1 p-1 border border-amber-200 rounded-t-lg bg-amber-50/50">
+                            <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bold">B</button>
+                            <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bullet list">• List</button>
+                            <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Numbered list">1. List</button>
                           </div>
                         )}
                         <div
@@ -6878,19 +6888,19 @@ const ClientDashboardPage: React.FC = () => {
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Due date</label>
+                      <div className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-3">
+                        <label className="block text-sm font-semibold text-violet-800 mb-1">Due date</label>
                         <input
                           type="date"
                           value={workLogForm.dueDate}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, dueDate: e.target.value })}
                           disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 disabled:bg-gray-50 transition-shadow"
                         />
                       </div>
 
-                      <div ref={assignToRef} className="relative">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Assign to</label>
+                      <div ref={assignToRef} className="relative rounded-xl border-l-4 border-slate-400 bg-slate-50/50 p-3">
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">Assign to</label>
                         {workLogModalMode === "view" ? (
                           <p className="text-sm text-gray-900 py-2">
                             {workLogForm.assigneeId
@@ -6948,8 +6958,8 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
+                      <div className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-3">
+                        <label className="block text-sm font-semibold text-indigo-800 mb-2">Proof / Attachments</label>
                         {workLogModalMode !== "view" && (
                           <>
                             <input
@@ -7055,13 +7065,13 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-3">
+                        <label className="block text-sm font-semibold text-blue-800 mb-1">Status</label>
                         <select
                           value={workLogForm.status}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
                           disabled={workLogModalMode === "view"}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                          className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow"
                         >
                           <option value="TODO">Pending</option>
                           <option value="IN_PROGRESS">In Progress</option>
@@ -7072,37 +7082,37 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                     </div>
 
-                    <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
-                      {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
-                          className="mr-auto px-4 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
-                        >
-                          Delete
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setWorkLogModalOpen(false)}
-                        className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-                      >
-                        Close
-                      </button>
-                      {workLogModalMode !== "view" && (
-                        <button
-                          type="button"
-                          onClick={handleSaveWorkLog}
-                          className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                        >
-                          Save
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>,
-                document.body
-              )}
+<div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
+                  {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
+                      className="mr-auto px-5 py-2.5 rounded-xl bg-red-50 text-red-700 font-medium hover:bg-red-100 border border-red-200 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setWorkLogModalOpen(false)}
+                    className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
+                  >
+                    Close
+                  </button>
+                  {workLogModalMode !== "view" && (
+                    <button
+                      type="button"
+                      onClick={handleSaveWorkLog}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-semibold hover:from-emerald-700 hover:to-teal-700 transition-all shadow-md"
+                    >
+                      Save
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
               {/* Onboarding tasks modal (from Work Log "Add onboarding task") */}
               {!reportOnly && (
@@ -7152,66 +7162,67 @@ const ClientDashboardPage: React.FC = () => {
                 addBacklinkModalOpen &&
                 createPortal(
                   <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white w-full max-w-lg rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-                        <h3 className="text-lg font-semibold text-gray-900">Add Backlink</h3>
+                    <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden ring-2 ring-primary-200/80">
+                      <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 border-b-2 border-primary-500/50">
+                        <h3 className="text-lg font-bold text-white drop-shadow-sm">Add Backlink</h3>
                         <button
                           type="button"
                           onClick={() => setAddBacklinkModalOpen(false)}
-                          className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                          className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                         >
                           <X className="h-5 w-5" />
                         </button>
                       </div>
 
-                      <div className="px-6 py-4 space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Source URL</label>
+                      <div className="px-6 py-4 space-y-4 bg-gradient-to-b from-slate-50/80 to-white">
+                        <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/60 p-3">
+                          <label className="block text-sm font-semibold text-primary-800 mb-1">Source URL</label>
                           <input
                             type="text"
                             value={addBacklinkForm.sourceUrl}
                             onChange={(e) => setAddBacklinkForm((p) => ({ ...p, sourceUrl: e.target.value }))}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            className="w-full border-2 border-primary-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 bg-white transition-shadow"
                             placeholder="https://example.com/page"
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Target URL</label>
+                        <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60 p-3">
+                          <label className="block text-sm font-semibold text-emerald-800 mb-1">Target URL</label>
                           <input
                             type="text"
                             value={addBacklinkForm.targetUrl}
                             onChange={(e) => setAddBacklinkForm((p) => ({ ...p, targetUrl: e.target.value }))}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            className="w-full border-2 border-emerald-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 bg-white transition-shadow"
                             placeholder="https://your-site.com/"
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Anchor Text (optional)</label>
+                        <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/60 p-3">
+                          <label className="block text-sm font-semibold text-amber-800 mb-1">Anchor Text (optional)</label>
                           <input
                             type="text"
                             value={addBacklinkForm.anchorText}
                             onChange={(e) => setAddBacklinkForm((p) => ({ ...p, anchorText: e.target.value }))}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            className="w-full border-2 border-amber-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-400 bg-white transition-shadow"
                             placeholder="e.g. best seo services"
                           />
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Domain Rating (optional)</label>
+                          <div className="rounded-xl border-l-4 border-violet-500 bg-violet-50/60 p-3">
+                            <label className="block text-sm font-semibold text-violet-800 mb-1">Domain Rating (optional)</label>
                             <input
                               type="number"
                               value={addBacklinkForm.domainRating}
                               onChange={(e) => setAddBacklinkForm((p) => ({ ...p, domainRating: e.target.value }))}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                              className="w-full border-2 border-violet-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 bg-white transition-shadow"
                               placeholder="e.g. 65"
                             />
                           </div>
-                          <div className="flex items-end">
-                            <label className="flex items-center gap-2 text-sm text-gray-700">
+                          <div className="flex items-end rounded-xl border-l-4 border-slate-400 bg-slate-50/60 p-3">
+                            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                               <input
                                 type="checkbox"
                                 checked={addBacklinkForm.isFollow}
                                 onChange={(e) => setAddBacklinkForm((p) => ({ ...p, isFollow: e.target.checked }))}
+                                className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                               />
                               Follow link
                             </label>
@@ -7219,11 +7230,11 @@ const ClientDashboardPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                      <div className="px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
                         <button
                           type="button"
                           onClick={() => setAddBacklinkModalOpen(false)}
-                          className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
                         >
                           Cancel
                         </button>
@@ -7231,7 +7242,7 @@ const ClientDashboardPage: React.FC = () => {
                           type="button"
                           disabled={addingBacklink}
                           onClick={() => void submitAddBacklink()}
-                          className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary-600 to-blue-600 text-white font-semibold hover:from-primary-700 hover:to-blue-700 disabled:opacity-50 transition-all shadow-md"
                         >
                           {addingBacklink ? "Saving..." : "Add"}
                         </button>
@@ -7246,39 +7257,42 @@ const ClientDashboardPage: React.FC = () => {
                 importBacklinksModalOpen &&
                 createPortal(
                   <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                    <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ring-2 ring-blue-200/80">
+                      <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 border-b-2 border-indigo-500/50">
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Import Backlinks</h3>
-                          <p className="text-sm text-gray-500 mt-1">Paste source URLs (one per line). Target URL defaults to this client.</p>
+                          <h3 className="text-lg font-bold text-white drop-shadow-sm">Import Backlinks</h3>
+                          <p className="text-sm text-white/90 mt-1">Paste source URLs (one per line). Target URL defaults to this client.</p>
                         </div>
                         <button
                           type="button"
                           onClick={() => setImportBacklinksModalOpen(false)}
-                          className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                          className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                         >
                           <X className="h-5 w-5" />
                         </button>
                       </div>
 
-                      <div className="px-6 py-4 space-y-3">
-                        <textarea
-                          value={importBacklinksText}
-                          onChange={(e) => setImportBacklinksText(e.target.value)}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                          rows={10}
-                          placeholder={"https://example.com/page-1\nhttps://example.com/page-2"}
-                        />
-                        <p className="text-xs text-gray-500">
+                      <div className="px-6 py-4 space-y-3 bg-gradient-to-b from-slate-50/80 to-white">
+                        <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/60 p-3">
+                          <label className="block text-sm font-semibold text-blue-900 mb-1">Source URLs (one per line)</label>
+                          <textarea
+                            value={importBacklinksText}
+                            onChange={(e) => setImportBacklinksText(e.target.value)}
+                            className="w-full border-2 border-blue-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white transition-shadow"
+                            rows={10}
+                            placeholder={"https://example.com/page-1\nhttps://example.com/page-2"}
+                          />
+                        </div>
+                        <p className="text-xs text-amber-800 bg-amber-50 rounded-xl px-4 py-3 border-l-4 border-amber-500 border border-amber-200/80">
                           Tip: after importing, you can click the top “Refresh” button (Super Admin) to pull live/lost backlink data from DataForSEO.
                         </p>
                       </div>
 
-                      <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                      <div className="px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
                         <button
                           type="button"
                           onClick={() => setImportBacklinksModalOpen(false)}
-                          className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                          className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
                         >
                           Cancel
                         </button>
@@ -7286,7 +7300,7 @@ const ClientDashboardPage: React.FC = () => {
                           type="button"
                           disabled={importingBacklinks}
                           onClick={() => void submitImportBacklinks()}
-                          className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 transition-all shadow-md"
                         >
                           {importingBacklinks ? "Importing..." : "Import"}
                         </button>
@@ -7661,7 +7675,7 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                       <div>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">
                           Showing {clientUsers.length} of {clientUsers.length} Rows
                         </p>
                       </div>
@@ -7676,38 +7690,38 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
 
                     <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      <table className="min-w-full">
+                        <thead>
+                          <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Name</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Email</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Role</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Status</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Last Login</th>
+                            <th className="px-6 py-3.5 text-right text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
                           </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
+                        <tbody className="divide-y divide-gray-100">
                           {clientUsersLoading ? (
                             <tr>
-                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 bg-gray-50/50">
                                 Loading users...
                               </td>
                             </tr>
                           ) : clientUsersError ? (
                             <tr>
-                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600">
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600 bg-rose-50/50">
                                 {clientUsersError}
                               </td>
                             </tr>
                           ) : clientUsers.length === 0 ? (
                             <tr>
-                              <td colSpan={6} className="px-6 py-10 text-center text-sm text-gray-500">
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 bg-amber-50/50">
                                 No users yet.
                               </td>
                             </tr>
                           ) : (
-                            clientUsers.map((u) => {
+                            clientUsers.map((u, index) => {
                               const initials = (u.name || u.email || "?")
                                 .split(" ")
                                 .map((p) => p.trim()[0] || "")
@@ -7718,10 +7732,10 @@ const ClientDashboardPage: React.FC = () => {
                                 ? new Date(u.lastLoginAt).toLocaleString()
                                 : "Never";
                               return (
-                                <tr key={u.id} className="hover:bg-gray-50">
+                                <tr key={u.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <div className="flex items-center gap-3">
-                                      <div className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                                      <div className="h-9 w-9 rounded-full bg-primary-100 flex items-center justify-center text-xs font-semibold text-primary-800">
                                         {initials}
                                       </div>
                                       <div className="text-sm font-medium text-gray-900">
@@ -7729,9 +7743,9 @@ const ClientDashboardPage: React.FC = () => {
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{u.email}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">{u.email}</td>
                                   <td className="px-6 py-4 whitespace-nowrap">
-                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-900 text-white">
+                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-slate-700 text-white">
                                       {u.role}
                                     </span>
                                   </td>
@@ -7746,13 +7760,13 @@ const ClientDashboardPage: React.FC = () => {
                                       {u.status}
                                     </span>
                                   </td>
-                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{lastLogin}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-violet-800/90">{lastLogin}</td>
                                   <td className="px-6 py-4 whitespace-nowrap text-right">
                                     {u.role === "CLIENT" ? (
                                       <div className="relative inline-block">
                                         <button
                                           type="button"
-                                          className="inline-flex items-center justify-center h-9 w-9 rounded-full hover:bg-gray-100 text-gray-500"
+                                          className="inline-flex items-center justify-center h-9 w-9 rounded-lg p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             const el = e.currentTarget as unknown as HTMLElement;
@@ -7914,26 +7928,26 @@ const ClientDashboardPage: React.FC = () => {
                           className="absolute inset-0 bg-black/50"
                           onClick={() => !invitingClientUsers && setInviteClientUsersModalOpen(false)}
                         />
-                        <div className="relative w-full max-w-4xl rounded-2xl bg-white shadow-2xl border border-gray-200">
-                          <div className="px-8 py-6 border-b border-gray-200 text-center">
-                            <h2 className="text-3xl font-bold text-gray-900">Add Client User(s)</h2>
-                            <p className="mt-3 text-sm text-gray-600">
+                        <div className="relative w-full max-w-4xl rounded-2xl bg-white shadow-2xl border-2 border-primary-200 overflow-hidden">
+                          <div className="px-8 py-6 bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200 text-center">
+                            <h2 className="text-3xl font-bold text-primary-900">Add Client User(s)</h2>
+                            <p className="mt-3 text-sm text-primary-700/90">
                               Fill in the email of the users you would like to create. You can choose to send invitation emails now, or send them manually later to complete the signup process.
                             </p>
                           </div>
 
-                          <div className="px-8 py-8">
+                          <div className="px-8 py-8 bg-white">
                             {inviteClientUsersAllClientsError && (
-                              <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                              <div className="mb-4 rounded-lg border-2 border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-700 font-medium">
                                 {inviteClientUsersAllClientsError}
                               </div>
                             )}
 
                             <div className="space-y-4">
                               {inviteClientUsersRows.map((row) => (
-                                <div key={row.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-start">
+                                <div key={row.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-start p-4 rounded-xl bg-gray-50/50 border border-gray-100">
                                   <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                                    <label className="block text-sm font-semibold text-primary-800 mb-2">Email</label>
                                     <input
                                       type="email"
                                       value={row.email}
@@ -7943,15 +7957,15 @@ const ClientDashboardPage: React.FC = () => {
                                         )
                                       }
                                       placeholder="Type User's Email"
-                                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 transition-shadow"
                                     />
                                   </div>
 
                                   <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Clients</label>
+                                    <label className="block text-sm font-semibold text-emerald-800 mb-2">Clients</label>
                                     <button
                                       type="button"
-                                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white flex items-center justify-between gap-2 hover:bg-gray-50 disabled:opacity-60"
+                                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm bg-white flex items-center justify-between gap-2 hover:bg-emerald-50 hover:border-emerald-300 focus:ring-2 focus:ring-emerald-500 disabled:opacity-60 transition-colors"
                                       disabled={inviteClientUsersAllClientsLoading}
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -7990,7 +8004,7 @@ const ClientDashboardPage: React.FC = () => {
                                   <div className="pt-7">
                                     <button
                                       type="button"
-                                      className="h-10 w-10 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+                                      className="h-10 w-10 inline-flex items-center justify-center rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                       title="Remove"
                                       onClick={() =>
                                         setInviteClientUsersRows((prev) =>
@@ -8019,28 +8033,29 @@ const ClientDashboardPage: React.FC = () => {
                                     },
                                   ])
                                 }
-                                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-2"
+                                className="px-4 py-2.5 rounded-lg border-2 border-primary-200 text-primary-700 font-medium hover:bg-primary-50 hover:border-primary-300 inline-flex items-center gap-2 transition-colors"
                               >
                                 <Plus className="h-4 w-4" />
                                 Add Client User
                               </button>
 
-                              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                              <label className="inline-flex items-center gap-2 text-sm font-medium text-violet-800">
                                 <input
                                   type="checkbox"
                                   checked={inviteClientUsersViaEmail}
                                   onChange={(e) => setInviteClientUsersViaEmail(e.target.checked)}
+                                  className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                                 />
                                 Invite users via email
                               </label>
                             </div>
 
-                            <div className="mt-10 flex items-center justify-between">
+                            <div className="mt-10 flex items-center justify-between pt-4 border-t border-gray-200">
                               <button
                                 type="button"
                                 disabled={invitingClientUsers}
                                 onClick={() => setInviteClientUsersModalOpen(false)}
-                                className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+                                className="px-5 py-2.5 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 disabled:opacity-60 transition-colors"
                               >
                                 Cancel
                               </button>
@@ -8048,7 +8063,7 @@ const ClientDashboardPage: React.FC = () => {
                                 type="button"
                                 disabled={invitingClientUsers}
                                 onClick={() => void submitInviteClientUsers()}
-                                className="px-10 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                                className="px-10 py-3 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60 transition-colors shadow-sm"
                               >
                                 {invitingClientUsers ? "Sending..." : "Next"}
                               </button>
@@ -8427,120 +8442,122 @@ const ClientDashboardPage: React.FC = () => {
                     <h2 className="text-xl font-semibold text-gray-900">Reports</h2>
                   </div>
 
-                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Generated</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recipients</th>
-                        <th className="px-6 py-3"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {reportLoading ? (
-                        <tr>
-                          <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">Loading report...</td>
-                        </tr>
-                      ) : reportError ? (
-                        <tr>
-                          <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600">{reportError}</td>
-                        </tr>
-                      ) : !singleReportForClient ? (
-                        <tr>
-                          <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
-                            No reports yet for this client.
-                          </td>
-                        </tr>
-                      ) : (
-                        <tr key={singleReportForClient.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{singleReportForClient.name}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{singleReportForClient.type}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{singleReportForClient.lastGenerated}</td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span
-                                className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                singleReportForClient.status === "Sent"
-                                    ? "bg-green-100 text-green-800"
-                                  : singleReportForClient.status === "Draft"
-                                    ? "bg-yellow-100 text-yellow-800"
-                                    : "bg-blue-100 text-blue-800"
-                                }`}
-                              >
-                              {singleReportForClient.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {singleReportForClient.recipients.join(", ")}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                              <button 
-                                onClick={() => handleViewReport(singleReportForClient)}
-                                className="text-primary-600 hover:text-primary-800 inline-flex items-center justify-center mr-2"
-                                title="View report"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={handleShare}
-                                className="text-gray-500 hover:text-gray-700 inline-flex items-center justify-center mr-2"
-                                title="Share dashboard"
-                              >
-                                <Share2 className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={handleSendReport}
-                                disabled={sendingReport}
-                                className="text-secondary-600 hover:text-secondary-800 inline-flex items-center justify-center mr-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                                title="Send report via email"
-                              >
-                                <Send className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={handleDeleteReport}
-                                className="text-red-600 hover:text-red-800 inline-flex items-center justify-center"
-                                title="Delete report"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </td>
+                      <table className="min-w-full">
+                        <thead>
+                          <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Name</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Type</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Last Generated</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Recipients</th>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300"></th>
                           </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {reportLoading ? (
+                            <tr>
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 bg-gray-50/50">Loading report...</td>
+                            </tr>
+                          ) : reportError ? (
+                            <tr>
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600 bg-rose-50/50">{reportError}</td>
+                            </tr>
+                          ) : !singleReportForClient ? (
+                            <tr>
+                              <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 bg-amber-50/50">
+                                No reports yet for this client.
+                              </td>
+                            </tr>
+                          ) : (
+                            <tr key={singleReportForClient.id} className="bg-white hover:bg-primary-50/50 transition-colors">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{singleReportForClient.name}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">{singleReportForClient.type}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{singleReportForClient.lastGenerated}</td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                    singleReportForClient.status === "Sent"
+                                      ? "bg-green-100 text-green-800"
+                                      : singleReportForClient.status === "Draft"
+                                        ? "bg-yellow-100 text-yellow-800"
+                                        : "bg-blue-100 text-blue-800"
+                                  }`}
+                                >
+                                  {singleReportForClient.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-violet-800/90">
+                                {singleReportForClient.recipients.join(", ")}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="inline-flex items-center gap-1 justify-end">
+                                  <button
+                                    onClick={() => handleViewReport(singleReportForClient)}
+                                    className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                                    title="View report"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={handleShare}
+                                    className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                    title="Share dashboard"
+                                  >
+                                    <Share2 className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={handleSendReport}
+                                    disabled={sendingReport}
+                                    className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                    title="Send report via email"
+                                  >
+                                    <Send className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={handleDeleteReport}
+                                    className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                    title="Delete report"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              </div>
-            )}
+              )}
 
           {/* Client-specific Create Report & Schedule Modal */}
           {showClientReportModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold">Create Report & Schedule</h2>
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col border-2 border-primary-200 shadow-xl">
+                <div className="flex-shrink-0 flex justify-between items-center px-6 py-4 bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                  <h2 className="text-xl font-bold text-primary-900">Create Report & Schedule</h2>
                   <button
                     onClick={() => setShowClientReportModal(false)}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-100 transition-colors"
                   >
                     <X className="h-5 w-5" />
                   </button>
                 </div>
-                <div className="space-y-4">
-                  <p className="text-sm text-gray-600">
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  <p className="text-sm text-primary-700/90">
                     Configure how often this client's report should be generated and who should receive it.
                   </p>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+                    <label className="block text-sm font-semibold text-emerald-800 mb-2">Frequency</label>
                     <select
                       value={clientReportFrequency}
                       onChange={(e) =>
                         setClientReportFrequency(e.target.value as "weekly" | "biweekly" | "monthly")
                       }
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 transition-shadow"
                     >
                       <option value="weekly">Weekly</option>
                       <option value="biweekly">Biweekly</option>
@@ -8549,11 +8566,11 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                   {clientReportFrequency !== "monthly" ? (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Day of Week</label>
+                      <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Week</label>
                       <select
                         value={clientReportDayOfWeek}
                         onChange={(e) => setClientReportDayOfWeek(Number(e.target.value))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                        className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-400 transition-shadow"
                       >
                         {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map(
                           (day, index) => (
@@ -8566,28 +8583,28 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                   ) : (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Day of Month</label>
+                      <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Month</label>
                       <input
                         type="number"
                         min={1}
                         max={31}
                         value={clientReportDayOfMonth}
                         onChange={(e) => setClientReportDayOfMonth(Number(e.target.value))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                        className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-400 transition-shadow"
                       />
                     </div>
                   )}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Time of Day</label>
+                    <label className="block text-sm font-semibold text-violet-800 mb-2">Time of Day</label>
                     <input
                       type="time"
                       value={clientReportTimeOfDay}
                       onChange={(e) => setClientReportTimeOfDay(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 transition-shadow"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-semibold text-primary-800 mb-2">
                       Recipients (comma-separated emails)
                     </label>
                     <input
@@ -8595,24 +8612,24 @@ const ClientDashboardPage: React.FC = () => {
                       value={modalRecipients}
                       onChange={(e) => setModalRecipients(e.target.value)}
                       placeholder="email1@example.com, email2@example.com"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 transition-shadow"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Email Subject (optional)</label>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Email Subject (optional)</label>
                     <input
                       type="text"
                       value={modalEmailSubject}
                       onChange={(e) => setModalEmailSubject(e.target.value)}
                       placeholder="Custom email subject"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 transition-shadow"
                     />
                   </div>
-                  <div className="flex justify-end space-x-3 mt-6">
+                  <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-6">
                     <button
                       type="button"
                       onClick={() => setShowClientReportModal(false)}
-                      className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                      className="px-5 py-2.5 text-gray-700 bg-gray-100 rounded-lg font-medium hover:bg-gray-200 transition-colors"
                     >
                       Cancel
                     </button>
@@ -8620,7 +8637,7 @@ const ClientDashboardPage: React.FC = () => {
                       type="button"
                       disabled={clientReportSubmitting}
                       onClick={handleSubmitClientReport}
-                      className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                      className="px-5 py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors shadow-sm"
                     >
                       {clientReportSubmitting ? "Saving..." : "Create Report"}
                     </button>
@@ -8636,9 +8653,9 @@ const ClientDashboardPage: React.FC = () => {
                 className="absolute inset-0 bg-black/50"
                 onClick={() => setWorkLogModalOpen(false)}
               />
-              <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-gray-200">
-                <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">
+              <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl border-2 border-primary-200 overflow-hidden">
+                <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                  <h3 className="text-lg font-bold text-primary-900">
                     {workLogModalMode === "create"
                       ? "Add Work Log Entry"
                       : workLogModalMode === "edit"
@@ -8648,7 +8665,7 @@ const ClientDashboardPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setWorkLogModalOpen(false)}
-                    className="p-2 text-gray-400 hover:text-gray-600"
+                    className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-100 transition-colors"
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -8657,37 +8674,37 @@ const ClientDashboardPage: React.FC = () => {
                 <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
                   <div className="px-6 py-5 space-y-4 min-w-0">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                    <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
                     <input
                       type="text"
                       maxLength={90}
                       value={workLogForm.description}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
                       disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow"
                       placeholder="e.g. Optimized homepage title tags"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                    <label className="block text-sm font-semibold text-emerald-800 mb-1">Work Type</label>
                     <input
                       type="text"
                       value={workLogForm.category}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
                       disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 disabled:bg-gray-50 transition-shadow"
                       placeholder="e.g. Technical, Content, Link Building"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Task</label>
+                    <label className="block text-sm font-semibold text-amber-800 mb-1">Task</label>
                     {workLogModalMode !== "view" && (
-                      <div className="flex flex-wrap gap-1 mb-1 p-1 border border-gray-200 rounded-t-lg bg-gray-50">
-                        <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-gray-300 rounded hover:bg-gray-200" title="Bold">B</button>
-                        <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Bullet list">• List</button>
-                        <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-200" title="Numbered list">1. List</button>
+                      <div className="flex flex-wrap gap-1 mb-1 p-1 border border-amber-200 rounded-t-lg bg-amber-50/50">
+                        <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bold">B</button>
+                        <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bullet list">• List</button>
+                        <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Numbered list">1. List</button>
                       </div>
                     )}
                     <div
@@ -8702,18 +8719,18 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Due date</label>
+                    <label className="block text-sm font-semibold text-violet-800 mb-1">Due date</label>
                     <input
                       type="date"
                       value={workLogForm.dueDate}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, dueDate: e.target.value })}
                       disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 disabled:bg-gray-50 transition-shadow"
                     />
                   </div>
 
                   <div ref={assignToRef} className="relative">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Assign to</label>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">Assign to</label>
                     {workLogModalMode === "view" ? (
                       <p className="text-sm text-gray-900 py-2">
                         {workLogForm.assigneeId
@@ -8737,16 +8754,16 @@ const ClientDashboardPage: React.FC = () => {
                             }}
                             onFocus={() => setAssignToOpen(true)}
                             placeholder="Search by name or email (Super Admin, Admin, Specialist)"
-                            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            className="flex-1 border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 transition-shadow"
                           />
                           {workLogForm.assigneeId && (
-                            <button type="button" onClick={() => { setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" })); setAssignableSearch(""); setAssignToOpen(true); }} className="text-sm text-gray-500 hover:text-gray-700">
+                            <button type="button" onClick={() => { setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" })); setAssignableSearch(""); setAssignToOpen(true); }} className="text-sm text-slate-600 hover:text-primary-600 font-medium">
                               Clear
                             </button>
                           )}
                         </div>
                         {assignToOpen && (
-                          <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                          <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border-2 border-primary-200 bg-white shadow-lg py-1">
                             {assignableLoading ? (
                               <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
                             ) : assignableUsers.length === 0 ? (
@@ -8756,7 +8773,7 @@ const ClientDashboardPage: React.FC = () => {
                                 <li key={u.id}>
                                   <button
                                     type="button"
-                                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center justify-between"
+                                    className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50 flex items-center justify-between"
                                     onClick={() => { setWorkLogForm((p) => ({ ...p, assigneeId: u.id, assigneeDisplay: u.name || u.email })); setAssignableSearch(""); setAssignToOpen(false); }}
                                   >
                                     <span>{u.name || u.email}</span>
@@ -8771,8 +8788,8 @@ const ClientDashboardPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
+                  <div className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-3">
+                    <label className="block text-sm font-semibold text-indigo-800 mb-2">Proof / Attachments</label>
                     {workLogModalMode !== "view" && (
                       <>
                         <input
@@ -8859,7 +8876,7 @@ const ClientDashboardPage: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => removeWorkLogAttachment(i)}
-                                className="ml-2 p-1 text-red-600 hover:text-red-800 flex-shrink-0"
+                                className="ml-2 p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 flex-shrink-0 transition-colors"
                                 title="Remove"
                               >
                                 <X className="h-4 w-4" />
@@ -8869,17 +8886,17 @@ const ClientDashboardPage: React.FC = () => {
                         ))}
                       </div>
                     ) : (
-                      <p className="text-sm text-gray-500">No attachments</p>
+                      <p className="text-sm text-violet-700/80">No attachments</p>
                     )}
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-3">
+                    <label className="block text-sm font-semibold text-blue-800 mb-1">Status</label>
                     <select
                       value={workLogForm.status}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
                       disabled={workLogModalMode === "view"}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 disabled:bg-gray-50 transition-shadow"
                     >
                       <option value="TODO">Pending</option>
                       <option value="IN_PROGRESS">In Progress</option>
@@ -8890,12 +8907,12 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
                 </div>
 
-                <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+                <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
                   {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
                     <button
                       type="button"
                       onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
-                      className="mr-auto px-4 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50"
+                      className="mr-auto px-5 py-2.5 rounded-lg bg-red-50 text-red-700 font-medium hover:bg-red-100 transition-colors"
                     >
                       Delete
                     </button>
@@ -8903,7 +8920,7 @@ const ClientDashboardPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setWorkLogModalOpen(false)}
-                    className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    className="px-5 py-2.5 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-colors"
                   >
                     Close
                   </button>
@@ -8911,7 +8928,7 @@ const ClientDashboardPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleSaveWorkLog}
-                      className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                      className="px-5 py-2.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 transition-colors shadow-sm"
                     >
                       Save
                     </button>
@@ -8927,66 +8944,67 @@ const ClientDashboardPage: React.FC = () => {
         addBacklinkModalOpen &&
         createPortal(
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-lg rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Add Backlink</h3>
+            <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden ring-2 ring-primary-200/80">
+              <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 border-b-2 border-primary-500/50">
+                <h3 className="text-lg font-bold text-white drop-shadow-sm">Add Backlink</h3>
                 <button
                   type="button"
                   onClick={() => setAddBacklinkModalOpen(false)}
-                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="px-6 py-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Source URL</label>
+              <div className="px-6 py-4 space-y-4 bg-gradient-to-b from-slate-50/80 to-white">
+                <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/60 p-3">
+                  <label className="block text-sm font-semibold text-primary-800 mb-1">Source URL</label>
                   <input
                     type="text"
                     value={addBacklinkForm.sourceUrl}
                     onChange={(e) => setAddBacklinkForm((p) => ({ ...p, sourceUrl: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full border-2 border-primary-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 bg-white transition-shadow"
                     placeholder="https://example.com/page"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Target URL</label>
+                <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60 p-3">
+                  <label className="block text-sm font-semibold text-emerald-800 mb-1">Target URL</label>
                   <input
                     type="text"
                     value={addBacklinkForm.targetUrl}
                     onChange={(e) => setAddBacklinkForm((p) => ({ ...p, targetUrl: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full border-2 border-emerald-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 bg-white transition-shadow"
                     placeholder="https://your-site.com/"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Anchor Text (optional)</label>
+                <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/60 p-3">
+                  <label className="block text-sm font-semibold text-amber-800 mb-1">Anchor Text (optional)</label>
                   <input
                     type="text"
                     value={addBacklinkForm.anchorText}
                     onChange={(e) => setAddBacklinkForm((p) => ({ ...p, anchorText: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full border-2 border-amber-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-400 bg-white transition-shadow"
                     placeholder="e.g. best seo services"
                   />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Domain Rating (optional)</label>
+                  <div className="rounded-xl border-l-4 border-violet-500 bg-violet-50/60 p-3">
+                    <label className="block text-sm font-semibold text-violet-800 mb-1">Domain Rating (optional)</label>
                     <input
                       type="number"
                       value={addBacklinkForm.domainRating}
                       onChange={(e) => setAddBacklinkForm((p) => ({ ...p, domainRating: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full border-2 border-violet-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 bg-white transition-shadow"
                       placeholder="e.g. 65"
                     />
                   </div>
-                  <div className="flex items-end">
-                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <div className="flex items-end rounded-xl border-l-4 border-slate-400 bg-slate-50/60 p-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                       <input
                         type="checkbox"
                         checked={addBacklinkForm.isFollow}
                         onChange={(e) => setAddBacklinkForm((p) => ({ ...p, isFollow: e.target.checked }))}
+                        className="rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                       />
                       Follow link
                     </label>
@@ -8994,11 +9012,11 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+              <div className="px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
                 <button
                   type="button"
                   onClick={() => setAddBacklinkModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
                 >
                   Cancel
                 </button>
@@ -9006,7 +9024,7 @@ const ClientDashboardPage: React.FC = () => {
                   type="button"
                   disabled={addingBacklink}
                   onClick={() => void submitAddBacklink()}
-                  className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary-600 to-blue-600 text-white font-semibold hover:from-primary-700 hover:to-blue-700 disabled:opacity-50 transition-all shadow-md"
                 >
                   {addingBacklink ? "Saving..." : "Add"}
                 </button>
@@ -9021,39 +9039,42 @@ const ClientDashboardPage: React.FC = () => {
         importBacklinksModalOpen &&
         createPortal(
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden ring-2 ring-blue-200/80">
+              <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 border-b-2 border-indigo-500/50">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Import Backlinks</h3>
-                  <p className="text-sm text-gray-500 mt-1">Paste source URLs (one per line). Target URL defaults to this client.</p>
+                  <h3 className="text-lg font-bold text-white drop-shadow-sm">Import Backlinks</h3>
+                  <p className="text-sm text-white/90 mt-1">Paste source URLs (one per line). Target URL defaults to this client.</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setImportBacklinksModalOpen(false)}
-                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="px-6 py-4 space-y-3">
-                <textarea
-                  value={importBacklinksText}
-                  onChange={(e) => setImportBacklinksText(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  rows={10}
-                  placeholder={"https://example.com/page-1\nhttps://example.com/page-2"}
-                />
-                <p className="text-xs text-gray-500">
+              <div className="px-6 py-4 space-y-3 bg-gradient-to-b from-slate-50/80 to-white">
+                <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/60 p-3">
+                <label className="block text-sm font-semibold text-blue-900 mb-1">Source URLs (one per line)</label>
+                  <textarea
+                    value={importBacklinksText}
+                    onChange={(e) => setImportBacklinksText(e.target.value)}
+                    className="w-full border-2 border-blue-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white transition-shadow"
+                    rows={10}
+                    placeholder={"https://example.com/page-1\nhttps://example.com/page-2"}
+                  />
+                </div>
+                <p className="text-xs text-amber-800 bg-amber-50 rounded-xl px-4 py-3 border-l-4 border-amber-500 border border-amber-200/80">
                   Tip: after importing, you can click the top “Refresh” button (Super Admin) to pull live/lost backlink data from DataForSEO.
                 </p>
               </div>
 
-              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
+              <div className="px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
                 <button
                   type="button"
                   onClick={() => setImportBacklinksModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
                 >
                   Cancel
                 </button>
@@ -9061,7 +9082,7 @@ const ClientDashboardPage: React.FC = () => {
                   type="button"
                   disabled={importingBacklinks}
                   onClick={() => void submitImportBacklinks()}
-                  className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 transition-all shadow-md"
                 >
                   {importingBacklinks ? "Importing..." : "Import"}
                 </button>
@@ -9599,7 +9620,6 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="bg-white p-4 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-lg font-semibold text-gray-900">AI Search Visibility</h3>
-                      <span className="text-xs text-gray-500">Subscription active</span>
                     </div>
 
                     {aiSearchError && <p className="mb-3 text-sm text-rose-600">{aiSearchError}</p>}

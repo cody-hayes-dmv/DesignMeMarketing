@@ -889,66 +889,82 @@ const SettingsPage = () => {
       {/* Create/Edit Template Modal */}
       {templateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setTemplateModalOpen(false)} />
-          <div className="relative bg-white rounded-xl border border-gray-200 shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">
-                {templateModalMode === "create" ? "Create template" : "Edit template"}
-              </h3>
-              <button type="button" onClick={() => setTemplateModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-600">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setTemplateModalOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <h3 className="text-lg font-semibold">
+                  {templateModalMode === "create" ? "Create template" : "Edit template"}
+                </h3>
+              </div>
+              <button type="button" onClick={() => setTemplateModalOpen(false)} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <form onSubmit={handleSaveTemplate} className="flex flex-col flex-1 min-h-0">
-              <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                  <input
-                    type="text"
-                    value={templateForm.name}
-                    onChange={(e) => setTemplateForm((f) => ({ ...f, name: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    placeholder="e.g. Standard SEO Onboarding"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
-                  <input
-                    type="text"
-                    value={templateForm.description}
-                    onChange={(e) => setTemplateForm((f) => ({ ...f, description: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    placeholder="Short description of this template"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="template-default"
-                    checked={templateForm.isDefault}
-                    onChange={(e) => setTemplateForm((f) => ({ ...f, isDefault: e.target.checked }))}
-                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  />
-                  <label htmlFor="template-default" className="text-sm text-gray-700">Set as default template</label>
-                </div>
-                {user?.role === "SUPER_ADMIN" && templateModalMode === "create" && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Scope</label>
-                    <select
-                      value={templateForm.agencyId ?? ""}
-                      onChange={(e) => setTemplateForm((f) => ({ ...f, agencyId: e.target.value || null }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    >
-                      <option value="">Global (all agencies)</option>
-                      {agenciesList.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </select>
+              <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1 bg-gray-50/50">
+                <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    Template Info
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={templateForm.name}
+                        onChange={(e) => setTemplateForm((f) => ({ ...f, name: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder="e.g. Standard SEO Onboarding"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
+                      <input
+                        type="text"
+                        value={templateForm.description}
+                        onChange={(e) => setTemplateForm((f) => ({ ...f, description: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder="Short description of this template"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="template-default"
+                        checked={templateForm.isDefault}
+                        onChange={(e) => setTemplateForm((f) => ({ ...f, isDefault: e.target.checked }))}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <label htmlFor="template-default" className="text-sm text-gray-700">Set as default template</label>
+                    </div>
+                    {user?.role === "SUPER_ADMIN" && templateModalMode === "create" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Scope</label>
+                        <select
+                          value={templateForm.agencyId ?? ""}
+                          onChange={(e) => setTemplateForm((f) => ({ ...f, agencyId: e.target.value || null }))}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                          <option value="">Global (all agencies)</option>
+                          {agenciesList.map((a) => (
+                            <option key={a.id} value={a.id}>{a.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
-                )}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700">Tasks</label>
+                </div>
+                <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-emerald-900 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Tasks
+                    </h3>
                     <button type="button" onClick={addTemplateTask} className="text-sm text-primary-600 hover:text-primary-800 flex items-center gap-1">
                       <Plus className="h-4 w-4" /> Add task
                     </button>
@@ -1013,11 +1029,11 @@ const SettingsPage = () => {
                   </div>
                 </div>
               </div>
-              <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
-                <button type="button" onClick={() => setTemplateModalOpen(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+              <div className="px-6 py-4 border-t border-gray-200 bg-gray-100/80 flex justify-end gap-3 rounded-b-2xl shrink-0">
+                <button type="button" onClick={() => setTemplateModalOpen(false)} className="px-4 py-2.5 border border-gray-300 bg-white rounded-xl text-gray-700 hover:bg-gray-50 font-medium">
                   Cancel
                 </button>
-                <button type="submit" disabled={templateSaveLoading} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2">
+                <button type="submit" disabled={templateSaveLoading} className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 flex items-center gap-2 transition-all">
                   {templateSaveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {templateModalMode === "create" ? "Create" : "Save"}
                 </button>

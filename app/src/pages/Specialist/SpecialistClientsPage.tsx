@@ -61,47 +61,55 @@ const SpecialistClientsPage = () => {
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+        <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/60 px-8 py-6 flex items-center gap-3 shadow-sm">
+          <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+          <span className="text-sm font-medium text-primary-800">Loading your clients…</span>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="p-8">
-      <p className="text-gray-600 mb-6">
-        Clients you have tasks for (read-only). You receive tasks; you cannot create or edit clients.
-      </p>
+      <div className="rounded-xl border-l-4 border-primary-500 bg-gradient-to-r from-primary-50/80 via-blue-50/60 to-indigo-50/50 px-5 py-4 mb-6 shadow-sm">
+        <p className="text-primary-900 font-medium">
+          Clients you have tasks for (read-only). You receive tasks; you cannot create or edit clients.
+        </p>
+      </div>
       {clients.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-500">
-          <PersonStanding className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-          <p className="font-medium">No clients yet</p>
-          <p className="text-sm mt-1">When tasks are assigned to you, the related clients will appear here.</p>
+        <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/60 p-12 text-center shadow-sm">
+          <PersonStanding className="h-12 w-12 mx-auto mb-4 text-amber-600" />
+          <p className="font-semibold text-amber-900">No clients yet</p>
+          <p className="text-sm mt-1 text-amber-800/90">When tasks are assigned to you, the related clients will appear here.</p>
           <Link
             to="/specialist/tasks"
-            className="inline-block mt-4 text-primary-600 hover:text-primary-700 font-medium text-sm"
+            className="inline-block mt-4 px-4 py-2 rounded-xl bg-amber-600 text-white font-medium text-sm hover:bg-amber-700 transition-colors"
           >
             View your tasks →
           </Link>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Domain</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Your tasks</th>
+            <thead>
+              <tr className="bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Client</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Domain</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Your tasks</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
-              {clients.map((client) => (
-                <tr key={client.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{client.name}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{client.domain}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {clients.map((client, index) => (
+                <tr
+                  key={client.id}
+                  className={index % 2 === 0 ? "hover:bg-blue-50/60" : "bg-slate-50/50 hover:bg-blue-50/60"}
+                >
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">{client.name}</td>
+                  <td className="px-6 py-4 text-sm text-primary-800/90">{client.domain}</td>
+                  <td className="px-6 py-4 text-sm">
                     <Link
                       to={`/specialist/tasks?clientId=${client.id}`}
-                      className="text-primary-600 hover:text-primary-700"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-800 font-medium hover:bg-emerald-200 transition-colors"
                     >
                       {client.taskCount} task{client.taskCount !== 1 ? "s" : ""} →
                     </Link>

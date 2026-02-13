@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2, Download } from "lucide-react";
+import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2, Download, CheckSquare } from "lucide-react";
 import api from "@/lib/api";
 import { fetchClients, Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
@@ -330,16 +330,21 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm overflow-y-auto">
             <div className="min-h-full flex items-center justify-center p-4">
-                <div className="bg-white w-full max-w-3xl rounded-xl border border-gray-200 shadow-lg max-h-[calc(100vh-2rem)] flex flex-col">
+                <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl ring-1 ring-gray-200/80 max-h-[calc(100vh-2rem)] flex flex-col">
                     {/* Header */}
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-                        <h2 className="text-lg sm:text-xl font-bold text-gray-900">{title}</h2>
+                    <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                                <CheckSquare className="h-5 w-5" />
+                            </div>
+                            <h2 className="text-lg sm:text-xl font-bold">{title}</h2>
+                        </div>
                         <button
                             type="button"
                             onClick={handleCancel}
-                            className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                            className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                             aria-label="Close"
                         >
                             <X className="h-5 w-5" />
@@ -347,8 +352,13 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                     </div>
 
                     {/* Body */}
-                    <div className="flex-1 overflow-y-auto px-5 py-4">
-                        <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="flex-1 overflow-y-auto px-5 py-4 bg-gray-50/50">
+                        <form onSubmit={handleSubmit} className="space-y-5">
+                    <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                        <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            Task Details
+                        </h3>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
                         <input
@@ -396,7 +406,12 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             </select>
                         </div>
                     </div>
-
+                    </section>
+                    <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                        <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Schedule & Assign
+                        </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">Due Date</label>
@@ -471,7 +486,12 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             )}
                         </div>
                     </div>
-
+                    </section>
+                    <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                        <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Client & Priority
+                        </h3>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Client</label>
                         <select
@@ -514,8 +534,13 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             />
                         </div>
                     </div>
-
+                    </section>
                     {/* Proof/Attachments Section (same as Work Log) */}
+                    <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                        <h3 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                            Proof / Attachments
+                        </h3>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
                         {!isSpecialistView && (
@@ -619,11 +644,14 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <p className="text-sm text-gray-500">No attachments</p>
                         )}
                     </div>
-
+                    </section>
                     {/* Comments Section */}
-                    <div className="pt-2">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-semibold text-gray-900">Comments</h3>
+                    <div className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-sm font-semibold text-teal-900 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                                Comments
+                            </h3>
                             {mode === 1 && task?.id && (
                                 <button
                                     type="button"
@@ -718,18 +746,18 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                     </div>
 
                         {/* Footer */}
-                        <div className="sticky bottom-0 bg-white pt-4 pb-1">
+                        <div className="sticky bottom-0 bg-gray-100/80 pt-4 pb-1 -mx-5 -mb-4 px-5 py-4 rounded-b-2xl">
                             <div className="flex flex-col sm:flex-row gap-3">
                                 <button
                                     type="button"
                                     onClick={handleCancel}
-                                    className="w-full sm:flex-1 bg-gray-100 text-gray-800 py-3 px-6 rounded-lg hover:bg-gray-200 transition-colors"
+                                    className="w-full sm:flex-1 border border-gray-300 bg-white text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-50 font-medium transition-colors"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    className="w-full sm:flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors"
+                                    className="w-full sm:flex-1 py-3 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
                                 >
                                     {mode === 0 ? "Create" : "Save"}
                                 </button>

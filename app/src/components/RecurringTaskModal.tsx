@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import DatePicker from "react-datepicker";
 import { useDispatch, useSelector } from "react-redux";
-import { Upload, X, Image, Video, Link as LinkIcon, Plus } from "lucide-react";
+import { Upload, X, Image, Video, Link as LinkIcon, Plus, Repeat } from "lucide-react";
 import api from "@/lib/api";
 import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
@@ -223,17 +223,27 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm overflow-y-auto">
       <div className="min-h-full flex items-center justify-center p-4">
-        <div className="bg-white w-full max-w-3xl rounded-xl border border-gray-200 shadow-lg max-h-[calc(100vh-2rem)] flex flex-col">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-            <h2 className="text-lg sm:text-xl font-bold text-gray-900">{isEdit ? "Edit Recurring Task" : "Add Recurring Task"}</h2>
-            <button type="button" onClick={() => setOpen(false)} className="p-2 text-gray-400 hover:text-gray-600" aria-label="Close">
+        <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl ring-1 ring-gray-200/80 max-h-[calc(100vh-2rem)] flex flex-col">
+          <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 text-white rounded-t-2xl border-b-2 border-indigo-500/50 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm">
+                <Repeat className="h-5 w-5" />
+              </div>
+              <h2 className="text-lg sm:text-xl font-bold drop-shadow-sm">{isEdit ? "Edit Recurring Task" : "Add Recurring Task"}</h2>
+            </div>
+            <button type="button" onClick={() => setOpen(false)} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors" aria-label="Close">
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto px-5 py-4">
-            <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="flex-1 overflow-y-auto px-5 py-4 bg-gray-50/50">
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  Task Details
+                </h3>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
                 <input
@@ -278,6 +288,12 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                   </select>
                 </div>
               </div>
+              </section>
+              <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Recurrence
+                </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Recurrence</label>
@@ -292,7 +308,7 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">First run date (task will be created on this day each cycle)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">First Run Date</label>
                   <DatePicker
                     selected={form.firstRunAt}
                     onChange={(date) => date && setForm({ ...form, firstRunAt: date })}
@@ -302,6 +318,12 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                   />
                 </div>
               </div>
+              </section>
+              <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  Assignment
+                </h3>
               <div ref={assignToRef} className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Assign to</label>
                 <div className="flex items-stretch gap-2">
@@ -378,6 +400,12 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                   ))}
                 </select>
               </div>
+              </section>
+              <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  Priority & Time
+                </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
@@ -404,6 +432,12 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                   />
                 </div>
               </div>
+              </section>
+              <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                  Proof / Attachments
+                </h3>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
                 <div className="mb-4">
@@ -479,18 +513,19 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                   </div>
                 )}
               </div>
-              <div className="flex justify-end gap-2 pt-2">
+              </section>
+              <div className="flex justify-end gap-3 pt-2 bg-gray-100/80 -mx-5 -mb-4 px-5 py-4 rounded-b-2xl">
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  className="px-4 py-2.5 border border-gray-300 bg-white rounded-xl text-gray-700 hover:bg-gray-50 font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
                 >
                   {submitting ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save Changes" : "Create Recurring Task")}
                 </button>

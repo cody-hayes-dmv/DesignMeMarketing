@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, Plus, Clock, User, AlertCircle, CheckCircle } from "lucide-react";
+import { X, Plus, Clock, User, AlertCircle, CheckCircle, ListChecks } from "lucide-react";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 
@@ -280,24 +280,29 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">Create Onboarding Tasks</h2>
-            <p className="text-gray-600 mt-1">Generate tasks from predefined templates for new clients</p>
+        <div className="flex items-center justify-between px-6 py-5 flex-shrink-0 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+              <ListChecks className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Create Onboarding Tasks</h2>
+              <p className="text-white/90 mt-0.5">Generate tasks from predefined templates for new clients</p>
+            </div>
           </div>
           <button
             onClick={() => setOpen(false)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
           >
-            <X className="h-6 w-6 text-gray-500" />
+            <X className="h-6 w-6" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1 min-h-0">
+        <div className="p-6 overflow-y-auto flex-1 min-h-0 bg-gray-50/50">
           {error && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
               <div className="flex items-center">
@@ -309,8 +314,11 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Template Selection */}
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Select Template</h3>
+            <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                Select Template
+              </h3>
               <div className="space-y-3">
                 {templates.length === 0 ? (
                   <p className="text-sm text-gray-500 py-4">No templates available. Loading or creating default…</p>
@@ -347,8 +355,11 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
             </div>
 
             {/* Configuration */}
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Configuration</h3>
+            <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-emerald-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Configuration
+              </h3>
               <div className="space-y-4">
                 {/* Client Selection */}
                 <div>
@@ -442,8 +453,9 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
 
           {/* Selected Template Tasks Preview */}
           {selectedTemplate && (
-            <div className="mt-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className="mt-6 rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-amber-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                 Tasks to be Created ({selectedTemplate.tasks.length})
               </h3>
               <div className="space-y-3">
@@ -498,17 +510,17 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end space-x-3 p-6 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl flex-shrink-0">
           <button
             onClick={() => setOpen(false)}
-            className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-4 py-2.5 border border-gray-300 bg-white text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleCreateTasks}
             disabled={loading || !selectedTemplate || !selectedClient}
-            className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+            className="px-6 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center space-x-2"
           >
             {loading ? (
               <>

@@ -11,6 +11,7 @@ import {
   MoreVertical,
   Users,
   UserCheck,
+  UserPlus,
   Search,
   Table,
   List,
@@ -975,57 +976,61 @@ const ClientsPage = () => {
 
       {/* Client View */}
       {(!enabled) ? (
-        <div className="bg-white rounded-xl border border-gray-200">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
+              <thead>
+                <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
                   <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider cursor-pointer hover:from-primary-100 hover:via-blue-100 select-none border-l-4 border-primary-400 first:border-l-0"
                     onClick={() => handleSort("name")}
                   >
                     <div className="flex items-center gap-2">
                       Client Name
-                      {sortField === "name" && (sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+                      {sortField === "name" && (sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-primary-600" /> : <ArrowDown className="h-3.5 w-3.5 text-primary-600" />)}
                     </div>
                   </th>
                   <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                    className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider cursor-pointer hover:from-primary-100 select-none border-l-4 border-emerald-300"
                     onClick={() => handleSort("domain")}
                   >
                     <div className="flex items-center gap-2">
                       Domain
-                      {sortField === "domain" && (sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+                      {sortField === "domain" && (sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-emerald-600" /> : <ArrowDown className="h-3.5 w-3.5 text-emerald-600" />)}
                     </div>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Service Package</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Agency</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Service Package</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Created Date</th>
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredClients.map((client) => (
-                  <tr key={client.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-xs flex items-center gap-1">
-                      <Building2 className="text-blue-600" size={18} />
-                      {client.name}
+              <tbody className="divide-y divide-gray-100">
+                {filteredClients.map((client, index) => (
+                  <tr key={client.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
+                    <td className="px-6 py-4 whitespace-nowrap text-xs">
+                      <div className="flex items-center gap-2 font-semibold text-gray-900">
+                        <Building2 className="h-4 w-4 text-primary-500 shrink-0" />
+                        {client.name}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
                       <a
-                        className="text-sm text-gray-600 underline"
+                        className="text-sm font-medium text-primary-600 hover:text-primary-700 underline underline-offset-1 decoration-primary-300 hover:decoration-primary-500 transition-colors"
                         href={client.domain.startsWith("http") ? client.domain : `https://${client.domain}`}
                         target="_blank" rel="noopener noreferrer"
                       >
                         {client.domain}
                       </a>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-600">
+                    <td className="px-6 py-4 whitespace-nowrap text-xs text-amber-800/90">
                       {client.agencyNames?.length ? client.agencyNames.join(", ") : "—"}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-700">
-                      {getServicePackageLabel(client)}
+                    <td className="px-6 py-4 whitespace-nowrap text-xs">
+                      <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-violet-100 text-violet-800">
+                        {getServicePackageLabel(client)}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {user?.role === "SUPER_ADMIN" ? (
@@ -1086,11 +1091,11 @@ const ClientsPage = () => {
                       </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-xs">
+                    <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-600">
                       {client.createdAt ? format(new Date(client.createdAt), "yyyy-MM-dd") : "-"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
-                      <div className="flex items-center flex-wrap gap-2">
+                      <div className="flex items-center flex-wrap gap-1">
                         {client.status === "PENDING" && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") ? (
                           <>
                             <button
@@ -1112,14 +1117,14 @@ const ClientsPage = () => {
                           </>
                         ) : null}
                         <button
-                          className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                          className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                           onClick={() => handleViewClick(client)}
                           title="View"
                         >
                           <Eye className="h-4 w-4" />
                         </button>
                         <button
-                          className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                          className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                           onClick={() => handleShareClick(client)}
                           title="Share"
                         >
@@ -1127,7 +1132,7 @@ const ClientsPage = () => {
                         </button>
                         {user?.role === "SUPER_ADMIN" && (
                           <button
-                            className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                            className="p-2 rounded-lg text-gray-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                             onClick={() => handleAssignToAgency(client)}
                             title="Assign to Agency"
                           >
@@ -1136,7 +1141,7 @@ const ClientsPage = () => {
                         )}
                         {user?.role === "SUPER_ADMIN" && !client.vendasta && (
                           <button
-                            className="p-1 text-gray-400 hover:text-orange-600 transition-colors"
+                            className="p-2 rounded-lg text-gray-500 hover:text-orange-600 hover:bg-orange-50 transition-colors"
                             onClick={() => handleMoveToVendasta(client)}
                             title="Move to Vendasta"
                           >
@@ -1144,14 +1149,14 @@ const ClientsPage = () => {
                           </button>
                         )}
                         <button
-                          className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                          className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                           onClick={() => handleEditClick(client)}
                           title="Edit"
                         >
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
-                          className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                          className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                           onClick={() => handleDeleteClient(client.id)}
                           title="Delete"
                         >
@@ -1170,20 +1175,22 @@ const ClientsPage = () => {
           {filteredClients.map((client) => (
             <div
               key={client.id}
-              className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow"
+              className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-lg hover:border-primary-200 transition-all flex flex-col"
             >
-              <div className="p-6">
+              {/* Card header strip */}
+              <div className="h-1.5 bg-gradient-to-r from-primary-500 via-blue-500 to-indigo-500" />
+              <div className="p-6 flex-1">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-3">
-                    <div className="bg-primary-100 p-2 rounded-lg">
-                      <Globe className="h-5 w-5 text-primary-600" />
+                    <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-primary-100 to-blue-100 text-primary-600 shrink-0">
+                      <Globe className="h-6 w-6" />
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-gray-900 truncate">
                         {client.name}
                       </h3>
                       <a
-                        className="text-sm text-gray-600 underline"
+                        className="text-sm text-primary-600 hover:text-primary-700 underline underline-offset-1 decoration-primary-300 truncate block"
                         href={client.domain.startsWith("http") ? client.domain : `https://${client.domain}`}
                         target="_blank" rel="noopener noreferrer"
                       >
@@ -1191,11 +1198,11 @@ const ClientsPage = () => {
                       </a>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center gap-1 shrink-0">
                     {user?.role === "SUPER_ADMIN" ? (
                       <div className="relative inline-block status-dropdown">
                           <button
-                            className={`px-4 py-1 text-xs font-medium rounded-full ${getStatusBadge(client.status)}`}
+                            className={`px-4 py-1.5 text-xs font-semibold rounded-full ${getStatusBadge(client.status)}`}
                           onClick={() => setOpenStatusId(openStatusId === client.id ? "" : client.id)}
                           >
                             {getStatusLabel(client.status)}
@@ -1236,14 +1243,14 @@ const ClientsPage = () => {
                         </span>
                     )}
                     <button
-                      className="p-1 text-gray-400 hover:text-primary-600"
+                      className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                       onClick={() => handleShareClick(client)}
                       title="Share"
                     >
                       <Share2 className="h-4 w-4" />
                     </button>
                     <button
-                      className="p-1 text-gray-400 hover:text-gray-600 card-menu-button"
+                      className="p-2 rounded-lg text-gray-500 hover:text-violet-600 hover:bg-violet-50 card-menu-button transition-colors"
                       ref={(el) => {
                         if (el) cardMenuButtonRefs.current[client.id] = el;
                       }}
@@ -1336,45 +1343,43 @@ const ClientsPage = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <p className="text-lg font-bold text-gray-900">
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="text-center p-4 rounded-xl border-l-4 border-blue-500 bg-blue-50/60">
+                    <p className="text-xl font-bold text-blue-900">
                       {Array.isArray(client.keywords) ? client.keywords.length : (client.keywords ?? 0)}
                     </p>
-                    <p className="text-xs text-gray-600">Keywords</p>
+                    <p className="text-xs font-medium text-blue-700">Keywords</p>
                   </div>
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <p className="text-lg font-bold text-gray-900">
+                  <div className="text-center p-4 rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60">
+                    <p className="text-xl font-bold text-emerald-900">
                       {client.avgPosition ?? 0}
                     </p>
-                    <p className="text-xs text-gray-600">Avg Position</p>
+                    <p className="text-xs font-medium text-emerald-700">Avg Position</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <p className="text-lg font-bold text-secondary-600">
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="text-center p-4 rounded-xl border-l-4 border-amber-500 bg-amber-50/60">
+                    <p className="text-xl font-bold text-amber-900">
                       {client.topRankings ?? 0}
                     </p>
-                    <p className="text-xs text-gray-600">Top 10</p>
+                    <p className="text-xs font-medium text-amber-700">Top 10</p>
                   </div>
-                  <div className="text-center p-3 bg-gray-50 rounded-lg">
-                    <p className="text-lg font-bold text-primary-600">
+                  <div className="text-center p-4 rounded-xl border-l-4 border-violet-500 bg-violet-50/60">
+                    <p className="text-xl font-bold text-violet-900">
                       {Math.round(Number(client.traffic30d ?? client.traffic ?? 0)).toLocaleString()}
                     </p>
-                    <p className="text-xs text-gray-600">Traffic (30d)</p>
+                    <p className="text-xs font-medium text-violet-700">Traffic (30d)</p>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-sm text-gray-500">
-                  <div className="flex items-center space-x-1">
-                    <Calendar className="h-4 w-4" />
-                    <span>
-                      Created {new Date(client.createdAt).toLocaleDateString()}
-                    </span>
+                <div className="flex items-center justify-between text-sm pt-3 border-t border-gray-100">
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <Calendar className="h-4 w-4 text-slate-400" />
+                    <span>Created {new Date(client.createdAt).toLocaleDateString()}</span>
                   </div>
                   <button
-                    className="text-primary-600 hover:text-primary-700 font-medium"
+                    className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-sm hover:shadow transition-all"
                     onClick={() => handleViewReportClick(client)}
                   >
                     View Details
@@ -1388,13 +1393,18 @@ const ClientsPage = () => {
 
       {/* Create Client Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-gray-100/80 backdrop-blur-sm overflow-y-auto z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm overflow-y-auto z-50 p-4">
           <div className="min-h-full px-4 py-8 flex items-start justify-center">
-            <div className="bg-white rounded-xl shadow-sm ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200 shrink-0">
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">Create New Client</h2>
-                <p className="text-sm text-gray-500 mt-1">Account information</p>
+            <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-start justify-between px-6 py-5 shrink-0 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                  <UserPlus className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold">Create New Client</h2>
+                  <p className="text-sm text-white/90">Account information</p>
+                </div>
               </div>
               <button
                 type="button"
@@ -1402,20 +1412,23 @@ const ClientsPage = () => {
                   setShowCreateModal(false);
                   setClientForm(EMPTY_CLIENT_FORM);
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                 aria-label="Close"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateClient} className="flex-1 min-h-0 flex flex-col">
-              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
+            <form onSubmit={handleCreateClient} className="flex-1 min-h-0 flex flex-col bg-gray-50/50">
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
                 {isAgencyCreateForm ? (
                   <>
                     {/* SECTION A: BUSINESS INFORMATION (Required) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">BUSINESS INFORMATION (Required)</h3>
+                    <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        BUSINESS INFORMATION (Required)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Name *</label>
@@ -1458,8 +1471,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION B: LOCATION INFORMATION (Required) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">LOCATION INFORMATION (Required)</h3>
+                    <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-emerald-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        LOCATION INFORMATION (Required)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Address *</label>
@@ -1497,8 +1513,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION C: CONTACT INFORMATION (Required) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">CONTACT INFORMATION (Required)</h3>
+                    <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-amber-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        CONTACT INFORMATION (Required)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
@@ -1512,8 +1531,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION D: WEBSITE LOGIN INFO (Optional) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">WEBSITE LOGIN INFO (Optional)</h3>
+                    <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-violet-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                        WEBSITE LOGIN INFO (Optional)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Website Login URL</label>
@@ -1532,8 +1554,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION E: CAMPAIGN TYPE (Required) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">SECTION E: CAMPAIGN TYPE (Required)</h3>
+                    <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-indigo-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                        CAMPAIGN TYPE (Required)
+                      </h3>
                       <div className="space-y-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Type *</label>
                         <div className="flex flex-wrap gap-4">
@@ -1550,8 +1575,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION F: GOOGLE BUSINESS PROFILE (Optional) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">GOOGLE BUSINESS PROFILE (Optional)</h3>
+                    <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-teal-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                        GOOGLE BUSINESS PROFILE (Optional)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Google Business Profile Category</label>
@@ -1569,8 +1597,11 @@ const ClientsPage = () => {
                 ) : (
                   <>
                     {/* Full form for Super Admin / Specialist */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Business Information</h3>
+                    <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        Business Information
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Name</label>
@@ -1626,8 +1657,11 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Website Info</h3>
+                    <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-violet-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                        Website Info
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Login URL</label>
@@ -1643,8 +1677,11 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Campaign Type</h3>
+                    <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-indigo-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                        Campaign Type
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Type</label>
@@ -1656,8 +1693,11 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile (GBP) Categories</h3>
+                    <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-teal-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                        Google Business Profile (GBP) Categories
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Primary GBP Category</label>
@@ -1669,8 +1709,11 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Google Business Profile Services</h3>
+                    <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-amber-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        Google Business Profile Services
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Services List</label>
@@ -1686,8 +1729,11 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Keywords</h3>
+                    <section className="rounded-xl border-l-4 border-rose-500 bg-rose-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-rose-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        Keywords
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">What are the keywords you want to target?</label>
@@ -1704,8 +1750,11 @@ const ClientsPage = () => {
                       </div>
                     </section>
                     {canSeeSeoRoadmapFields && (
-                      <section>
-                        <h3 className="text-sm font-semibold text-gray-900 mb-4">SEO Roadmap</h3>
+                      <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
+                        <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+                          SEO Roadmap
+                        </h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Start Month</label>
@@ -1730,20 +1779,20 @@ const ClientsPage = () => {
                 )}
               </div>
 
-              <div className="border-t border-gray-200 px-6 py-4 bg-white flex items-center justify-end gap-3 shrink-0">
+              <div className="border-t border-gray-200 px-6 py-4 bg-gray-100/80 flex items-center justify-end gap-3 shrink-0 rounded-b-2xl">
                 <button
                   type="button"
                   onClick={() => {
                     setShowCreateModal(false);
                     setClientForm(EMPTY_CLIENT_FORM);
                   }}
-                  className="bg-gray-100 text-gray-700 px-5 py-2.5 rounded-lg hover:bg-gray-200 transition-colors"
+                  className="border border-gray-300 bg-white text-gray-700 px-5 py-2.5 rounded-xl hover:bg-gray-50 font-medium transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="bg-primary-600 text-white px-6 py-2.5 rounded-lg hover:bg-primary-700 transition-colors"
+                  className="px-6 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
                 >
                   Create Client
                 </button>
@@ -1756,13 +1805,13 @@ const ClientsPage = () => {
 
       {/* Edit Client Modal */}
       {showEditModal && (
-        <div className="fixed inset-0 bg-gray-100/80 backdrop-blur-sm overflow-y-auto z-50">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm overflow-y-auto z-50">
           <div className="min-h-full px-4 py-8 flex items-start justify-center">
-            <div className="bg-white rounded-xl shadow-sm ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+            <div className="bg-white rounded-2xl shadow-2xl ring-2 ring-primary-200/80 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-start justify-between px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 border-b-2 border-primary-500/50 shrink-0">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">Edit Client</h2>
-                <p className="text-sm text-gray-500 mt-1">Account information</p>
+                <h2 className="text-xl font-bold text-white drop-shadow-sm">Edit Client</h2>
+                <p className="text-sm text-white/90 mt-1">Account information</p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1810,7 +1859,7 @@ const ClientsPage = () => {
                       () => toast.error("Failed to copy")
                     );
                   }}
-                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white/90 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
                   title="Copy all information"
                 >
                   <Copy className="h-4 w-4" />
@@ -1823,7 +1872,7 @@ const ClientsPage = () => {
                     setEditingClient(null);
                     setClientForm(EMPTY_CLIENT_FORM);
                   }}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                   aria-label="Close"
                 >
                   <X className="h-5 w-5" />
@@ -1832,12 +1881,15 @@ const ClientsPage = () => {
             </div>
 
             <form onSubmit={handleUpdateClient} className="flex-1 min-h-0 flex flex-col">
-              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6 bg-gradient-to-b from-slate-50/50 to-white">
                 {isAgencyCreateForm ? (
                   <>
                     {/* SECTION A: BUSINESS INFORMATION (Required) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">BUSINESS INFORMATION (Required)</h3>
+                    <section className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-primary-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
+                        BUSINESS INFORMATION (Required)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Name *</label>
@@ -1914,8 +1966,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION B: LOCATION INFORMATION (Required) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">LOCATION INFORMATION (Required)</h3>
+                    <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-emerald-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        LOCATION INFORMATION (Required)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Address *</label>
@@ -1953,8 +2008,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION C: CONTACT INFORMATION (Required) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">CONTACT INFORMATION (Required)</h3>
+                    <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-amber-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        CONTACT INFORMATION (Required)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
@@ -1968,8 +2026,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION D: WEBSITE LOGIN INFO (Optional) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">WEBSITE LOGIN INFO (Optional)</h3>
+                    <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-violet-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                        WEBSITE LOGIN INFO (Optional)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Website Login URL</label>
@@ -2006,8 +2067,11 @@ const ClientsPage = () => {
                     </section>
 
                     {/* SECTION F: GOOGLE BUSINESS PROFILE (Optional) */}
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">GOOGLE BUSINESS PROFILE (Optional)</h3>
+                    <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-teal-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                        GOOGLE BUSINESS PROFILE (Optional)
+                      </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Google Business Profile Category</label>
@@ -2235,8 +2299,11 @@ const ClientsPage = () => {
                     </section>
 
                     {canSeeSeoRoadmapFields && (
-                      <section>
-                        <h3 className="text-sm font-semibold text-gray-900 mb-4">SEO Roadmap</h3>
+                      <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
+                        <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+                          SEO Roadmap
+                        </h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Start Month</label>
@@ -2398,7 +2465,7 @@ const ClientsPage = () => {
                 )}
               </div>
 
-              <div className="border-t border-gray-200 px-6 py-4 bg-white flex items-center justify-end gap-3 shrink-0">
+              <div className="border-t-2 border-gray-200 px-6 py-4 bg-gradient-to-r from-gray-50 to-slate-50 flex items-center justify-end gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -2406,13 +2473,13 @@ const ClientsPage = () => {
                     setEditingClient(null);
                     setClientForm(EMPTY_CLIENT_FORM);
                   }}
-                  className="bg-gray-100 text-gray-700 px-5 py-2.5 rounded-lg hover:bg-gray-200 transition-colors"
+                  className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="bg-primary-600 text-white px-6 py-2.5 rounded-lg hover:bg-primary-700 transition-colors"
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary-600 to-blue-600 text-white font-semibold hover:from-primary-700 hover:to-blue-700 transition-all shadow-md"
                 >
                   Save Changes
                 </button>
@@ -2425,51 +2492,56 @@ const ClientsPage = () => {
 
       {/* Share Link Modal - same style as Share Client Dashboard (Vendasta) */}
       {showShareModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Share Client Dashboard</h3>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden ring-2 ring-blue-200/80 max-w-md w-full">
+            <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 border-b-2 border-indigo-500/50">
+              <h3 className="text-lg font-bold text-white drop-shadow-sm">Share Client Dashboard</h3>
               <button
                 onClick={() => {
                   setShowShareModal(false);
                   setShareLink("");
                 }}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <p className="text-sm text-gray-600 mb-4">
-              Share this link to give others access to view the client dashboard. The link does not expire.
-            </p>
-            <div className="flex items-center gap-2 mb-4">
-              <input
-                type="text"
-                value={shareLink}
-                readOnly
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm"
-              />
-              <button
-                onClick={handleCopyLink}
-                className="p-2 text-gray-600 hover:text-primary-600 transition-colors"
-                title="Copy link"
-              >
-                <Copy className="h-5 w-5" />
-              </button>
+            <div className="p-6 bg-gradient-to-b from-slate-50/80 to-white space-y-4">
+              <p className="text-sm text-gray-600 rounded-xl border-l-4 border-blue-500 bg-blue-50/60 px-4 py-3">
+                Share this link to give others access to view the client dashboard. The link does not expire.
+              </p>
+              <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60 p-3">
+                <label className="block text-sm font-semibold text-emerald-800 mb-2">Share link</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={shareLink}
+                    readOnly
+                    className="flex-1 px-4 py-2.5 border-2 border-emerald-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    onClick={handleCopyLink}
+                    className="p-2.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                    title="Copy link"
+                  >
+                    <Copy className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="px-6 py-4 border-t-2 border-gray-200 flex items-center gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
               <button
                 onClick={() => {
                   setShowShareModal(false);
                   setShareLink("");
                 }}
-                className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+                className="flex-1 px-4 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
               >
                 Close
               </button>
               <button
                 onClick={handleOpenLink}
-                className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md flex items-center justify-center gap-2"
               >
                 <ExternalLink className="h-4 w-4" />
                 Open Link
@@ -2494,10 +2566,10 @@ const ClientsPage = () => {
 
       {/* Assign to Agency Modal */}
       {showAssignAgencyModal && selectedClientForAgency && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-gray-900">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden ring-2 ring-emerald-200/80 max-w-2xl w-full max-h-[85vh] flex flex-col">
+            <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-green-600 border-b-2 border-teal-500/50 shrink-0">
+              <h2 className="text-xl font-bold text-white drop-shadow-sm">
                 Assign Client to Agency
               </h2>
               <button
@@ -2505,35 +2577,35 @@ const ClientsPage = () => {
                   setShowAssignAgencyModal(false);
                   setSelectedClientForAgency(null);
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600">
+            <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-slate-50/50 to-white">
+              <p className="text-sm text-gray-700 rounded-xl border-l-4 border-teal-500 bg-teal-50/60 px-4 py-3">
                 Select an agency to assign "{selectedClientForAgency.name}" to:
               </p>
-              <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+              <div className="rounded-xl border-2 border-emerald-200 bg-white overflow-hidden max-h-96 overflow-y-auto">
                 {agencies.length === 0 ? (
-                  <div className="p-4 text-center text-gray-500">
+                  <div className="p-6 text-center text-gray-500 bg-amber-50/50 border-t border-amber-200">
                     No agencies available. Create an agency first.
                   </div>
                 ) : (
-                  <div className="divide-y divide-gray-200">
+                  <div className="divide-y divide-gray-100">
                     {agencies.map((agency) => (
                       <button
                         key={agency.id}
                         onClick={() => confirmAssignToAgency(agency.id)}
-                        className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                        className="w-full px-4 py-3 text-left hover:bg-emerald-50/80 active:bg-emerald-100/80 transition-colors border-l-4 border-transparent hover:border-emerald-400"
                       >
-                        <div className="font-medium text-gray-900">{agency.name}</div>
+                        <div className="font-semibold text-gray-900">{agency.name}</div>
                         {agency.subdomain && (
-                          <div className="text-sm text-gray-500">
+                          <div className="text-sm text-emerald-700/90 mt-0.5">
                             {agency.subdomain}.yourseodashboard.com
                           </div>
                         )}
-                        <div className="text-xs text-gray-400 mt-1">
+                        <div className="text-xs text-gray-500 mt-1">
                           {agency.memberCount} member{agency.memberCount !== 1 ? 's' : ''}
                         </div>
                       </button>

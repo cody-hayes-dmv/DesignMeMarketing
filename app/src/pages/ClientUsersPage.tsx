@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { ChevronDown, Eye, EyeOff, MoreVertical, Plus, Users, X } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, MoreVertical, Plus, Users, UserPlus, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { checkAuth } from "@/store/slices/authSlice";
@@ -485,39 +485,39 @@ const ClientUsersPage: React.FC = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+          <table className="min-w-full">
+            <thead>
+              <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Name</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Email</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Client</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Role</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Last Login</th>
+                <th className="px-6 py-3.5 text-right text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500 bg-gray-50/50">
                     Loading users...
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-rose-600">
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-rose-600 bg-rose-50/50">
                     {error}
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500 bg-amber-50/50">
                     No users found.
                   </td>
                 </tr>
               ) : (
-                filtered.map((u) => {
+                filtered.map((u, index) => {
                   const initials = (u.name || u.email || "?")
                     .split(" ")
                     .map((p) => p.trim()[0] || "")
@@ -526,22 +526,22 @@ const ClientUsersPage: React.FC = () => {
                     .toUpperCase();
                   const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "Never";
                   return (
-                    <tr key={u.id} className="hover:bg-gray-50">
+                    <tr key={u.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                          <div className="h-9 w-9 rounded-full bg-primary-100 flex items-center justify-center text-xs font-semibold text-primary-700">
                             {initials}
                           </div>
-                          <div className="text-sm font-medium text-gray-900">{u.name || u.email}</div>
+                          <div className="text-sm font-semibold text-gray-900">{u.name || u.email}</div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{u.email}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                        <div className="font-medium text-gray-900">{u.clientName}</div>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">{u.email}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <div className="font-medium text-amber-900/90">{u.clientName}</div>
                         <div className="text-xs text-gray-500">{u.clientDomain}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-900 text-white">
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-violet-100 text-violet-800">
                           {u.role}
                         </span>
                       </td>
@@ -554,12 +554,12 @@ const ClientUsersPage: React.FC = () => {
                           {u.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{lastLogin}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{lastLogin}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="relative inline-block">
                           <button
                             type="button"
-                            className="inline-flex items-center justify-center h-9 w-9 rounded-full hover:bg-gray-100 text-gray-500"
+                            className="inline-flex items-center justify-center h-9 w-9 rounded-lg hover:bg-violet-50 hover:text-violet-600 text-gray-500 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               const el = e.currentTarget as unknown as HTMLElement;
@@ -973,30 +973,40 @@ const ClientUsersPage: React.FC = () => {
         typeof window !== "undefined" &&
         createPortal(
           <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setInviteOpen(false)} />
-            <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
-              <div className="shrink-0 px-8 py-6 border-b border-gray-200 flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">Invite User</h2>
-                  <p className="text-sm text-gray-500 mt-1">Invite users to one or more client dashboards.</p>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setInviteOpen(false)} />
+            <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="shrink-0 px-8 py-5 flex items-center justify-between bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                    <UserPlus className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold">Invite User</h2>
+                    <p className="text-sm text-white/90 mt-0.5">Invite users to one or more client dashboards.</p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setInviteOpen(false)}
-                  className="h-10 w-10 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+                  className="h-10 w-10 inline-flex items-center justify-center rounded-lg text-white/90 hover:bg-white/20 hover:text-white"
                   title="Close"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+              <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 bg-gray-50/50">
                 {allClientsError && (
                   <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                     {allClientsError}
                   </div>
                 )}
 
+                <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    Invite Rows
+                  </h3>
                 <div className="space-y-4">
                   {inviteRows.map((row) => (
                     <div key={row.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-start">
@@ -1094,13 +1104,14 @@ const ClientUsersPage: React.FC = () => {
                     Invite users via email
                   </label>
                 </div>
+                </div>
               </div>
 
-              <div className="shrink-0 px-8 py-6 border-t border-gray-200 flex items-center justify-end gap-3">
+              <div className="shrink-0 px-8 py-4 border-t border-gray-200 bg-gray-100/80 flex items-center justify-end gap-3 rounded-b-2xl">
                 <button
                   type="button"
                   onClick={() => setInviteOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  className="px-4 py-2.5 rounded-xl border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium"
                   disabled={inviting}
                 >
                   Cancel
@@ -1108,7 +1119,7 @@ const ClientUsersPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void submitInvites()}
-                  className="px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                  className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-60 transition-all"
                   disabled={inviting}
                 >
                   {inviting ? "Sending..." : "Send Invite"}

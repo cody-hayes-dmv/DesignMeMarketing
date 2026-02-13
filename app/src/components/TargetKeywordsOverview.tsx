@@ -314,30 +314,30 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
 
   if (!clientId) {
     return (
-      <div className={`bg-white rounded-xl border border-gray-200 p-6 ${className}`}>
-        <p className="text-sm text-gray-500">Select a client to view target keywords.</p>
+      <div className={`rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-6 shadow-sm ${className}`}>
+        <p className="text-sm text-primary-800">Select a client to view target keywords.</p>
       </div>
     );
   }
 
   return (
-    <div className={`bg-white rounded-xl border border-gray-200 ${className}`}>
+    <div className={`rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden ${className}`}>
       {showHeader && (
-        <div className="p-6 border-b border-gray-200 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-primary-50/80 via-blue-50/60 to-indigo-50/50 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 inline-flex items-center gap-1.5">
+            <h3 className="text-lg font-semibold text-primary-900 inline-flex items-center gap-1.5">
               {title}
               {titleTooltip && (
                 <span title={titleTooltip}>
-                  <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                  <Info className="h-4 w-4 text-primary-600 cursor-help" aria-hidden />
                 </span>
               )}
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-primary-800/80">
               {subtitle}
               {clientName ? ` Client: ${clientName}` : ""}
             </p>
-            {lastUpdatedLabel && <p className="text-xs text-gray-500 mt-0.5">{lastUpdatedLabel}</p>}
+            {lastUpdatedLabel && <p className="text-xs text-primary-700/70 mt-0.5">{lastUpdatedLabel}</p>}
           </div>
           <div className="flex items-center space-x-2">
             {headerActions}
@@ -367,25 +367,25 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
         </div>
       )}
 
-      <div className={`space-y-6 ${showHeader ? "p-6 pt-4" : "p-6"}`}>
+      <div className={`space-y-6 ${showHeader ? "p-6 pt-4" : "p-6"} bg-gradient-to-b from-white to-slate-50/30`}>
         {error && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div className="rounded-xl border-l-4 border-rose-500 bg-rose-50 px-4 py-3 text-sm text-rose-800 font-medium shadow-sm">
             {error}
           </div>
         )}
 
         {loading ? (
-          <div className="flex h-64 items-center justify-center">
-            <span className="inline-flex items-center gap-2 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+          <div className="flex h-64 items-center justify-center rounded-xl border-l-4 border-blue-500 bg-blue-50/50">
+            <span className="inline-flex items-center gap-2 text-sm font-medium text-blue-900">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
               Loading target keywords…
             </span>
           </div>
         ) : keywords.length === 0 ? (
-          <div className="flex h-48 flex-col items-center justify-center text-center text-sm text-gray-500">
-            <Search className="h-8 w-8 text-gray-400 mb-2" />
-            <p>No target keywords available yet.</p>
-            <p className="text-xs text-gray-400 mt-1">
+          <div className="flex h-48 flex-col items-center justify-center text-center rounded-xl border-l-4 border-amber-500 bg-amber-50/50 py-8">
+            <Search className="h-10 w-10 text-amber-600 mb-2" />
+            <p className="text-sm font-medium text-amber-900">No target keywords available yet.</p>
+            <p className="text-xs text-amber-800/80 mt-1">
               {user?.role === "SUPER_ADMIN"
                 ? "Click Refresh to fetch keywords from DataForSEO."
                 : "Contact your administrator to refresh keyword data."}
@@ -394,44 +394,45 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between px-6 pt-2">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <BarChart3 className="h-4 w-4" />
+              <div className="flex items-center gap-2 text-sm font-medium text-primary-800 rounded-lg bg-primary-50/60 px-3 py-2 border border-primary-200/60">
+                <BarChart3 className="h-4 w-4 text-primary-600" />
                 <span>Showing {Math.min(50, keywords.length)} of {keywords.length} Rows</span>
               </div>
             </div>
-            <div className="overflow-x-auto max-h-[600px] overflow-y-auto border border-gray-200 rounded-lg">
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-xl border-2 border-primary-200/80 bg-white shadow-inner">
               <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                       Keyword
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                       Location
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                       Date Added
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                       Google
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                       Google Change
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                       Google SERP Features
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                       Google URL
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {sortedKeywords.slice(0, 50).map((keyword) => {
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {sortedKeywords.slice(0, 50).map((keyword, index) => {
                     const isStarred = starredKeywordIds.has(keyword.id);
+                    const rowAccent = index % 2 === 0 ? "bg-white" : "bg-slate-50/50";
                     return (
-                    <tr key={keyword.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
+                    <tr key={keyword.id} className={`hover:bg-blue-50/60 transition-colors ${rowAccent}`}>
+                      <td className="px-6 py-4 whitespace-nowrap border-l-4 border-transparent">
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -441,7 +442,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                           >
                             <Star
                               className={`h-4 w-4 cursor-pointer transition-colors ${
-                                isStarred ? "text-yellow-500" : "text-gray-400 hover:text-yellow-400"
+                                isStarred ? "text-amber-500" : "text-gray-400 hover:text-amber-400"
                               }`}
                               fill={isStarred ? "currentColor" : "none"}
                             />
@@ -453,6 +454,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-1 text-sm text-gray-900">
+                          <MapPin className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
                           {keyword.locationName || "United States"}
                         </div>
                       </td>
@@ -542,7 +544,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                           }
                           const isPositive = change < 0; // Negative change means moved up (better position)
                           return (
-                            <div className={`flex items-center gap-1 text-sm font-medium ${isPositive ? "text-green-600" : "text-red-600"}`}>
+                            <div className={`flex items-center gap-1 text-sm font-semibold ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
                               {isPositive ? (
                                 <TrendingUp className="h-4 w-4" />
                               ) : (
@@ -582,7 +584,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
               </table>
             </div>
             {keywords.length > 50 && (
-              <div className="px-6 pb-4 text-sm text-gray-500 text-center">
+              <div className="px-6 pb-4 text-sm font-medium text-primary-700 text-center rounded-lg bg-primary-50/50 py-2 border border-primary-200/60">
                 Showing top 50 of {keywords.length} keywords
               </div>
             )}

@@ -113,8 +113,8 @@ const RankedKeywordsLegend = () => {
   return (
     <ul className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
       {SERIES.map((s) => (
-        <li key={s.key} className="flex items-center gap-2 text-xs text-gray-600">
-          <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: s.color }} />
+        <li key={s.key} className="flex items-center gap-2 text-xs font-medium text-gray-700">
+          <span className="h-2.5 w-2.5 rounded-sm ring-1 ring-gray-300/80" style={{ backgroundColor: s.color }} />
           <span>{s.name}</span>
         </li>
       ))}
@@ -133,17 +133,17 @@ const RankedKeywordsTooltip = ({ active, label, payload }: any) => {
 
   const total = sortedPayload.reduce((sum: number, p: any) => sum + (Number(p?.value) || 0), 0);
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow">
-      <p className="text-xs font-medium text-gray-700">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-gray-900">Total: {total.toLocaleString()}</p>
+    <div className="rounded-xl border border-indigo-200 bg-white px-3 py-2 shadow-lg ring-1 ring-indigo-100">
+      <p className="text-xs font-semibold text-indigo-900">{label}</p>
+      <p className="mt-1 text-sm font-bold text-gray-900">Total: {total.toLocaleString()}</p>
       <div className="mt-2 space-y-1">
         {sortedPayload.map((p: any) => (
           <div key={p.dataKey} className="flex items-center justify-between gap-4 text-xs">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.color }} />
-              <span className="text-gray-600 truncate">{p.name}</span>
+              <span className="h-2 w-2 rounded-sm flex-shrink-0" style={{ backgroundColor: p.color }} />
+              <span className="text-gray-700 truncate font-medium">{p.name}</span>
             </div>
-            <span className="font-medium text-gray-800">{(Number(p.value) || 0).toLocaleString()}</span>
+            <span className="font-semibold text-gray-900">{(Number(p.value) || 0).toLocaleString()}</span>
           </div>
         ))}
       </div>
@@ -307,14 +307,14 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
         ? Number(summary.changePercent)
         : null;
     return (
-      <div className={`flex items-center space-x-1 text-sm font-medium ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
+      <div className={`flex items-center space-x-1 text-sm font-semibold ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
         {isPositive ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
         <span>
           {isPositive ? "+" : ""}
           {summary.change.toLocaleString()} vs last month
         </span>
         {changePercent !== null && (
-          <span className="text-xs text-gray-500">
+          <span className={`text-xs ${isPositive ? "text-emerald-700/80" : "text-rose-700/80"}`}>
             ({isPositive ? "+" : ""}
             {changePercent}
             %)
@@ -337,30 +337,30 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
 
   if (!clientId) {
     return (
-      <div className={`bg-white rounded-xl border border-gray-200 p-6 ${className}`}>
-        <p className="text-sm text-gray-500">Select a client to view ranked keyword trends.</p>
+      <div className={`rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-6 shadow-sm ${className}`}>
+        <p className="text-sm text-emerald-800">Select a client to view ranked keyword trends.</p>
       </div>
     );
   }
 
   return (
-    <div className={`bg-white rounded-xl border border-gray-200 ${className}`}>
+    <div className={`rounded-xl border-l-4 border-emerald-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden ${className}`}>
       {showHeader && (
-        <div className="py-4 px-5 border-b border-gray-200 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <div className="py-4 px-5 border-b-2 border-gray-100 bg-gradient-to-r from-emerald-50/80 via-teal-50/60 to-green-50/50 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-base font-semibold text-gray-900 inline-flex items-center gap-1.5">
+            <h3 className="text-base font-semibold text-emerald-900 inline-flex items-center gap-1.5">
               {title}
               {titleTooltip && (
                 <span title={titleTooltip}>
-                  <Info className="h-4 w-4 text-gray-400 cursor-help" aria-hidden />
+                  <Info className="h-4 w-4 text-emerald-600 cursor-help" aria-hidden />
                 </span>
               )}
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-emerald-800/80">
               {subtitle}
               {clientName ? ` Client: ${clientName}` : ""}
             </p>
-            {lastUpdatedLabel && <p className="text-xs text-gray-500 mt-0.5">{lastUpdatedLabel}</p>}
+            {lastUpdatedLabel && <p className="text-xs text-emerald-700/70 mt-0.5">{lastUpdatedLabel}</p>}
           </div>
           <div className="flex items-center space-x-2">
             {headerActions}
@@ -390,21 +390,21 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
         </div>
       )}
 
-      <div className={`space-y-4 ${showHeader ? "py-4 px-5 pt-3" : "py-4 px-5"}`}>
+      <div className={`space-y-4 ${showHeader ? "py-4 px-5 pt-3" : "py-4 px-5"} bg-gradient-to-b from-white to-slate-50/20`}>
         {summaryError && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div className="rounded-xl border-l-4 border-rose-500 bg-rose-50 px-4 py-3 text-sm text-rose-800 font-medium shadow-sm">
             {summaryError}
           </div>
         )}
 
-        <div className="bg-gradient-to-r from-primary-50 via-blue-50 to-blue-100/40 rounded-lg py-4 px-5 flex flex-col gap-2">
+        <div className="rounded-xl border-l-4 border-emerald-500 bg-gradient-to-r from-emerald-50/80 via-teal-50/60 to-green-50/50 py-4 px-5 flex flex-col gap-2 shadow-sm">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-700">Current total keywords ranked</p>
-              <div className="flex items-baseline gap-3">
+              <p className="text-sm font-semibold text-emerald-900">Current total keywords ranked</p>
+              <div className="flex items-baseline gap-3 flex-wrap">
                 <span className="text-3xl font-bold text-gray-900">
                   {summaryLoading && !hasData ? (
-                    <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                    <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
                   ) : summary?.current?.totalKeywords !== undefined && summary?.current?.totalKeywords !== null ? (
                     summary.current.totalKeywords.toLocaleString()
                   ) : (
@@ -413,16 +413,16 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                 </span>
                 {changeBadge}
               </div>
-              <div className="mt-2 space-y-1 text-xs text-gray-600">
+              <div className="mt-2 space-y-1 text-xs text-emerald-800/90">
                 {summary?.previous && (
                   <p>
                     Last month:{" "}
-                    <span className="font-medium">
+                    <span className="font-semibold text-emerald-900">
                       {summary.previous.totalKeywords.toLocaleString()} keywords
                     </span>
                   </p>
                 )}
-                {lastUpdated && <p className="text-gray-500">Last updated {lastUpdated}</p>}
+                {lastUpdated && <p className="text-emerald-700/80">Last updated {lastUpdated}</p>}
               </div>
             </div>
             {!showHeader && user?.role === "SUPER_ADMIN" && enableRefresh && (
@@ -450,25 +450,25 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
           </div>
         </div>
 
-        <div className="space-y-3 rounded-lg border border-gray-200 px-4 pt-3 pb-2">
+        <div className="space-y-3 rounded-xl border-l-4 border-indigo-500 bg-white border border-indigo-200/60 px-4 pt-3 pb-2 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h4 className="text-sm font-semibold text-gray-900">
+              <h4 className="text-sm font-semibold text-indigo-900">
                 Total Keywords Ranked Over Time
               </h4>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-indigo-800/80 mt-0.5">
                 Total keywords per month (12 months) with breakdown by rank: 1–3, 4–10, 11–20, 21–30, 31–50, 51+. Data from DataForSEO.
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center space-x-1 rounded-lg bg-gray-100 p-1">
+              <div className="flex items-center space-x-1 rounded-xl bg-indigo-100/80 p-1 border border-indigo-200/60">
                 <button
                   type="button"
                   onClick={() => setChartType("line")}
-                  className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                     chartType === "line"
-                      ? "bg-white text-primary-600 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-indigo-700 hover:bg-indigo-100"
                   }`}
                 >
                   Line
@@ -476,10 +476,10 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                 <button
                   type="button"
                   onClick={() => setChartType("bar")}
-                  className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                     chartType === "bar"
-                      ? "bg-white text-primary-600 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-indigo-700 hover:bg-indigo-100"
                   }`}
                 >
                   Bar
@@ -489,30 +489,30 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
           </div>
 
           {historyError && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div className="rounded-xl border-l-4 border-rose-500 bg-rose-50 px-4 py-3 text-sm text-rose-800 font-medium">
               {historyError}
             </div>
           )}
 
           {isHistoryInitialLoading ? (
-            <div className="flex h-64 items-center justify-center">
-              <span className="inline-flex items-center gap-2 text-sm text-gray-500">
-                <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+            <div className="flex h-64 items-center justify-center rounded-lg bg-indigo-50/40">
+              <span className="inline-flex items-center gap-2 text-sm font-medium text-indigo-800">
+                <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
                 Loading history…
               </span>
             </div>
           ) : history.length === 0 ? (
-            <div className="flex h-48 flex-col items-center justify-center text-center text-sm text-gray-500">
-              <p>No historical data available yet.</p>
-              <p className="text-xs text-gray-400 mt-1">
+            <div className="flex h-48 flex-col items-center justify-center text-center rounded-lg bg-amber-50/50 py-8">
+              <p className="text-sm font-medium text-amber-900">No historical data available yet.</p>
+              <p className="text-xs text-amber-800/80 mt-1">
                 Fetch ranked keywords at least once per month to build up a trendline.
               </p>
             </div>
           ) : (
             <div className="relative flex flex-col">
               {historyLoading && (
-                <div className="absolute right-2 top-2 z-10 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white/90 px-2 py-1 text-xs text-gray-600 shadow-sm">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary-600" />
+                <div className="absolute right-2 top-2 z-10 inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/95 px-3 py-1.5 text-xs font-medium text-indigo-800 shadow-sm">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
                   Updating…
                 </div>
               )}
@@ -598,7 +598,7 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
                 </ResponsiveContainer>
               </div>
               {/* 2. Legend directly under chart (minimal gap) */}
-              <div className="mt-0.5 pt-1 border-t border-gray-200 shrink-0">
+              <div className="mt-0.5 pt-2 border-t border-indigo-100 bg-indigo-50/30 rounded-b-lg px-2 pb-2 shrink-0">
                 <RankedKeywordsLegend />
               </div>
             </div>

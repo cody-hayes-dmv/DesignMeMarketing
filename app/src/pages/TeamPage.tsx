@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Users,
+  UserPlus,
   Plus,
   Building2,
   Globe,
@@ -354,7 +355,7 @@ const TeamPage = () => {
       )}
 
       {/* Team Members Table */}
-      <div className="bg-white rounded-xl border border-gray-200">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
             {activeView === "myTeam" ? "My Team (Admins + Specialists)" : activeView === "agencyAccess" ? "Agency Access" : "All Users"}
@@ -362,47 +363,33 @@ const TeamPage = () => {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Photo
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Full Name
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Email
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Role
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date Added
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+            <thead>
+              <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Photo</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-300">Full Name</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Email</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Role</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Date Added</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="divide-y divide-gray-100">
               {isTableLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-gray-50/50">
                     Loading team members...
                   </td>
                 </tr>
               ) : visibleMembers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-amber-50/50">
                     No team members found
                   </td>
                 </tr>
               ) : (
-                visibleMembers.map((member) => (
-                  <tr key={member.id} className="hover:bg-gray-50">
+                visibleMembers.map((member, index) => (
+                  <tr key={member.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
                         <span className="text-sm font-medium text-primary-700">
@@ -434,17 +421,17 @@ const TeamPage = () => {
                         {getStatusText(member)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
                       {member.createdAt ? new Date(member.createdAt).toLocaleDateString() : "—"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center gap-1">
                         {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") && (
                           <>
                             {member.invited && !member.verified && (
                               <button
                                 onClick={() => handleResendInvite(member)}
-                                className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+                                className="p-2 rounded-lg text-gray-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                                 title="Resend invitation"
                               >
                                 <Mail className="h-4 w-4" />
@@ -452,7 +439,7 @@ const TeamPage = () => {
                             )}
                             <button
                               onClick={() => handleEditTeamMember(member)}
-                              className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                              className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                               title="Edit member"
                             >
                               <Edit className="h-4 w-4" />
@@ -460,7 +447,7 @@ const TeamPage = () => {
                             {member.role !== "SUPER_ADMIN" && (
                               <button
                                 onClick={() => handleDeleteTeamMember(member.id)}
-                                className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                 title="Delete member"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -472,14 +459,14 @@ const TeamPage = () => {
                           <>
                             <button
                               onClick={() => handleEditTeamMember(member)}
-                              className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                              className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                               title="Edit member"
                             >
                               <Edit className="h-4 w-4" />
                             </button>
                             <button
                               onClick={() => handleDeleteTeamMember(member.id)}
-                              className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                              className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                               title="Remove from agency"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -498,111 +485,145 @@ const TeamPage = () => {
 
       {/* Invite New Specialist Modal */}
       {showInviteModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-bold text-gray-900 mb-6">
-              Invite New Specialist
-            </h2>
-            <form onSubmit={handleInviteTeamMember} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={inviteForm.name}
-                  onChange={(e) =>
-                    setInviteForm({ ...inviteForm, name: e.target.value })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
-                  required
-                  disabled={submittingInvite}
-                />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 max-w-md w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="shrink-0 px-6 py-5 flex items-center justify-between bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                  <UserPlus className="h-5 w-5" />
+                </div>
+                <h2 className="text-xl font-bold">Invite New Specialist</h2>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  value={inviteForm.email}
-                  onChange={(e) =>
-                    setInviteForm({ ...inviteForm, email: e.target.value })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
-                  required
-                  disabled={submittingInvite}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Role <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={inviteForm.role}
-                  onChange={(e) =>
-                    setInviteForm({
-                      ...inviteForm,
-                      role: e.target.value as "SPECIALIST" | "ADMIN",
-                    })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  disabled={submittingInvite}
-                  required
-                >
-                  <option value="SPECIALIST">Specialist</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Specialty <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <div className="space-y-2">
-                  {SPECIALTY_OPTIONS.map((opt) => (
-                    <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(false)}
+                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleInviteTeamMember} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50 space-y-5">
+                <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    Contact
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Full Name <span className="text-red-500">*</span>
+                      </label>
                       <input
-                        type="checkbox"
-                        checked={inviteForm.specialties.includes(opt.value)}
-                        onChange={() => toggleSpecialty(opt.value)}
+                        type="text"
+                        value={inviteForm.name}
+                        onChange={(e) =>
+                          setInviteForm({ ...inviteForm, name: e.target.value })
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
+                        required
                         disabled={submittingInvite}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
-                      <span className="text-gray-700">{opt.label}</span>
-                    </label>
-                  ))}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Email <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        value={inviteForm.email}
+                        onChange={(e) =>
+                          setInviteForm({ ...inviteForm, email: e.target.value })
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
+                        required
+                        disabled={submittingInvite}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Role & Specialty
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Role <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={inviteForm.role}
+                        onChange={(e) =>
+                          setInviteForm({
+                            ...inviteForm,
+                            role: e.target.value as "SPECIALIST" | "ADMIN",
+                          })
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        disabled={submittingInvite}
+                        required
+                      >
+                        <option value="SPECIALIST">Specialist</option>
+                        <option value="ADMIN">Admin</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Specialty <span className="text-gray-400 font-normal">(optional)</span>
+                      </label>
+                      <div className="space-y-2">
+                        {SPECIALTY_OPTIONS.map((opt) => (
+                          <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={inviteForm.specialties.includes(opt.value)}
+                              onChange={() => toggleSpecialty(opt.value)}
+                              disabled={submittingInvite}
+                              className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                            />
+                            <span className="text-gray-700">{opt.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    Options
+                  </h3>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={inviteForm.sendInvitationEmail}
+                      onChange={(e) =>
+                        setInviteForm({
+                          ...inviteForm,
+                          sendInvitationEmail: e.target.checked,
+                        })
+                      }
+                      disabled={submittingInvite}
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-sm text-gray-700">Send invitation email</span>
+                  </label>
                 </div>
               </div>
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={inviteForm.sendInvitationEmail}
-                    onChange={(e) =>
-                      setInviteForm({
-                        ...inviteForm,
-                        sendInvitationEmail: e.target.checked,
-                      })
-                    }
-                    disabled={submittingInvite}
-                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  />
-                  <span className="text-sm text-gray-700">Send invitation email</span>
-                </label>
-              </div>
-              <div className="flex space-x-4 pt-4">
+              <div className="shrink-0 flex gap-3 p-6 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl">
                 <button
                   type="button"
                   onClick={() => setShowInviteModal(false)}
                   disabled={submittingInvite}
-                  className="flex-1 bg-gray-200 text-gray-800 py-3 px-6 rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
+                  className="flex-1 py-3 px-6 rounded-xl border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 font-medium disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submittingInvite}
-                  className="flex-1 bg-primary-600 text-white py-3 px-6 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                  className="flex-1 py-3 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
                 >
                   {submittingInvite ? "Sending…" : "Send Invitation"}
                 </button>

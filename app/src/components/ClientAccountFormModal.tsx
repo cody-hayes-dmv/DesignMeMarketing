@@ -100,34 +100,37 @@ export default function ClientAccountFormModal({
   );
 
   return (
-    <div className="fixed inset-0 bg-gray-100/80 backdrop-blur-sm overflow-y-auto z-50">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm overflow-y-auto z-50">
       <div className="min-h-full px-4 py-8 flex items-start justify-center">
-        <div className="bg-white rounded-xl shadow-sm ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-          <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+        <div className="bg-white rounded-2xl shadow-2xl ring-2 ring-primary-200/80 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="flex items-start justify-between px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 border-b-2 border-primary-500/50 shrink-0">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-              <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
+              <h2 className="text-xl font-bold text-white drop-shadow-sm">{title}</h2>
+              <p className="text-sm text-white/90 mt-1">{subtitle}</p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={copyAllToClipboard}
-                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white/90 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
                 title="Copy all information"
               >
                 <Copy className="h-4 w-4" />
                 Copy Text
               </button>
-              <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1" aria-label="Close">
+              <button type="button" onClick={onClose} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors" aria-label="Close">
                 <X className="h-5 w-5" />
               </button>
             </div>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-6 bg-gradient-to-b from-slate-50/50 to-white">
             {/* BUSINESS INFORMATION */}
-            <section>
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">BUSINESS INFORMATION (Required)</h3>
+            <section className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-primary-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
+                BUSINESS INFORMATION (Required)
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {field(
                   "Business Name",
@@ -253,8 +256,11 @@ export default function ClientAccountFormModal({
             </section>
 
             {/* LOCATION INFORMATION */}
-            <section>
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">LOCATION INFORMATION (Required)</h3>
+            <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-emerald-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                LOCATION INFORMATION (Required)
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   {field(
@@ -355,8 +361,11 @@ export default function ClientAccountFormModal({
             </section>
 
             {/* CONTACT INFORMATION */}
-            <section>
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">CONTACT INFORMATION (Required)</h3>
+            <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-amber-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                CONTACT INFORMATION (Required)
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {field(
                   "Phone Number",
@@ -392,8 +401,11 @@ export default function ClientAccountFormModal({
             </section>
 
             {/* WEBSITE LOGIN INFO */}
-            <section>
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">WEBSITE LOGIN INFO (Optional)</h3>
+            <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-violet-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                WEBSITE LOGIN INFO (Optional)
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                 {field(
@@ -455,8 +467,11 @@ export default function ClientAccountFormModal({
             </section>
 
             {/* CAMPAIGN TYPE */}
-            <section>
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">CAMPAIGN TYPE (Required)</h3>
+            <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                CAMPAIGN TYPE (Required)
+              </h3>
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Type *</label>
                 {canEdit ? (
@@ -491,8 +506,11 @@ export default function ClientAccountFormModal({
             </section>
 
             {/* GOOGLE BUSINESS PROFILE */}
-            <section>
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">GOOGLE BUSINESS PROFILE (Optional)</h3>
+            <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-indigo-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                GOOGLE BUSINESS PROFILE (Optional)
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                 {field(
@@ -532,31 +550,34 @@ export default function ClientAccountFormModal({
             </section>
 
             {/* Status (Admin / Super Admin only) */}
-            {showStatus &&
-              field(
-                "Status",
-                false,
-                canEdit ? (
-                  <select
-                    value={form.clientStatus}
-                    onChange={(e) => setForm((f) => ({ ...f, clientStatus: e.target.value }))}
-                    className={`${inputClass} bg-white`}
-                  >
-                    <option value="ACTIVE">Active</option>
-                    <option value="PENDING">Pending</option>
-                    <option value="DASHBOARD_ONLY">Dashboard Only</option>
-                    <option value="CANCELED">Canceled</option>
-                    <option value="SUSPENDED">Suspended</option>
-                    <option value="ARCHIVED">Archived</option>
-                  </select>
-                ) : (
-                  ro(form.clientStatus)
-                )
-              )}
+            {showStatus && (
+              <section className="rounded-xl border-l-4 border-slate-500 bg-slate-50/50 p-4 sm:p-5">
+                {field(
+                  "Status",
+                  false,
+                  canEdit ? (
+                    <select
+                      value={form.clientStatus}
+                      onChange={(e) => setForm((f) => ({ ...f, clientStatus: e.target.value }))}
+                      className={`${inputClass} bg-white`}
+                    >
+                      <option value="ACTIVE">Active</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="DASHBOARD_ONLY">Dashboard Only</option>
+                      <option value="CANCELED">Canceled</option>
+                      <option value="SUSPENDED">Suspended</option>
+                      <option value="ARCHIVED">Archived</option>
+                    </select>
+                  ) : (
+                    ro(form.clientStatus)
+                  )
+                )}
+              </section>
+            )}
           </div>
 
-          <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2 shrink-0">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
+          <div className="px-6 py-4 border-t-2 border-gray-200 flex justify-end gap-3 shrink-0 bg-gradient-to-r from-gray-50 to-slate-50">
+            <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors">
               {canEdit ? "Cancel" : "Close"}
             </button>
             {canEdit && onSave && (
@@ -564,7 +585,7 @@ export default function ClientAccountFormModal({
                 type="button"
                 disabled={saving}
                 onClick={onSave}
-                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2"
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-primary-600 to-blue-600 text-white font-semibold hover:from-primary-700 hover:to-blue-700 disabled:opacity-50 transition-all shadow-md flex items-center gap-2"
               >
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 Save Changes

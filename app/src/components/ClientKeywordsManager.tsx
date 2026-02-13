@@ -477,55 +477,59 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
-              <tr>
-                <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Keyword</th>
-                <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Search volume</th>
-                <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Keyword Difficulty</th>
-                <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">CPC</th>
-                <th className="px-6 py-4 text-left font-semibold text-gray-700 uppercase tracking-wider text-xs">Current position</th>
-                <th className="px-6 py-4"><span className="sr-only">Actions</span></th>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Keyword</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Search volume</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Keyword Difficulty</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">CPC</th>
+                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Current position</th>
+                <th className="px-6 py-3.5 text-right text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
+            <tbody className="divide-y divide-gray-100">
               {trackedLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center text-gray-500">
+                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500 bg-gray-50/50">
                     <span className="inline-flex items-center gap-3"><Loader2 className="h-5 w-5 animate-spin text-primary-600" /> Loading…</span>
                   </td>
                 </tr>
               ) : trackedError ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center text-sm text-rose-600">{trackedError}</td>
+                  <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600 bg-rose-50/50">{trackedError}</td>
                 </tr>
               ) : filteredKeywords.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center text-sm text-gray-500">No tracked keywords yet. Add some above.</td>
+                  <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 bg-amber-50/50">No tracked keywords yet. Add some above.</td>
                 </tr>
               ) : (
-                keywordsPagination.rows.map((keyword) => (
-                  <tr key={keyword.id} className="hover:bg-gray-50">
+                keywordsPagination.rows.map((keyword, index) => (
+                  <tr key={keyword.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                     <td className="px-6 py-4">
                       <p className="font-semibold text-gray-900">{keyword.keyword}</p>
                       {keyword.googleUrl && (
                         <a href={keyword.googleUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary-600 hover:underline mt-1 inline-block">View ranking URL</a>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-gray-700">{formatNumber(keyword.searchVolume)}</td>
-                    <td className="px-6 py-4 text-gray-700">
-                      {keyword.difficulty != null && Number.isFinite(keyword.difficulty) ? Math.round(Number(keyword.difficulty)) : "—"}
+                    <td className="px-6 py-4 text-emerald-800/90">{formatNumber(keyword.searchVolume)}</td>
+                    <td className="px-6 py-4 text-amber-800/90">
+                      {keyword.difficulty != null && Number.isFinite(keyword.difficulty) ? (
+                        <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+                          {Math.round(Number(keyword.difficulty))}
+                        </span>
+                      ) : "—"}
                     </td>
-                    <td className="px-6 py-4 text-gray-700">{keyword.cpc != null ? `$${Number(keyword.cpc).toFixed(2)}` : "—"}</td>
-                    <td className="px-6 py-4 text-gray-700">{keyword.currentPosition ?? "—"}</td>
+                    <td className="px-6 py-4 text-violet-800/90">{keyword.cpc != null ? `$${Number(keyword.cpc).toFixed(2)}` : "—"}</td>
+                    <td className="px-6 py-4 text-slate-700">{keyword.currentPosition ?? "—"}</td>
                     <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1">
                         {user?.role === "SUPER_ADMIN" && (
                           <button
                             type="button"
                             onClick={() => handleRefreshTrackedKeyword(keyword.id)}
                             disabled={!!refreshingKeywordIds[keyword.id]}
-                            className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                            className="inline-flex items-center justify-center rounded-lg p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 disabled:opacity-60 transition-colors"
                             title="Refresh keyword data"
                           >
                             {refreshingKeywordIds[keyword.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -535,7 +539,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                           type="button"
                           onClick={() => handleDeleteTrackedKeyword(keyword.id, keyword.keyword)}
                           disabled={!!deletingKeywordIds[keyword.id]}
-                          className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white p-2 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                          className="inline-flex items-center justify-center rounded-lg p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
                           title="Delete"
                         >
                           {deletingKeywordIds[keyword.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}

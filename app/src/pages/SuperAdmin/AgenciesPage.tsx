@@ -751,86 +751,86 @@ const AgenciesPage = () => {
             </div>
 
             {/* Agencies Table */}
-            <div className="bg-white rounded-xl border border-gray-200">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th 
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                        <thead>
+                            <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                                <th
+                                    className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider cursor-pointer hover:from-primary-100 hover:via-blue-100 hover:to-indigo-100 select-none transition-colors border-l-4 border-transparent border-l-primary-400 first:border-l-0"
                                     onClick={() => handleSort("agency")}
                                 >
                                     <div className="flex items-center gap-2">
                                         Name
                                         {sortField === "agency" && (
-                                            sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                            sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-primary-600" /> : <ArrowDown className="h-3.5 w-3.5 text-primary-600" />
                                         )}
                                     </div>
                                 </th>
-                                <th 
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                                <th
+                                    className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider cursor-pointer hover:from-primary-100 hover:via-blue-100 select-none transition-colors border-l-4 border-emerald-300"
                                     onClick={() => handleSort("subdomain")}
                                 >
                                     <div className="flex items-center gap-2">
                                         Subdomain
                                         {sortField === "subdomain" && (
-                                            sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                            sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-emerald-600" /> : <ArrowDown className="h-3.5 w-3.5 text-emerald-600" />
                                         )}
                                     </div>
                                 </th>
-                                <th 
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                                <th
+                                    className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider cursor-pointer hover:from-primary-100 hover:via-blue-100 select-none transition-colors border-l-4 border-amber-300"
                                     onClick={() => handleSort("clients")}
                                 >
                                     <div className="flex items-center gap-2">
                                         Clients
                                         {sortField === "clients" && (
-                                            sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                                            sortDirection === "asc" ? <ArrowUp className="h-3.5 w-3.5 text-amber-600" /> : <ArrowDown className="h-3.5 w-3.5 text-amber-600" />
                                         )}
                                     </div>
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">
                                     Created
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">
                                     Actions
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
+                        <tbody className="divide-y divide-gray-100">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
+                                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500 bg-gray-50/50">
                                         Loading agencies...
                                     </td>
                                 </tr>
                             ) : filteredAgencies.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
+                                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500 bg-amber-50/50">
                                         {agenciesSearch.trim() ? "No agencies match your search." : "No agencies found. Create your first agency."}
                                     </td>
                                 </tr>
                             ) : (
-                                filteredAgencies.map((agency) => (
+                                filteredAgencies.map((agency, index) => (
                                 <React.Fragment key={agency.id}>
                                     <tr
-                                        className="hover:bg-gray-50 cursor-pointer"
+                                        className={`cursor-pointer transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}
                                         onClick={() => toggleAgencyClientsDropdown(agency.id, agency.name)}
                                         aria-expanded={expandedAgencyId === agency.id}
                                     >
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                                            <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                                                 {expandedAgencyId === agency.id ? (
-                                                    <ChevronDown className="h-4 w-4 text-gray-500" />
+                                                    <ChevronDown className="h-4 w-4 text-primary-500 shrink-0" />
                                                 ) : (
-                                                    <ChevronRight className="h-4 w-4 text-gray-500" />
+                                                    <ChevronRight className="h-4 w-4 text-gray-400 shrink-0" />
                                                 )}
-                                                {agency.name}
+                                                <span className="text-gray-900">{agency.name}</span>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <a
-                                                className="text-sm text-gray-600 underline"
+                                                className="text-sm font-medium text-primary-600 hover:text-primary-700 underline underline-offset-1 decoration-primary-300 hover:decoration-primary-500 transition-colors"
                                                 href={
                                                     agency.subdomain
                                                         ? `https://${agency.subdomain}.yourseodashboard.com`
@@ -851,23 +851,23 @@ const AgenciesPage = () => {
                                             </a>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm text-gray-900">
+                                            <span className="inline-flex items-center justify-center min-w-[2rem] px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                                                 {(agency as any).clientCount ?? 0}
-                                            </div>
+                                            </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm text-gray-600">
+                                            <span className="text-sm text-slate-600">
                                                 {new Date(agency.createdAt).toLocaleDateString()}
-                                            </div>
+                                            </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="flex items-center space-x-2">
+                                            <div className="flex items-center gap-1">
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         handleViewMembers(agency.id, agency.name);
                                                     }}
-                                                    className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                    className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                                                     title="View Members"
                                                 >
                                                     <Users className="h-4 w-4" />
@@ -877,7 +877,7 @@ const AgenciesPage = () => {
                                                         e.stopPropagation();
                                                         handleViewClients(agency.id, agency.name);
                                                     }}
-                                                    className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                    className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                                                     title="View Clients"
                                                 >
                                                     <BuildingIcon className="h-4 w-4" />
@@ -887,7 +887,7 @@ const AgenciesPage = () => {
                                                         e.stopPropagation();
                                                         handleDeleteAgency(agency.id, agency.name);
                                                     }}
-                                                    className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                                    className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                                     title="Delete Agency"
                                                 >
                                                     <Trash2 className="h-4 w-4" />
@@ -897,9 +897,9 @@ const AgenciesPage = () => {
                                     </tr>
 
                                     {expandedAgencyId === agency.id && (
-                                        <tr className="bg-gray-50">
+                                        <tr className="bg-primary-50/30">
                                             <td colSpan={5} className="px-6 py-4">
-                                                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                                <div className="bg-white rounded-lg border border-primary-100 shadow-sm overflow-hidden">
                                                     {loadingAgencyClientsId === agency.id ? (
                                                         <div className="text-center py-6 text-gray-500 text-sm">
                                                             Loading clients...
@@ -911,17 +911,17 @@ const AgenciesPage = () => {
                                                     ) : (
                                                         <div className="overflow-x-auto">
                                                             <table className="w-full">
-                                                                <thead className="bg-gray-50">
-                                                                    <tr>
-                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain</th>
-                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industy</th>
-                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
-                                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                                                <thead>
+                                                                    <tr className="bg-gradient-to-r from-slate-50 to-gray-50 border-b border-slate-200">
+                                                                        <th className="px-6 py-2.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Name</th>
+                                                                        <th className="px-6 py-2.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Domain</th>
+                                                                        <th className="px-6 py-2.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Industy</th>
+                                                                        <th className="px-6 py-2.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Status</th>
+                                                                        <th className="px-6 py-2.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Created Date</th>
+                                                                        <th className="px-6 py-2.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Actions</th>
                                                                     </tr>
                                                                 </thead>
-                                                                <tbody className="bg-white divide-y divide-gray-200">
+                                                                <tbody className="bg-white divide-y divide-gray-100">
                                                                     {(agencyClientsByAgencyId[agency.id] ?? []).map((client) => (
                                                                         <tr key={client.id} className="hover:bg-gray-50">
                                                                             <td className="px-6 py-4 whitespace-nowrap text-xs flex items-center gap-1">
@@ -1086,19 +1086,30 @@ const AgenciesPage = () => {
 
             {/* Create Agency Modal */}
             {showCreateModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-xl ring-1 ring-gray-200 w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
-                        <div className="flex justify-between items-center p-6 border-b border-gray-200 shrink-0">
-                            <h2 className="text-xl font-bold text-gray-900">Create New Agency</h2>
-                            <button type="button" onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600">
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+                        <div className="flex justify-between items-center px-6 py-5 shrink-0 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                                    <BuildingIcon className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold">Create New Agency</h2>
+                                    <p className="text-sm text-white/90">Add a new agency and primary contact</p>
+                                </div>
+                            </div>
+                            <button type="button" onClick={() => setShowCreateModal(false)} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
-                        <form onSubmit={handleCreateAgency} className="flex flex-col min-h-0">
-                            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                        <form onSubmit={handleCreateAgency} className="flex flex-col min-h-0 bg-gray-50/50">
+                            <div className="p-6 overflow-y-auto space-y-5 flex-1">
                                 {/* Section A: Agency Information */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">AGENCY INFORMATION (Required)</h3>
+                                <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        AGENCY INFORMATION (Required)
+                                    </h3>
                                     <div className="space-y-3">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Agency Name *</label>
@@ -1140,8 +1151,11 @@ const AgenciesPage = () => {
                                 </section>
 
                                 {/* Section B: Primary Contact */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">PRIMARY CONTACT (Required)</h3>
+                                <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                        PRIMARY CONTACT (Required)
+                                    </h3>
                                     <div className="space-y-3">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Primary Contact Name *</label>
@@ -1163,8 +1177,11 @@ const AgenciesPage = () => {
                                 </section>
 
                                 {/* Section C: Business Address */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">BUSINESS ADDRESS (Optional)</h3>
+                                <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                        BUSINESS ADDRESS (Optional)
+                                    </h3>
                                     <div className="space-y-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         <div className="sm:col-span-2">
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Street Address</label>
@@ -1195,8 +1212,11 @@ const AgenciesPage = () => {
                                 </section>
 
                                 {/* Section D: Subdomain */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">WHITE LABEL SUBDOMAIN (Optional)</h3>
+                                <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                                        WHITE LABEL SUBDOMAIN (Optional)
+                                    </h3>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Custom Subdomain</label>
                                         <input type="text" value={createForm.subdomain} onChange={(e) => setCreateForm({ ...createForm, subdomain: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="tkmdigital" />
@@ -1205,8 +1225,11 @@ const AgenciesPage = () => {
                                 </section>
 
                                 {/* Section E: Billing & Subscription */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">BILLING & SUBSCRIPTION</h3>
+                                <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                        BILLING & SUBSCRIPTION
+                                    </h3>
                                     <div className="space-y-3">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type *</label>
@@ -1274,8 +1297,11 @@ const AgenciesPage = () => {
                                 </section>
 
                                 {/* Section F: Additional Questions */}
-                                <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">ADDITIONAL QUESTIONS (Optional)</h3>
+                                <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-teal-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                                        ADDITIONAL QUESTIONS (Optional)
+                                    </h3>
                                     <div className="space-y-3">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">How did you hear about us?</label>
@@ -1379,13 +1405,13 @@ const AgenciesPage = () => {
                                     </div>
                                 </section>
 
-                                <p className="text-xs text-gray-500 border-t pt-3">After creation, an email will be sent to the contact with a secure &quot;Set your password&quot; link (expires in 24 hours). No password is collected in this form.</p>
+                                <p className="text-xs text-gray-500 border-t border-gray-200 pt-4 mt-2">After creation, an email will be sent to the contact with a secure &quot;Set your password&quot; link (expires in 24 hours). No password is collected in this form.</p>
                             </div>
-                            <div className="flex gap-3 p-6 border-t border-gray-200 shrink-0">
-                                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                            <div className="flex gap-3 px-6 py-4 border-t border-gray-200 shrink-0 bg-gray-100/80 rounded-b-2xl">
+                                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium">
                                     Cancel
                                 </button>
-                                <button type="submit" className="flex-1 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
+                                <button type="submit" className="flex-1 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all">
                                     Create Agency
                                 </button>
                             </div>
