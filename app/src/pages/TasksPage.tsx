@@ -195,9 +195,10 @@ const TasksPage = () => {
         return new Date(dueDate) < new Date();
     };
 
-    const getOverdueCount = () => {
-        return tasks.filter(task => isOverdue(task.dueDate)).length;
-    };
+    const overdueCount = useMemo(
+        () => tasks.filter((t) => t.status !== "DONE" && isOverdue(t.dueDate)).length,
+        [tasks]
+    );
 
     const clientOptions = useMemo(() => {
         const map = new Map<string, { id: string; name: string }>();
@@ -255,11 +256,19 @@ const TasksPage = () => {
         });
     }, [filtered]);
 
+    const filteredSortedByDueDate = useMemo(() => {
+        return [...filtered].sort((a, b) => {
+            const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+            const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+            return aDue - bDue;
+        });
+    }, [filtered]);
+
     const displayedTasks = isSuperAdmin
         ? taskListTab === "upcoming"
             ? upcomingTasks
             : completedTasks
-        : filtered;
+        : filteredSortedByDueDate;
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
 
@@ -333,11 +342,11 @@ const TasksPage = () => {
                     <p className="text-gray-600 mt-2">
                         Manage all tasks and assign to the specialists
                     </p>
-                    {getOverdueCount() > 0 && (
+                    {overdueCount > 0 && (
                         <div className="mt-2 flex items-center text-red-600">
                             <AlertTriangle className="h-4 w-4 mr-1" />
                             <span className="text-sm font-medium">
-                                {getOverdueCount()} overdue task{getOverdueCount() !== 1 ? 's' : ''}
+                                {overdueCount} overdue task{overdueCount !== 1 ? 's' : ''}
                             </span>
                         </div>
                     )}
@@ -369,20 +378,26 @@ const TasksPage = () => {
                 )}
             </div>
 
-            {/* Task */}
-            <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-8">
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+            {/* Task metrics: click to filter table by status */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+                <button
+                    type="button"
+                    onClick={() => setFilterStatus("all")}
+                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "all" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                >
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-600">Total Tasks</p>
-                            <p className="text-2xl font-bold text-gray-900">
-                                {tasks.length}
-                            </p>
+                            <p className="text-2xl font-bold text-gray-900">{tasks.length}</p>
                         </div>
                         <ListTodo className="h-8 w-8 text-primary-600" />
                     </div>
-                </div>
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setFilterStatus("TODO")}
+                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "TODO" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                >
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-600">TODO</p>
@@ -392,8 +407,12 @@ const TasksPage = () => {
                         </div>
                         <ListTodo className="h-8 w-8 text-gray-400" />
                     </div>
-                </div>
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setFilterStatus("IN_PROGRESS")}
+                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "IN_PROGRESS" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                >
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-600">IN_PROGRESS</p>
@@ -403,8 +422,12 @@ const TasksPage = () => {
                         </div>
                         <Edit className="h-8 w-8 text-blue-400" />
                     </div>
-                </div>
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setFilterStatus("REVIEW")}
+                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "REVIEW" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                >
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-600">REVIEW</p>
@@ -414,8 +437,25 @@ const TasksPage = () => {
                         </div>
                         <CheckCircle className="h-8 w-8 text-orange-400" />
                     </div>
-                </div>
-                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setFilterStatus("overdue")}
+                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "overdue" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                >
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium text-gray-600">OVERDUE</p>
+                            <p className="text-2xl font-bold text-rose-500">{overdueCount}</p>
+                        </div>
+                        <AlertTriangle className="h-8 w-8 text-rose-500" />
+                    </div>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setFilterStatus("DONE")}
+                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "DONE" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                >
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-600">DONE</p>
@@ -425,7 +465,7 @@ const TasksPage = () => {
                         </div>
                         <CheckCheck className="h-8 w-8 text-secondary-600" />
                     </div>
-                </div>
+                </button>
             </div>
 
             {/* Filters */}

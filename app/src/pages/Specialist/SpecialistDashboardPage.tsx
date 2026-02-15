@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import {
@@ -88,6 +88,7 @@ const SpecialistDashboardPage = () => {
   const [teamError, setTeamError] = useState<string | null>(null);
   const [updatingTaskIds, setUpdatingTaskIds] = useState<string[]>([]);
   const [collapsedClientIds, setCollapsedClientIds] = useState<Set<string>>(new Set());
+  const didInitUpcomingCollapsed = useRef(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [completeModalTask, setCompleteModalTask] = useState<Task | null>(null);
@@ -225,6 +226,14 @@ const SpecialistDashboardPage = () => {
     return groups;
   }, [activeTasks]);
 
+  // Default: all Upcoming Tasks client sections start collapsed (shorter list)
+  useEffect(() => {
+    if (upcomingByClient.length > 0 && !didInitUpcomingCollapsed.current) {
+      setCollapsedClientIds(new Set(upcomingByClient.map((g) => g.clientId)));
+      didInitUpcomingCollapsed.current = true;
+    }
+  }, [upcomingByClient]);
+
   const handleAdvanceStatus = useCallback(
     async (task: Task) => {
       const nextStatus = getNextStatus(task.status);
@@ -289,12 +298,21 @@ const SpecialistDashboardPage = () => {
   const hasOverdue = overdueTasks.length > 0;
   const stats = [
     {
+      label: "Overdue Tasks",
+      value: overdueTasks.length,
+      description: "Past due",
+      icon: AlertTriangle,
+      color: "text-rose-600",
+      bg: "bg-rose-50",
+      border: hasOverdue ? "border-rose-200" : "border-gray-200",
+    },
+    {
       label: "Tasks Due Today",
       value: tasksDueToday.length,
       description: "Due by end of day",
       icon: CalendarClock,
-      color: hasOverdue ? "text-rose-600" : "text-rose-600",
-      bg: hasOverdue ? "bg-rose-50" : "bg-rose-50",
+      color: "text-rose-600",
+      bg: "bg-rose-50",
       border: hasOverdue ? "border-rose-200" : "border-gray-200",
     },
     {
@@ -404,7 +422,7 @@ const SpecialistDashboardPage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <div
             key={stat.label}

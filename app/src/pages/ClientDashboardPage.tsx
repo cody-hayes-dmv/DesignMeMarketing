@@ -6930,31 +6930,36 @@ const ClientDashboardPage: React.FC = () => {
                                 </div>
                               </label>
                             </div>
-                            <div className="flex flex-col sm:flex-row gap-2 mb-4">
-                              <select
-                                value={workLogUrlType}
-                                onChange={(e) => setWorkLogUrlType(e.target.value as "image" | "video" | "url")}
-                                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent sm:w-40"
-                              >
-                                <option value="url">URL</option>
-                                <option value="image">Image URL</option>
-                                <option value="video">Video URL</option>
-                              </select>
-                              <input
-                                type="url"
-                                value={workLogUrlInput}
-                                onChange={(e) => setWorkLogUrlInput(e.target.value)}
-                                placeholder="Enter URL (e.g., https://example.com/image.png)"
-                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                              />
-                              <button
-                                type="button"
-                                onClick={handleWorkLogAddUrl}
-                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1 sm:w-auto"
-                              >
-                                <Plus className="h-4 w-4" />
-                                <span>Add</span>
-                              </button>
+                            <div className="space-y-3 mb-4">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <select
+                                  value={workLogUrlType}
+                                  onChange={(e) => setWorkLogUrlType(e.target.value as "image" | "video" | "url")}
+                                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent w-full sm:w-40"
+                                >
+                                  <option value="url">URL</option>
+                                  <option value="image">Image URL</option>
+                                  <option value="video">Video URL</option>
+                                </select>
+                                <span className="text-sm text-gray-500 hidden sm:inline">Add a link as proof</span>
+                              </div>
+                              <div className="flex flex-col sm:flex-row gap-3">
+                                <input
+                                  type="url"
+                                  value={workLogUrlInput}
+                                  onChange={(e) => setWorkLogUrlInput(e.target.value)}
+                                  placeholder="Enter URL (e.g., https://example.com/image.png)"
+                                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleWorkLogAddUrl}
+                                  className="sm:self-end w-full sm:w-auto flex-shrink-0 px-5 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1.5 font-medium"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                  <span>Add link</span>
+                                </button>
+                              </div>
                             </div>
                           </>
                         )}
@@ -8760,31 +8765,36 @@ const ClientDashboardPage: React.FC = () => {
                             </div>
                           </label>
                         </div>
-                        <div className="flex flex-col sm:flex-row gap-2 mb-4">
-                          <select
-                            value={workLogUrlType}
-                            onChange={(e) => setWorkLogUrlType(e.target.value as "image" | "video" | "url")}
-                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent sm:w-40"
-                          >
-                            <option value="url">URL</option>
-                            <option value="image">Image URL</option>
-                            <option value="video">Video URL</option>
-                          </select>
-                          <input
-                            type="url"
-                            value={workLogUrlInput}
-                            onChange={(e) => setWorkLogUrlInput(e.target.value)}
-                            placeholder="Enter URL (e.g., https://example.com/image.png)"
-                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleWorkLogAddUrl}
-                            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1 sm:w-auto"
-                          >
-                            <Plus className="h-4 w-4" />
-                            <span>Add</span>
-                          </button>
+                        <div className="space-y-3 mb-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={workLogUrlType}
+                              onChange={(e) => setWorkLogUrlType(e.target.value as "image" | "video" | "url")}
+                              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent w-full sm:w-40"
+                            >
+                              <option value="url">URL</option>
+                              <option value="image">Image URL</option>
+                              <option value="video">Video URL</option>
+                            </select>
+                            <span className="text-sm text-gray-500 hidden sm:inline">Add a link as proof</span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <input
+                              type="url"
+                              value={workLogUrlInput}
+                              onChange={(e) => setWorkLogUrlInput(e.target.value)}
+                              placeholder="Enter URL (e.g., https://example.com/image.png)"
+                              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleWorkLogAddUrl}
+                              className="sm:self-end w-full sm:w-auto flex-shrink-0 px-5 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-1.5 font-medium"
+                            >
+                              <Plus className="h-4 w-4" />
+                              <span>Add link</span>
+                            </button>
+                          </div>
                         </div>
                       </>
                     )}

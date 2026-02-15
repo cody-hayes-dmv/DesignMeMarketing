@@ -6,7 +6,6 @@ import {
   Building2,
   Bell,
   Shield,
-  CreditCard,
   Save,
   Eye,
   EyeOff,
@@ -75,14 +74,12 @@ const SettingsPage = () => {
   const [templateSaveLoading, setTemplateSaveLoading] = useState(false);
   const [agenciesList, setAgenciesList] = useState<Array<{ id: string; name: string }>>([]);
 
-  // Remove billing tab for SUPER_ADMIN, remove agency tab for SUPER_ADMIN (they don't have agencies)
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
     { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
-    { id: "billing", label: "Billing", icon: CreditCard, roles: ["ADMIN", "AGENCY", "SPECIALIST"] },
   ];
 
   // Fetch agency data on mount if user has agency access
@@ -786,74 +783,6 @@ const SettingsPage = () => {
                       className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
                     >
                       Manage
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-
-      case "billing":
-        return (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Billing Information
-              </h3>
-              <div className="bg-primary-50 border border-primary-200 p-4 rounded-lg mb-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-primary-900">
-                      Professional Plan
-                    </p>
-                    <p className="text-sm text-primary-700">
-                      $299/month • Next billing: Feb 15, 2024
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => toast("Billing feature coming soon", { icon: "ℹ️" })}
-                    className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
-                  >
-                    Upgrade
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        Payment Method
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        •••• •••• •••• 4242
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => toast("Payment method update coming soon", { icon: "ℹ️" })}
-                      className="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
-                      Update
-                    </button>
-                  </div>
-                </div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        Billing History
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        View past invoices and payments
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => toast("Billing history coming soon", { icon: "ℹ️" })}
-                      className="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
-                      View History
                     </button>
                   </div>
                 </div>

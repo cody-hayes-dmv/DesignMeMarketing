@@ -263,20 +263,20 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   };
 
   const handleExportCsv = useCallback(() => {
-    const headers = ["Keyword", "Location", "Date Added", "Google", "Google Change", "Google SERP Features", "Google URL"];
+    const headers = ["Keyword", "Location", "Ranking", "Ranking Date", "Ranking Change", "SERP Features"];
     const rows = sortedKeywords.map((kw) => {
       const change = getPositionChange(kw.googlePosition, kw.previousPosition);
       const changeStr = change === null ? "" : String(change);
       const serpTypes = toStringArray(kw.serpItemTypes);
       const serpStr = serpTypes.map((t) => serpFeatureLabels[t] || t).filter(Boolean).join(", ");
+      const rankingDate = kw.updatedAt ? format(new Date(kw.updatedAt), "MMM d, yyyy") : "";
       return [
         escapeCsvCell(kw.keyword),
         escapeCsvCell(kw.locationName || "United States"),
-        kw.createdAt ? format(new Date(kw.createdAt), "MMM d, yyyy") : "",
         kw.googlePosition != null ? String(kw.googlePosition) : "",
+        escapeCsvCell(rankingDate),
         changeStr,
         escapeCsvCell(serpStr),
-        escapeCsvCell(kw.googleUrl || ""),
       ];
     });
     const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
