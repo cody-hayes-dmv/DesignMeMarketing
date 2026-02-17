@@ -17,6 +17,7 @@ export interface User {
   verified: boolean;
   invited: boolean;
   notificationPreferences?: NotificationPreferences;
+  specialties?: string[];
   clientAccess?: {
     clients: Array<{ clientId: string; role: string; status: string }>;
   };

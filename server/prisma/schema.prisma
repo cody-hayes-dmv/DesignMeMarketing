@@ -77,6 +77,7 @@ model Agency {
   managedServices       ManagedService[]
   addOns                AgencyAddOn[]
   clientsBelongingToAgency Client[]           @relation("ClientsBelongingToAgency")
+  includedClients       ClientAgencyIncluded[]
 
   @@map("agencies")
 }
@@ -252,11 +253,26 @@ model Client {
   trafficSources        TrafficSource[]
   clientUsers           ClientUser[]
   managedServices       ManagedService[]
+  agencyInclusions      ClientAgencyIncluded[]
 
   @@index([name, domain])
   @@index([userId], map: "clients_userId_fkey")
   @@index([belongsToAgencyId])
   @@map("clients")
+}
+
+model ClientAgencyIncluded {
+  id        String   @id @default(cuid())
+  clientId  String
+  agencyId  String
+  createdAt DateTime @default(now())
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, agencyId])
+  @@index([agencyId])
+  @@index([clientId])
+  @@map("client_agency_included")
 }
 
 model ManagedService {

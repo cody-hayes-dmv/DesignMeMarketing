@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import { Loader2, PersonStanding, Info } from "lucide-react";
+import { Loader2, PersonStanding, Info, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store";
 import ClientAccountFormModal, { EMPTY_CLIENT_FORM } from "@/components/ClientAccountFormModal";
+import AddBacklinkModal from "@/components/AddBacklinkModal";
 import { clientToFormState } from "@/lib/clientAccountForm";
 import type { Client } from "@/store/slices/clientSlice";
 
@@ -24,10 +27,13 @@ interface ClientRow {
 }
 
 const SpecialistClientsPage = () => {
+  const user = useSelector((s: RootState) => s.auth.user);
+  const canAddBacklinks = (user?.specialties ?? []).includes("LINK_BUILDING");
   const [tasks, setTasks] = useState<TaskWithClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [clientsById, setClientsById] = useState<Record<string, Client>>({});
   const [companyInfoClientId, setCompanyInfoClientId] = useState<string | null>(null);
+  const [addBacklinkClient, setAddBacklinkClient] = useState<{ id: string; domain: string } | null>(null);
 
   useEffect(() => {
     const fetchTasks = async () => {
@@ -122,6 +128,9 @@ const SpecialistClientsPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Client</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Domain</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Your tasks</th>
+                {canAddBacklinks && (
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Backlinks</th>
+                )}
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Company Info</th>
               </tr>
             </thead>
@@ -141,6 +150,18 @@ const SpecialistClientsPage = () => {
                       {client.taskCount} task{client.taskCount !== 1 ? "s" : ""} →
                     </Link>
                   </td>
+                  {canAddBacklinks && (
+                    <td className="px-6 py-4 text-sm">
+                      <button
+                        type="button"
+                        onClick={() => setAddBacklinkClient({ id: client.id, domain: client.domain })}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-50 text-violet-800 font-medium hover:bg-violet-100 transition-colors"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add
+                      </button>
+                    </td>
+                  )}
                   <td className="px-6 py-4 text-sm">
                     <button
                       type="button"
@@ -168,6 +189,21 @@ const SpecialistClientsPage = () => {
         showStatus={false}
         onClose={() => setCompanyInfoClientId(null)}
       />
+
+      {addBacklinkClient && (
+        <AddBacklinkModal
+          open={!!addBacklinkClient}
+          onClose={() => setAddBacklinkClient(null)}
+          clientId={addBacklinkClient.id}
+          defaultTargetUrl={
+            addBacklinkClient.domain?.trim()
+              ? /^https?:\/\//i.test(addBacklinkClient.domain)
+                ? addBacklinkClient.domain
+                : `https://${addBacklinkClient.domain}`
+              : ""
+          }
+        />
+      )}
     </div>
   );
 };

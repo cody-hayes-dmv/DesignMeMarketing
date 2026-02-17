@@ -59,6 +59,8 @@ const TeamPage = () => {
   const [editForm, setEditForm] = useState({
     name: "",
     role: "SPECIALIST" as "SPECIALIST" | "AGENCY" | "ADMIN",
+    newPassword: "",
+    confirmPassword: "",
   });
 
   useEffect(() => {
@@ -160,6 +162,8 @@ const TeamPage = () => {
     setEditForm({
       name: member.name,
       role: member.role as "SPECIALIST" | "AGENCY" | "ADMIN",
+      newPassword: "",
+      confirmPassword: "",
     });
     setShowEditModal(true);
   };
@@ -168,16 +172,36 @@ const TeamPage = () => {
     e.preventDefault();
     if (!selectedMember) return;
 
+    if (editForm.newPassword) {
+      if (editForm.newPassword !== editForm.confirmPassword) {
+        toast.error("Passwords do not match");
+        return;
+      }
+      if (editForm.newPassword.length < 6) {
+        toast.error("Password must be at least 6 characters");
+        return;
+      }
+    }
+
     try {
-      await api.put(`/team/${selectedMember.id}`, editForm);
-      toast.success("Team member updated successfully!");
+      const payload: { name: string; role: string; newPassword?: string } = {
+        name: editForm.name,
+        role: editForm.role,
+      };
+      if (editForm.newPassword) payload.newPassword = editForm.newPassword;
+
+      const res = await api.put(`/team/${selectedMember.id}`, payload);
+      const passwordSet = res.data?.newPassword;
+      if (passwordSet) {
+        toast.success(`Password updated. New password: ${passwordSet}`, { duration: 10000 });
+      } else {
+        toast.success("Team member updated successfully!");
+      }
       setShowEditModal(false);
       setSelectedMember(null);
-      // Refresh team members
       fetchTeamMembers();
     } catch (error: any) {
       console.error("Failed to update team member:", error);
-      // Toast is already shown by API interceptor
     }
   };
 
@@ -684,6 +708,38 @@ const TeamPage = () => {
                   )}
                 </select>
               </div>
+              {user?.role === "SUPER_ADMIN" && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Set new password (optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.newPassword}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, newPassword: e.target.value })
+                      }
+                      placeholder="Leave blank to keep current"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Confirm password
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.confirmPassword}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, confirmPassword: e.target.value })
+                      }
+                      placeholder="Re-enter to confirm"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                  </div>
+                </>
+              )}
               <div className="flex space-x-4 pt-4">
                 <button
                   type="button"

@@ -25,6 +25,7 @@ import {
   Briefcase,
   Package,
   CreditCard,
+  FolderPlus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,6 +41,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const { user } = useSelector((state: RootState) => state.auth);
   const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean; trialExpired?: boolean } | null>(null);
+  const [hasIncludedClients, setHasIncludedClients] = useState(false);
   const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "AGENCY";
 
   useEffect(() => {
@@ -48,6 +50,27 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     } else {
       setAgencyMe(null);
     }
+  }, [user?.role]);
+
+  const refetchHasIncluded = () => {
+    if (user?.role === "AGENCY" || user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") {
+      api.get<{ hasIncluded: boolean }>("/agencies/included-clients/exists")
+        .then((r) => setHasIncludedClients(r.data?.hasIncluded ?? false))
+        .catch(() => setHasIncludedClients(false));
+    }
+  };
+
+  useEffect(() => {
+    refetchHasIncluded();
+    if (user?.role !== "AGENCY" && user?.role !== "ADMIN" && user?.role !== "SUPER_ADMIN") {
+      setHasIncludedClients(false);
+    }
+  }, [user?.role]);
+
+  useEffect(() => {
+    const handler = () => refetchHasIncluded();
+    window.addEventListener("included-clients-changed", handler);
+    return () => window.removeEventListener("included-clients-changed", handler);
   }, [user?.role]);
 
   const panelLabel =
@@ -125,6 +148,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       path: "/agency/vendasta",
       hasSubMenu: false,
       roles: ["ADMIN", "SUPER_ADMIN"],
+    },
+    {
+      icon: FolderPlus,
+      label: "Included",
+      path: "/agency/included",
+      hasSubMenu: false,
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: FolderOpen,
@@ -231,6 +261,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const filteredMenuItems = menuItems
     .filter((item) => item.roles.includes(user?.role || ""))
     .filter((item) => !(item.path === "/agency/users" && agencyMe?.isBusinessTier))
+    .filter((item) => item.path !== "/agency/included" || hasIncludedClients)
     .map((item) => {
       if (item.path === "/agency/clients" && agencyMe?.isBusinessTier) {
         return { ...item, label: "Your Business" };

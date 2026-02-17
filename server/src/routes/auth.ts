@@ -207,6 +207,16 @@ router.get("/me", authenticateToken, async (req, res) => {
       }
       : { emailReports: true, rankingAlerts: true, weeklyDigest: false, teamUpdates: true };
 
+    let specialties: string[] = [];
+    if (user.specialties && user.role === "SPECIALIST") {
+      try {
+        const parsed = JSON.parse(user.specialties);
+        specialties = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        specialties = [];
+      }
+    }
+
     res.json({
       id: user.id,
       email: user.email,
@@ -215,6 +225,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       verified: user.verified,
       invited: user.invited,
       notificationPreferences,
+      ...(user.role === "SPECIALIST" ? { specialties } : {}),
       clientAccess: {
         clients: user.clientUsers.map((c) => ({
           clientId: c.clientId,

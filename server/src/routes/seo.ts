@@ -4322,6 +4322,9 @@ router.post("/backlinks/:clientId", authenticateToken, async (req, res) => {
     const userAgencyIds = userMemberships.map((m) => m.agencyId);
     const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
     let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAccess && client.belongsToAgencyId && userAgencyIds.includes(client.belongsToAgencyId)) {
+      hasAccess = true;
+    }
     if (!hasAccess) {
       const cu = await prisma.clientUser.findFirst({
         where: { clientId, userId: req.user.userId, status: "ACTIVE" },
@@ -4329,8 +4332,34 @@ router.post("/backlinks/:clientId", authenticateToken, async (req, res) => {
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
+    }
+
+    if (req.user.role === "SPECIALIST") {
+      const specialist = await prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { specialties: true },
+      });
+      let specialties: string[] = [];
+      if (specialist?.specialties) {
+        try {
+          const parsed = JSON.parse(specialist.specialties);
+          specialties = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          specialties = [];
+        }
+      }
+      if (!specialties.includes("LINK_BUILDING")) {
+        return res.status(403).json({ message: "Only specialists with Link Building specialty can add backlinks" });
+      }
     }
 
     const sourceUrl = normalizeUrlInput(body.sourceUrl);

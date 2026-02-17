@@ -142,8 +142,17 @@ async function getTargetKeywordCounts(clientIds: string[]) {
     select: { id: true, isAgencyOwnDashboard: true },
   });
   const clientIds = clients.map((c) => c.id);
+
+  // Included clients (ClientAgencyIncluded) are free - they do not count toward tier dashboard limit
+  const includedClientIds = await prisma.clientAgencyIncluded
+    .findMany({ where: { agencyId: agency.id }, select: { clientId: true } })
+    .then((rows) => new Set(rows.map((r) => r.clientId)));
+
   // Default agency dashboard (isAgencyOwnDashboard) does not count toward tier limit
-  const dashboardCount = clients.filter((c) => !c.isAgencyOwnDashboard).length;
+  // Exclude included clients so they are free (do not consume tier slots)
+  const dashboardCount = clients.filter(
+    (c) => !c.isAgencyOwnDashboard && !includedClientIds.has(c.id)
+  ).length;
 
   const keywordCounts = await prisma.keyword.groupBy({
     by: ["clientId"],

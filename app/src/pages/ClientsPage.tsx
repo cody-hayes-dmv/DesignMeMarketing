@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store";
 import { fetchClients, createClient, updateClient, deleteClient, Client } from "../store/slices/clientSlice";
-import { fetchAgencies, assignClientToAgency } from "../store/slices/agencySlice";
+import { fetchAgencies } from "../store/slices/agencySlice";
 import {
   Plus,
   Globe,
@@ -37,6 +37,7 @@ import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import ConfirmDialog from "../components/ConfirmDialog";
+import AssignClientToAgencyModal from "../components/AssignClientToAgencyModal";
 
 const INDUSTRY_OPTIONS = [
   "Automotive Services",
@@ -437,17 +438,9 @@ const ClientsPage = () => {
     setShowAssignAgencyModal(true);
   };
 
-  const confirmAssignToAgency = async (agencyId: string) => {
-    if (!selectedClientForAgency) return;
-    try {
-      await dispatch(assignClientToAgency({ agencyId, clientId: selectedClientForAgency.id }) as any);
-      toast.success("Client assigned to agency successfully!");
-      setShowAssignAgencyModal(false);
-      setSelectedClientForAgency(null);
-      dispatch(fetchClients() as any);
-    } catch (error: any) {
-      console.error("Failed to assign client to agency:", error);
-    }
+  const handleAssignSuccess = () => {
+    setSelectedClientForAgency(null);
+    dispatch(fetchClients() as any);
   };
 
   const handleCopyLink = async () => {
@@ -2566,56 +2559,16 @@ const ClientsPage = () => {
 
       {/* Assign to Agency Modal */}
       {showAssignAgencyModal && selectedClientForAgency && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden ring-2 ring-emerald-200/80 max-w-2xl w-full max-h-[85vh] flex flex-col">
-            <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-green-600 border-b-2 border-teal-500/50 shrink-0">
-              <h2 className="text-xl font-bold text-white drop-shadow-sm">
-                Assign Client to Agency
-              </h2>
-              <button
-                onClick={() => {
-                  setShowAssignAgencyModal(false);
-                  setSelectedClientForAgency(null);
-                }}
-                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-slate-50/50 to-white">
-              <p className="text-sm text-gray-700 rounded-xl border-l-4 border-teal-500 bg-teal-50/60 px-4 py-3">
-                Select an agency to assign "{selectedClientForAgency.name}" to:
-              </p>
-              <div className="rounded-xl border-2 border-emerald-200 bg-white overflow-hidden max-h-96 overflow-y-auto">
-                {agencies.length === 0 ? (
-                  <div className="p-6 text-center text-gray-500 bg-amber-50/50 border-t border-amber-200">
-                    No agencies available. Create an agency first.
-                  </div>
-                ) : (
-                  <div className="divide-y divide-gray-100">
-                    {agencies.map((agency) => (
-                      <button
-                        key={agency.id}
-                        onClick={() => confirmAssignToAgency(agency.id)}
-                        className="w-full px-4 py-3 text-left hover:bg-emerald-50/80 active:bg-emerald-100/80 transition-colors border-l-4 border-transparent hover:border-emerald-400"
-                      >
-                        <div className="font-semibold text-gray-900">{agency.name}</div>
-                        {agency.subdomain && (
-                          <div className="text-sm text-emerald-700/90 mt-0.5">
-                            {agency.subdomain}.yourseodashboard.com
-                          </div>
-                        )}
-                        <div className="text-xs text-gray-500 mt-1">
-                          {agency.memberCount} member{agency.memberCount !== 1 ? 's' : ''}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <AssignClientToAgencyModal
+          open={showAssignAgencyModal}
+          onClose={() => {
+            setShowAssignAgencyModal(false);
+            setSelectedClientForAgency(null);
+          }}
+          client={selectedClientForAgency}
+          agencies={agencies}
+          onAssignSuccess={handleAssignSuccess}
+        />
       )}
     </div>
   );

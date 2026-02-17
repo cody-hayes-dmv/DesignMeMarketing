@@ -184,6 +184,22 @@ export const removeClientFromAgency = createAsyncThunk(
   }
 );
 
+export const includeClientForAgency = createAsyncThunk(
+  "agency/includeClientForAgency",
+  async ({ agencyId, clientId }: { agencyId: string; clientId: string }) => {
+    const response = await api.post(`/agencies/${agencyId}/include-client/${clientId}`);
+    return response.data;
+  }
+);
+
+export const unincludeClientFromAgency = createAsyncThunk(
+  "agency/unincludeClientFromAgency",
+  async ({ agencyId, clientId }: { agencyId: string; clientId: string }) => {
+    const response = await api.post(`/agencies/${agencyId}/uninclude-client/${clientId}`);
+    return response.data;
+  }
+);
+
 const agencySlice = createSlice({
   name: "agency",
   initialState,

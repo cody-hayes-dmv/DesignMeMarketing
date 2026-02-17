@@ -1,5 +1,6 @@
 import express from 'express';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
 import { Prisma, Role } from "@prisma/client";
 import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
@@ -36,6 +37,7 @@ const updateTeamMemberSchema = z.object({
     name: z.string().min(1).optional(),
     role: z.enum(['SPECIALIST', 'AGENCY', 'ADMIN', 'SUPER_ADMIN']).optional(),
     agencyRole: z.enum(['SPECIALIST', 'MANAGER', 'OWNER']).optional(),
+    newPassword: z.string().min(6).optional(),
 });
 
 // Get team members (for the current user's agency)
@@ -488,7 +490,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Access denied' });
         }
 
-        const updateData = updateTeamMemberSchema.parse(req.body);
+        const parsed = updateTeamMemberSchema.parse(req.body);
+        const { newPassword, ...updateData } = parsed;
 
         const existingUser = await prisma.user.findUnique({
             where: { id: userId },
@@ -498,19 +501,27 @@ router.put('/:id', authenticateToken, async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // Update user
+        const data: Record<string, unknown> = { ...updateData };
+        if (newPassword && user.role === 'SUPER_ADMIN') {
+            data.passwordHash = await bcrypt.hash(newPassword, 12);
+        }
+
         const updated = await prisma.user.update({
             where: { id: userId },
-            data: updateData,
+            data,
         });
 
-        res.json({
+        const body: Record<string, unknown> = {
             id: updated.id,
             name: updated.name,
             email: updated.email,
             role: updated.role,
             status: updated.verified ? 'Active' : 'Invited',
-        });
+        };
+        if (newPassword && user.role === 'SUPER_ADMIN') {
+            body.newPassword = newPassword;
+        }
+        res.json(body);
     } catch (error: any) {
         if (error.name === 'ZodError') {
             return res.status(400).json({ message: 'Invalid input', errors: error.errors });

@@ -102,6 +102,119 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Get included agencies for a client (for Assign modal - Super Admin only). Must be before /:agencyId
+router.get('/included-for-client/:clientId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const { clientId } = req.params;
+    const inclusions = await prisma.clientAgencyIncluded.findMany({
+      where: { clientId },
+      select: { agencyId: true },
+    });
+    res.json(inclusions.map(i => i.agencyId));
+  } catch (error: any) {
+    console.error('Get included for client error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
+  }
+});
+
+// Check if any included clients exist (for conditional tab visibility). Must be before /:agencyId
+router.get('/included-clients/exists', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'SUPER_ADMIN') {
+      const count = await prisma.clientAgencyIncluded.count();
+      return res.json({ hasIncluded: count > 0 });
+    }
+    if (req.user.role === 'AGENCY' || req.user.role === 'ADMIN') {
+      const memberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const agencyIds = memberships.map(m => m.agencyId);
+      const count = await prisma.clientAgencyIncluded.count({
+        where: { agencyId: { in: agencyIds } },
+      });
+      return res.json({ hasIncluded: count > 0 });
+    }
+    return res.json({ hasIncluded: false });
+  } catch (error: any) {
+    console.error('Check has included error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
+  }
+});
+
+// Get included clients - Super Admin: all; Agency: their agency only. Returns client data with stats like Clients page.
+router.get('/included-clients', authenticateToken, async (req, res) => {
+  try {
+    const agencyIdParam = req.query.agencyId as string | undefined;
+    let inclusions: { id: string; clientId: string; agencyId: string; client: any; agency: any }[];
+    if (req.user.role === 'SUPER_ADMIN') {
+      const agencyId = agencyIdParam || undefined;
+      const where: any = {};
+      if (agencyId) where.agencyId = agencyId;
+      inclusions = await prisma.clientAgencyIncluded.findMany({
+        where,
+        include: {
+          client: { select: { id: true, name: true, domain: true, status: true, industry: true, createdAt: true } },
+          agency: { select: { id: true, name: true } },
+        },
+      });
+    } else if (req.user.role === 'AGENCY' || req.user.role === 'ADMIN') {
+      const memberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const agencyIds = memberships.map(m => m.agencyId);
+      const whereAgency = agencyIdParam && agencyIds.includes(agencyIdParam)
+        ? agencyIdParam
+        : agencyIds;
+      inclusions = await prisma.clientAgencyIncluded.findMany({
+        where: { agencyId: { in: Array.isArray(whereAgency) ? whereAgency : [whereAgency] } },
+        include: {
+          client: { select: { id: true, name: true, domain: true, status: true, industry: true, createdAt: true } },
+          agency: { select: { id: true, name: true } },
+        },
+      });
+    } else {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Add stats (keywords, avgPosition, topRankings, traffic) like Clients page
+    const enriched = await Promise.all(inclusions.map(async (row) => {
+      const c = row.client;
+      const [keywordStats, topRankingsCount, trafficSource, ga4Metrics] = await Promise.all([
+        prisma.keyword.aggregate({ where: { clientId: c.id }, _count: { id: true }, _avg: { currentPosition: true } }),
+        prisma.keyword.count({ where: { clientId: c.id, currentPosition: { lte: 10, not: null } } }),
+        prisma.trafficSource.findFirst({ where: { clientId: c.id }, select: { totalEstimatedTraffic: true, organicEstimatedTraffic: true } }),
+        prisma.ga4Metrics.findUnique({ where: { clientId: c.id }, select: { totalSessions: true } }),
+      ]);
+      const keywords = keywordStats._count.id || 0;
+      const avgPosition = keywordStats._avg.currentPosition ? Math.round(keywordStats._avg.currentPosition * 10) / 10 : null;
+      const traffic = trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0;
+      const traffic30d = ga4Metrics?.totalSessions ?? null;
+      return {
+        ...row,
+        client: {
+          ...c,
+          keywords,
+          avgPosition: avgPosition ?? 0,
+          topRankings: topRankingsCount || 0,
+          traffic,
+          traffic30d,
+          agencyNames: [row.agency.name],
+        },
+      };
+    }));
+
+    res.json(enriched);
+  } catch (error: any) {
+    console.error('Get included clients error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
+  }
+});
+
 // Create agency directly (Super Admin only). Contact email required; no password — we send "Set your password" link.
 const createAgencySchema = z.object({
   name: z.string().min(1, 'Agency name is required'),
@@ -2482,6 +2595,46 @@ router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req,
     });
   } catch (error: any) {
     console.error('Remove client from agency error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
+  }
+});
+
+// Include client for agency (Super Admin only) - client appears in agency's Included tab
+router.post('/:agencyId/include-client/:clientId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can include clients for agencies.' });
+    }
+    const { agencyId, clientId } = req.params;
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+    if (!agency) return res.status(404).json({ message: 'Agency not found' });
+    const client = await prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) return res.status(404).json({ message: 'Client not found' });
+    await prisma.clientAgencyIncluded.upsert({
+      where: { clientId_agencyId: { clientId, agencyId } },
+      create: { clientId, agencyId },
+      update: {},
+    });
+    res.json({ message: 'Client included for agency successfully', clientId, agencyId });
+  } catch (error: any) {
+    console.error('Include client for agency error:', error);
+    res.status(500).json({ message: error.message || 'Internal server error' });
+  }
+});
+
+// Uninclude client from agency (Super Admin only)
+router.post('/:agencyId/uninclude-client/:clientId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can uninclude clients from agencies.' });
+    }
+    const { agencyId, clientId } = req.params;
+    await prisma.clientAgencyIncluded.deleteMany({
+      where: { clientId, agencyId },
+    });
+    res.json({ message: 'Client unincluded from agency successfully', clientId, agencyId });
+  } catch (error: any) {
+    console.error('Uninclude client from agency error:', error);
     res.status(500).json({ message: error.message || 'Internal server error' });
   }
 });

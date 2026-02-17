@@ -228,7 +228,7 @@ const TasksPage = () => {
         const matchesStatus =
             filterStatus === "all" ||
             (filterStatus === "upcoming" && t.status !== "DONE") ||
-            (filterStatus === "overdue" && t.status !== "DONE") ||
+            (filterStatus === "overdue" && t.status !== "DONE" && isOverdue(t.dueDate)) ||
             t.status.toLowerCase() === filterStatus.toLowerCase();
 
         const matchesClient =
@@ -520,7 +520,7 @@ const TasksPage = () => {
                         >
                             <option value="all">All Tasks</option>
                             <option value="upcoming">Upcoming</option>
-                            <option value="overdue">Overdue & Upcoming</option>
+                            <option value="overdue">Overdue</option>
                             <option value="TODO">TODO</option>
                             <option value="IN_PROGRESS">IN_PROGRESS</option>
                             <option value="REVIEW">REVIEW</option>
