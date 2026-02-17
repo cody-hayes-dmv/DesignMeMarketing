@@ -194,38 +194,77 @@ const ShareDashboardPage: React.FC = () => {
       setExportingPdf(true);
       document.body.style.overflow = "hidden";
 
+      // Temporarily remove padding for full-width capture
+      const contentWrapper = element.parentElement;
+      const originalPadding = contentWrapper?.style.padding ?? "";
+      if (contentWrapper) contentWrapper.style.padding = "0";
+
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
         scrollY: -window.scrollY,
         scrollX: -window.scrollX,
         backgroundColor: "#FFFFFF",
+        ignoreElements: (el) => el.getAttribute?.("data-pdf-hide") === "true",
       });
+
+      // Restore padding
+      if (contentWrapper) contentWrapper.style.padding = originalPadding;
 
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
 
-      const headerHeightMm = 14;
-      const contentHeightMm = pageHeight - headerHeightMm;
+      const domain = dashboardSummary?.client?.domain;
+      const headerHeightMm = domain ? 18 : 14;
+      const gapMm = 4;
+      const contentTopMm = headerHeightMm + gapMm;
       const websiteName = dashboardSummary?.client?.name || dashboardSummary?.client?.domain || "Shared Dashboard";
 
-      pdf.setFontSize(16);
-      pdf.setTextColor(30, 30, 30);
-      pdf.text(websiteName, pageWidth / 2, headerHeightMm / 2 + 4, { align: "center" });
-
-      // Fit entire dashboard on one page (size-auto): scale image to fit content area
-      let imgWidth = pageWidth;
-      let imgHeight = (canvas.height * pageWidth) / canvas.width;
-      let x = 0;
-      if (imgHeight > contentHeightMm) {
-        const scale = contentHeightMm / imgHeight;
-        imgWidth = pageWidth * scale;
-        imgHeight = contentHeightMm;
-        x = (pageWidth - imgWidth) / 2;
+      // Title style: match ShareDashboard nav (gradient blue bar, white text) but centered
+      pdf.setFillColor(37, 99, 235); // primary-600 / blue-600
+      pdf.rect(0, 0, pageWidth, headerHeightMm, "F");
+      pdf.setDrawColor(59, 130, 246); // primary-500 border
+      pdf.setLineWidth(0.4);
+      pdf.line(0, headerHeightMm, pageWidth, headerHeightMm);
+      pdf.setFontSize(18);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(255, 255, 255);
+      pdf.text(websiteName, pageWidth / 2, domain ? 6 : headerHeightMm / 2 + 2.5, { align: "center" });
+      if (domain) {
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "normal");
+        pdf.text(`Domain: ${domain}`, pageWidth / 2, 12, { align: "center" });
       }
-      pdf.addImage(imgData, "PNG", x, headerHeightMm, imgWidth, imgHeight);
+      pdf.setFont("helvetica", "normal");
+
+      // Dashboard: always full page width; add gap below title; multi-page if tall
+      const imgWidth = pageWidth;
+      const fullImgHeightMm = (canvas.height * pageWidth) / canvas.width;
+      const firstPageContentMm = pageHeight - contentTopMm;
+      let srcY = 0;
+      let remainingHeightMm = fullImgHeightMm;
+      let isFirstPage = true;
+      while (remainingHeightMm > 0) {
+        const contentAreaMm = isFirstPage ? firstPageContentMm : pageHeight;
+        const sliceHeightMm = Math.min(remainingHeightMm, contentAreaMm);
+        const sliceHeightPx = (sliceHeightMm / fullImgHeightMm) * canvas.height;
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = Math.ceil(sliceHeightPx);
+        const ctx = sliceCanvas.getContext("2d")!;
+        ctx.drawImage(canvas, 0, srcY, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+        const sliceData = sliceCanvas.toDataURL("image/png");
+        const imgY = isFirstPage ? contentTopMm : 0;
+        pdf.addImage(sliceData, "PNG", 0, imgY, imgWidth, sliceHeightMm);
+        remainingHeightMm -= sliceHeightMm;
+        srcY += sliceHeightPx;
+        if (remainingHeightMm > 0) {
+          pdf.addPage();
+          isFirstPage = false;
+        }
+      }
 
       const sanitizedName = dashboardSummary?.client?.name 
         ? dashboardSummary.client.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() 
@@ -240,7 +279,7 @@ const ShareDashboardPage: React.FC = () => {
       document.body.style.overflow = previousOverflow;
       setExportingPdf(false);
     }
-  }, [dashboardSummary?.client?.name]);
+  }, [dashboardSummary?.client?.name, dashboardSummary?.client?.domain]);
 
   const formatNumber = (value: number) => {
     if (!Number.isFinite(value)) return "0";
