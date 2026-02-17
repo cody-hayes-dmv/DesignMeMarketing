@@ -123,6 +123,9 @@ router.get('/included-for-client/:clientId', authenticateToken, async (req, res)
 // Check if any included clients exist (for conditional tab visibility). Must be before /:agencyId
 router.get('/included-clients/exists', authenticateToken, async (req, res) => {
   try {
+    if (!req.user?.role) {
+      return res.json({ hasIncluded: false });
+    }
     if (req.user.role === 'SUPER_ADMIN') {
       const count = await prisma.clientAgencyIncluded.count();
       return res.json({ hasIncluded: count > 0 });
@@ -133,6 +136,9 @@ router.get('/included-clients/exists', authenticateToken, async (req, res) => {
         select: { agencyId: true },
       });
       const agencyIds = memberships.map(m => m.agencyId);
+      if (agencyIds.length === 0) {
+        return res.json({ hasIncluded: false });
+      }
       const count = await prisma.clientAgencyIncluded.count({
         where: { agencyId: { in: agencyIds } },
       });
@@ -140,8 +146,12 @@ router.get('/included-clients/exists', authenticateToken, async (req, res) => {
     }
     return res.json({ hasIncluded: false });
   } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('does not exist') || msg.includes('ER_NO_SUCH_TABLE') || error?.code === 'P2021') {
+      return res.json({ hasIncluded: false });
+    }
     console.error('Check has included error:', error);
-    res.status(500).json({ message: error.message || 'Internal server error' });
+    return res.json({ hasIncluded: false });
   }
 });
 

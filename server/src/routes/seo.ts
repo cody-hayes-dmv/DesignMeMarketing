@@ -10147,6 +10147,9 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
 // Get agency dashboard summary (aggregated data from all clients)
 router.get("/agency/dashboard", authenticateToken, async (req, res) => {
   try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: "Invalid session" });
+    }
     const { period = "30" } = req.query;
     const days = parseInt(period as string) || 30;
 
@@ -10168,17 +10171,19 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       });
       agencyIds = userMemberships.map(m => m.agencyId);
 
-      const clients = await prisma.client.findMany({
-        where: {
-          user: {
-            memberships: {
-              some: { agencyId: { in: agencyIds } },
-            },
+      if (agencyIds.length > 0) {
+        const clients = await prisma.client.findMany({
+          where: {
+            OR: [
+              { user: { memberships: { some: { agencyId: { in: agencyIds } } } } },
+              { belongsToAgencyId: { in: agencyIds } },
+              { agencyInclusions: { some: { agencyId: { in: agencyIds } } } },
+            ],
           },
-        },
-        select: { id: true },
-      });
-      accessibleClientIds = clients.map(c => c.id);
+          select: { id: true },
+        });
+        accessibleClientIds = [...new Set(clients.map(c => c.id))];
+      }
     }
 
     const startDate = new Date();
@@ -10521,6 +10526,9 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
 // Syncs agency.subscriptionTier from Stripe when loading so upgrades/downgrades in Stripe are reflected even if webhook didn't run.
 router.get("/agency/subscription", authenticateToken, async (req, res) => {
   try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: "Invalid session" });
+    }
     let accessibleClientIds: string[] = [];
     let agencyIds: string[] = [];
 
@@ -10533,24 +10541,30 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
         select: { agencyId: true },
       });
       agencyIds = userMemberships.map((m) => m.agencyId);
-      const clients = await prisma.client.findMany({
-        where: {
-          user: {
-            memberships: {
-              some: { agencyId: { in: agencyIds } },
-            },
+      if (agencyIds.length > 0) {
+        const clients = await prisma.client.findMany({
+          where: {
+            OR: [
+              { user: { memberships: { some: { agencyId: { in: agencyIds } } } } },
+              { belongsToAgencyId: { in: agencyIds } },
+              { agencyInclusions: { some: { agencyId: { in: agencyIds } } } },
+            ],
           },
-        },
-        select: { id: true },
-      });
-      accessibleClientIds = clients.map((c) => c.id);
+          select: { id: true },
+        });
+        accessibleClientIds = [...new Set(clients.map((c) => c.id))];
+      }
     }
 
     let tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
     if (tierCtx.agencyId) {
-      const { updated } = await syncAgencyTierFromStripe(tierCtx.agencyId);
-      if (updated) {
-        tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+      try {
+        const { updated } = await syncAgencyTierFromStripe(tierCtx.agencyId);
+        if (updated) {
+          tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+        }
+      } catch (syncErr: any) {
+        console.warn("syncAgencyTierFromStripe failed, using cached tier:", syncErr?.message);
       }
     }
     const keywordCount = tierCtx.totalKeywords;
