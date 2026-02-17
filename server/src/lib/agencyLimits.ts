@@ -129,7 +129,7 @@ async function getTargetKeywordCounts(clientIds: string[]) {
   const trialExpired =
     agency.billingType === "free" &&
     (agency.trialEndsAt == null || agency.trialEndsAt <= now);
-  const tierConfig = getTierConfig(agency.subscriptionTier);
+  const tierConfig = getTierConfig(agency.subscriptionTier) ?? (agency.billingType === "free" ? getTierConfig("free") : null);
 
   // Clients accessible by any user in this agency (same logic as dashboard)
   const agencyUserIds = await prisma.userAgency.findMany({

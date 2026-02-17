@@ -142,6 +142,46 @@ export const createAgency = createAsyncThunk(
   }
 );
 
+export const updateAgency = createAsyncThunk(
+  "agency/updateAgency",
+  async ({
+    agencyId,
+    data,
+  }: {
+    agencyId: string;
+    data: {
+      name?: string;
+      website?: string;
+      industry?: string;
+      agencySize?: string;
+      numberOfClients?: number | null;
+      contactName?: string;
+      contactEmail?: string;
+      contactPhone?: string;
+      contactJobTitle?: string;
+      streetAddress?: string;
+      city?: string;
+      state?: string;
+      zip?: string;
+      country?: string;
+      subdomain?: string;
+      billingType?: string | null;
+      subscriptionTier?: string | null;
+      customPricing?: number | null;
+      internalNotes?: string | null;
+    };
+  }) => {
+    try {
+      const response = await api.put(`/agencies/${agencyId}`, data);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(
+        error.response?.data?.message || "Failed to update agency"
+      );
+    }
+  }
+);
+
 export const deleteAgency = createAsyncThunk(
   "agency/deleteAgency",
   async (agencyId: string) => {
@@ -242,6 +282,22 @@ const agencySlice = createSlice({
       .addCase(createAgency.rejected, (state, action) => {
         state.loading = false;
         state.error = action.error.message || "Failed to create agency";
+      })
+      .addCase(updateAgency.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(updateAgency.fulfilled, (state, action) => {
+        state.loading = false;
+        const updated = action.payload;
+        const idx = state.agencies.findIndex((a) => a.id === updated.id);
+        if (idx >= 0) {
+          state.agencies[idx] = { ...state.agencies[idx], name: updated.name, subdomain: updated.subdomain };
+        }
+      })
+      .addCase(updateAgency.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || "Failed to update agency";
       })
       .addCase(deleteAgency.pending, (state) => {
         state.loading = true;

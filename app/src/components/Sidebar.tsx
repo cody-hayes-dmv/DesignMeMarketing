@@ -53,7 +53,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   }, [user?.role]);
 
   const refetchHasIncluded = () => {
-    if (user?.role === "AGENCY" || user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") {
+    if (user?.role === "AGENCY" || user?.role === "ADMIN") {
       api.get<{ hasIncluded: boolean }>("/agencies/included-clients/exists")
         .then((r) => setHasIncludedClients(r.data?.hasIncluded ?? false))
         .catch(() => setHasIncludedClients(false));
@@ -62,7 +62,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
 
   useEffect(() => {
     refetchHasIncluded();
-    if (user?.role !== "AGENCY" && user?.role !== "ADMIN" && user?.role !== "SUPER_ADMIN") {
+    if (user?.role !== "AGENCY" && user?.role !== "ADMIN") {
       setHasIncludedClients(false);
     }
   }, [user?.role]);
@@ -154,7 +154,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       label: "Included",
       path: "/agency/included",
       hasSubMenu: false,
-      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+      roles: ["AGENCY", "ADMIN"],
     },
     {
       icon: FolderOpen,

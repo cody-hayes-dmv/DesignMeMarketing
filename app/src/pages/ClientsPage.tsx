@@ -31,6 +31,7 @@ import {
   Clock,
   XCircle,
   Archive,
+  FolderPlus,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -233,8 +234,9 @@ const ClientsPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [openStatusId, setOpenStatusId] = useState("")
   const [enabled, setEnabled] = useState(false);
-  type ClientListFilter = "active" | "total" | "pending" | "dashboard_only" | "canceled" | "archived";
+  type ClientListFilter = "active" | "total" | "pending" | "dashboard_only" | "canceled" | "archived" | "included";
   const [statusFilter, setStatusFilter] = useState<ClientListFilter>("active");
+  const [includedClientIds, setIncludedClientIds] = useState<Set<string>>(new Set());
   const [clientForm, setClientForm] = useState<ClientFormState>(EMPTY_CLIENT_FORM);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState("");
@@ -268,6 +270,24 @@ const ClientsPage = () => {
       setAgencyMe(null);
       setDashboardLimit(null);
     }
+  }, [user?.role]);
+
+  // Fetch included clients count for SUPER_ADMIN (Included Dashboards metric)
+  useEffect(() => {
+    if (user?.role !== "SUPER_ADMIN") return;
+    const fetchIncluded = () => {
+      api
+        .get<Array<{ clientId: string }>>("/agencies/included-clients")
+        .then((r) => {
+          const data = Array.isArray(r.data) ? r.data : [];
+          setIncludedClientIds(new Set(data.map((row) => row.clientId)));
+        })
+        .catch(() => setIncludedClientIds(new Set()));
+    };
+    fetchIncluded();
+    const handler = () => fetchIncluded();
+    window.addEventListener("included-clients-changed", handler);
+    return () => window.removeEventListener("included-clients-changed", handler);
   }, [user?.role]);
 
   const canSeeSeoRoadmapFields = user?.role === "SUPER_ADMIN" || user?.role === "SPECIALIST";
@@ -713,6 +733,7 @@ const ClientsPage = () => {
   const dashboardOnlyCount = nonVendasta.filter((m) => m.status === "DASHBOARD_ONLY").length;
   const canceledCount = nonVendasta.filter((m) => m.status === "CANCELED").length;
   const archivedCount = nonVendasta.filter((m) => isArchivedStatus(m.status)).length;
+  const includedCount = isSuperAdmin ? includedClientIds.size : 0;
 
   const handleSort = (field: "name" | "domain" | "industry") => {
     if (sortField === field) {
@@ -749,8 +770,8 @@ const ClientsPage = () => {
 
   const filteredClients = modifiedClients
     .filter((client) => {
-      // For "Active" and "Total", include Vendasta clients; for other filters show only non-Vendasta
-      if (statusFilter !== "total" && statusFilter !== "active" && client.vendasta) return false;
+      // For "Active", "Total", and "Included", include Vendasta clients; for other filters show only non-Vendasta
+      if (statusFilter !== "total" && statusFilter !== "active" && statusFilter !== "included" && client.vendasta) return false;
       if (statusFilter === "active") {
         return client.status === "ACTIVE";
       }
@@ -759,6 +780,7 @@ const ClientsPage = () => {
       if (statusFilter === "dashboard_only") return client.status === "DASHBOARD_ONLY";
       if (statusFilter === "canceled") return client.status === "CANCELED";
       if (statusFilter === "archived") return isArchivedStatus(client.status);
+      if (statusFilter === "included") return includedClientIds.has(client.id);
       return true;
     })
     .filter((client) => {
@@ -827,8 +849,8 @@ const ClientsPage = () => {
         )}
       </div>
 
-      {/* Filter cards: default view = Active Clients (managed services) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
+      {/* Filter cards: default view = Active Clients (managed services). Super Admin: 7 metrics in 1 line. */}
+      <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8 ${isSuperAdmin ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}>
         <button
           type="button"
           onClick={() => setStatusFilter("active")}
@@ -929,6 +951,24 @@ const ClientsPage = () => {
             <Archive className="h-8 w-8 text-gray-500 shrink-0" />
           </div>
         </button>
+
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setStatusFilter("included")}
+            className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "included" ? "border-teal-300 ring-2 ring-teal-100" : "border-gray-200 hover:bg-gray-50"}`}
+            title="Included dashboards (free, no tier limit)"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-600">Included Dashboards</p>
+                <p className="text-xl font-bold text-teal-600">{includedCount}</p>
+                <p className="text-xs text-gray-500 mt-0.5">Free, no tier limit</p>
+              </div>
+              <FolderPlus className="h-8 w-8 text-teal-600 shrink-0" />
+            </div>
+          </button>
+        )}
       </div>
 
 

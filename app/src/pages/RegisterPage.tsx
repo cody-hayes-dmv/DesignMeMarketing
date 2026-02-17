@@ -350,7 +350,7 @@ const RegisterPage = () => {
               className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition-colors shadow-sm"
             >
               <Building2 className="h-5 w-5" />
-              Sign up as an agency
+              Start For Free
             </button>
           </form>
 

@@ -233,7 +233,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col my-8 overflow-hidden border-l-4 border-l-primary-500">
         <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 shrink-0">
-          <h2 className="text-xl font-bold text-white">Sign up as an agency</h2>
+          <h2 className="text-xl font-bold text-white">Start For Free</h2>
           <button
             type="button"
             onClick={onClose}

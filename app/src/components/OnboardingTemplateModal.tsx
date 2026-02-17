@@ -289,7 +289,7 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
               <ListChecks className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold">Create Onboarding Tasks</h2>
+              <h2 className="text-2xl font-bold">Use a template</h2>
               <p className="text-white/90 mt-0.5">Generate tasks from predefined templates for new clients</p>
             </div>
           </div>

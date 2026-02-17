@@ -697,7 +697,7 @@ router.post('/', authenticateToken, async (req, res) => {
         return res.status(400).json({ message: 'Stripe is not configured. Cannot create agency with Charge to Card. Set STRIPE_SECRET_KEY on the server.' });
       }
     }
-    if (!tier && billingOption !== 'manual_invoice') {
+    if (!tier && billingOption !== 'manual_invoice' && billingOption !== 'no_charge') {
       return res.status(400).json({ message: 'Subscription tier is required' });
     }
 
@@ -829,7 +829,7 @@ router.post('/', authenticateToken, async (req, res) => {
         state: state || null,
         zip: zip || null,
         country: country || null,
-        subscriptionTier: tier || null,
+        subscriptionTier: billingOption === 'no_charge' ? 'free' : (tier || null),
         customPricing: customPricing ?? null,
         internalNotes: internalNotes || null,
         onboardingData,
@@ -942,6 +942,415 @@ router.post('/', authenticateToken, async (req, res) => {
     }
     console.error('Create agency error:', error);
     res.status(500).json({ message: 'Failed to create agency' });
+  }
+});
+
+// Get current user's agency (includes tier for UI). Must be BEFORE /:agencyId so "me" is not captured.
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+
+    // SUPER_ADMIN users don't have agency memberships - return null gracefully
+    if (user.role === 'SUPER_ADMIN') {
+      return res.json(null);
+    }
+
+    // Get user's first agency membership
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId },
+      include: {
+        agency: true,
+      },
+    });
+
+    if (!membership) {
+      return res.status(404).json({ message: 'No agency found for user' });
+    }
+
+    const tierConfig = getTierConfig(membership.agency.subscriptionTier);
+    const trialEndsAt = membership.agency.trialEndsAt ?? null;
+    const now = new Date();
+    const trialActive = trialEndsAt && trialEndsAt > now;
+    const trialDaysLeft =
+      trialEndsAt && trialEndsAt > now
+        ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000))
+        : null;
+    const billingType = membership.agency.billingType ?? null;
+    const trialExpired = billingType === "free" && !trialActive;
+
+    const tierId = tierConfig?.id ?? null;
+    const accountActivated = !!(membership.agency as { stripeCustomerId?: string | null }).stripeCustomerId;
+    res.json({
+      id: membership.agency.id,
+      name: membership.agency.name,
+      subdomain: membership.agency.subdomain,
+      createdAt: membership.agency.createdAt,
+      agencyRole: membership.agencyRole,
+      subscriptionTier: membership.agency.subscriptionTier ?? null,
+      tierId,
+      isBusinessTier: tierConfig?.type === "business",
+      maxDashboards: tierConfig?.maxDashboards ?? null,
+      trialEndsAt: trialEndsAt?.toISOString() ?? null,
+      trialActive: !!trialActive,
+      trialDaysLeft,
+      trialExpired: trialExpired || undefined,
+      billingType: billingType ?? undefined,
+      accountActivated,
+      allowedAddOns: getAllowedAddOnOptions(tierId as TierId | null),
+      basePriceMonthlyUsd: tierConfig?.priceMonthlyUsd ?? null,
+    });
+  } catch (error) {
+    console.error('Get user agency error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Update agency settings (current user's agency). Must be BEFORE /:agencyId.
+const updateAgencyMeSchema = z.object({
+  name: z.string().min(1).optional(),
+  subdomain: z.string().optional(),
+});
+
+router.put('/me', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    const updateData = updateAgencyMeSchema.parse(req.body);
+
+    // SUPER_ADMIN users don't have agency memberships
+    if (user.role === 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'SUPER_ADMIN users cannot update agency settings' });
+    }
+
+    // Get user's first agency membership
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId },
+      include: {
+        agency: true,
+      },
+    });
+
+    if (!membership) {
+      return res.status(404).json({ message: 'No agency found for user' });
+    }
+
+    // Check permissions - only OWNER, ADMIN, or SUPER_ADMIN can update
+    if (
+      membership.agencyRole !== 'OWNER' &&
+      user.role !== 'ADMIN' &&
+      user.role !== 'SUPER_ADMIN'
+    ) {
+      return res.status(403).json({ message: 'Access denied. Only agency owners can update settings.' });
+    }
+
+    // Check if subdomain is already taken (if being updated)
+    if (updateData.subdomain && updateData.subdomain !== membership.agency.subdomain) {
+      const existingAgency = await prisma.agency.findUnique({
+        where: { subdomain: updateData.subdomain },
+      });
+
+      if (existingAgency) {
+        return res.status(400).json({ message: 'Subdomain already taken' });
+      }
+    }
+
+    // Update agency
+    const updatedAgency = await prisma.agency.update({
+      where: { id: membership.agency.id },
+      data: updateData,
+    });
+
+    res.json({
+      id: updatedAgency.id,
+      name: updatedAgency.name,
+      subdomain: updatedAgency.subdomain,
+      createdAt: updatedAgency.createdAt,
+    });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+    }
+    if (error.code === 'P2002') {
+      return res.status(400).json({ message: 'Subdomain already taken' });
+    }
+    console.error('Update agency error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Static routes must be before /:agencyId to avoid "managed-services", "add-ons" etc. being captured as agencyId.
+
+// Managed Services: list active for current user's agency (AGENCY, ADMIN, SUPER_ADMIN only; no SPECIALIST)
+router.get('/managed-services', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    if (user.role === 'SPECIALIST') {
+      return res.status(403).json({ message: 'Access denied. Specialists cannot view managed services.' });
+    }
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId },
+      select: { agencyId: true },
+    });
+    if (!membership && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+      return res.json([]);
+    }
+    const pendingOnly = req.query.pendingOnly === 'true' && user.role === 'SUPER_ADMIN';
+    const agencyId = membership?.agencyId;
+
+    if (pendingOnly) {
+      const list = await prisma.managedService.findMany({
+        where: { status: 'PENDING' },
+        include: {
+          client: { select: { id: true, name: true } },
+          agency: { select: { id: true, name: true } },
+        },
+        orderBy: { startDate: 'desc' },
+      });
+      return res.json(list.map((m) => ({
+        id: m.id,
+        clientId: m.clientId,
+        clientName: m.client.name,
+        packageId: m.packageId,
+        packageName: m.packageName,
+        monthlyPrice: m.monthlyPrice,
+        commissionPercent: m.commissionPercent,
+        monthlyCommission: m.monthlyCommission,
+        startDate: m.startDate,
+        status: m.status,
+        agencyId: m.agency.id,
+        agencyName: m.agency.name,
+      })));
+    }
+
+    if (!agencyId && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')) {
+      return res.json([]);
+    }
+    const list = await prisma.managedService.findMany({
+      where: { agencyId, status: { in: ['ACTIVE', 'PENDING'] } },
+      include: { client: { select: { id: true, name: true, status: true } } },
+      orderBy: [{ status: 'asc' }, { startDate: 'desc' }], // ACTIVE before PENDING (asc), then newest first
+    });
+    // One row per client: prefer ACTIVE over PENDING so approved status always shows after Super Admin approval
+    const byClient = new Map<string, typeof list[0]>();
+    for (const m of list) {
+      const existing = byClient.get(m.clientId);
+      if (!existing || m.status === 'ACTIVE') byClient.set(m.clientId, m);
+    }
+    const deduped = Array.from(byClient.values());
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.json(deduped.map((m) => {
+      const client = m.client as { id: string; name: string; status?: string };
+      const clientActive = client.status === 'ACTIVE';
+      const status = (m.status === 'ACTIVE' || clientActive) ? 'ACTIVE' : m.status;
+      return {
+        id: m.id,
+        clientId: m.clientId,
+        clientName: m.client.name,
+        packageId: m.packageId,
+        packageName: m.packageName,
+        monthlyPrice: m.monthlyPrice,
+        commissionPercent: m.commissionPercent,
+        monthlyCommission: m.monthlyCommission,
+        startDate: m.startDate,
+        status,
+      };
+    }));
+  } catch (err: any) {
+    console.error('List managed services error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to list managed services' });
+  }
+});
+
+// Add-Ons: list active for current user's agency
+router.get('/add-ons', authenticateToken, async (req, res) => {
+  try {
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    if (!membership && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.json([]);
+    }
+    const agencyId = membership?.agencyId;
+    if (!agencyId && (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN')) {
+      return res.json([]);
+    }
+    const list = await prisma.agencyAddOn.findMany({
+      where: { agencyId },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(list.map((a) => ({
+      id: a.id,
+      addOnType: a.addOnType,
+      addOnOption: a.addOnOption,
+      displayName: a.displayName,
+      details: a.details,
+      priceCents: a.priceCents,
+      billingInterval: a.billingInterval,
+      createdAt: a.createdAt,
+    })));
+  } catch (err: any) {
+    console.error('List add-ons error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to list add-ons' });
+  }
+});
+
+// Get single agency (Super Admin only) - full details for edit form
+router.get('/:agencyId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const { agencyId } = req.params;
+    const agency = await prisma.agency.findUnique({
+      where: { id: agencyId },
+    });
+    if (!agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+    res.json({
+      id: agency.id,
+      name: agency.name,
+      subdomain: agency.subdomain,
+      website: agency.website,
+      industry: agency.industry,
+      agencySize: agency.agencySize,
+      numberOfClients: agency.numberOfClients,
+      contactName: agency.contactName,
+      contactEmail: agency.contactEmail,
+      contactPhone: agency.contactPhone,
+      contactJobTitle: agency.contactJobTitle,
+      streetAddress: agency.streetAddress,
+      city: agency.city,
+      state: agency.state,
+      zip: agency.zip,
+      country: agency.country,
+      billingType: agency.billingType ?? null,
+      subscriptionTier: agency.subscriptionTier ?? null,
+      customPricing: agency.customPricing ? Number(agency.customPricing) : null,
+      internalNotes: agency.internalNotes,
+      createdAt: agency.createdAt,
+    });
+  } catch (error) {
+    console.error('Get agency error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Update agency (Super Admin only)
+const updateAgencySuperAdminSchema = z.object({
+  name: z.string().min(1).optional(),
+  website: z.string().optional(),
+  industry: z.string().optional(),
+  agencySize: z.string().optional(),
+  numberOfClients: z.coerce.number().int().min(0).optional().nullable(),
+  contactName: z.string().optional(),
+  contactEmail: z.string().email().optional(),
+  contactPhone: z.string().optional(),
+  contactJobTitle: z.string().optional(),
+  streetAddress: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zip: z.string().optional(),
+  country: z.string().optional(),
+  subdomain: z.string().optional(),
+  billingType: z.enum(['paid', 'free', 'custom']).optional().nullable(),
+  subscriptionTier: z.string().optional().nullable(),
+  customPricing: z.coerce.number().optional().nullable(),
+  internalNotes: z.string().optional().nullable(),
+}).refine((data) => {
+  const w = data.website;
+  if (!w || w === '') return true;
+  try {
+    new URL(w.startsWith('http') ? w : `https://${w}`);
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: 'Agency website must be a valid URL', path: ['website'] });
+
+router.put('/:agencyId', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const { agencyId } = req.params;
+    const updateData = updateAgencySuperAdminSchema.parse(req.body);
+
+    const agency = await prisma.agency.findUnique({
+      where: { id: agencyId },
+    });
+    if (!agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+
+    const newSubdomain = updateData.subdomain !== undefined ? (updateData.subdomain?.trim() || null) : undefined;
+    if (newSubdomain !== undefined && newSubdomain !== agency.subdomain && newSubdomain) {
+      const existing = await prisma.agency.findFirst({
+        where: { subdomain: newSubdomain },
+      });
+      if (existing) {
+        return res.status(400).json({ message: 'Subdomain already taken' });
+      }
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (updateData.name !== undefined) payload.name = updateData.name;
+    if (updateData.website !== undefined) payload.website = updateData.website;
+    if (updateData.industry !== undefined) payload.industry = updateData.industry;
+    if (updateData.agencySize !== undefined) payload.agencySize = updateData.agencySize;
+    if (updateData.numberOfClients !== undefined) payload.numberOfClients = updateData.numberOfClients;
+    if (updateData.contactName !== undefined) payload.contactName = updateData.contactName;
+    if (updateData.contactEmail !== undefined) payload.contactEmail = updateData.contactEmail;
+    if (updateData.contactPhone !== undefined) payload.contactPhone = updateData.contactPhone;
+    if (updateData.contactJobTitle !== undefined) payload.contactJobTitle = updateData.contactJobTitle;
+    if (updateData.streetAddress !== undefined) payload.streetAddress = updateData.streetAddress;
+    if (updateData.city !== undefined) payload.city = updateData.city;
+    if (updateData.state !== undefined) payload.state = updateData.state;
+    if (updateData.zip !== undefined) payload.zip = updateData.zip;
+    if (updateData.country !== undefined) payload.country = updateData.country;
+    if (updateData.subdomain !== undefined) payload.subdomain = newSubdomain ?? null;
+    if (updateData.billingType !== undefined) payload.billingType = updateData.billingType;
+    if (updateData.subscriptionTier !== undefined) payload.subscriptionTier = updateData.subscriptionTier;
+    if (updateData.customPricing !== undefined) payload.customPricing = updateData.customPricing;
+    if (updateData.internalNotes !== undefined) payload.internalNotes = updateData.internalNotes;
+
+    const updated = await prisma.agency.update({
+      where: { id: agencyId },
+      data: payload,
+    });
+
+    res.json({
+      id: updated.id,
+      name: updated.name,
+      subdomain: updated.subdomain,
+      website: updated.website,
+      industry: updated.industry,
+      agencySize: updated.agencySize,
+      numberOfClients: updated.numberOfClients,
+      contactName: updated.contactName,
+      contactEmail: updated.contactEmail,
+      contactPhone: updated.contactPhone,
+      contactJobTitle: updated.contactJobTitle,
+      streetAddress: updated.streetAddress,
+      city: updated.city,
+      state: updated.state,
+      zip: updated.zip,
+      country: updated.country,
+      billingType: updated.billingType,
+      subscriptionTier: updated.subscriptionTier,
+      customPricing: updated.customPricing ? Number(updated.customPricing) : null,
+      internalNotes: updated.internalNotes,
+      createdAt: updated.createdAt,
+    });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+    }
+    if (error.code === 'P2002') {
+      return res.status(400).json({ message: 'Subdomain already taken' });
+    }
+    console.error('Update agency error:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -1411,219 +1820,6 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
   }
 });
 
-// Get current user's agency (includes tier for UI: Your Business vs Clients)
-router.get('/me', authenticateToken, async (req, res) => {
-  try {
-    const user = req.user;
-
-    // SUPER_ADMIN users don't have agency memberships - return null gracefully
-    if (user.role === 'SUPER_ADMIN') {
-      return res.json(null);
-    }
-
-    // Get user's first agency membership
-    const membership = await prisma.userAgency.findFirst({
-      where: { userId: user.userId },
-      include: {
-        agency: true,
-      },
-    });
-
-    if (!membership) {
-      return res.status(404).json({ message: 'No agency found for user' });
-    }
-
-    const tierConfig = getTierConfig(membership.agency.subscriptionTier);
-    const trialEndsAt = membership.agency.trialEndsAt ?? null;
-    const now = new Date();
-    const trialActive = trialEndsAt && trialEndsAt > now;
-    const trialDaysLeft =
-      trialEndsAt && trialEndsAt > now
-        ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000))
-        : null;
-    const billingType = membership.agency.billingType ?? null;
-    const trialExpired = billingType === "free" && !trialActive;
-
-    const tierId = tierConfig?.id ?? null;
-    const accountActivated = !!(membership.agency as { stripeCustomerId?: string | null }).stripeCustomerId;
-    res.json({
-      id: membership.agency.id,
-      name: membership.agency.name,
-      subdomain: membership.agency.subdomain,
-      createdAt: membership.agency.createdAt,
-      agencyRole: membership.agencyRole,
-      subscriptionTier: membership.agency.subscriptionTier ?? null,
-      tierId,
-      isBusinessTier: tierConfig?.type === "business",
-      maxDashboards: tierConfig?.maxDashboards ?? null,
-      trialEndsAt: trialEndsAt?.toISOString() ?? null,
-      trialActive: !!trialActive,
-      trialDaysLeft,
-      trialExpired: trialExpired || undefined,
-      billingType: billingType ?? undefined,
-      accountActivated,
-      allowedAddOns: getAllowedAddOnOptions(tierId as TierId | null),
-      basePriceMonthlyUsd: tierConfig?.priceMonthlyUsd ?? null,
-    });
-  } catch (error) {
-    console.error('Get user agency error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-// Update agency settings
-const updateAgencySchema = z.object({
-  name: z.string().min(1).optional(),
-  subdomain: z.string().optional(),
-});
-
-router.put('/me', authenticateToken, async (req, res) => {
-  try {
-    const user = req.user;
-    const updateData = updateAgencySchema.parse(req.body);
-
-    // SUPER_ADMIN users don't have agency memberships
-    if (user.role === 'SUPER_ADMIN') {
-      return res.status(403).json({ message: 'SUPER_ADMIN users cannot update agency settings' });
-    }
-
-    // Get user's first agency membership
-    const membership = await prisma.userAgency.findFirst({
-      where: { userId: user.userId },
-      include: {
-        agency: true,
-      },
-    });
-
-    if (!membership) {
-      return res.status(404).json({ message: 'No agency found for user' });
-    }
-
-    // Check permissions - only OWNER, ADMIN, or SUPER_ADMIN can update
-    if (
-      membership.agencyRole !== 'OWNER' &&
-      user.role !== 'ADMIN' &&
-      user.role !== 'SUPER_ADMIN'
-    ) {
-      return res.status(403).json({ message: 'Access denied. Only agency owners can update settings.' });
-    }
-
-    // Check if subdomain is already taken (if being updated)
-    if (updateData.subdomain && updateData.subdomain !== membership.agency.subdomain) {
-      const existingAgency = await prisma.agency.findUnique({
-        where: { subdomain: updateData.subdomain },
-      });
-
-      if (existingAgency) {
-        return res.status(400).json({ message: 'Subdomain already taken' });
-      }
-    }
-
-    // Update agency
-    const updatedAgency = await prisma.agency.update({
-      where: { id: membership.agency.id },
-      data: updateData,
-    });
-
-    res.json({
-      id: updatedAgency.id,
-      name: updatedAgency.name,
-      subdomain: updatedAgency.subdomain,
-      createdAt: updatedAgency.createdAt,
-    });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      return res.status(400).json({ message: 'Invalid input', errors: error.errors });
-    }
-    if (error.code === 'P2002') {
-      return res.status(400).json({ message: 'Subdomain already taken' });
-    }
-    console.error('Update agency error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-// Managed Services: list active for current user's agency (AGENCY, ADMIN, SUPER_ADMIN only; no SPECIALIST)
-router.get('/managed-services', authenticateToken, async (req, res) => {
-  try {
-    const user = req.user;
-    if (user.role === 'SPECIALIST') {
-      return res.status(403).json({ message: 'Access denied. Specialists cannot view managed services.' });
-    }
-    const membership = await prisma.userAgency.findFirst({
-      where: { userId: user.userId },
-      select: { agencyId: true },
-    });
-    if (!membership && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
-      return res.json([]);
-    }
-    const pendingOnly = req.query.pendingOnly === 'true' && user.role === 'SUPER_ADMIN';
-    const agencyId = membership?.agencyId;
-
-    if (pendingOnly) {
-      const list = await prisma.managedService.findMany({
-        where: { status: 'PENDING' },
-        include: {
-          client: { select: { id: true, name: true } },
-          agency: { select: { id: true, name: true } },
-        },
-        orderBy: { startDate: 'desc' },
-      });
-      return res.json(list.map((m) => ({
-        id: m.id,
-        clientId: m.clientId,
-        clientName: m.client.name,
-        packageId: m.packageId,
-        packageName: m.packageName,
-        monthlyPrice: m.monthlyPrice,
-        commissionPercent: m.commissionPercent,
-        monthlyCommission: m.monthlyCommission,
-        startDate: m.startDate,
-        status: m.status,
-        agencyId: m.agency.id,
-        agencyName: m.agency.name,
-      })));
-    }
-
-    if (!agencyId && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')) {
-      return res.json([]);
-    }
-    const list = await prisma.managedService.findMany({
-      where: { agencyId, status: { in: ['ACTIVE', 'PENDING'] } },
-      include: { client: { select: { id: true, name: true, status: true } } },
-      orderBy: [{ status: 'asc' }, { startDate: 'desc' }], // ACTIVE before PENDING (asc), then newest first
-    });
-    // One row per client: prefer ACTIVE over PENDING so approved status always shows after Super Admin approval
-    const byClient = new Map<string, typeof list[0]>();
-    for (const m of list) {
-      const existing = byClient.get(m.clientId);
-      if (!existing || m.status === 'ACTIVE') byClient.set(m.clientId, m);
-    }
-    const deduped = Array.from(byClient.values());
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.json(deduped.map((m) => {
-      const client = m.client as { id: string; name: string; status?: string };
-      const clientActive = client.status === 'ACTIVE';
-      const status = (m.status === 'ACTIVE' || clientActive) ? 'ACTIVE' : m.status;
-      return {
-        id: m.id,
-        clientId: m.clientId,
-        clientName: m.client.name,
-        packageId: m.packageId,
-        packageName: m.packageName,
-        monthlyPrice: m.monthlyPrice,
-        commissionPercent: m.commissionPercent,
-        monthlyCommission: m.monthlyCommission,
-        startDate: m.startDate,
-        status,
-      };
-    }));
-  } catch (err: any) {
-    console.error('List managed services error:', err);
-    res.status(500).json({ message: err?.message || 'Failed to list managed services' });
-  }
-});
-
 const activateManagedServiceSchema = z.object({
   packageId: z.enum(['foundation', 'growth', 'domination', 'market_domination', 'custom']),
   clientId: z.string().min(1),
@@ -2054,40 +2250,6 @@ router.patch('/managed-services/:id/cancel', authenticateToken, async (req, res)
   }
 });
 
-// Add-Ons: list active for current user's agency
-router.get('/add-ons', authenticateToken, async (req, res) => {
-  try {
-    const membership = await prisma.userAgency.findFirst({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    if (!membership && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
-      return res.json([]);
-    }
-    const agencyId = membership?.agencyId;
-    if (!agencyId && (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN')) {
-      return res.json([]);
-    }
-    const list = await prisma.agencyAddOn.findMany({
-      where: { agencyId },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json(list.map((a) => ({
-      id: a.id,
-      addOnType: a.addOnType,
-      addOnOption: a.addOnOption,
-      displayName: a.displayName,
-      details: a.details,
-      priceCents: a.priceCents,
-      billingInterval: a.billingInterval,
-      createdAt: a.createdAt,
-    })));
-  } catch (err: any) {
-    console.error('List add-ons error:', err);
-    res.status(500).json({ message: err?.message || 'Failed to list add-ons' });
-  }
-});
-
 /** Which add-on options each tier can add. Business tiers cannot add Extra Dashboards (only 1 business). */
 export function getAllowedAddOnOptions(tierId: TierId | null): {
   extra_dashboards: string[];
@@ -2098,6 +2260,8 @@ export function getAllowedAddOnOptions(tierId: TierId | null): {
   const keywordLookups = ['100', '300', '500'];
   if (!tierId) return { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] };
   switch (tierId) {
+    case 'free':
+      return { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] };
     case 'business_lite':
     case 'business_pro':
       return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };

@@ -6,6 +6,7 @@
 export type TierType = "agency" | "business";
 
 export type TierId =
+  | "free"
   | "solo"
   | "starter"
   | "growth"
@@ -35,6 +36,7 @@ export interface TierConfig {
 }
 
 export const TIER_IDS: TierId[] = [
+  "free",
   "solo",
   "starter",
   "growth",
@@ -44,10 +46,25 @@ export const TIER_IDS: TierId[] = [
   "business_pro",
 ];
 
-export const AGENCY_TIER_IDS: TierId[] = ["solo", "starter", "growth", "pro", "enterprise"];
+export const AGENCY_TIER_IDS: TierId[] = ["free", "solo", "starter", "growth", "pro", "enterprise"];
 export const BUSINESS_TIER_IDS: TierId[] = ["business_lite", "business_pro"];
 
 export const TIERS: Record<TierId, TierConfig> = {
+  free: {
+    id: "free",
+    name: "Free",
+    type: "agency",
+    maxDashboards: 0,
+    keywordsPerDashboard: 0,
+    keywordsTotal: null,
+    keywordResearchCreditsPerMonth: 0,
+    rankUpdateFrequency: "daily",
+    aiUpdateFrequency: "weekly",
+    maxTeamUsers: 0,
+    hasWhiteLabel: true,
+    hasClientPortal: true,
+    priceMonthlyUsd: 0,
+  },
   solo: {
     id: "solo",
     name: "Solo",
@@ -162,6 +179,7 @@ export function normalizeTierId(value: string | null | undefined): TierId | null
   if (TIER_IDS.includes(v as TierId)) return v as TierId;
   if (v === "business_lite" || v === "biz_lite") return "business_lite";
   if (v === "business_pro" || v === "biz_pro") return "business_pro";
+  if (v === "free") return "free";
   return null;
 }
 

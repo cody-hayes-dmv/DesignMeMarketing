@@ -6516,22 +6516,22 @@ const ClientDashboardPage: React.FC = () => {
                                   type="button"
                                   onClick={() => {
                                     setWorkLogAddMenuOpen(false);
-                                    setShowOnboardingModal(true);
-                                  }}
-                                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
-                                >
-                                  Add onboarding task
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setWorkLogAddMenuOpen(false);
                                     setEditingWorkLogRecurringRule(null);
                                     setShowRecurringTaskModal(true);
                                   }}
                                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
                                 >
                                   Add a recurring task
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWorkLogAddMenuOpen(false);
+                                    setShowOnboardingModal(true);
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                  Use a template
                                 </button>
                               </div>
                             )}
@@ -7060,7 +7060,7 @@ const ClientDashboardPage: React.FC = () => {
             document.body
           )}
 
-              {/* Onboarding tasks modal (from Work Log "Add onboarding task") */}
+              {/* Onboarding tasks modal (from Work Log "Use a template") */}
               {!reportOnly && (
                 <OnboardingTemplateModal
                   open={showOnboardingModal}

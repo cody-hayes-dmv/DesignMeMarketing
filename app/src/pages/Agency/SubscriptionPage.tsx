@@ -206,7 +206,7 @@ const SubscriptionPage = () => {
           {showAdminManagedMessage && (
             <div className="mb-6 p-4 rounded-xl bg-blue-50 border border-blue-200">
               <p className="text-sm font-medium text-blue-800">
-                Your account is set up as <strong>{data.billingType === "custom" ? "Manual Invoice (Enterprise)" : "No Charge – Free Account"}</strong>. Billing and plan changes are managed by your administrator. Contact your administrator for billing or plan questions.
+                Your account is set up as <strong>{data.billingType === "custom" ? "Enterprise" : "No Charge – Free Account"}</strong>. Billing and plan changes are managed by your administrator. Contact your administrator for billing or plan questions.
               </p>
             </div>
           )}

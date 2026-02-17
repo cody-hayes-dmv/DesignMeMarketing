@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { RootState } from "@/store";
-import { fetchAgencies, createAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
+import { fetchAgencies, createAgency, updateAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
 import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
@@ -93,6 +93,8 @@ const AgenciesPage = () => {
     const dispatch = useDispatch();
     const { agencies, loading } = useSelector((state: RootState) => state.agency);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showEditAgencyModal, setShowEditAgencyModal] = useState(false);
+    const [editingAgency, setEditingAgency] = useState<{ id: string; name: string } | null>(null);
     const [showMembersModal, setShowMembersModal] = useState(false);
     const [showClientsModal, setShowClientsModal] = useState(false);
     const [selectedAgencyId, setSelectedAgencyId] = useState<string | null>(null);
@@ -162,6 +164,29 @@ const AgenciesPage = () => {
         currentTools: "",
     };
     const [createForm, setCreateForm] = useState(initialCreateForm);
+    const initialEditForm = {
+        name: "",
+        website: "",
+        industry: "",
+        agencySize: "",
+        numberOfClients: "" as string | number,
+        contactName: "",
+        contactEmail: "",
+        contactPhone: "",
+        contactJobTitle: "",
+        streetAddress: "",
+        city: "",
+        state: "",
+        zip: "",
+        country: "United States",
+        subdomain: "",
+        billingType: "" as "" | "paid" | "free" | "custom",
+        subscriptionTier: "" as string,
+        customPricing: "" as string | number,
+        internalNotes: "",
+    };
+    const [editForm, setEditForm] = useState(initialEditForm);
+    const [loadingEditAgency, setLoadingEditAgency] = useState(false);
     const [setupIntentClientSecret, setSetupIntentClientSecret] = useState<string | null>(null);
     const stripePaymentRef = useRef<StripePaymentHandle>(null);
 
@@ -301,7 +326,7 @@ const AgenciesPage = () => {
             toast.error("Please select a billing type.");
             return;
         }
-        if (createForm.billingOption !== "manual_invoice" && !createForm.tier) {
+        if (createForm.billingOption === "charge" && !createForm.tier) {
             toast.error("Please select a subscription tier.");
             return;
         }
@@ -349,7 +374,7 @@ const AgenciesPage = () => {
                 subdomain: createForm.subdomain?.trim() || undefined,
                 billingOption: createForm.billingOption,
                 paymentMethodId,
-                tier: createForm.tier || undefined,
+                tier: createForm.billingOption === "no_charge" ? undefined : (createForm.tier || undefined),
                 customPricing: createForm.billingOption === "manual_invoice" && createForm.customPricing !== "" ? Number(createForm.customPricing) : undefined,
                 internalNotes: createForm.internalNotes || undefined,
                 referralSource: createForm.referralSource || undefined,
@@ -372,6 +397,98 @@ const AgenciesPage = () => {
 
     const handleDeleteAgency = (agencyId: string, agencyName: string) => {
         setDeleteAgencyConfirm({ isOpen: true, agencyId, agencyName });
+    };
+
+    const handleEditAgencyClick = async (agencyId: string, agencyName: string) => {
+        setEditingAgency({ id: agencyId, name: agencyName });
+        setShowEditAgencyModal(true);
+        setLoadingEditAgency(true);
+        try {
+            const res = await api.get(`/agencies/${agencyId}`);
+            const a = res.data;
+            setEditForm({
+                name: a.name ?? "",
+                website: a.website ?? "",
+                industry: a.industry ?? "",
+                agencySize: a.agencySize ?? "",
+                numberOfClients: a.numberOfClients ?? "",
+                contactName: a.contactName ?? "",
+                contactEmail: a.contactEmail ?? "",
+                contactPhone: a.contactPhone ?? "",
+                contactJobTitle: a.contactJobTitle ?? "",
+                streetAddress: a.streetAddress ?? "",
+                city: a.city ?? "",
+                state: a.state ?? "",
+                zip: a.zip ?? "",
+                country: a.country ?? "United States",
+                subdomain: a.subdomain ?? "",
+                billingType: (a.billingType ?? "") as "" | "paid" | "free" | "custom",
+                subscriptionTier: a.subscriptionTier ?? "",
+                customPricing: a.customPricing ?? "",
+                internalNotes: a.internalNotes ?? "",
+            });
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message ?? "Failed to load agency");
+            setShowEditAgencyModal(false);
+            setEditingAgency(null);
+        } finally {
+            setLoadingEditAgency(false);
+        }
+    };
+
+    const handleUpdateAgency = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingAgency) return;
+        if (!editForm.name.trim()) {
+            toast.error("Agency name is required.");
+            return;
+        }
+        if (!editForm.website.trim()) {
+            toast.error("Agency website is required.");
+            return;
+        }
+        if (!editForm.contactName.trim()) {
+            toast.error("Primary contact name is required.");
+            return;
+        }
+        if (!editForm.contactEmail.trim()) {
+            toast.error("Contact email is required.");
+            return;
+        }
+        const website = editForm.website.trim().startsWith("http") ? editForm.website.trim() : `https://${editForm.website.trim()}`;
+        try {
+            await dispatch(updateAgency({
+                agencyId: editingAgency.id,
+                data: {
+                    name: editForm.name.trim(),
+                    website,
+                    industry: editForm.industry || undefined,
+                    agencySize: editForm.agencySize || undefined,
+                    numberOfClients: editForm.numberOfClients === "" ? undefined : Number(editForm.numberOfClients),
+                    contactName: editForm.contactName.trim(),
+                    contactEmail: editForm.contactEmail.trim(),
+                    contactPhone: editForm.contactPhone || undefined,
+                    contactJobTitle: editForm.contactJobTitle || undefined,
+                    streetAddress: editForm.streetAddress || undefined,
+                    city: editForm.city || undefined,
+                    state: editForm.state || undefined,
+                    zip: editForm.zip || undefined,
+                    country: editForm.country || undefined,
+                    subdomain: editForm.subdomain?.trim() || undefined,
+                    billingType: editForm.billingType || undefined,
+                    subscriptionTier: editForm.subscriptionTier || undefined,
+                    customPricing: editForm.billingType === "custom" && editForm.customPricing !== "" ? Number(editForm.customPricing) : undefined,
+                    internalNotes: editForm.internalNotes || undefined,
+                },
+            }) as any).unwrap();
+            setShowEditAgencyModal(false);
+            setEditingAgency(null);
+            setEditForm(initialEditForm);
+            toast.success("Agency updated successfully!");
+            dispatch(fetchAgencies() as any);
+        } catch (error: any) {
+            toast.error(error?.message ?? error?.response?.data?.message ?? "Failed to update agency");
+        }
     };
 
     const confirmDeleteAgency = async () => {
@@ -865,6 +982,16 @@ const AgenciesPage = () => {
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
+                                                        handleEditAgencyClick(agency.id, agency.name);
+                                                    }}
+                                                    className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                                                    title="Edit Agency"
+                                                >
+                                                    <Edit className="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
                                                         handleViewMembers(agency.id, agency.name);
                                                     }}
                                                     className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
@@ -1240,13 +1367,13 @@ const AgenciesPage = () => {
                                                     <span className="text-xs text-gray-500">(requires payment method)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
-                                                    <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "no_charge" })} className="text-primary-600" />
+                                                    <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "no_charge", tier: "" })} className="text-primary-600" />
                                                     <span>No Charge – Free Account</span>
-                                                    <span className="text-xs text-gray-500">(comped, 7-day trial)</span>
+                                                    <span className="text-xs text-gray-500">(Free tier during 7-day trial, then must subscribe)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="manual_invoice" checked={createForm.billingOption === "manual_invoice"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "manual_invoice" })} className="text-primary-600" />
-                                                    <span>Manual Invoice (Enterprise)</span>
+                                                    <span>Enterprise</span>
                                                 </label>
                                             </div>
                                         </div>
@@ -1264,6 +1391,12 @@ const AgenciesPage = () => {
                                                 )}
                                             </div>
                                         )}
+                                        {createForm.billingOption === "no_charge" && (
+                                            <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                                                Agency will use <strong>Free</strong> tier during the 7-day trial. After the trial, they must subscribe to a paid plan.
+                                            </p>
+                                        )}
+                                        {createForm.billingOption !== "no_charge" && (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier *</label>
                                             <select value={createForm.tier} onChange={(e) => setCreateForm({ ...createForm, tier: e.target.value as typeof createForm.tier })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
@@ -1281,6 +1414,7 @@ const AgenciesPage = () => {
                                                 </optgroup>
                                             </select>
                                         </div>
+                                        )}
                                         {createForm.billingOption === "manual_invoice" && (
                                             <>
                                                 <div>
@@ -1416,6 +1550,220 @@ const AgenciesPage = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Agency Modal */}
+            {showEditAgencyModal && editingAgency && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+                        <div className="flex justify-between items-center px-6 py-5 shrink-0 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+                                    <Edit className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold">Edit Agency</h2>
+                                    <p className="text-sm text-white/90">{editingAgency.name}</p>
+                                </div>
+                            </div>
+                            <button type="button" onClick={() => { setShowEditAgencyModal(false); setEditingAgency(null); }} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        {loadingEditAgency ? (
+                            <div className="p-12 text-center text-gray-500">Loading agency...</div>
+                        ) : (
+                        <form onSubmit={handleUpdateAgency} className="flex flex-col min-h-0 bg-gray-50/50">
+                            <div className="p-6 overflow-y-auto space-y-5 flex-1">
+                                {/* Section A: Agency Information */}
+                                <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        AGENCY INFORMATION
+                                    </h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Agency Name *</label>
+                                            <input type="text" required value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="e.g. TKM Agency" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Agency Website *</label>
+                                            <input type="url" required value={editForm.website} onChange={(e) => setEditForm({ ...editForm, website: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="https://tkmdigital.com" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Industry/Specialty</label>
+                                            <select value={editForm.industry} onChange={(e) => setEditForm({ ...editForm, industry: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select...</option>
+                                                <option value="Full Service Agency">Full Service Agency</option>
+                                                <option value="SEO Specialist">SEO Specialist</option>
+                                                <option value="Web Design">Web Design</option>
+                                                <option value="PPC Agency">PPC Agency</option>
+                                                <option value="Social Media">Social Media</option>
+                                                <option value="Local Marketing">Local Marketing</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Agency Size</label>
+                                            <select value={editForm.agencySize} onChange={(e) => setEditForm({ ...editForm, agencySize: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select...</option>
+                                                <option value="Solo (1 person)">Solo (1 person)</option>
+                                                <option value="Small (2-5 employees)">Small (2-5 employees)</option>
+                                                <option value="Medium (6-15 employees)">Medium (6-15 employees)</option>
+                                                <option value="Large (16-30 employees)">Large (16-30 employees)</option>
+                                                <option value="Enterprise (30+ employees)">Enterprise (30+ employees)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Number of Current Clients</label>
+                                            <input type="number" min={0} value={editForm.numberOfClients} onChange={(e) => setEditForm({ ...editForm, numberOfClients: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="e.g. 12" />
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Section B: Primary Contact */}
+                                <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                        PRIMARY CONTACT
+                                    </h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Primary Contact Name *</label>
+                                            <input type="text" required value={editForm.contactName} onChange={(e) => setEditForm({ ...editForm, contactName: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="e.g. Johnny Doe" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email *</label>
+                                            <input type="email" required value={editForm.contactEmail} onChange={(e) => setEditForm({ ...editForm, contactEmail: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="johnny@tkmdigital.com" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                                            <input type="tel" value={editForm.contactPhone} onChange={(e) => setEditForm({ ...editForm, contactPhone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="+1 (631) 555-1234" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
+                                            <input type="text" value={editForm.contactJobTitle} onChange={(e) => setEditForm({ ...editForm, contactJobTitle: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Owner, Marketing Director" />
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Section C: Business Address */}
+                                <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                        BUSINESS ADDRESS
+                                    </h3>
+                                    <div className="space-y-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div className="sm:col-span-2">
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Street Address</label>
+                                            <input type="text" value={editForm.streetAddress} onChange={(e) => setEditForm({ ...editForm, streetAddress: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="375 Commack Road" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                                            <input type="text" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Deer Park" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">State/Province</label>
+                                            <input type="text" value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="NY" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">ZIP/Postal Code</label>
+                                            <input type="text" value={editForm.zip} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="11729" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                                            <select value={editForm.country} onChange={(e) => setEditForm({ ...editForm, country: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="United States">United States</option>
+                                                <option value="Canada">Canada</option>
+                                                <option value="United Kingdom">United Kingdom</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Section D: Subdomain */}
+                                <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                                        WHITE LABEL SUBDOMAIN
+                                    </h3>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Custom Subdomain</label>
+                                        <input type="text" value={editForm.subdomain} onChange={(e) => setEditForm({ ...editForm, subdomain: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="tkmdigital" />
+                                        <p className="mt-1 text-xs text-gray-500">e.g. tkmdigital → tkmdigital.yourplatform.com. Leave blank if not needed.</p>
+                                    </div>
+                                </section>
+
+                                {/* Section E: Billing & Subscription */}
+                                <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
+                                    <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                        BILLING & SUBSCRIPTION
+                                    </h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type</label>
+                                            <select value={editForm.billingType} onChange={(e) => setEditForm({ ...editForm, billingType: e.target.value as typeof editForm.billingType, subscriptionTier: e.target.value === "free" ? "" : editForm.subscriptionTier })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <option value="">Select...</option>
+                                                <option value="paid">Paid (Charge to Card)</option>
+                                                <option value="free">Free / No Charge</option>
+                                                <option value="custom">Enterprise / Manual Invoice</option>
+                                            </select>
+                                        </div>
+                                        {editForm.billingType && editForm.billingType !== "free" && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier</label>
+                                                <select value={editForm.subscriptionTier} onChange={(e) => setEditForm({ ...editForm, subscriptionTier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                    <option value="">Select tier</option>
+                                                    <optgroup label="Agency tiers">
+                                                        <option value="free">Free – 0 dashboards</option>
+                                                        <option value="solo">Solo ($147/mo) – 3 dashboards</option>
+                                                        <option value="starter">Starter ($297/mo) – 10 dashboards</option>
+                                                        <option value="growth">Growth ($597/mo) – 25 dashboards</option>
+                                                        <option value="pro">Pro ($997/mo) – 50 dashboards</option>
+                                                        <option value="enterprise">Enterprise (Custom) – Unlimited</option>
+                                                    </optgroup>
+                                                    <optgroup label="Business tiers">
+                                                        <option value="business_lite">Business Lite ($79/mo) – 1 dashboard</option>
+                                                        <option value="business_pro">Business Pro ($197/mo) – 1 dashboard</option>
+                                                    </optgroup>
+                                                </select>
+                                            </div>
+                                        )}
+                                        {editForm.billingType === "custom" && (
+                                            <>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-1">Custom pricing</label>
+                                                    <input type="number" step="0.01" min={0} value={editForm.customPricing} onChange={(e) => setEditForm({ ...editForm, customPricing: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="0.00" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-1">Internal notes</label>
+                                                    <textarea value={editForm.internalNotes} onChange={(e) => setEditForm({ ...editForm, internalNotes: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Notes for internal use" />
+                                                </div>
+                                            </>
+                                        )}
+                                        {editForm.billingType !== "custom" && editForm.billingType !== "free" && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Internal notes</label>
+                                                <textarea value={editForm.internalNotes} onChange={(e) => setEditForm({ ...editForm, internalNotes: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Notes for internal use" />
+                                            </div>
+                                        )}
+                                    </div>
+                                </section>
+                            </div>
+                            <div className="flex gap-3 px-6 py-4 border-t border-gray-200 shrink-0 bg-gray-100/80 rounded-b-2xl">
+                                <button type="button" onClick={() => { setShowEditAgencyModal(false); setEditingAgency(null); }} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium">
+                                    Cancel
+                                </button>
+                                <button type="submit" className="flex-1 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </form>
+                        )}
                     </div>
                 </div>
             )}
