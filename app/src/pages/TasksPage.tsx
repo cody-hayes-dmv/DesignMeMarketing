@@ -200,6 +200,11 @@ const TasksPage = () => {
         [tasks]
     );
 
+    const upcomingCount = useMemo(
+        () => tasks.filter((t) => t.status !== "DONE").length,
+        [tasks]
+    );
+
     const clientOptions = useMemo(() => {
         const map = new Map<string, { id: string; name: string }>();
         for (const t of tasks) {
@@ -220,8 +225,10 @@ const TasksPage = () => {
             (t.client?.name ?? "").toLowerCase().includes(q)
         );
         
-        const matchesStatus = filterStatus === "all" || 
-            (filterStatus === "overdue" && isOverdue(t.dueDate)) ||
+        const matchesStatus =
+            filterStatus === "all" ||
+            (filterStatus === "upcoming" && t.status !== "DONE") ||
+            (filterStatus === "overdue" && t.status !== "DONE") ||
             t.status.toLowerCase() === filterStatus.toLowerCase();
 
         const matchesClient =
@@ -382,13 +389,13 @@ const TasksPage = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
                 <button
                     type="button"
-                    onClick={() => setFilterStatus("all")}
-                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "all" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                    onClick={() => setFilterStatus("upcoming")}
+                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "upcoming" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
                 >
                     <div className="flex items-center justify-between">
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Total Tasks</p>
-                            <p className="text-2xl font-bold text-gray-900">{tasks.length}</p>
+                            <p className="text-sm font-medium text-gray-600">Total Upcoming Tasks</p>
+                            <p className="text-2xl font-bold text-gray-900">{upcomingCount}</p>
                         </div>
                         <ListTodo className="h-8 w-8 text-primary-600" />
                     </div>
@@ -512,7 +519,8 @@ const TasksPage = () => {
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         >
                             <option value="all">All Tasks</option>
-                            <option value="overdue">Overdue</option>
+                            <option value="upcoming">Upcoming</option>
+                            <option value="overdue">Overdue & Upcoming</option>
                             <option value="TODO">TODO</option>
                             <option value="IN_PROGRESS">IN_PROGRESS</option>
                             <option value="REVIEW">REVIEW</option>

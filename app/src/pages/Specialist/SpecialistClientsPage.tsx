@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import { Loader2, PersonStanding } from "lucide-react";
+import { Loader2, PersonStanding, Info } from "lucide-react";
 import { Link } from "react-router-dom";
+import ClientAccountFormModal, { EMPTY_CLIENT_FORM } from "@/components/ClientAccountFormModal";
+import { clientToFormState } from "@/lib/clientAccountForm";
+import type { Client } from "@/store/slices/clientSlice";
 
 interface TaskWithClient {
   id: string;
@@ -23,6 +26,8 @@ interface ClientRow {
 const SpecialistClientsPage = () => {
   const [tasks, setTasks] = useState<TaskWithClient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [clientsById, setClientsById] = useState<Record<string, Client>>({});
+  const [companyInfoClientId, setCompanyInfoClientId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTasks = async () => {
@@ -37,6 +42,27 @@ const SpecialistClientsPage = () => {
     };
     fetchTasks();
   }, []);
+
+  useEffect(() => {
+    const fetchClients = async () => {
+      try {
+        const res = await api.get<Client[]>("/clients");
+        const list = Array.isArray(res.data) ? res.data : [];
+        const map: Record<string, Client> = {};
+        for (const c of list) map[c.id] = c;
+        setClientsById(map);
+      } catch {
+        setClientsById({});
+      }
+    };
+    fetchClients();
+  }, []);
+
+  const companyInfoForm = useMemo(() => {
+    if (!companyInfoClientId) return EMPTY_CLIENT_FORM;
+    const client = clientsById[companyInfoClientId];
+    return client ? clientToFormState(client) : EMPTY_CLIENT_FORM;
+  }, [companyInfoClientId, clientsById]);
 
   const clients: ClientRow[] = useMemo(() => {
     const byId = new Map<string, ClientRow>();
@@ -96,6 +122,7 @@ const SpecialistClientsPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Client</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Domain</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Your tasks</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Company Info</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
@@ -114,12 +141,33 @@ const SpecialistClientsPage = () => {
                       {client.taskCount} task{client.taskCount !== 1 ? "s" : ""} →
                     </Link>
                   </td>
+                  <td className="px-6 py-4 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => setCompanyInfoClientId(client.id)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-800 font-medium hover:bg-indigo-100 transition-colors"
+                    >
+                      <Info className="h-4 w-4" />
+                      View
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <ClientAccountFormModal
+        open={companyInfoClientId !== null}
+        title="Company Information"
+        subtitle="Account information (read-only)"
+        form={companyInfoForm}
+        setForm={() => {}}
+        canEdit={false}
+        showStatus={false}
+        onClose={() => setCompanyInfoClientId(null)}
+      />
     </div>
   );
 };

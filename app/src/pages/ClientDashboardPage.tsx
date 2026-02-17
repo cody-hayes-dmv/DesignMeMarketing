@@ -6781,7 +6781,7 @@ const ClientDashboardPage: React.FC = () => {
                       </button>
                     </div>
 
-                    <div className="flex-1 min-h-0 overflow-auto overflow-x-auto bg-gradient-to-b from-slate-50/50 to-white">
+                    <div className="overflow-auto overflow-x-auto max-h-[calc(90vh-14rem)] bg-gradient-to-b from-slate-50/50 to-white">
                       <div className="px-6 py-5 space-y-4 min-w-0">
                       <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-3">
                         <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
@@ -8617,7 +8617,7 @@ const ClientDashboardPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="flex-1 min-h-0 overflow-auto overflow-x-auto">
+                <div className="overflow-auto overflow-x-auto max-h-[calc(90vh-14rem)]">
                   <div className="px-6 py-5 space-y-4 min-w-0">
                   <div>
                     <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>

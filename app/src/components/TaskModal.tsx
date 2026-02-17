@@ -1,4 +1,4 @@
-import { createTask, updateTask, ProofItem, fetchTasks } from "@/store/slices/taskSlice";
+import { createTask, updateTask, patchTaskStatus, ProofItem, fetchTasks } from "@/store/slices/taskSlice";
 import { Task, TaskStatus } from "@/utils/types";
 import React, { useState, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
@@ -160,34 +160,48 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const handleSubmit: React.FormEventHandler = async (e) => {
         e.preventDefault();
 
-        const payload = {
-            title: form.title.trim(),
-            description: form.description || undefined,
-            category: form.category || undefined,
-            status: form.status,
-            dueDate: form.dueDate ? form.dueDate.toISOString() : undefined,
-            assigneeId: form.assigneeId || undefined,
-            clientId: form.clientId || undefined,
-            priority: form.priority || undefined,
-            estimatedHours: form.estimatedHours ? parseInt(form.estimatedHours) : undefined,
-            // Always send current proof so removals are saved (empty array clears proof on server)
-            proof: proof.length > 0 ? proof : [],
-        };
-
         try {
             if (mode === 0) {
+                const payload = {
+                    title: form.title.trim(),
+                    description: form.description || undefined,
+                    category: form.category || undefined,
+                    status: form.status,
+                    dueDate: form.dueDate ? form.dueDate.toISOString() : undefined,
+                    assigneeId: form.assigneeId || undefined,
+                    clientId: form.clientId || undefined,
+                    priority: form.priority || undefined,
+                    estimatedHours: form.estimatedHours ? parseInt(form.estimatedHours) : undefined,
+                    proof: proof.length > 0 ? proof : [],
+                };
                 await dispatch(createTask(payload) as any);
+                toast.success("Task created successfully!");
             } else if (mode === 1 && task) {
-                await dispatch(updateTask({ id: task.id, ...payload }) as any);
+                if (isSpecialistView) {
+                    await dispatch(patchTaskStatus({ id: task.id, status: form.status }) as any);
+                    toast.success("Status updated successfully!");
+                } else {
+                    const payload = {
+                        title: form.title.trim(),
+                        description: form.description || undefined,
+                        category: form.category || undefined,
+                        status: form.status,
+                        dueDate: form.dueDate ? form.dueDate.toISOString() : undefined,
+                        assigneeId: form.assigneeId || undefined,
+                        clientId: form.clientId || undefined,
+                        priority: form.priority || undefined,
+                        estimatedHours: form.estimatedHours ? parseInt(form.estimatedHours) : undefined,
+                        proof: proof.length > 0 ? proof : [],
+                    };
+                    await dispatch(updateTask({ id: task.id, ...payload }) as any);
+                    toast.success("Task updated successfully!");
+                }
             }
 
-            // Refresh tasks list
             dispatch(fetchTasks() as any);
-            toast.success(mode === 0 ? "Task created successfully!" : "Task updated successfully!");
             setOpen(false);
         } catch (error: any) {
             console.error("Failed to save task:", error);
-            // Toast is already shown by API interceptor
         }
     };
 
@@ -350,7 +364,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             type="text"
                             value={form.title}
                             onChange={(e) => setForm({ ...form, title: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            disabled={isSpecialistView}
+                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             required
                         />
                     </div>
@@ -360,7 +375,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         <textarea
                             value={form.description}
                             onChange={(e) => setForm({ ...form, description: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            disabled={isSpecialistView}
+                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             rows={3}
                         />
                     </div>
@@ -372,7 +388,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 type="text"
                                 value={form.category}
                                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                disabled={isSpecialistView}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 placeholder="e.g. On-Page SEO, Link Building"
                             />
                         </div>
@@ -404,7 +421,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 selected={form.dueDate}
                                 onChange={(date) => date && setForm({ ...form, dueDate: date })}
                                 minDate={new Date()}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                disabled={isSpecialistView}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 placeholderText="Select date"
                             />
                         </div>
@@ -416,6 +434,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                     type="text"
                                     value={form.assigneeId ? assigneeDisplay : assignableSearch}
                                     onChange={(e) => {
+                                        if (isSpecialistView) return;
                                         setAssignableSearch(e.target.value);
                                         setAssignToOpen(true);
                                         if (form.assigneeId && e.target.value !== assigneeDisplay) {
@@ -423,11 +442,12 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                             setAssigneeDisplay("");
                                         }
                                     }}
-                                    onFocus={() => setAssignToOpen(true)}
+                                    onFocus={() => !isSpecialistView && setAssignToOpen(true)}
+                                    disabled={isSpecialistView}
                                     placeholder="Search by name or email (Super Admin, Admin, Specialist)"
-                                    className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    className={`flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 />
-                                {form.assigneeId && (
+                                {form.assigneeId && !isSpecialistView && (
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -442,7 +462,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                     </button>
                                 )}
                             </div>
-                            {assignToOpen && (
+                            {assignToOpen && !isSpecialistView && (
                                 <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
                                     {assignableLoading ? (
                                         <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
@@ -482,7 +502,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         <select
                             value={form.clientId}
                             onChange={(e) => setForm({ ...form, clientId: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            disabled={isSpecialistView}
+                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         >
                             <option value="">No client</option>
                             {sortedClients.map((client) => (
@@ -499,7 +520,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <select
                                 value={form.priority}
                                 onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                disabled={isSpecialistView}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             >
                                 <option value="">None</option>
                                 <option value="high">High</option>
@@ -513,7 +535,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 type="number"
                                 value={form.estimatedHours}
                                 onChange={(e) => setForm({ ...form, estimatedHours: e.target.value })}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                disabled={isSpecialistView}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 placeholder="(optional)"
                                 min="0"
                             />
