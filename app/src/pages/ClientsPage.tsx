@@ -1458,7 +1458,7 @@ const ClientsPage = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateClient} className="flex flex-col flex-1 min-h-0 bg-gray-50/50 overflow-hidden">
+            <form onSubmit={(e) => e.preventDefault()} className="flex flex-col flex-1 min-h-0 bg-gray-50/50 overflow-hidden">
               <>
                 {/* Step indicator - 6-part flow for all roles */}
                   <div className="px-6 pt-4 pb-2 shrink-0 border-b border-gray-200 bg-white">
@@ -1678,7 +1678,8 @@ const ClientsPage = () => {
                         </button>
                       ) : (
                         <button
-                          type="submit"
+                          type="button"
+                          onClick={(e) => handleCreateClient(e as unknown as React.FormEvent)}
                           className="w-full max-w-[160px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
                         >
                           Create Client
