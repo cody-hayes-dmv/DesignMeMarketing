@@ -520,7 +520,8 @@ const AgenciesPage = () => {
                 state: editForm.state || undefined,
                 zip: editForm.zip || undefined,
                 country: editForm.country || undefined,
-                subdomain: editForm.subdomain?.trim() || undefined,
+                // Send null when blank so backend clears agency subdomain; otherwise send trimmed value
+                subdomain: editForm.subdomain != null && editForm.subdomain.trim() !== "" ? editForm.subdomain.trim() : null,
                 billingType: editForm.billingType || undefined,
                 subscriptionTier: editForm.subscriptionTier || undefined,
                 customPricing: editForm.billingType === "custom" && editForm.customPricing !== "" ? Number(editForm.customPricing) : undefined,
@@ -1747,7 +1748,7 @@ const AgenciesPage = () => {
                                 <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                                        WHITE LABEL SUBDOMAIN
+                                        WHITE LABEL SUBDOMAIN (Optional)
                                     </h3>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Custom Subdomain</label>

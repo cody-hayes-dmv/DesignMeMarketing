@@ -1487,7 +1487,7 @@ const updateAgencySuperAdminSchema = z.object({
   state: z.string().optional(),
   zip: z.string().optional(),
   country: z.string().optional(),
-  subdomain: z.string().optional(),
+  subdomain: z.string().optional().nullable(),
   billingType: z.enum(['paid', 'free', 'trial', 'custom']).optional().nullable(),
   subscriptionTier: z.string().optional().nullable(),
   customPricing: z.coerce.number().optional().nullable(),
@@ -1519,7 +1519,11 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Agency not found' });
     }
 
-    const newSubdomain = updateData.subdomain !== undefined ? (updateData.subdomain?.trim() || null) : undefined;
+    // When subdomain key is present (including "" or null), update to trimmed value or null; when key is undefined, leave DB unchanged
+    const newSubdomain =
+      updateData.subdomain === undefined
+        ? undefined
+        : (String(updateData.subdomain).trim() || null);
     if (newSubdomain !== undefined && newSubdomain !== agency.subdomain && newSubdomain) {
       const existing = await prisma.agency.findFirst({
         where: { subdomain: newSubdomain },
