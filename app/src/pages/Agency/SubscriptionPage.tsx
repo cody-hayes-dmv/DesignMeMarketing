@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useImperativeHandle, forwardRef } from "react";
 import {
   CreditCard,
   Users,
@@ -9,9 +9,49 @@ import {
   Download,
   ChevronUp,
   ChevronDown,
+  X,
 } from "lucide-react";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
+
+const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
+const stripePromise = stripePk ? loadStripe(stripePk) : null;
+
+type StripePaymentHandle = { confirmAndGetPaymentMethod: () => Promise<string | null> };
+
+const StripePaymentSection = forwardRef<StripePaymentHandle, { clientSecret: string }>(function StripePaymentSection({ clientSecret }, ref) {
+  const stripe = useStripe();
+  const elements = useElements();
+  useImperativeHandle(ref, () => ({
+    async confirmAndGetPaymentMethod() {
+      if (!stripe || !elements) return null;
+      const { error: submitError } = await elements.submit();
+      if (submitError) throw new Error(submitError.message ?? "Please complete the card details.");
+      const result = await stripe.confirmSetup({
+        elements,
+        clientSecret,
+        confirmParams: { return_url: window.location.href },
+      });
+      if (result.error) throw new Error(result.error.message ?? "Payment failed");
+      const setupIntent = (result as { setupIntent?: { payment_method?: string | { id?: string } } }).setupIntent;
+      const pm = setupIntent?.payment_method;
+      return typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id ?? null;
+    },
+  }));
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <PaymentElement
+        options={{
+          layout: "tabs",
+          paymentMethodOrder: ["card"],
+          wallets: { applePay: "never", googlePay: "never" },
+        }}
+      />
+    </div>
+  );
+});
 
 const PLANS = [
   { id: "solo", name: "Solo", price: 147, priceLabel: "$147", clients: 3, clientsLabel: "3 clients" },
@@ -57,6 +97,11 @@ const SubscriptionPage = () => {
   const [data, setData] = useState<SubscriptionData>(defaultSubscription);
   const [portalLoading, setPortalLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [showActivateModal, setShowActivateModal] = useState(false);
+  const [activateSetupSecret, setActivateSetupSecret] = useState<string | null>(null);
+  const [activateTier, setActivateTier] = useState<string>("solo");
+  const [activateSubmitting, setActivateSubmitting] = useState(false);
+  const activatePaymentRef = useRef<StripePaymentHandle>(null);
 
   useEffect(() => {
     if (window.location.hash === "#invoices") {
@@ -64,38 +109,138 @@ const SubscriptionPage = () => {
     }
   }, [loading]);
 
-  const fetchSubscription = async () => {
+  const applySubscriptionData = (resData: Record<string, unknown>) => {
+    const u = (resData.usage || {}) as Record<string, unknown>;
+    setData({
+      currentPlan: (resData.currentPlan as string) ?? defaultSubscription.currentPlan,
+      currentPlanPrice: (resData.currentPlanPrice as number | null) ?? defaultSubscription.currentPlanPrice,
+      nextBillingDate: (resData.nextBillingDate as string) ?? defaultSubscription.nextBillingDate,
+      paymentMethod: (resData.paymentMethod as SubscriptionData["paymentMethod"]) ?? defaultSubscription.paymentMethod,
+      trialEndsAt: (resData.trialEndsAt as string | null) ?? null,
+      trialDaysLeft: (resData.trialDaysLeft as number | null) ?? null,
+      billingType: (resData.billingType as string | null) ?? null,
+      trialExpired: (resData.trialExpired as boolean) ?? false,
+      usage: {
+        clientDashboards: (u.clientDashboards as { used: number; limit: number }) ?? defaultSubscription.usage.clientDashboards,
+        keywordsTracked: (u.keywordsTracked as { used: number; limit: number }) ?? defaultSubscription.usage.keywordsTracked,
+        researchCredits: (u.researchCredits as { used: number; limit: number }) ?? defaultSubscription.usage.researchCredits,
+        teamMembers: (u.teamMembers as { used: number; limit: number }) ?? defaultSubscription.usage.teamMembers,
+        clientsWithActiveManagedServices: (u.clientsWithActiveManagedServices as number) ?? 0,
+      },
+    });
+  };
+
+  const fetchSubscription = async (silent = false) => {
     try {
-      const res = await api.get("/seo/agency/subscription").catch(() => ({ data: null }));
+      const res = await api.get("/seo/agency/subscription");
       if (res?.data && typeof res.data === "object") {
-        setData({
-          currentPlan: res.data.currentPlan ?? defaultSubscription.currentPlan,
-          currentPlanPrice: res.data.currentPlanPrice ?? defaultSubscription.currentPlanPrice,
-          nextBillingDate: res.data.nextBillingDate ?? defaultSubscription.nextBillingDate,
-          paymentMethod: res.data.paymentMethod ?? defaultSubscription.paymentMethod,
-          trialEndsAt: res.data.trialEndsAt ?? null,
-          trialDaysLeft: res.data.trialDaysLeft ?? null,
-          billingType: res.data.billingType ?? null,
-          trialExpired: res.data.trialExpired ?? false,
-          usage: {
-            clientDashboards: res.data.usage?.clientDashboards ?? defaultSubscription.usage.clientDashboards,
-            keywordsTracked: res.data.usage?.keywordsTracked ?? defaultSubscription.usage.keywordsTracked,
-            researchCredits: res.data.usage?.researchCredits ?? defaultSubscription.usage.researchCredits,
-            teamMembers: res.data.usage?.teamMembers ?? defaultSubscription.usage.teamMembers,
-            clientsWithActiveManagedServices: res.data.usage?.clientsWithActiveManagedServices ?? 0,
-          },
-        });
+        applySubscriptionData(res.data as Record<string, unknown>);
       }
     } catch {
-      // keep default
+      if (!silent) toast.error("Could not load subscription data.");
     } finally {
       setLoading(false);
     }
   };
 
+  const ACTIVATION_TIER_KEY = "activationTier";
+
   useEffect(() => {
-    fetchSubscription();
+    const params = new URLSearchParams(window.location.search);
+    const clientSecret = params.get("setup_intent_client_secret");
+
+    if (clientSecret && stripePromise) {
+      // Return from Stripe redirect (e.g. 3D Secure): complete activation then refetch
+      let cancelled = false;
+      setLoading(true);
+      (async () => {
+        try {
+          const stripe = await stripePromise;
+          if (!stripe || cancelled) return;
+          const { setupIntent } = await stripe.retrieveSetupIntent(clientSecret);
+          const pm = setupIntent?.payment_method;
+          const paymentMethodId = typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id;
+          const tier = sessionStorage.getItem(ACTIVATION_TIER_KEY) || "solo";
+          if (!paymentMethodId || setupIntent?.status !== "succeeded") {
+            toast.error("Payment was not completed. Please try again.");
+            return;
+          }
+          await api.post("/agencies/activate-trial-subscription", {
+            paymentMethodId,
+            tier: tier as "solo" | "starter" | "growth" | "pro" | "enterprise",
+          });
+          sessionStorage.removeItem(ACTIVATION_TIER_KEY);
+          window.history.replaceState({}, "", window.location.pathname + window.location.hash || "");
+          const res = await api.get("/seo/agency/subscription");
+          if (res?.data && typeof res.data === "object") applySubscriptionData(res.data as Record<string, unknown>);
+          toast.success("Subscription activated successfully!");
+        } catch (e: any) {
+          toast.error(e?.response?.data?.message ?? e?.message ?? "Failed to complete activation.");
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    fetchSubscription(true);
   }, []);
+
+  useEffect(() => {
+    if (!showActivateModal || !stripePk) {
+      setActivateSetupSecret(null);
+      return;
+    }
+    let cancelled = false;
+    api.post("/agencies/setup-intent-for-activation")
+      .then((res) => {
+        if (!cancelled && res.data?.clientSecret) setActivateSetupSecret(res.data.clientSecret);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Could not load payment form.");
+        setShowActivateModal(false);
+      });
+    return () => { cancelled = true; };
+  }, [showActivateModal]);
+
+  const handleActivateSubscription = async () => {
+    if (!activatePaymentRef.current || !activateSetupSecret) {
+      toast.error("Please wait for the payment form to load.");
+      return;
+    }
+    setActivateSubmitting(true);
+    sessionStorage.setItem(ACTIVATION_TIER_KEY, activateTier);
+    try {
+      const paymentMethodId = await activatePaymentRef.current.confirmAndGetPaymentMethod();
+      if (!paymentMethodId) {
+        toast.error("Please complete the card details.");
+        return;
+      }
+      await api.post("/agencies/activate-trial-subscription", {
+        paymentMethodId,
+        tier: activateTier,
+      });
+      sessionStorage.removeItem(ACTIVATION_TIER_KEY);
+      toast.success("Subscription activated successfully!");
+      setShowActivateModal(false);
+      setLoading(true);
+      try {
+        const res = await api.get("/seo/agency/subscription");
+        if (res?.data && typeof res.data === "object") applySubscriptionData(res.data as Record<string, unknown>);
+      } catch {
+        toast("Subscription activated. Refreshing the page will show your plan.", { icon: "✅" });
+      } finally {
+        setLoading(false);
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.message ?? e?.message ?? "Failed to activate subscription.";
+      toast.error(msg);
+    } finally {
+      setActivateSubmitting(false);
+    }
+  };
 
   const openBillingPortal = async (options?: { flow?: "subscription_update" }) => {
     setPortalLoading(true);
@@ -185,8 +330,11 @@ const SubscriptionPage = () => {
     : "—";
   const hasTrial = data.trialDaysLeft != null && data.trialDaysLeft > 0;
   const trialExpired = data.trialExpired === true;
-  const billingManagedByAdmin = data.billingType === "free" || data.billingType === "custom";
-  // No Charge: show admin-managed message only after trial ends. Manual Invoice: always.
+  const billingManagedByAdmin = data.billingType === "custom";
+  // No charge during 7-day trial or Free account: only "Activate Subscription" is allowed; all other billing buttons disabled.
+  const isTrialFreeTier =
+    (hasTrial && !trialExpired && data.billingType === "trial") || data.billingType === "free";
+  // No Charge (custom only) or Free account after trial ended: show admin-managed message. For "free" we also show Activate button.
   const showAdminManagedMessage =
     (data.billingType === "free" && trialExpired) || data.billingType === "custom";
 
@@ -230,6 +378,15 @@ const SubscriptionPage = () => {
               <p className="text-sm font-medium text-amber-800">
                 Your free trial has ended. Contact your administrator for plan or billing questions.
               </p>
+              <p className="text-sm font-medium text-amber-800 mt-2">You can also activate a paid subscription below.</p>
+              <button
+                type="button"
+                onClick={() => setShowActivateModal(true)}
+                disabled={!stripePk}
+                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
+              >
+                Activate Subscription
+              </button>
             </div>
           )}
           {hasTrial && !trialExpired && data.billingType === "free" && (
@@ -237,9 +394,48 @@ const SubscriptionPage = () => {
               <p className="text-sm font-medium text-amber-800">
                 You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Your account is set up as No Charge; billing and plan changes are managed by your administrator after the trial.
               </p>
+              <p className="text-sm font-medium text-amber-800 mt-2">You can also activate a paid subscription below.</p>
+              <button
+                type="button"
+                onClick={() => setShowActivateModal(true)}
+                disabled={!stripePk}
+                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
+              >
+                Activate Subscription
+              </button>
             </div>
           )}
-          {hasTrial && !trialExpired && data.billingType !== "free" && (
+          {data.billingType === "free" && !hasTrial && !trialExpired && (
+            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-800">
+                Your account is set up as a <strong>Free account</strong>. You can activate a paid subscription below to get more features and higher limits.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowActivateModal(true)}
+                disabled={!stripePk}
+                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
+              >
+                Activate Subscription
+              </button>
+            </div>
+          )}
+          {hasTrial && !trialExpired && data.billingType === "trial" && (
+            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-800">
+                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Choose a paid plan before it ends to keep your account active.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowActivateModal(true)}
+                disabled={!stripePk}
+                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
+              >
+                Activate Subscription
+              </button>
+            </div>
+          )}
+          {hasTrial && !trialExpired && data.billingType !== "free" && data.billingType !== "trial" && (
             <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
               <p className="text-sm font-medium text-amber-800">
                 You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Choose a paid plan before it ends to keep your account active.
@@ -347,7 +543,7 @@ const SubscriptionPage = () => {
                 <button
                   type="button"
                   onClick={handleUpgradePlan}
-                  disabled={portalLoading || billingManagedByAdmin}
+                  disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
                 >
                   {portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronUp className="h-4 w-4" />}
@@ -356,7 +552,7 @@ const SubscriptionPage = () => {
                 <button
                   type="button"
                   onClick={handleManageBilling}
-                  disabled={portalLoading || billingManagedByAdmin}
+                  disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
                 >
                   {portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
@@ -365,7 +561,7 @@ const SubscriptionPage = () => {
                 <button
                   type="button"
                   onClick={handleViewInvoiceHistory}
-                  disabled={invoicesLoading || billingManagedByAdmin}
+                  disabled={invoicesLoading || billingManagedByAdmin || isTrialFreeTier}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
                 >
                   {invoicesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -419,7 +615,7 @@ const SubscriptionPage = () => {
                         <button
                           type="button"
                           onClick={() => handlePlanChange(plan.id, "upgrade")}
-                          disabled={portalLoading || billingManagedByAdmin}
+                          disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
                         >
                           Upgrade
@@ -428,7 +624,7 @@ const SubscriptionPage = () => {
                         <button
                           type="button"
                           onClick={() => handlePlanChange(plan.id, "downgrade")}
-                          disabled={portalLoading || billingManagedByAdmin}
+                          disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                         >
                           <ChevronDown className="h-4 w-4" /> Downgrade
@@ -437,7 +633,7 @@ const SubscriptionPage = () => {
                         <button
                           type="button"
                           onClick={handleManageBilling}
-                          disabled={portalLoading || billingManagedByAdmin}
+                          disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
                           className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                         >
                           Select
@@ -457,13 +653,89 @@ const SubscriptionPage = () => {
             <button
               type="button"
               onClick={handleViewInvoiceHistory}
-              disabled={invoicesLoading || portalLoading || billingManagedByAdmin}
+              disabled={invoicesLoading || portalLoading || billingManagedByAdmin || isTrialFreeTier}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
             >
               {invoicesLoading || portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               Download Invoices
             </button>
           </section>
+
+          {/* Activate Subscription Modal (7-day trial agencies) */}
+          {showActivateModal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-bold text-gray-900">Activate Subscription</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowActivateModal(false)}
+                    className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <p className="text-sm text-gray-600">
+                    Add your payment card and select a plan to activate your subscription. You will be charged immediately.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Subscription Tier</label>
+                    <select
+                      value={activateTier}
+                      onChange={(e) => setActivateTier(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    >
+                      {PLANS.map((plan) => (
+                        <option key={plan.id} value={plan.id}>
+                          {plan.name} – {plan.priceLabel}
+                          {plan.price != null ? "/mo" : ""} – {plan.clientsLabel}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Card details</label>
+                    {!stripePk ? (
+                      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        Stripe is not configured. Contact support.
+                      </p>
+                    ) : activateSetupSecret && stripePromise ? (
+                      <Elements stripe={stripePromise} options={{ clientSecret: activateSetupSecret }}>
+                        <StripePaymentSection ref={activatePaymentRef} clientSecret={activateSetupSecret} />
+                      </Elements>
+                    ) : (
+                      <p className="text-sm text-gray-500">Loading payment form…</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-3 p-6 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+                  <button
+                    type="button"
+                    onClick={() => setShowActivateModal(false)}
+                    className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleActivateSubscription}
+                    disabled={activateSubmitting || !activateSetupSecret}
+                    className="flex-1 px-4 py-2.5 rounded-lg font-semibold text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {activateSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin inline mr-2" />
+                        Activating…
+                      </>
+                    ) : (
+                      "Activate"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

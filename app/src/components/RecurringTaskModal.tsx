@@ -237,8 +237,9 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto px-5 py-4 bg-gray-50/50">
-            <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 bg-gray-50/50">
+            <div className="space-y-5">
               <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
                 <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -514,24 +515,25 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                 )}
               </div>
               </section>
-              <div className="flex justify-end gap-3 pt-2 bg-gray-100/80 -mx-5 -mb-4 px-5 py-4 rounded-b-2xl">
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="px-4 py-2.5 border border-gray-300 bg-white rounded-xl text-gray-700 hover:bg-gray-50 font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
-                >
-                  {submitting ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save Changes" : "Create Recurring Task")}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
+          <div className="flex-shrink-0 flex justify-end gap-3 px-5 py-4 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="px-4 py-2.5 border border-gray-300 bg-white rounded-xl text-gray-700 hover:bg-gray-50 font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
+            >
+              {submitting ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Update" : "Create")}
+            </button>
+          </div>
+          </form>
         </div>
       </div>
     </div>

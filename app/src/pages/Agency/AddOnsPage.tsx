@@ -167,7 +167,7 @@ const AddOnsPage = () => {
                 <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
                   Subscription & Billing
                 </Link>{" "}
-                to add add-ons. The 7-day free trial is for reporting only; add-ons and managed plans are paid when added or approved.
+                to add add-ons.
               </>
             )}
           </p>

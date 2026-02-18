@@ -10612,7 +10612,10 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
         trialDaysLeft = Math.max(0, Math.ceil((agency.trialEndsAt.getTime() - Date.now()) / 86400000));
       }
       billingType = agency?.billingType ?? null;
-      trialExpired = agency?.billingType === "free" && (agency?.trialEndsAt == null || agency.trialEndsAt <= new Date());
+      trialExpired =
+        agency?.trialEndsAt != null &&
+        agency.trialEndsAt <= new Date() &&
+        (agency?.billingType === "free" || agency?.billingType === "trial");
     }
 
     res.json({

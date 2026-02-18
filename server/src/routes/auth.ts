@@ -194,7 +194,7 @@ router.get("/me", authenticateToken, async (req, res) => {
     });
 
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(401).json({ message: "User not found" });
     }
 
     const prefs = user.notificationPreferences as Record<string, boolean> | null;
@@ -507,7 +507,7 @@ router.post("/invite/accept", async (req, res) => {
   }
 });
 
-// Verify email
+// Verify email – marks user verified and returns JWT so frontend can auto-log in
 router.post("/verify", async (req, res) => {
   try {
     const { token } = req.body;
@@ -515,7 +515,16 @@ router.post("/verify", async (req, res) => {
     // Find and validate token
     const tokenRecord = await prisma.token.findUnique({
       where: { token },
-      include: { user: true },
+      include: {
+        user: {
+          include: {
+            clientUsers: {
+              where: { status: "ACTIVE" },
+              select: { clientId: true, clientRole: true, status: true },
+            },
+          },
+        },
+      },
     });
 
     if (
@@ -526,9 +535,14 @@ router.post("/verify", async (req, res) => {
       return res.status(400).json({ message: "Invalid or expired token" });
     }
 
+    const user = tokenRecord.user;
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired token" });
+    }
+
     // Update user as verified
     await prisma.user.update({
-      where: { id: tokenRecord.userId! },
+      where: { id: user.id },
       data: { verified: true },
     });
 
@@ -538,7 +552,33 @@ router.post("/verify", async (req, res) => {
       data: { usedAt: new Date() },
     });
 
-    res.json({ message: "Email verified successfully" });
+    // Return JWT so frontend can auto-log in without redirecting to login page
+    const jwtToken = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      getJwtSecret(),
+      { expiresIn: "7d" }
+    );
+
+    const clientUsers = user.clientUsers ?? [];
+    res.json({
+      message: "Email verified successfully",
+      token: jwtToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        verified: true,
+        invited: user.invited,
+        clientAccess: {
+          clients: clientUsers.map((c: { clientId: string; clientRole: string; status: string }) => ({
+            clientId: c.clientId,
+            role: c.clientRole,
+            status: c.status,
+          })),
+        },
+      },
+    });
   } catch (error) {
     console.error("Verification error:", error);
     res.status(500).json({ message: "Verification failed" });

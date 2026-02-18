@@ -1,50 +1,8 @@
-import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
-import { X, User, Mail, Lock, Eye, EyeOff, CreditCard, Loader2 } from "lucide-react";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import { X, Eye, EyeOff, CreditCard } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-
-const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
-const stripePromise = stripePk ? loadStripe(stripePk) : null;
-
-export const AGENCY_REGISTER_FORM_KEY = "agencyRegisterForm";
-
-type PaymentSectionHandle = { confirmAndGetPaymentMethod: () => Promise<string | null> };
-
-const StripePaymentSection = forwardRef<PaymentSectionHandle, { clientSecret: string; returnUrl: string }>(
-  function StripePaymentSection({ clientSecret, returnUrl }, ref) {
-    const stripe = useStripe();
-    const elements = useElements();
-    useImperativeHandle(ref, () => ({
-      async confirmAndGetPaymentMethod() {
-        if (!stripe || !elements) return null;
-        const { error: submitError } = await elements.submit();
-        if (submitError) throw new Error(submitError.message ?? "Please complete the card details.");
-        const result = await stripe.confirmSetup({
-          elements,
-          clientSecret,
-          confirmParams: { return_url: returnUrl },
-        });
-        if (result.error) throw new Error(result.error.message ?? "Payment failed");
-        const setupIntent = (result as { setupIntent?: { payment_method?: string | { id?: string } } }).setupIntent;
-        const pm = setupIntent?.payment_method;
-        return typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id ?? null;
-      },
-    }));
-    return (
-      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-        <PaymentElement
-          options={{
-            layout: "tabs",
-            paymentMethodOrder: ["card"],
-            wallets: { applePay: "never", googlePay: "never" },
-          }}
-        />
-      </div>
-    );
-  }
-);
 
 interface AgencyRegisterModalProps {
   open: boolean;
@@ -52,824 +10,195 @@ interface AgencyRegisterModalProps {
   onSuccess?: () => void;
 }
 
-const INDUSTRY_OPTIONS = [
-  "Full Service Agency",
-  "SEO Specialist",
-  "Web Design",
-  "PPC Agency",
-  "Social Media",
-  "Local Marketing",
-  "Other",
-];
-
-const AGENCY_SIZE_OPTIONS = [
-  "Solo (1 person)",
-  "Small (2-5 employees)",
-  "Medium (6-15 employees)",
-  "Large (16-30 employees)",
-  "Enterprise (30+ employees)",
-];
-
-const REFERRAL_OPTIONS = [
-  { value: "", label: "Select..." },
-  { value: "Google Search", label: "Google Search" },
-  { value: "referral", label: "Referral" },
-  { value: "Social Media", label: "Social Media" },
-  { value: "Industry Event", label: "Industry Event" },
-  { value: "Cold Outreach", label: "Cold Outreach" },
-  { value: "Other", label: "Other" },
-];
-
-const PRIMARY_GOALS = [
-  "White label reporting for clients",
-  "Outsource SEO fulfillment",
-  "Scale my agency",
-  "Better client retention",
-];
-
-const TOOLS_OPTIONS = ["SEMrush", "Ahrefs", "AgencyAnalytics"];
-
-const initialForm = {
-  name: "",
-  website: "",
-  industry: "",
-  agencySize: "",
-  numberOfClients: "" as string | number,
-  contactName: "",
-  contactEmail: "",
-  contactPhone: "",
-  contactJobTitle: "",
-  streetAddress: "",
-  city: "",
-  state: "",
-  zip: "",
-  country: "United States",
-  subdomain: "",
-  password: "",
-  passwordConfirm: "",
-  referralSource: "",
-  referralSourceOther: "",
-  primaryGoals: [] as string[],
-  primaryGoalsOther: "",
-  currentTools: "",
-};
-
-const buildRegisterPayload = (form: typeof initialForm) => {
-  const website =
-    form.website.trim().startsWith("http")
-      ? form.website.trim()
-      : `https://${form.website.trim()}`;
-  const toolsList = form.currentTools
-    ? form.currentTools.split(",").map((t) => t.trim()).filter(Boolean)
-    : [];
-  return {
-    name: form.name.trim(),
-    website,
-    industry: form.industry || undefined,
-    agencySize: form.agencySize || undefined,
-    numberOfClients: form.numberOfClients === "" ? undefined : Number(form.numberOfClients),
-    contactName: form.contactName.trim(),
-    contactEmail: form.contactEmail.trim(),
-    contactPhone: form.contactPhone || undefined,
-    contactJobTitle: form.contactJobTitle || undefined,
-    streetAddress: form.streetAddress || undefined,
-    city: form.city || undefined,
-    state: form.state || undefined,
-    zip: form.zip || undefined,
-    country: form.country || undefined,
-    subdomain: form.subdomain?.trim() || undefined,
-    password: form.password,
-    passwordConfirm: form.passwordConfirm,
-    referralSource: form.referralSource || undefined,
-    referralSourceOther: form.referralSource === "referral" ? form.referralSourceOther : undefined,
-    primaryGoals: form.primaryGoals?.length ? form.primaryGoals : undefined,
-    primaryGoalsOther: form.primaryGoalsOther || undefined,
-    currentTools: toolsList.length ? toolsList.join(", ") : undefined,
-  };
-};
-
 const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
   open,
   onClose,
   onSuccess,
 }) => {
-  const [form, setForm] = useState(initialForm);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [setupClientSecret, setSetupClientSecret] = useState<string | null>(null);
-  const [setupIntentError, setSetupIntentError] = useState<string | null>(null);
-  const stripePaymentRef = useRef<PaymentSectionHandle>(null);
-  const registerInProgressRef = useRef(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setSetupClientSecret(null);
-    setSetupIntentError(null);
-    api
-      .post("/agencies/setup-intent-public")
-      .then((res) => setSetupClientSecret(res.data?.clientSecret ?? null))
-      .catch((err: any) =>
-        setSetupIntentError(err?.response?.data?.message || "Could not load payment form. Try again later.")
-      );
-  }, [open]);
-
-  const handleChange = (field: string, value: string | number | string[]) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (registerInProgressRef.current) return;
-    if (form.password !== form.passwordConfirm) {
-      toast.error("Passwords do not match");
-      return;
-    }
-    if (form.password.length < 6) {
+    if (submitting) return;
+    if (password.length < 6) {
       toast.error("Password must be at least 6 characters");
       return;
     }
-    if (!setupClientSecret || !stripePromise || !stripePaymentRef.current) {
-      toast.error("Payment form is not ready. Please wait or refresh.");
-      return;
-    }
-    registerInProgressRef.current = true;
+
     setSubmitting(true);
     try {
-      const payload = buildRegisterPayload(form);
-      sessionStorage.setItem(AGENCY_REGISTER_FORM_KEY, JSON.stringify(payload));
-      const paymentMethodId = await stripePaymentRef.current.confirmAndGetPaymentMethod();
-      sessionStorage.removeItem(AGENCY_REGISTER_FORM_KEY);
-      if (!paymentMethodId) {
-        toast.error("Could not get payment method. Please try again.");
-        setSubmitting(false);
-        return;
-      }
-      await api.post("/agencies/register", { ...payload, paymentMethodId });
+      await api.post("/agencies/register-free-trial", {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        contactEmail: contactEmail.trim(),
+        password,
+      });
       toast.success(
-        "Agency account created. Please check your email to verify your account. Your 7-day free trial (reporting only) starts now; you'll be billed after the trial."
+        "Please check your email to verify your account. After verification, you can sign in and use the Free tier for 7 days."
       );
-      setForm(initialForm);
+      setFirstName("");
+      setLastName("");
+      setContactEmail("");
+      setPassword("");
       onClose();
       onSuccess?.();
     } catch (err: any) {
-      const msg = err?.message || err?.response?.data?.message || "Failed to create agency account";
-      if (err?.message && /redirect|redirected/i.test(String(err.message))) {
-        return;
-      }
-      toast.error(msg);
+      toast.error(
+        err?.response?.data?.message || "Failed to create account. Please try again."
+      );
     } finally {
       setSubmitting(false);
-      registerInProgressRef.current = false;
     }
   };
 
   if (!open) return null;
 
-  const passwordsMatch = form.password === form.passwordConfirm;
-  const isPasswordValid = form.password.length >= 6;
+  const isPasswordValid = password.length >= 6;
+  const canSubmit =
+    firstName.trim() &&
+    lastName.trim() &&
+    contactEmail.trim() &&
+    isPasswordValid &&
+    !submitting;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col my-8 overflow-hidden border-l-4 border-l-primary-500">
-        <div className="flex justify-between items-center px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 shrink-0">
-          <h2 className="text-xl font-bold text-white">Start For Free</h2>
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8 overflow-hidden border-l-4 border-emerald-500">
+        {/* Gradient header */}
+        <div className="bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-600 px-6 py-5 flex justify-between items-center">
+          <h2 className="text-xl font-bold text-white drop-shadow-sm">Start For Free</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 text-white/90 hover:bg-white/20 rounded-lg transition-colors"
+            className="p-2 text-white/90 hover:text-white hover:bg-white/20 rounded-lg transition-colors"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
-          <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-gradient-to-b from-blue-50/30 to-white">
-            {/* Section A: Agency Information */}
-            <section className="rounded-xl border border-gray-200 border-l-4 border-l-blue-500 bg-blue-50/40 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                AGENCY INFORMATION (Required)
-              </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Agency Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={form.name}
-                    onChange={(e) => handleChange("name", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="e.g. TKM Agency"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Agency Website *
-                  </label>
-                  <input
-                    type="url"
-                    required
-                    value={form.website}
-                    onChange={(e) => handleChange("website", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="https://tkmdigital.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Industry/Specialty
-                  </label>
-                  <select
-                    value={form.industry}
-                    onChange={(e) => handleChange("industry", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="">Select...</option>
-                    {INDUSTRY_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Agency Size
-                  </label>
-                  <select
-                    value={form.agencySize}
-                    onChange={(e) => handleChange("agencySize", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="">Select...</option>
-                    {AGENCY_SIZE_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Number of Current Clients
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.numberOfClients}
-                    onChange={(e) =>
-                      handleChange(
-                        "numberOfClients",
-                        e.target.value === "" ? "" : Number(e.target.value)
-                      )
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="e.g. 12"
-                  />
-                </div>
-              </div>
-            </section>
-
-            {/* Section B: Primary Contact + Password */}
-            <section className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 bg-emerald-50/40 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                PRIMARY CONTACT (Required)
-              </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Primary Contact Name *
-                  </label>
-                  <div className="relative">
-                    <User className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      required
-                      value={form.contactName}
-                      onChange={(e) => handleChange("contactName", e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                      placeholder="e.g. Johnny Doe"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Contact Email * (login email)
-                  </label>
-                  <div className="relative">
-                    <Mail className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="email"
-                      required
-                      value={form.contactEmail}
-                      onChange={(e) => handleChange("contactEmail", e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                      placeholder="johnny@tkmdigital.com"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Password *
-                  </label>
-                  <div className="relative">
-                    <Lock className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      value={form.password}
-                      onChange={(e) => handleChange("password", e.target.value)}
-                      className="w-full pl-10 pr-12 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                      placeholder="Create a password (min 6 characters)"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-5 w-5" />
-                      ) : (
-                        <Eye className="h-5 w-5" />
-                      )}
-                    </button>
-                  </div>
-                  {form.password && (
-                    <p
-                      className={`text-xs mt-1 ${
-                        isPasswordValid ? "text-green-600" : "text-red-600"
-                      }`}
-                    >
-                      Password must be at least 6 characters
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Confirm Password *
-                  </label>
-                  <div className="relative">
-                    <Lock className="h-5 w-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type={showConfirmPassword ? "text" : "password"}
-                      required
-                      value={form.passwordConfirm}
-                      onChange={(e) =>
-                        handleChange("passwordConfirm", e.target.value)
-                      }
-                      className="w-full pl-10 pr-12 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                      placeholder="Confirm your password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShowConfirmPassword(!showConfirmPassword)
-                      }
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showConfirmPassword ? (
-                        <EyeOff className="h-5 w-5" />
-                      ) : (
-                        <Eye className="h-5 w-5" />
-                      )}
-                    </button>
-                  </div>
-                  {form.passwordConfirm && (
-                    <p
-                      className={`text-xs mt-1 ${
-                        passwordsMatch ? "text-green-600" : "text-red-600"
-                      }`}
-                    >
-                      {passwordsMatch
-                        ? "Passwords match"
-                        : "Passwords do not match"}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={form.contactPhone}
-                    onChange={(e) => handleChange("contactPhone", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="+1 (631) 555-1234"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Job Title
-                  </label>
-                  <input
-                    type="text"
-                    value={form.contactJobTitle}
-                    onChange={(e) =>
-                      handleChange("contactJobTitle", e.target.value)
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="Owner, Marketing Director, SEO Manager"
-                  />
-                </div>
-              </div>
-            </section>
-
-            {/* Section C: Business Address */}
-            <section className="rounded-xl border border-gray-200 border-l-4 border-l-amber-500 bg-amber-50/30 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                BUSINESS ADDRESS (Optional)
-              </h3>
-              <div className="space-y-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Street Address
-                  </label>
-                  <input
-                    type="text"
-                    value={form.streetAddress}
-                    onChange={(e) =>
-                      handleChange("streetAddress", e.target.value)
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="375 Commack Road"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City
-                  </label>
-                  <input
-                    type="text"
-                    value={form.city}
-                    onChange={(e) => handleChange("city", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="Deer Park"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    State/Province
-                  </label>
-                  <input
-                    type="text"
-                    value={form.state}
-                    onChange={(e) => handleChange("state", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="NY"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ZIP/Postal Code
-                  </label>
-                  <input
-                    type="text"
-                    value={form.zip}
-                    onChange={(e) => handleChange("zip", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                    placeholder="11729"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Country
-                  </label>
-                  <select
-                    value={form.country}
-                    onChange={(e) => handleChange("country", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="United States">United States</option>
-                    <option value="Canada">Canada</option>
-                    <option value="United Kingdom">United Kingdom</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-              </div>
-            </section>
-
-            {/* Section D: Subdomain */}
-            <section className="rounded-xl border border-gray-200 border-l-4 border-l-teal-500 bg-teal-50/30 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                WHITE LABEL SUBDOMAIN (Optional)
-              </h3>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Custom Subdomain
-                </label>
-                <input
-                  type="text"
-                  value={form.subdomain}
-                  onChange={(e) => handleChange("subdomain", e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                  placeholder="tkmdigital"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  e.g. tkmdigital → tkmdigital.yourplatform.com. Leave blank if
-                  not needed.
-                </p>
-              </div>
-            </section>
-
-            {/* Section E: Payment – required to activate 7-day free trial (reporting only); auto-bills after trial */}
-            <section className="rounded-xl border border-gray-200 border-l-4 border-l-violet-500 bg-violet-50/30 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-violet-600" />
-                PAYMENT (Required to activate account)
-              </h3>
-              <p className="text-sm text-gray-600 mb-3">
-                Add a card to start your <strong>7-day free trial</strong> for reporting (keywords, research, etc.). You won&apos;t be charged until after the trial. Managed services are paid when approved—you need an active account to request them.
-              </p>
-              {setupIntentError && (
-                <div className="mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-                  {setupIntentError}
-                </div>
-              )}
-              {!stripePk && (
-                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  Payment is required to sign up. If you don&apos;t see the card form, the site may be in setup. Please try again later or contact support.
-                </p>
-              )}
-              {stripePk && setupClientSecret && stripePromise && (
-                <Elements stripe={stripePromise} options={{ clientSecret: setupClientSecret }}>
-                  <StripePaymentSection
-                    ref={stripePaymentRef}
-                    clientSecret={setupClientSecret}
-                    returnUrl={typeof window !== "undefined" ? window.location.href : ""}
-                  />
-                </Elements>
-              )}
-              {stripePk && !setupIntentError && !setupClientSecret && (
-                <div className="flex items-center gap-2 text-gray-500 text-sm">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading payment form...
-                </div>
-              )}
-            </section>
-
-            {/* Section F: Additional Questions */}
-            <section className="rounded-xl border border-gray-200 border-l-4 border-l-sky-500 bg-sky-50/30 p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                ADDITIONAL QUESTIONS (Optional)
-              </h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    How did you hear about us?
-                  </label>
-                  <select
-                    value={form.referralSource}
-                    onChange={(e) =>
-                      handleChange("referralSource", e.target.value)
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                  >
-                    {REFERRAL_OPTIONS.map((opt) => (
-                      <option key={opt.value || "empty"} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  {form.referralSource === "referral" && (
-                    <input
-                      type="text"
-                      value={form.referralSourceOther}
-                      onChange={(e) =>
-                        handleChange("referralSourceOther", e.target.value)
-                      }
-                      className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                      placeholder="Referral from..."
-                    />
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    What&apos;s your primary goal? (select multiple)
-                  </label>
-                  <div className="space-y-1 flex flex-wrap gap-2">
-                    {PRIMARY_GOALS.map((goal) => (
-                      <label
-                        key={goal}
-                        className="flex items-center gap-2"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={form.primaryGoals.includes(goal)}
-                          onChange={(e) =>
-                            handleChange(
-                              "primaryGoals",
-                              e.target.checked
-                                ? [...form.primaryGoals, goal]
-                                : form.primaryGoals.filter((g) => g !== goal)
-                            )
-                          }
-                          className="rounded border-gray-300 text-primary-600"
-                        />
-                        <span className="text-sm">{goal}</span>
-                      </label>
-                    ))}
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={form.primaryGoals.includes("Other")}
-                        onChange={(e) =>
-                          handleChange(
-                            "primaryGoals",
-                            e.target.checked
-                              ? [...form.primaryGoals, "Other"]
-                              : form.primaryGoals.filter((g) => g !== "Other")
-                          )
-                        }
-                        className="rounded border-gray-300 text-primary-600"
-                      />
-                      <span className="text-sm">Other</span>
-                      {form.primaryGoals.includes("Other") && (
-                        <input
-                          type="text"
-                          value={form.primaryGoalsOther}
-                          onChange={(e) =>
-                            handleChange("primaryGoalsOther", e.target.value)
-                          }
-                          className="ml-1 px-2 py-1 border rounded text-sm w-40"
-                          placeholder="Specify"
-                        />
-                      )}
-                    </label>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    What tools are you currently using?
-                  </label>
-                  <div className="space-y-2">
-                    {TOOLS_OPTIONS.map((tool) => {
-                      const toolsList = form.currentTools
-                        ? form.currentTools
-                            .split(",")
-                            .map((t) => t.trim())
-                            .filter(Boolean)
-                        : [];
-                      const isChecked = toolsList.includes(tool);
-                      return (
-                        <label
-                          key={tool}
-                          className="flex items-center gap-2"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              const current = form.currentTools
-                                ? form.currentTools
-                                    .split(",")
-                                    .map((t) => t.trim())
-                                    .filter(Boolean)
-                                : [];
-                              if (e.target.checked) {
-                                handleChange(
-                                  "currentTools",
-                                  [...current.filter((t) => t !== tool), tool].join(
-                                    ", "
-                                  )
-                                );
-                              } else {
-                                handleChange(
-                                  "currentTools",
-                                  current.filter((t) => t !== tool).join(", ")
-                                );
-                              }
-                            }}
-                            className="rounded border-gray-300 text-primary-600"
-                          />
-                          <span className="text-sm">{tool}</span>
-                        </label>
-                      );
-                    })}
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={(() => {
-                          if (!form.currentTools) return false;
-                          const list = form.currentTools
-                            .split(",")
-                            .map((t) => t.trim())
-                            .filter(Boolean);
-                          return (
-                            list.includes("Other") ||
-                            list.some(
-                              (t) =>
-                                !["SEMrush", "Ahrefs", "AgencyAnalytics"].includes(
-                                  t
-                                )
-                            )
-                          );
-                        })()}
-                        onChange={(e) => {
-                          const current = form.currentTools
-                            ? form.currentTools
-                                .split(",")
-                                .map((t) => t.trim())
-                                .filter(Boolean)
-                            : [];
-                          const known = current.filter((t) =>
-                            ["SEMrush", "Ahrefs", "AgencyAnalytics"].includes(t)
-                          );
-                          const other = current.filter(
-                            (t) =>
-                              !["SEMrush", "Ahrefs", "AgencyAnalytics", "Other"].includes(
-                                t
-                              )
-                          );
-                          if (e.target.checked) {
-                            handleChange(
-                              "currentTools",
-                              [...known, ...other, "Other"].join(", ")
-                            );
-                          } else {
-                            handleChange(
-                              "currentTools",
-                              known.join(", ")
-                            );
-                          }
-                        }}
-                        className="rounded border-gray-300 text-primary-600"
-                      />
-                      <span className="text-sm">Other</span>
-                    </label>
-                  </div>
-                  {(() => {
-                    if (!form.currentTools) return null;
-                    const list = form.currentTools
-                      .split(",")
-                      .map((t) => t.trim())
-                      .filter(Boolean);
-                    const other = list.filter(
-                      (t) =>
-                        !["SEMrush", "Ahrefs", "AgencyAnalytics", "Other"].includes(
-                          t
-                        )
-                    );
-                    if (other.length === 0) return null;
-                    return (
-                      <input
-                        type="text"
-                        value={other.join(", ")}
-                        onChange={(e) => {
-                          const known = form.currentTools
-                            ? form.currentTools
-                                .split(",")
-                                .map((t) => t.trim())
-                                .filter((t) =>
-                                  ["SEMrush", "Ahrefs", "AgencyAnalytics", "Other"].includes(
-                                    t
-                                  )
-                                )
-                            : [];
-                          handleChange(
-                            "currentTools",
-                            [...known, e.target.value.trim()].filter(Boolean).join(", ")
-                          );
-                        }}
-                        className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                        placeholder="Enter other tools"
-                      />
-                    );
-                  })()}
-                </div>
-              </div>
-            </section>
+        <form onSubmit={handleSubmit} className="p-6 bg-gradient-to-b from-slate-50/80 to-white">
+          <h1 className="text-xl font-bold text-slate-800 mb-2 text-center">
+            Create a free advanced trial with your work email
+          </h1>
+          {/* Emerald badge for no card */}
+          <div className="flex items-center justify-center gap-2 mb-6 px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium">
+            <span className="relative inline-block">
+              <CreditCard className="h-4 w-4 text-emerald-500" />
+              <span className="absolute inset-0 flex items-center justify-center">
+                <span className="w-5 h-px bg-emerald-500 transform -rotate-45" aria-hidden />
+              </span>
+            </span>
+            <span>No credit card required</span>
           </div>
 
-          <div className="flex gap-3 p-6 border-t border-gray-200 shrink-0 bg-gray-50/50">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2.5 border-2 border-amber-300 rounded-lg text-amber-800 font-medium hover:bg-amber-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={
-                submitting ||
-                !form.name.trim() ||
-                !form.website.trim() ||
-                !form.contactName.trim() ||
-                !form.contactEmail.trim() ||
-                !passwordsMatch ||
-                !isPasswordValid ||
-                !setupClientSecret ||
-                !!setupIntentError ||
-                !stripePk
-              }
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white rounded-lg font-semibold hover:from-primary-700 hover:via-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all"
-            >
-              {submitting ? "Creating account..." : "Create agency account"}
-            </button>
+          {/* Form inputs with teal focus */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label htmlFor="firstName" className="sr-only">First Name</label>
+              <input
+                id="firstName"
+                type="text"
+                required
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 focus:border-teal-500 bg-white transition-colors"
+                placeholder="First Name"
+              />
+            </div>
+            <div>
+              <label htmlFor="lastName" className="sr-only">Last Name</label>
+              <input
+                id="lastName"
+                type="text"
+                required
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 focus:border-teal-500 bg-white transition-colors"
+                placeholder="Last Name"
+              />
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <label htmlFor="contactEmail" className="sr-only">Contact Email</label>
+            <input
+              id="contactEmail"
+              type="email"
+              required
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 focus:border-teal-500 bg-white transition-colors"
+              placeholder="Contact Email"
+            />
+          </div>
+
+          <div className="mb-4">
+            <label htmlFor="password" className="sr-only">Password</label>
+            <div className="relative">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2.5 pr-10 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 focus:border-teal-500 bg-white transition-colors"
+                placeholder="Password (min 6 characters)"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-teal-600 transition-colors"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
+            {password && !isPasswordValid && (
+              <p className="text-xs text-amber-600 mt-1 font-medium">Password must be at least 6 characters</p>
+            )}
+          </div>
+
+          {/* Gradient CTA button */}
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="w-full py-3.5 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-600 hover:from-emerald-500 hover:via-teal-400 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-teal-500/25 hover:shadow-teal-500/30"
+          >
+            {submitting ? "Sending..." : "Start 7-days Free Trial"}
+          </button>
+
+          <p className="text-xs text-slate-500 mt-4 text-center">
+            By clicking this button, you agree to our{" "}
+            <a href="/terms" className="text-teal-600 hover:text-teal-700 hover:underline font-medium" target="_blank" rel="noopener noreferrer">Terms of Service</a>{" "}
+            and{" "}
+            <a href="/privacy" className="text-cyan-600 hover:text-cyan-700 hover:underline font-medium" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
+          </p>
+
+          <div className="mt-6 pt-6 border-t border-slate-200 space-y-3">
+            <div className="text-sm text-slate-600 text-center">
+              <span>Sign up with Google work account: </span>
+              <button type="button" className="inline-flex items-center gap-1.5 text-indigo-600 hover:text-indigo-700 font-medium" disabled>
+                <svg className="h-5 w-5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                </svg>
+                <span>Google <span className="text-slate-400 font-normal"></span></span>
+              </button>
+            </div>
+            <p className="text-sm text-slate-600 text-center">
+              Already have an account?{" "}
+              <Link to="/login" onClick={onClose} className="text-violet-600 hover:text-violet-700 font-semibold hover:underline">
+                Log in
+              </Link>
+            </p>
           </div>
         </form>
       </div>

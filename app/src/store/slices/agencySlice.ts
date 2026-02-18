@@ -94,7 +94,7 @@ export const createAgency = createAsyncThunk(
     zip?: string;
     country?: string;
     subdomain?: string;
-    billingOption: "charge" | "no_charge" | "manual_invoice";
+    billingOption: "free_account" | "charge" | "no_charge" | "manual_invoice";
     paymentMethodId?: string;
     tier?: "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro";
     customPricing?: number | null;
@@ -169,6 +169,7 @@ export const updateAgency = createAsyncThunk(
       subscriptionTier?: string | null;
       customPricing?: number | null;
       internalNotes?: string | null;
+      paymentMethodId?: string;
     };
   }) => {
     try {

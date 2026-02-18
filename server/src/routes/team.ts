@@ -11,7 +11,7 @@ import { getAgencyTierContext, canAddTeamMember } from '../lib/agencyLimits.js';
 const router = express.Router();
 
 type UserWithMemberships = Prisma.UserGetPayload<{
-    include: { memberships: { include: { agency: { select: { id: true; name: true } } } } };
+    include: { memberships: { include: { agency: { select: { id: true; name: true; contactName: true; contactEmail: true } } } } };
 }>;
 
 function escapeHtml(s: string): string {
@@ -62,7 +62,7 @@ router.get('/', authenticateToken, async (req, res) => {
                     memberships: {
                         include: {
                             agency: {
-                                select: { id: true, name: true },
+                                select: { id: true, name: true, contactName: true, contactEmail: true },
                             },
                         },
                     },
@@ -70,7 +70,7 @@ router.get('/', authenticateToken, async (req, res) => {
                 orderBy: { createdAt: 'desc' },
             });
 
-            // Get client counts for each user
+            // Get client counts for each user. For AGENCY role, prefer agency's contactName/contactEmail (matches Edit Agency) for display in Agency Access.
             teamMembers = await Promise.all(
                 users.map(async (u) => {
                     const clientCount = await prisma.client.count({
@@ -81,10 +81,14 @@ router.get('/', authenticateToken, async (req, res) => {
                         where: { assigneeId: u.id },
                     });
 
+                    const ownerAgency = u.memberships?.find((m: { agencyRole: string }) => m.agencyRole === 'OWNER')?.agency as { contactName?: string | null; contactEmail?: string | null } | undefined;
+                    const displayName = (u.role === 'AGENCY' && ownerAgency?.contactName) ? ownerAgency.contactName : (u.name || 'Unknown');
+                    const displayEmail = (u.role === 'AGENCY' && ownerAgency?.contactEmail) ? ownerAgency.contactEmail : u.email;
+
                     return {
                         id: u.id,
-                        name: u.name || 'Unknown',
-                        email: u.email,
+                        name: displayName,
+                        email: displayEmail,
                         role: u.role,
                         status: u.verified ? 'Active' : 'Invited',
                         verified: u.verified,
@@ -116,13 +120,14 @@ router.get('/', authenticateToken, async (req, res) => {
                 include: {
                     user: true,
                     agency: {
-                        select: { id: true, name: true },
+                        select: { id: true, name: true, contactName: true, contactEmail: true },
                     },
                 },
             });
 
-            // Group by user
+            // Group by user. Track owner agency contact for AGENCY role users.
             const userMap = new Map();
+            const ownerContactByUserId = new Map<string, { contactName: string | null; contactEmail: string | null }>();
             agencyMemberships.forEach((membership) => {
                 const userId = membership.userId;
                 if (!userMap.has(userId)) {
@@ -136,9 +141,15 @@ router.get('/', authenticateToken, async (req, res) => {
                     name: membership.agency.name,
                     role: membership.agencyRole,
                 });
+                if (membership.agencyRole === 'OWNER' && membership.user.role === 'AGENCY') {
+                    ownerContactByUserId.set(userId, {
+                        contactName: membership.agency.contactName,
+                        contactEmail: membership.agency.contactEmail,
+                    });
+                }
             });
 
-            // Convert to array and add client/task counts
+            // Convert to array and add client/task counts. Prefer agency contact for AGENCY owners.
             teamMembers = await Promise.all(
                 Array.from(userMap.values()).map(async (u: any) => {
                     const clientCount = await prisma.client.count({
@@ -149,10 +160,14 @@ router.get('/', authenticateToken, async (req, res) => {
                         where: { assigneeId: u.id },
                     });
 
+                    const ownerContact = ownerContactByUserId.get(u.id);
+                    const displayName = (u.role === 'AGENCY' && ownerContact?.contactName) ? ownerContact.contactName : (u.name || 'Unknown');
+                    const displayEmail = (u.role === 'AGENCY' && ownerContact?.contactEmail) ? ownerContact.contactEmail : u.email;
+
                     return {
                         id: u.id,
-                        name: u.name || 'Unknown',
-                        email: u.email,
+                        name: displayName,
+                        email: displayEmail,
                         role: u.role,
                         status: u.verified ? 'Active' : 'Invited',
                         verified: u.verified,

@@ -65,7 +65,7 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url = error.config?.url ?? "";
     const isAuth = /\/auth\/(login|register|verify|forgot-password|reset-password)/i.test(url);
-    const isAgencyRegister = /\/agencies\/register/i.test(url);
+    const isAgencyRegister = /\/agencies\/register/i.test(url) || /\/agencies\/register-free-trial/i.test(url);
     const isShare = /\/seo\/share\//i.test(url); // public shared dashboard endpoints
     
     // Get error message from response
@@ -103,6 +103,9 @@ api.interceptors.response.use(
             toast.error("Cannot reach the server. Check that the backend is running and VITE_API_URL is correct.");
           }
         } else if (status === 401) {
+          localStorage.removeItem("token");
+          toast.error("Session expired. Please login again.");
+        } else if (status === 404 && /\/auth\/me/i.test(url)) {
           localStorage.removeItem("token");
           toast.error("Session expired. Please login again.");
         } else if (status === 403) {

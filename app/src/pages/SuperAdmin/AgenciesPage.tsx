@@ -95,6 +95,7 @@ const AgenciesPage = () => {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showEditAgencyModal, setShowEditAgencyModal] = useState(false);
     const [editingAgency, setEditingAgency] = useState<{ id: string; name: string } | null>(null);
+    const [editingAgencyHasStripeCustomer, setEditingAgencyHasStripeCustomer] = useState(false);
     const [showMembersModal, setShowMembersModal] = useState(false);
     const [showClientsModal, setShowClientsModal] = useState(false);
     const [selectedAgencyId, setSelectedAgencyId] = useState<string | null>(null);
@@ -153,7 +154,7 @@ const AgenciesPage = () => {
         zip: "",
         country: "United States",
         subdomain: "",
-        billingOption: "" as "" | "charge" | "no_charge" | "manual_invoice",
+        billingOption: "" as "" | "free_account" | "charge" | "no_charge" | "manual_invoice",
         tier: "" as "" | "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro",
         customPricing: "" as string | number,
         internalNotes: "",
@@ -180,7 +181,7 @@ const AgenciesPage = () => {
         zip: "",
         country: "United States",
         subdomain: "",
-        billingType: "" as "" | "paid" | "free" | "custom",
+        billingType: "" as "" | "paid" | "free" | "trial" | "custom",
         subscriptionTier: "" as string,
         customPricing: "" as string | number,
         internalNotes: "",
@@ -188,7 +189,9 @@ const AgenciesPage = () => {
     const [editForm, setEditForm] = useState(initialEditForm);
     const [loadingEditAgency, setLoadingEditAgency] = useState(false);
     const [setupIntentClientSecret, setSetupIntentClientSecret] = useState<string | null>(null);
+    const [editSetupIntentClientSecret, setEditSetupIntentClientSecret] = useState<string | null>(null);
     const stripePaymentRef = useRef<StripePaymentHandle>(null);
+    const editStripePaymentRef = useRef<StripePaymentHandle>(null);
 
     useEffect(() => {
         dispatch(fetchAgencies() as any);
@@ -258,7 +261,7 @@ const AgenciesPage = () => {
                         zip: f.zip || undefined,
                         country: f.country || undefined,
                         subdomain: f.subdomain?.trim() || undefined,
-                        billingOption: f.billingOption as "charge" | "no_charge" | "manual_invoice",
+                        billingOption: f.billingOption as "free_account" | "charge" | "no_charge" | "manual_invoice",
                         paymentMethodId,
                         tier: f.tier || undefined,
                         customPricing: f.billingOption === "manual_invoice" && f.customPricing !== "" ? Number(f.customPricing) : undefined,
@@ -288,7 +291,8 @@ const AgenciesPage = () => {
     }, [dispatch]);
 
     useEffect(() => {
-        if (!showCreateModal || createForm.billingOption !== "charge") {
+        const needsCard = createForm.billingOption === "charge" || createForm.billingOption === "manual_invoice";
+        if (!showCreateModal || !needsCard) {
             setSetupIntentClientSecret(null);
             return;
         }
@@ -303,6 +307,24 @@ const AgenciesPage = () => {
             });
         return () => { cancelled = true; };
     }, [showCreateModal, createForm.billingOption]);
+
+    const editNeedsCard = (editForm.billingType === "paid" || editForm.billingType === "custom");
+    useEffect(() => {
+        if (!showEditAgencyModal || !editNeedsCard) {
+            setEditSetupIntentClientSecret(null);
+            return;
+        }
+        if (!stripePk) return;
+        let cancelled = false;
+        api.post("/agencies/setup-intent")
+            .then((res) => {
+                if (!cancelled && res.data?.clientSecret) setEditSetupIntentClientSecret(res.data.clientSecret);
+            })
+            .catch(() => {
+                if (!cancelled) toast.error("Could not load payment form.");
+            });
+        return () => { cancelled = true; };
+    }, [showEditAgencyModal, editNeedsCard]);
 
     const handleCreateAgency = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -330,12 +352,13 @@ const AgenciesPage = () => {
             toast.error("Please select a subscription tier.");
             return;
         }
-        if (createForm.billingOption === "charge" && (!stripePk || !setupIntentClientSecret)) {
+        const needsCard = createForm.billingOption === "charge" || createForm.billingOption === "manual_invoice";
+        if (needsCard && (!stripePk || !setupIntentClientSecret)) {
             toast.error("Payment form is not ready. Add VITE_STRIPE_PUBLISHABLE_KEY or try again.");
             return;
         }
         let paymentMethodId: string | undefined;
-        if (createForm.billingOption === "charge") {
+        if (needsCard) {
             if (!stripePaymentRef.current) {
                 toast.error("Payment form is still loading. Please wait a moment and try again.");
                 return;
@@ -374,7 +397,7 @@ const AgenciesPage = () => {
                 subdomain: createForm.subdomain?.trim() || undefined,
                 billingOption: createForm.billingOption,
                 paymentMethodId,
-                tier: createForm.billingOption === "no_charge" ? undefined : (createForm.tier || undefined),
+                tier: (createForm.billingOption === "no_charge" || createForm.billingOption === "free_account") ? undefined : (createForm.tier || undefined),
                 customPricing: createForm.billingOption === "manual_invoice" && createForm.customPricing !== "" ? Number(createForm.customPricing) : undefined,
                 internalNotes: createForm.internalNotes || undefined,
                 referralSource: createForm.referralSource || undefined,
@@ -406,6 +429,7 @@ const AgenciesPage = () => {
         try {
             const res = await api.get(`/agencies/${agencyId}`);
             const a = res.data;
+            setEditingAgencyHasStripeCustomer(!!a.hasStripeCustomer);
             setEditForm({
                 name: a.name ?? "",
                 website: a.website ?? "",
@@ -422,7 +446,7 @@ const AgenciesPage = () => {
                 zip: a.zip ?? "",
                 country: a.country ?? "United States",
                 subdomain: a.subdomain ?? "",
-                billingType: (a.billingType ?? "") as "" | "paid" | "free" | "custom",
+                billingType: (a.billingType ?? "") as "" | "paid" | "free" | "trial" | "custom",
                 subscriptionTier: a.subscriptionTier ?? "",
                 customPricing: a.customPricing ?? "",
                 internalNotes: a.internalNotes ?? "",
@@ -436,8 +460,8 @@ const AgenciesPage = () => {
         }
     };
 
-    const handleUpdateAgency = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleUpdateAgency = async (e?: React.FormEvent) => {
+        e?.preventDefault();
         if (!editingAgency) return;
         if (!editForm.name.trim()) {
             toast.error("Agency name is required.");
@@ -455,32 +479,55 @@ const AgenciesPage = () => {
             toast.error("Contact email is required.");
             return;
         }
+        const editNeedsCardNow = editForm.billingType === "paid" || editForm.billingType === "custom";
+        const cardRequired = editNeedsCardNow && !editingAgencyHasStripeCustomer;
+        if (cardRequired && (!stripePk || !editSetupIntentClientSecret)) {
+            toast.error("Payment form is not ready. Add VITE_STRIPE_PUBLISHABLE_KEY or try again.");
+            return;
+        }
+        let paymentMethodId: string | undefined;
+        if (editNeedsCardNow && !editingAgencyHasStripeCustomer) {
+            if (!editStripePaymentRef.current) {
+                toast.error("Payment form is still loading. Please wait a moment and try again.");
+                return;
+            }
+            try {
+                const id = await editStripePaymentRef.current.confirmAndGetPaymentMethod();
+                if (!id) {
+                    toast.error("Please complete the card details.");
+                    return;
+                }
+                paymentMethodId = id;
+            } catch (err: any) {
+                toast.error(err?.message ?? "Payment failed. Please check card details.");
+                return;
+            }
+        }
         const website = editForm.website.trim().startsWith("http") ? editForm.website.trim() : `https://${editForm.website.trim()}`;
         try {
-            await dispatch(updateAgency({
-                agencyId: editingAgency.id,
-                data: {
-                    name: editForm.name.trim(),
-                    website,
-                    industry: editForm.industry || undefined,
-                    agencySize: editForm.agencySize || undefined,
-                    numberOfClients: editForm.numberOfClients === "" ? undefined : Number(editForm.numberOfClients),
-                    contactName: editForm.contactName.trim(),
-                    contactEmail: editForm.contactEmail.trim(),
-                    contactPhone: editForm.contactPhone || undefined,
-                    contactJobTitle: editForm.contactJobTitle || undefined,
-                    streetAddress: editForm.streetAddress || undefined,
-                    city: editForm.city || undefined,
-                    state: editForm.state || undefined,
-                    zip: editForm.zip || undefined,
-                    country: editForm.country || undefined,
-                    subdomain: editForm.subdomain?.trim() || undefined,
-                    billingType: editForm.billingType || undefined,
-                    subscriptionTier: editForm.subscriptionTier || undefined,
-                    customPricing: editForm.billingType === "custom" && editForm.customPricing !== "" ? Number(editForm.customPricing) : undefined,
-                    internalNotes: editForm.internalNotes || undefined,
-                },
-            }) as any).unwrap();
+            const updatePayload: Record<string, unknown> = {
+                name: editForm.name.trim(),
+                website,
+                industry: editForm.industry || undefined,
+                agencySize: editForm.agencySize || undefined,
+                numberOfClients: editForm.numberOfClients === "" ? undefined : Number(editForm.numberOfClients),
+                contactName: editForm.contactName.trim(),
+                contactEmail: editForm.contactEmail.trim(),
+                contactPhone: editForm.contactPhone || undefined,
+                contactJobTitle: editForm.contactJobTitle || undefined,
+                streetAddress: editForm.streetAddress || undefined,
+                city: editForm.city || undefined,
+                state: editForm.state || undefined,
+                zip: editForm.zip || undefined,
+                country: editForm.country || undefined,
+                subdomain: editForm.subdomain?.trim() || undefined,
+                billingType: editForm.billingType || undefined,
+                subscriptionTier: editForm.subscriptionTier || undefined,
+                customPricing: editForm.billingType === "custom" && editForm.customPricing !== "" ? Number(editForm.customPricing) : undefined,
+                internalNotes: editForm.internalNotes || undefined,
+            };
+            if (paymentMethodId) updatePayload.paymentMethodId = paymentMethodId;
+            await dispatch(updateAgency({ agencyId: editingAgency.id, data: updatePayload as any }) as any).unwrap();
             setShowEditAgencyModal(false);
             setEditingAgency(null);
             setEditForm(initialEditForm);
@@ -1362,24 +1409,30 @@ const AgenciesPage = () => {
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type *</label>
                                             <div className="space-y-2">
                                                 <label className="flex items-center gap-2">
+                                                    <input type="radio" name="billingOption" value="free_account" checked={createForm.billingOption === "free_account"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "free_account", tier: "" })} className="text-primary-600" />
+                                                    <span>Free Account</span>
+                                                    <span className="text-xs text-gray-500">(Free tier, no payment)</span>
+                                                </label>
+                                                <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="charge" checked={createForm.billingOption === "charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "charge" })} className="text-primary-600" />
                                                     <span>Charge to Card</span>
-                                                    <span className="text-xs text-gray-500">(requires payment method)</span>
+                                                    <span className="text-xs text-gray-500">(any tier, subscription immediately)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "no_charge", tier: "" })} className="text-primary-600" />
-                                                    <span>No Charge – Free Account</span>
-                                                    <span className="text-xs text-gray-500">(Free tier during 7-day trial, then must subscribe)</span>
+                                                    <span>No Charge during 7 days trial</span>
+                                                    <span className="text-xs text-gray-500">(Free tier for 7 days, then must subscribe)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input type="radio" name="billingOption" value="manual_invoice" checked={createForm.billingOption === "manual_invoice"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "manual_invoice" })} className="text-primary-600" />
                                                     <span>Enterprise</span>
+                                                    <span className="text-xs text-gray-500">(manual invoice)</span>
                                                 </label>
                                             </div>
                                         </div>
-                                        {createForm.billingOption === "charge" && (
+                                        {(createForm.billingOption === "charge" || createForm.billingOption === "manual_invoice") && (
                                             <div>
-                                                <label className="block text-sm font-medium text-gray-700 mb-2">Card details</label>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">Card details *</label>
                                                 {!stripePk ? (
                                                     <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Add <code className="px-1 bg-amber-100 rounded">VITE_STRIPE_PUBLISHABLE_KEY</code> to the app environment to collect payment methods.</p>
                                                 ) : setupIntentClientSecret && stripePromise ? (
@@ -1389,14 +1442,20 @@ const AgenciesPage = () => {
                                                 ) : (
                                                     <p className="text-sm text-gray-500">Loading payment form…</p>
                                                 )}
+                                                <p className="mt-1 text-xs text-gray-500">Agency will be integrated with Stripe for billing.</p>
                                             </div>
+                                        )}
+                                        {createForm.billingOption === "free_account" && (
+                                            <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                                                Agency will use <strong>Free</strong> tier with no payment required.
+                                            </p>
                                         )}
                                         {createForm.billingOption === "no_charge" && (
                                             <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
-                                                Agency will use <strong>Free</strong> tier during the 7-day trial. After the trial, they must subscribe to a paid plan.
+                                                Agency will use <strong>Free</strong> tier during the 7-day trial. After the trial, they must proceed to payment.
                                             </p>
                                         )}
-                                        {createForm.billingOption !== "no_charge" && (
+                                        {createForm.billingOption !== "no_charge" && createForm.billingOption !== "free_account" && (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier *</label>
                                             <select value={createForm.tier} onChange={(e) => setCreateForm({ ...createForm, tier: e.target.value as typeof createForm.tier })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
@@ -1575,7 +1634,7 @@ const AgenciesPage = () => {
                         {loadingEditAgency ? (
                             <div className="p-12 text-center text-gray-500">Loading agency...</div>
                         ) : (
-                        <form onSubmit={handleUpdateAgency} className="flex flex-col min-h-0 bg-gray-50/50">
+                        <form onSubmit={(e) => { e.preventDefault(); handleUpdateAgency(e); }} action="javascript:void(0)" className="flex flex-col min-h-0 bg-gray-50/50">
                             <div className="p-6 overflow-y-auto space-y-5 flex-1">
                                 {/* Section A: Agency Information */}
                                 <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
@@ -1708,16 +1767,47 @@ const AgenciesPage = () => {
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type</label>
                                             <select value={editForm.billingType} onChange={(e) => {
                                                 const newBilling = e.target.value as typeof editForm.billingType;
-                                                const clearFreeTier = newBilling === "free" || (newBilling === "paid" && editForm.subscriptionTier === "free");
+                                                const clearFreeTier = newBilling === "free" || newBilling === "trial" || (newBilling === "paid" && editForm.subscriptionTier === "free");
                                                 setEditForm({ ...editForm, billingType: newBilling, subscriptionTier: clearFreeTier ? "" : editForm.subscriptionTier });
                                             }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
                                                 <option value="">Select...</option>
-                                                <option value="paid">Paid (Charge to Card)</option>
-                                                <option value="free">Free / No Charge</option>
-                                                <option value="custom">Enterprise / Manual Invoice</option>
+                                                <option value="free">Free Account (Free tier, no payment)</option>
+                                                <option value="paid">Charge to Card (any tier, subscription immediately)</option>
+                                                <option value="trial">No Charge during 7 days trial (Free tier, then must subscribe)</option>
+                                                <option value="custom">Enterprise (manual invoice)</option>
                                             </select>
                                         </div>
-                                        {editForm.billingType && editForm.billingType !== "free" && (
+                                        {editForm.billingType === "free" && (
+                                            <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                                                Agency uses <strong>Free</strong> tier with no payment required.
+                                            </p>
+                                        )}
+                                        {editForm.billingType === "trial" && (
+                                            <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                                                Agency uses <strong>Free</strong> tier during the 7-day trial. After the trial, they must proceed to payment.
+                                            </p>
+                                        )}
+                                        {(editForm.billingType === "paid" || editForm.billingType === "custom") && !editingAgencyHasStripeCustomer && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">Card details *</label>
+                                                {!stripePk ? (
+                                                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Add <code className="px-1 bg-amber-100 rounded">VITE_STRIPE_PUBLISHABLE_KEY</code> to the app environment to collect payment methods.</p>
+                                                ) : editSetupIntentClientSecret && stripePromise ? (
+                                                    <Elements stripe={stripePromise} options={{ clientSecret: editSetupIntentClientSecret }}>
+                                                        <StripePaymentSection ref={editStripePaymentRef} clientSecret={editSetupIntentClientSecret} />
+                                                    </Elements>
+                                                ) : (
+                                                    <p className="text-sm text-gray-500">Loading payment form…</p>
+                                                )}
+                                                <p className="mt-1 text-xs text-gray-500">Agency will be integrated with Stripe for billing.</p>
+                                            </div>
+                                        )}
+                                        {(editForm.billingType === "paid" || editForm.billingType === "custom") && editingAgencyHasStripeCustomer && (
+                                            <p className="text-sm text-green-700 bg-green-50 rounded-lg p-3">
+                                                ✓ Card on file. Agency is integrated with Stripe.
+                                            </p>
+                                        )}
+                                        {editForm.billingType && editForm.billingType !== "free" && editForm.billingType !== "trial" && (
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier</label>
                                                 <select value={editForm.billingType === "paid" && editForm.subscriptionTier === "free" ? "" : editForm.subscriptionTier} onChange={(e) => setEditForm({ ...editForm, subscriptionTier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
@@ -1762,8 +1852,8 @@ const AgenciesPage = () => {
                                 <button type="button" onClick={() => { setShowEditAgencyModal(false); setEditingAgency(null); }} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium">
                                     Cancel
                                 </button>
-                                <button type="submit" className="flex-1 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all">
-                                    Save Changes
+                                <button type="button" onClick={() => handleUpdateAgency()} disabled={loading} className="flex-1 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {loading ? "Saving..." : "Save Changes"}
                                 </button>
                             </div>
                         </form>

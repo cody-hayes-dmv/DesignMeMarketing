@@ -1,9 +1,24 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import { CheckCircle, XCircle } from "lucide-react";
 import api from "@/lib/api";
+import { login } from "@/store/slices/authSlice";
+
+const getRedirectUrl = (role: string) => {
+  switch (role) {
+    case "SUPER_ADMIN": return "/superadmin/dashboard";
+    case "ADMIN":
+    case "AGENCY": return "/agency/dashboard";
+    case "SPECIALIST": return "/specialist/dashboard";
+    case "USER": return "/client/dashboard";
+    default: return "/agency/dashboard";
+  }
+};
 
 const VerifyPage = () => {
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token")?.trim() ?? "";
 
@@ -20,10 +35,16 @@ const VerifyPage = () => {
     let cancelled = false;
     api
       .post("/auth/verify", { token })
-      .then(() => {
-        if (!cancelled) {
+      .then((res) => {
+        if (cancelled) return;
+        const { token: jwtToken, user } = res.data || {};
+        if (jwtToken && user) {
+          localStorage.setItem("token", jwtToken);
+          dispatch(login.fulfilled(user, "", undefined) as any);
+          navigate(getRedirectUrl(user.role || "AGENCY"), { replace: true });
+        } else {
           setStatus("success");
-          setMessage("Email verified successfully.");
+          setMessage("Email verified successfully. You can now sign in.");
         }
       })
       .catch((err: any) => {
@@ -36,7 +57,7 @@ const VerifyPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, dispatch, navigate]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">

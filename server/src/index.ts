@@ -46,15 +46,21 @@ console.log("[Email Config] SMTP_PASS:", process.env.SMTP_PASS ? "***SET***" : "
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// CORS: allow CORS_ORIGINS env (comma-separated) or default list. Production domains must be included.
+const defaultCorsOrigins = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://yourmarketingdashboard.ai",
+  "https://app.yourmarketingdashboard.ai",
+];
+const corsOriginsEnv = process.env.CORS_ORIGINS?.trim();
+const corsOrigins = corsOriginsEnv
+  ? corsOriginsEnv.split(",").map((o) => o.trim()).filter(Boolean)
+  : defaultCorsOrigins;
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "http://localhost:3001",
-      "https://yourseodashboard.com",
-      "https://app.yourseodashboard.com",
-    ],
+    origin: corsOrigins,
     credentials: true,
   })
 );

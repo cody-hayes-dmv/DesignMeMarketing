@@ -298,7 +298,7 @@ const ManagedServicesPage = () => {
                 <Link to="/agency/subscription" className="font-medium text-amber-700 underline hover:text-amber-900">
                   Subscription & Billing
                 </Link>{" "}
-                to request managed services. The 7-day free trial is for reporting only; managed plans are paid when approved.
+                to request managed services.
               </>
             )}
           </p>

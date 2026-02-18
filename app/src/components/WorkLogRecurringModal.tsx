@@ -260,8 +260,8 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-auto bg-gradient-to-b from-slate-50/50 to-white">
-          <div className="px-6 py-5 space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col bg-gradient-to-b from-slate-50/50 to-white">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
             <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-3">
               <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
               <input
@@ -455,7 +455,7 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
               </select>
             </div>
           </div>
-          <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
+          <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50 rounded-b-2xl">
             <button type="button" onClick={() => setOpen(false)} className="px-5 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors">
               Cancel
             </button>

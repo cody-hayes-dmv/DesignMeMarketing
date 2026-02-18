@@ -296,7 +296,7 @@ const createAgencySchema = z.object({
   zip: z.string().optional(),
   country: z.string().optional(),
   subdomain: z.string().optional(),
-  billingOption: z.enum(['charge', 'no_charge', 'manual_invoice']),
+  billingOption: z.enum(['free_account', 'charge', 'no_charge', 'manual_invoice']),
   paymentMethodId: z.string().optional(), // required when billingOption === 'charge' (Stripe Payment Element)
   tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise', 'business_lite', 'business_pro']).optional(),
   customPricing: z.coerce.number().optional().nullable(),
@@ -377,6 +377,141 @@ router.post('/setup-intent-public', async (req, res) => {
   }
 });
 
+// Free trial signup schema: no payment, just verification email. After verify, user gets 7-day Free tier.
+const registerFreeTrialSchema = z.object({
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
+  contactEmail: z.string().email('Valid email is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+});
+
+// Public: Start 7-day free trial (no credit card). Sends verification email. After verify, agency gets Free tier for 7 days.
+router.post('/register-free-trial', async (req, res) => {
+  try {
+    const body = registerFreeTrialSchema.parse(req.body);
+    const { firstName, lastName, contactEmail: rawEmail, password } = body;
+    const contactEmail = rawEmail.trim().toLowerCase();
+    const contactName = `${firstName.trim()} ${lastName.trim()}`.trim();
+
+    const existingUser = await prisma.user.findUnique({ where: { email: contactEmail } });
+    if (existingUser) {
+      return res.status(400).json({
+        message: 'This email is already registered. Sign in instead or use a different email.',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const agencyName = `${contactName}'s Agency`;
+
+    let agencyUser: { id: string; email: string };
+    try {
+      agencyUser = await prisma.user.create({
+        data: {
+          email: contactEmail,
+          name: contactName,
+          passwordHash,
+          role: 'AGENCY',
+          verified: false,
+          invited: false,
+        },
+      });
+    } catch (userErr: any) {
+      if (userErr?.code === 'P2002' && userErr?.meta?.target?.includes?.('email')) {
+        return res.status(409).json({
+          message: 'An account with this email was just created or already exists. Try signing in.',
+        });
+      }
+      throw userErr;
+    }
+
+    const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const agency = await prisma.agency.create({
+      data: {
+        name: agencyName,
+        billingType: 'trial',
+        subscriptionTier: 'free',
+        trialEndsAt,
+        contactName,
+        contactEmail,
+        website: null,
+      },
+      include: { _count: { select: { members: true } } },
+    });
+
+    await prisma.userAgency.create({
+      data: {
+        userId: agencyUser.id,
+        agencyId: agency.id,
+        agencyRole: 'OWNER',
+      },
+    });
+
+    const agencyDashboardName = `${agencyName} - Agency Website`;
+    const agencyDashboardDomain = `agency-${agency.id}.internal`;
+    try {
+      await prisma.client.create({
+        data: {
+          name: agencyDashboardName,
+          domain: agencyDashboardDomain,
+          userId: agencyUser.id,
+          belongsToAgencyId: agency.id,
+          isAgencyOwnDashboard: true,
+          status: 'DASHBOARD_ONLY',
+          managedServiceStatus: 'none',
+        },
+      });
+    } catch (dashboardErr: any) {
+      console.warn('Agency register-free-trial: auto dashboard create failed', dashboardErr?.message);
+    }
+
+    const verificationToken = jwt.sign(
+      { userId: agencyUser.id },
+      getJwtSecret(),
+      { expiresIn: '24h' }
+    );
+    await prisma.token.create({
+      data: {
+        type: 'EMAIL_VERIFY',
+        email: agencyUser.email,
+        token: verificationToken,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        userId: agencyUser.id,
+      },
+    });
+
+    const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify?token=${encodeURIComponent(verificationToken)}`;
+    try {
+      await sendEmail({
+        to: contactEmail,
+        subject: `Verify your email – ${agencyName}`,
+        html: `
+          <h1>Verify your agency account</h1>
+          <p>Hi ${contactName},</p>
+          <p>Thanks for signing up for your <strong>7-day free trial</strong>. Please verify your email by clicking the link below (expires in 24 hours):</p>
+          <p><a href="${verifyUrl}">Verify my email</a></p>
+          <p>If the link doesn't work, copy and paste this URL into your browser:</p>
+          <p style="word-break:break-all">${verifyUrl}</p>
+        `,
+      });
+    } catch (emailErr: any) {
+      console.warn('Agency register-free-trial: verification email failed', emailErr?.message);
+    }
+
+    res.status(201).json({
+      message: 'Please check your email to verify your account. After verification, you can sign in and use the Free tier for 7 days.',
+    });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      const first = error.errors?.[0];
+      const msg = first ? (first.path?.join('.') + ' ' + first.message) : 'Invalid input';
+      return res.status(400).json({ message: msg });
+    }
+    console.error('Agency register-free-trial error:', error);
+    res.status(500).json({ message: 'Failed to create account. Please try again.' });
+  }
+});
+
 // After 3DS redirect: retrieve payment method from a succeeded SetupIntent (public, no auth). Used to complete registration after redirect.
 router.post('/setup-intent-public/retrieve', async (req, res) => {
   try {
@@ -401,6 +536,27 @@ router.post('/setup-intent-public/retrieve', async (req, res) => {
   } catch (err: any) {
     console.error('SetupIntent (public) retrieve error:', err);
     res.status(500).json({ message: err?.message || 'Failed to retrieve payment method' });
+  }
+});
+
+// SetupIntent for trial activation (Agency/Admin) - used when activating subscription from 7-day trial
+router.post('/setup-intent-for-activation', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Set STRIPE_SECRET_KEY.' });
+    }
+    const setupIntent = await stripe.setupIntents.create({
+      usage: 'off_session',
+      payment_method_types: ['card'],
+    });
+    res.json({ clientSecret: setupIntent.client_secret });
+  } catch (err: any) {
+    console.error('SetupIntent for activation error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to create setup intent' });
   }
 });
 
@@ -742,16 +898,22 @@ router.post('/', authenticateToken, async (req, res) => {
       currentTools,
     } = body;
 
-    if (billingOption === 'charge' && !paymentMethodId) {
-      return res.status(400).json({ message: 'Payment method is required when billing type is Charge to Card.' });
+    if ((billingOption === 'charge' || billingOption === 'manual_invoice') && !paymentMethodId) {
+      return res.status(400).json({
+        message: billingOption === 'charge'
+          ? 'Payment method is required when billing type is Charge to Card.'
+          : 'Payment method is required when billing type is Enterprise.',
+      });
     }
-    if (billingOption === 'charge') {
+    if (billingOption === 'charge' || billingOption === 'manual_invoice') {
       const stripe = getStripe();
       if (!stripe || !isStripeConfigured()) {
-        return res.status(400).json({ message: 'Stripe is not configured. Cannot create agency with Charge to Card. Set STRIPE_SECRET_KEY on the server.' });
+        return res.status(400).json({
+          message: 'Stripe is not configured. Set STRIPE_SECRET_KEY on the server for Charge to Card and Enterprise billing.',
+        });
       }
     }
-    if (!tier && billingOption !== 'manual_invoice' && billingOption !== 'no_charge') {
+    if (!tier && billingOption !== 'manual_invoice' && billingOption !== 'no_charge' && billingOption !== 'free_account') {
       return res.status(400).json({ message: 'Subscription tier is required' });
     }
 
@@ -772,7 +934,11 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'A user with this contact email already exists' });
     }
 
-    const billingType = billingOption === 'charge' ? 'paid' : billingOption === 'no_charge' ? 'free' : 'custom';
+    const billingType =
+      billingOption === 'charge' ? 'paid'
+      : billingOption === 'free_account' ? 'free'
+      : billingOption === 'no_charge' ? 'trial'
+      : 'custom';
     const onboardingData = (referralSource || (primaryGoals && primaryGoals.length) || currentTools || referralSourceOther || primaryGoalsOther)
       ? JSON.stringify({
           referralSource: referralSource === 'referral' ? referralSourceOther : referralSource,
@@ -782,27 +948,32 @@ router.post('/', authenticateToken, async (req, res) => {
         })
       : null;
 
-    // Super Admin–created agencies: 7-day trial only when no charge (free tier / choose later)
+    // Super Admin–created agencies: 7-day trial only when "No Charge during 7 days trial" (free_account = free forever, no trial)
     const trialEndsAt =
       billingOption === "no_charge"
         ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         : null;
 
-    // When "Charge to Card": create Stripe customer, attach payment method, create subscription for tier, THEN create agency
+    // When "Charge to Card" or "Enterprise": create Stripe customer, attach payment method. Charge to Card also creates subscription.
     let stripeCustomerId: string | null = null;
     let stripeSubscriptionId: string | null = null;
-    if (billingOption === 'charge') {
-      if (!paymentMethodId || !tier) {
+    if (billingOption === 'charge' || billingOption === 'manual_invoice') {
+      if (!paymentMethodId) {
         return res.status(400).json({
-          message: paymentMethodId ? 'Subscription tier is required for Charge to Card.' : 'Payment method is required when billing type is Charge to Card.',
+          message: 'Payment method is required.',
+        });
+      }
+      if (billingOption === 'charge' && !tier) {
+        return res.status(400).json({
+          message: 'Subscription tier is required for Charge to Card.',
         });
       }
       const stripe = getStripe();
       if (!stripe || !isStripeConfigured()) {
-        return res.status(400).json({ message: 'Stripe is not configured. Cannot create agency with Charge to Card. Set STRIPE_SECRET_KEY on the server.' });
+        return res.status(400).json({ message: 'Stripe is not configured. Set STRIPE_SECRET_KEY on the server.' });
       }
       try {
-        console.log('[agencies] Charge to Card: creating Stripe customer, tier=', tier);
+        console.log('[agencies] Creating Stripe customer for', billingOption === 'charge' ? 'Charge to Card' : 'Enterprise');
         const customer = await stripe.customers.create({
           email: contactEmail,
           name: contactName || name,
@@ -811,32 +982,34 @@ router.post('/', authenticateToken, async (req, res) => {
         await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: paymentMethodId } });
         stripeCustomerId = customer.id;
 
-        // Create subscription for the selected tier. Use error_if_incomplete so the first invoice must be paid
-        // for the subscription to be created — we only create the agency when the subscription is active.
-        const tierPriceEnvKey = `STRIPE_PRICE_PLAN_${tier.toUpperCase().replace(/-/g, '_')}`;
-        const tierPriceId = (process.env as Record<string, string | undefined>)[tierPriceEnvKey];
-        if (!tierPriceId || typeof tierPriceId !== 'string' || !tierPriceId.startsWith('price_')) {
-          console.error('[agencies] Missing or invalid Stripe price for tier:', tierPriceEnvKey, tierPriceId ? '(set but not a price id)' : '(not set)');
-          return res.status(400).json({
-            message: `Billing is not configured for tier "${tier}". Add ${tierPriceEnvKey} to server .env with the Stripe Price ID (starts with price_).`,
+        if (billingOption === 'charge') {
+          // Create subscription for the selected tier
+          const tierPriceEnvKey = `STRIPE_PRICE_PLAN_${tier!.toUpperCase().replace(/-/g, '_')}`;
+          const tierPriceId = (process.env as Record<string, string | undefined>)[tierPriceEnvKey];
+          if (!tierPriceId || typeof tierPriceId !== 'string' || !tierPriceId.startsWith('price_')) {
+            console.error('[agencies] Missing or invalid Stripe price for tier:', tierPriceEnvKey, tierPriceId ? '(set but not a price id)' : '(not set)');
+            return res.status(400).json({
+              message: `Billing is not configured for tier "${tier}". Add ${tierPriceEnvKey} to server .env with the Stripe Price ID (starts with price_).`,
+            });
+          }
+          console.log('[agencies] Creating Stripe subscription for tier:', tier);
+          const subscription = await stripe.subscriptions.create({
+            customer: customer.id,
+            items: [{ price: tierPriceId }],
+            default_payment_method: paymentMethodId,
+            payment_behavior: 'error_if_incomplete',
+            payment_settings: { save_default_payment_method: 'on_subscription' },
           });
+          if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+            await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+            return res.status(400).json({
+              message: 'The first payment could not be completed. Try a different card or use test card 4242 4242 4242 4242. If your card requires verification, complete it and try again.',
+            });
+          }
+          stripeSubscriptionId = subscription.id;
+          console.log('[agencies] Stripe subscription created:', subscription.id, 'status=', subscription.status);
         }
-        console.log('[agencies] Creating Stripe subscription for tier:', tier);
-        const subscription = await stripe.subscriptions.create({
-          customer: customer.id,
-          items: [{ price: tierPriceId }],
-          default_payment_method: paymentMethodId,
-          payment_behavior: 'error_if_incomplete',
-          payment_settings: { save_default_payment_method: 'on_subscription' },
-        });
-        if (subscription.status !== 'active' && subscription.status !== 'trialing') {
-          await stripe.subscriptions.cancel(subscription.id).catch(() => {});
-          return res.status(400).json({
-            message: 'The first payment could not be completed. Try a different card or use test card 4242 4242 4242 4242. If your card requires verification, complete it and try again.',
-          });
-        }
-        stripeSubscriptionId = subscription.id;
-        console.log('[agencies] Stripe subscription created:', subscription.id, 'status=', subscription.status);
+        // Enterprise: customer + payment method only, no subscription (manual invoicing)
       } catch (stripeErr: any) {
         const code = stripeErr?.code || stripeErr?.type;
         const rawMsg = String(stripeErr?.message || stripeErr?.raw?.message || '');
@@ -857,10 +1030,14 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    // Safeguard: never create a "Charge to Card" agency without Stripe customer + subscription
+    // Safeguard: Charge to Card must have Stripe customer + subscription; Enterprise must have customer
     if (billingOption === 'charge' && (!stripeCustomerId || !stripeSubscriptionId)) {
       console.error('[agencies] Charge to Card selected but Stripe customer or subscription missing');
       return res.status(500).json({ message: 'Could not set up billing. Please try again or contact support.' });
+    }
+    if (billingOption === 'manual_invoice' && !stripeCustomerId) {
+      console.error('[agencies] Enterprise selected but Stripe customer missing');
+      return res.status(500).json({ message: 'Could not set up Stripe. Please try again or contact support.' });
     }
 
     const agency = await prisma.agency.create({
@@ -883,7 +1060,7 @@ router.post('/', authenticateToken, async (req, res) => {
         state: state || null,
         zip: zip || null,
         country: country || null,
-        subscriptionTier: billingOption === 'no_charge' ? 'free' : (tier || null),
+        subscriptionTier: (billingOption === 'no_charge' || billingOption === 'free_account') ? 'free' : (tier || null),
         customPricing: customPricing ?? null,
         internalNotes: internalNotes || null,
         onboardingData,
@@ -980,7 +1157,7 @@ router.post('/', authenticateToken, async (req, res) => {
       name: agency.name,
       subdomain: agency.subdomain,
       createdAt: agency.createdAt,
-      memberCount: agency._count.members,
+      memberCount: (agency as unknown as { _count: { members: number } })._count.members,
     });
   } catch (error: any) {
     if (error.name === 'ZodError') {
@@ -1030,7 +1207,10 @@ router.get('/me', authenticateToken, async (req, res) => {
         ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / 86400000))
         : null;
     const billingType = membership.agency.billingType ?? null;
-    const trialExpired = billingType === "free" && !trialActive;
+    const trialExpired =
+      trialEndsAt != null &&
+      trialEndsAt <= now &&
+      (billingType === 'free' || (billingType as string) === 'trial');
 
     const tierId = tierConfig?.id ?? null;
     const accountActivated = !!(membership.agency as { stripeCustomerId?: string | null }).stripeCustomerId;
@@ -1283,6 +1463,7 @@ router.get('/:agencyId', authenticateToken, async (req, res) => {
       customPricing: agency.customPricing ? Number(agency.customPricing) : null,
       internalNotes: agency.internalNotes,
       createdAt: agency.createdAt,
+      hasStripeCustomer: !!agency.stripeCustomerId,
     });
   } catch (error) {
     console.error('Get agency error:', error);
@@ -1307,10 +1488,11 @@ const updateAgencySuperAdminSchema = z.object({
   zip: z.string().optional(),
   country: z.string().optional(),
   subdomain: z.string().optional(),
-  billingType: z.enum(['paid', 'free', 'custom']).optional().nullable(),
+  billingType: z.enum(['paid', 'free', 'trial', 'custom']).optional().nullable(),
   subscriptionTier: z.string().optional().nullable(),
   customPricing: z.coerce.number().optional().nullable(),
   internalNotes: z.string().optional().nullable(),
+  paymentMethodId: z.string().optional(), // required when billingType is paid or custom and agency has no Stripe customer
 }).refine((data) => {
   const w = data.website;
   if (!w || w === '') return true;
@@ -1348,6 +1530,58 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
     }
 
     const payload: Record<string, unknown> = {};
+    const needsStripe = updateData.billingType === 'paid' || updateData.billingType === 'custom';
+    const hasStripeCustomer = !!agency.stripeCustomerId;
+    if (needsStripe && !hasStripeCustomer && !updateData.paymentMethodId) {
+      return res.status(400).json({
+        message: 'Payment method is required when setting billing to Charge to Card or Enterprise. Please add card details.',
+      });
+    }
+    if (updateData.paymentMethodId && needsStripe) {
+      const stripe = getStripe();
+      if (!stripe || !isStripeConfigured()) {
+        return res.status(400).json({
+          message: 'Stripe is not configured. Set STRIPE_SECRET_KEY on the server for Charge to Card and Enterprise billing.',
+        });
+      }
+      try {
+        let stripeCustomerId: string;
+        if (agency.stripeCustomerId) {
+          stripeCustomerId = agency.stripeCustomerId;
+          await stripe.paymentMethods.attach(updateData.paymentMethodId, { customer: stripeCustomerId });
+          await stripe.customers.update(stripeCustomerId, { invoice_settings: { default_payment_method: updateData.paymentMethodId } });
+          console.log('[agencies] Updated payment method for agency', agencyId);
+        } else {
+          const customer = await stripe.customers.create({
+            email: agency.contactEmail ?? undefined,
+            name: agency.contactName ?? agency.name ?? undefined,
+            metadata: { agencyId },
+          });
+          await stripe.paymentMethods.attach(updateData.paymentMethodId, { customer: customer.id });
+          await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: updateData.paymentMethodId } });
+          stripeCustomerId = customer.id;
+          payload.stripeCustomerId = stripeCustomerId;
+          console.log('[agencies] Created Stripe customer for agency', agencyId);
+        }
+      } catch (stripeErr: any) {
+        const code = stripeErr?.code || stripeErr?.type;
+        const rawMsg = String(stripeErr?.message || stripeErr?.raw?.message || '');
+        console.error('Stripe update failed:', code, rawMsg);
+        let userMessage: string;
+        if (/connection|ENOTFOUND|network|timeout/i.test(rawMsg)) {
+          userMessage = 'Could not reach Stripe. Check your internet connection and try again.';
+        } else if (code === 'resource_missing' || /No such payment_method|payment_method.*invalid/i.test(rawMsg)) {
+          userMessage = 'Payment method expired or invalid. Please try again.';
+        } else if (/already been attached|already attached/i.test(rawMsg)) {
+          userMessage = 'This card was already used. Please use a different card.';
+        } else if (stripeErr?.decline_code || code === 'card_declined') {
+          userMessage = rawMsg || 'Card was declined. Try a different card.';
+        } else {
+          userMessage = rawMsg || 'Failed to save card. Please try again.';
+        }
+        return res.status(400).json({ message: userMessage });
+      }
+    }
     if (updateData.name !== undefined) payload.name = updateData.name;
     if (updateData.website !== undefined) payload.website = updateData.website;
     if (updateData.industry !== undefined) payload.industry = updateData.industry;
@@ -1363,8 +1597,26 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
     if (updateData.zip !== undefined) payload.zip = updateData.zip;
     if (updateData.country !== undefined) payload.country = updateData.country;
     if (updateData.subdomain !== undefined) payload.subdomain = newSubdomain ?? null;
-    if (updateData.billingType !== undefined) payload.billingType = updateData.billingType;
-    if (updateData.subscriptionTier !== undefined) payload.subscriptionTier = updateData.subscriptionTier;
+    if (updateData.billingType !== undefined) {
+      payload.billingType = updateData.billingType;
+      // When switching to trial: set trialEndsAt to 7 days from now if null or expired
+      if (updateData.billingType === 'trial') {
+        const now = new Date();
+        const sevenDays = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const currentTrialEndsAt = agency.trialEndsAt;
+        if (!currentTrialEndsAt || currentTrialEndsAt <= now) {
+          payload.trialEndsAt = sevenDays;
+        }
+        payload.subscriptionTier = 'free';
+      } else if (updateData.billingType === 'free') {
+        // Free Account: no trial, free forever
+        payload.trialEndsAt = null;
+        payload.subscriptionTier = 'free';
+      } else if (updateData.billingType === 'paid' || updateData.billingType === 'custom') {
+        payload.trialEndsAt = null;
+      }
+    }
+    if (updateData.subscriptionTier !== undefined && payload.billingType !== 'trial') payload.subscriptionTier = updateData.subscriptionTier;
     if (updateData.customPricing !== undefined) payload.customPricing = updateData.customPricing;
     if (updateData.internalNotes !== undefined) payload.internalNotes = updateData.internalNotes;
 
@@ -1372,6 +1624,35 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
       where: { id: agencyId },
       data: payload,
     });
+
+    // Sync Primary Contact (contactName, contactEmail) to agency owner User so Team's Agency Access shows matching Full Name and Email
+    const syncContact = updateData.contactName !== undefined || updateData.contactEmail !== undefined;
+    if (syncContact) {
+      const ownerMembership = await prisma.userAgency.findFirst({
+        where: { agencyId, agencyRole: 'OWNER' },
+        select: { userId: true },
+      });
+      if (ownerMembership) {
+        const userPayload: { name?: string; email?: string } = {};
+        if (updateData.contactName !== undefined) userPayload.name = updateData.contactName.trim() || undefined;
+        if (updateData.contactEmail !== undefined) userPayload.email = updateData.contactEmail.trim().toLowerCase();
+        if (Object.keys(userPayload).length > 0) {
+          try {
+            await prisma.user.update({
+              where: { id: ownerMembership.userId },
+              data: userPayload,
+            });
+          } catch (userErr: any) {
+            if (userErr?.code === 'P2002') {
+              return res.status(400).json({
+                message: 'Contact email is already used by another account. Please use a different email.',
+              });
+            }
+            throw userErr;
+          }
+        }
+      }
+    }
 
     res.json({
       id: updated.id,
@@ -1874,6 +2155,128 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
   }
 });
 
+const activateTrialSubscriptionSchema = z.object({
+  paymentMethodId: z.string().min(1, 'Payment method is required'),
+  tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise']),
+});
+
+// Activate subscription for agency on 7-day trial: create Stripe customer, attach card, create subscription, update agency to paid
+router.post('/activate-trial-subscription', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const body = activateTrialSubscriptionSchema.parse(req.body);
+    const { paymentMethodId, tier } = body;
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+    const agency = membership.agency;
+
+    if (agency.billingType !== 'trial' && agency.billingType !== 'free') {
+      return res.status(400).json({
+        message: 'This endpoint is only for agencies on the 7-day trial or Free account. Your account is not eligible.',
+      });
+    }
+    if (agency.stripeCustomerId && agency.stripeSubscriptionId) {
+      return res.status(400).json({
+        message: 'Your subscription is already active. Use Manage Billing to change your plan.',
+      });
+    }
+
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+
+    const tierPriceId = getPriceIdForTier(tier as import('../lib/tiers.js').TierId);
+    if (!tierPriceId || !tierPriceId.startsWith('price_')) {
+      return res.status(400).json({
+        message: `Plan "${tier}" is not configured. Contact support.`,
+      });
+    }
+
+    let stripeCustomerId = agency.stripeCustomerId;
+    if (!stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        email: agency.contactEmail ?? undefined,
+        name: agency.contactName ?? agency.name ?? undefined,
+        metadata: { agencyId: agency.id },
+      });
+      stripeCustomerId = customer.id;
+      await stripe.paymentMethods.attach(paymentMethodId, { customer: stripeCustomerId });
+      await stripe.customers.update(stripeCustomerId, {
+        invoice_settings: { default_payment_method: paymentMethodId },
+      });
+    } else {
+      await stripe.paymentMethods.attach(paymentMethodId, { customer: stripeCustomerId });
+      await stripe.customers.update(stripeCustomerId, {
+        invoice_settings: { default_payment_method: paymentMethodId },
+      });
+    }
+
+    const subscription = await stripe.subscriptions.create({
+      customer: stripeCustomerId,
+      items: [{ price: tierPriceId }],
+      default_payment_method: paymentMethodId,
+      payment_behavior: 'error_if_incomplete',
+      payment_settings: { save_default_payment_method: 'on_subscription' },
+    });
+
+    if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+      await stripe.subscriptions.cancel(subscription.id).catch(() => {});
+      return res.status(400).json({
+        message: 'The first payment could not be completed. Try a different card or use test card 4242 4242 4242 4242.',
+      });
+    }
+
+    // Switch agency from Free (trial) to selected subscription tier and "Charge to Card" behavior:
+    // subscriptionTier = chosen plan (solo/starter/growth/pro/enterprise), billingType = 'paid',
+    // trialEndsAt = null so limits and features use the paid tier like any other card-charged agency.
+    await prisma.agency.update({
+      where: { id: agency.id },
+      data: {
+        stripeCustomerId,
+        stripeSubscriptionId: subscription.id,
+        subscriptionTier: tier,
+        billingType: 'paid',
+        trialEndsAt: null,
+      },
+    });
+
+    await syncAgencyTierFromStripe(agency.id);
+    console.log('[agencies] Trial activated for agency', agency.id, 'tier=', tier);
+
+    res.json({
+      success: true,
+      message: 'Subscription activated successfully.',
+    });
+  } catch (err: any) {
+    if (err?.name === 'ZodError') {
+      return res.status(400).json({ message: 'Invalid input', errors: err.errors });
+    }
+    if (err?.code === 'card_declined' || err?.decline_code) {
+      return res.status(400).json({
+        message: err?.message || 'Card was declined. Try a different card.',
+      });
+    }
+    if (/already been attached|already attached/i.test(String(err?.message || ''))) {
+      return res.status(400).json({
+        message: 'This card was already used. Please use a different card.',
+      });
+    }
+    console.error('Activate trial subscription error:', err);
+    res.status(500).json({
+      message: err?.message || 'Failed to activate subscription. Please try again.',
+    });
+  }
+});
+
 const activateManagedServiceSchema = z.object({
   packageId: z.enum(['foundation', 'growth', 'domination', 'market_domination', 'custom']),
   clientId: z.string().min(1),
@@ -1914,7 +2317,7 @@ router.post('/managed-services', authenticateToken, async (req, res) => {
     const agency = membership!.agency as { stripeCustomerId?: string | null; trialEndsAt?: Date | null };
     if (!agency.stripeCustomerId) {
       return res.status(403).json({
-        message: 'Activate your account first. Add a payment method in Subscription & Billing to unlock managed services. The 7-day free trial is for reporting only; managed plans are paid when approved.',
+        message: 'Activate your account first. Add a payment method in Subscription & Billing to unlock managed services.',
       });
     }
     const onFreeTrial = agency.trialEndsAt && agency.trialEndsAt > new Date();
@@ -2368,7 +2771,7 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
     const agency = membership!.agency as { stripeCustomerId?: string | null; trialEndsAt?: Date | null };
     if (!agency.stripeCustomerId) {
       return res.status(403).json({
-        message: 'Activate your account first. Add a payment method in Subscription & Billing to add add-ons. The 7-day free trial is for reporting only; add-ons and managed plans are paid when added or approved.',
+        message: 'Activate your account first. Add a payment method in Subscription & Billing to add add-ons.',
       });
     }
     const onFreeTrial = agency.trialEndsAt && agency.trialEndsAt > new Date();

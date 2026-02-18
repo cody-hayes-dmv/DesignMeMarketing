@@ -743,6 +743,7 @@ enum ManagedServicePackage {
 enum BillingType {
   paid
   free
+  trial
   custom
 }
 
