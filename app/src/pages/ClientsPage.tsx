@@ -32,6 +32,8 @@ import {
   XCircle,
   Archive,
   FolderPlus,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -229,6 +231,10 @@ const ClientsPage = () => {
   const { agencies } = useSelector((state: RootState) => state.agency);
   const { user } = useSelector((state: RootState) => state.auth);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createClientModalStep, setCreateClientModalStep] = useState(1);
+  useEffect(() => {
+    if (showCreateModal) setCreateClientModalStep(1);
+  }, [showCreateModal]);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -1426,9 +1432,8 @@ const ClientsPage = () => {
 
       {/* Create Client Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm overflow-y-auto z-50 p-4">
-          <div className="min-h-full px-4 py-8 flex items-start justify-center">
-            <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 h-[90vh] max-h-[720px] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between px-6 py-5 shrink-0 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
               <div className="flex items-center gap-3">
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
@@ -1444,6 +1449,7 @@ const ClientsPage = () => {
                 onClick={() => {
                   setShowCreateModal(false);
                   setClientForm(EMPTY_CLIENT_FORM);
+                  setCreateClientModalStep(1);
                 }}
                 className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                 aria-label="Close"
@@ -1452,11 +1458,35 @@ const ClientsPage = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateClient} className="flex-1 min-h-0 flex flex-col bg-gray-50/50">
-              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
-                {isAgencyCreateForm ? (
-                  <>
-                    {/* SECTION A: BUSINESS INFORMATION (Required) */}
+            <form onSubmit={handleCreateClient} className="flex flex-col flex-1 min-h-0 bg-gray-50/50 overflow-hidden">
+              <>
+                {/* Step indicator - 6-part flow for all roles */}
+                  <div className="px-6 pt-4 pb-2 shrink-0 border-b border-gray-200 bg-white">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-gray-600">Step {createClientModalStep} of 6</span>
+                      <div className="flex gap-1.5">
+                        {[1, 2, 3, 4, 5, 6].map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setCreateClientModalStep(s)}
+                            className={`h-2 rounded-full transition-all ${s === createClientModalStep ? "w-6 bg-primary-600" : "w-2 bg-gray-300 hover:bg-gray-400"}`}
+                            aria-label={`Go to step ${s}`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      {createClientModalStep === 1 && "Business Information"}
+                      {createClientModalStep === 2 && "Location Information"}
+                      {createClientModalStep === 3 && "Contact Information"}
+                      {createClientModalStep === 4 && "Website Login Info (Optional)"}
+                      {createClientModalStep === 5 && "Campaign Type"}
+                      {createClientModalStep === 6 && "Google Business Profile (Optional)"}
+                    </p>
+                  </div>
+                  <div className="p-6 overflow-y-auto flex-1 min-h-0">
+                    {createClientModalStep === 1 && (
                     <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -1502,8 +1532,8 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-
-                    {/* SECTION B: LOCATION INFORMATION (Required) */}
+                    )}
+                    {createClientModalStep === 2 && (
                     <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-emerald-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -1535,17 +1565,17 @@ const ClientsPage = () => {
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
                           </select>
-                          <p className="mt-1 text-xs text-gray-500">How far do you serve from your primary location?</p>
+                          <p className="mt-1 text-xs text-gray-500">Optional but recommended. How far do you serve from your primary location?</p>
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Areas Served</label>
                           <textarea value={clientForm.serviceAreasServed} onChange={(e) => setClientForm({ ...clientForm, serviceAreasServed: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={2} placeholder="e.g. Huntington, Northport, Centerport, Cold Spring Harbor, Dix Hills" />
-                          <p className="mt-1 text-xs text-gray-500">List cities, towns, or regions you serve (comma-separated)</p>
+                          <p className="mt-1 text-xs text-gray-500">Optional. List cities, towns, or regions you serve (comma-separated)</p>
                         </div>
                       </div>
                     </section>
-
-                    {/* SECTION C: CONTACT INFORMATION (Required) */}
+                    )}
+                    {createClientModalStep === 3 && (
                     <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-amber-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -1562,8 +1592,8 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-
-                    {/* SECTION D: WEBSITE LOGIN INFO (Optional) */}
+                    )}
+                    {createClientModalStep === 4 && (
                     <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-violet-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
@@ -1585,8 +1615,8 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-
-                    {/* SECTION E: CAMPAIGN TYPE (Required) */}
+                    )}
+                    {createClientModalStep === 5 && (
                     <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-indigo-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
@@ -1606,8 +1636,8 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-
-                    {/* SECTION F: GOOGLE BUSINESS PROFILE (Optional) */}
+                    )}
+                    {createClientModalStep === 6 && (
                     <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-teal-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
@@ -1626,10 +1656,42 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-                  </>
-                ) : (
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 px-6 py-4 h-[72px] shrink-0 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl items-center">
+                    <button
+                      type="button"
+                      onClick={() => setCreateClientModalStep((s) => Math.max(1, s - 1))}
+                      disabled={createClientModalStep === 1}
+                      className="w-full max-w-[140px] inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="h-4 w-4 shrink-0" /> Previous
+                    </button>
+                    <div className="flex justify-end">
+                      {createClientModalStep < 6 ? (
+                        <button
+                          type="button"
+                          onClick={() => setCreateClientModalStep((s) => s + 1)}
+                          className="w-full max-w-[140px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
+                        >
+                          Next <ChevronRight className="h-4 w-4 shrink-0" />
+                        </button>
+                      ) : (
+                        <button
+                          type="submit"
+                          className="w-full max-w-[160px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
+                        >
+                          Create Client
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </>
+
+              {false && (
                   <>
-                    {/* Full form for Super Admin / Specialist */}
+                    <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
+                    {/* Full form - hidden; Create always uses 6-step flow */}
                     <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -1808,30 +1870,10 @@ const ClientsPage = () => {
                         </div>
                       </section>
                     )}
+                  </div>
                   </>
                 )}
-              </div>
-
-              <div className="border-t border-gray-200 px-6 py-4 bg-gray-100/80 flex items-center justify-end gap-3 shrink-0 rounded-b-2xl">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    setClientForm(EMPTY_CLIENT_FORM);
-                  }}
-                  className="border border-gray-300 bg-white text-gray-700 px-5 py-2.5 rounded-xl hover:bg-gray-50 font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
-                >
-                  Create Client
-                </button>
-              </div>
             </form>
-            </div>
           </div>
         </div>
       )}

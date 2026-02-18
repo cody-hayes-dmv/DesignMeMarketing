@@ -7,7 +7,7 @@ import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, updateAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, Archive, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, ChevronLeft, Archive, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -93,7 +93,15 @@ const AgenciesPage = () => {
     const dispatch = useDispatch();
     const { agencies, loading } = useSelector((state: RootState) => state.agency);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [createModalStep, setCreateModalStep] = useState(1);
+    useEffect(() => {
+        if (showCreateModal) setCreateModalStep(1);
+    }, [showCreateModal]);
     const [showEditAgencyModal, setShowEditAgencyModal] = useState(false);
+    const [editModalStep, setEditModalStep] = useState(1);
+    useEffect(() => {
+        if (showEditAgencyModal) setEditModalStep(1);
+    }, [showEditAgencyModal]);
     const [editingAgency, setEditingAgency] = useState<{ id: string; name: string } | null>(null);
     const [editingAgencyHasStripeCustomer, setEditingAgencyHasStripeCustomer] = useState(false);
     const [showMembersModal, setShowMembersModal] = useState(false);
@@ -1258,7 +1266,7 @@ const AgenciesPage = () => {
             {/* Create Agency Modal */}
             {showCreateModal && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+                    <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 h-[90vh] max-h-[720px] flex flex-col overflow-hidden">
                         <div className="flex justify-between items-center px-6 py-5 shrink-0 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
                             <div className="flex items-center gap-3">
                                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
@@ -1269,13 +1277,39 @@ const AgenciesPage = () => {
                                     <p className="text-sm text-white/90">Add a new agency and primary contact</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={() => setShowCreateModal(false)} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
+                            <button type="button" onClick={() => { setShowCreateModal(false); setCreateModalStep(1); }} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
-                        <form onSubmit={handleCreateAgency} className="flex flex-col min-h-0 bg-gray-50/50">
-                            <div className="p-6 overflow-y-auto space-y-5 flex-1">
-                                {/* Section A: Agency Information */}
+                        <form onSubmit={(e) => e.preventDefault()} className="flex flex-col flex-1 min-h-0 bg-gray-50/50 overflow-hidden">
+                            {/* Step indicator */}
+                            <div className="px-6 pt-4 pb-2 shrink-0 border-b border-gray-200 bg-white">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-medium text-gray-600">Step {createModalStep} of 5</span>
+                                    <div className="flex gap-1.5">
+                                        {[1, 2, 3, 4, 5].map((s) => (
+                                            <button
+                                                key={s}
+                                                type="button"
+                                                onClick={() => setCreateModalStep(s)}
+                                                className={`h-2 rounded-full transition-all ${s === createModalStep ? "w-6 bg-primary-600" : "w-2 bg-gray-300 hover:bg-gray-400"}`}
+                                                aria-label={`Go to step ${s}`}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                                <p className="text-xs text-gray-500">
+                                    {createModalStep === 1 && "Agency Information"}
+                                    {createModalStep === 2 && "Primary Contact"}
+                                    {createModalStep === 3 && "Business Address & White Label Subdomain"}
+                                    {createModalStep === 4 && "Billing & Subscription"}
+                                    {createModalStep === 5 && "Additional Questions"}
+                                </p>
+                            </div>
+                            <div className="p-6 overflow-y-auto flex-1 min-h-0">
+                                {createModalStep === 1 && (
+                                <>
+                                {/* Part 1: Agency Information */}
                                 <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -1320,8 +1354,9 @@ const AgenciesPage = () => {
                                         </div>
                                     </div>
                                 </section>
-
-                                {/* Section B: Primary Contact */}
+                                </>
+                                )}
+                                {createModalStep === 2 && (
                                 <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -1346,8 +1381,10 @@ const AgenciesPage = () => {
                                         </div>
                                     </div>
                                 </section>
-
-                                {/* Section C: Business Address */}
+                                )}
+                                {createModalStep === 3 && (
+                                <>
+                                {/* Part 3: Business Address & White Label Subdomain */}
                                 <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -1382,8 +1419,8 @@ const AgenciesPage = () => {
                                     </div>
                                 </section>
 
-                                {/* Section D: Subdomain */}
-                                <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
+                                {/* Section D: Subdomain (still part 3) */}
+                                <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5 mt-4">
                                     <h3 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
                                         WHITE LABEL SUBDOMAIN (Optional)
@@ -1394,8 +1431,9 @@ const AgenciesPage = () => {
                                         <p className="mt-1 text-xs text-gray-500">e.g. tkmdigital → tkmdigital.yourplatform.com. Leave blank if not needed.</p>
                                     </div>
                                 </section>
-
-                                {/* Section E: Billing & Subscription */}
+                                </>
+                                )}
+                                {createModalStep === 4 && (
                                 <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
@@ -1485,8 +1523,9 @@ const AgenciesPage = () => {
                                         )}
                                     </div>
                                 </section>
-
-                                {/* Section F: Additional Questions */}
+                                )}
+                                {createModalStep === 5 && (
+                                <>
                                 <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-teal-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
@@ -1594,16 +1633,38 @@ const AgenciesPage = () => {
                                         </div>
                                     </div>
                                 </section>
-
-                                <p className="text-xs text-gray-500 border-t border-gray-200 pt-4 mt-2">After creation, an email will be sent to the contact with a secure &quot;Set your password&quot; link (expires in 24 hours). No password is collected in this form.</p>
+                                <p className="text-xs text-gray-500 border-t border-gray-200 pt-4 mt-4">After creation, an email will be sent to the contact with a secure &quot;Set your password&quot; link (expires in 24 hours). No password is collected in this form.</p>
+                                </>
+                                )}
                             </div>
-                            <div className="flex gap-3 px-6 py-4 border-t border-gray-200 shrink-0 bg-gray-100/80 rounded-b-2xl">
-                                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium">
-                                    Cancel
+                            <div className="grid grid-cols-2 gap-3 px-6 py-4 h-[72px] shrink-0 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl items-center">
+                                <button
+                                    type="button"
+                                    onClick={() => setCreateModalStep((s) => Math.max(1, s - 1))}
+                                    disabled={createModalStep === 1}
+                                    className="w-full max-w-[140px] inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronLeft className="h-4 w-4 shrink-0" /> Previous
                                 </button>
-                                <button type="submit" className="flex-1 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all">
-                                    Create Agency
-                                </button>
+                                <div className="flex justify-end">
+                                    {createModalStep < 5 ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setCreateModalStep((s) => s + 1)}
+                                            className="w-full max-w-[140px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
+                                        >
+                                            Next <ChevronRight className="h-4 w-4 shrink-0" />
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleCreateAgency(e as unknown as React.FormEvent)}
+                                            className="w-full max-w-[160px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
+                                        >
+                                            Create Agency
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </form>
                     </div>
@@ -1613,7 +1674,7 @@ const AgenciesPage = () => {
             {/* Edit Agency Modal */}
             {showEditAgencyModal && editingAgency && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+                    <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl mx-4 h-[90vh] max-h-[720px] flex flex-col overflow-hidden">
                         <div className="flex justify-between items-center px-6 py-5 shrink-0 bg-gradient-to-r from-primary-600 via-primary-500 to-blue-600 text-white rounded-t-2xl">
                             <div className="flex items-center gap-3">
                                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
@@ -1624,16 +1685,39 @@ const AgenciesPage = () => {
                                     <p className="text-sm text-white/90">{editingAgency.name}</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={() => { setShowEditAgencyModal(false); setEditingAgency(null); }} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
+                            <button type="button" onClick={() => { setShowEditAgencyModal(false); setEditingAgency(null); setEditModalStep(1); }} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
                         {loadingEditAgency ? (
                             <div className="p-12 text-center text-gray-500">Loading agency...</div>
                         ) : (
-                        <form onSubmit={(e) => { e.preventDefault(); handleUpdateAgency(e); }} className="flex flex-col min-h-0 bg-gray-50/50">
-                            <div className="p-6 overflow-y-auto space-y-5 flex-1">
-                                {/* Section A: Agency Information */}
+                        <form onSubmit={(e) => { e.preventDefault(); handleUpdateAgency(e); }} className="flex flex-col flex-1 min-h-0 bg-gray-50/50 overflow-hidden">
+                            {/* Step indicator */}
+                            <div className="px-6 pt-4 pb-2 shrink-0 border-b border-gray-200 bg-white">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-medium text-gray-600">Step {editModalStep} of 4</span>
+                                    <div className="flex gap-1.5">
+                                        {[1, 2, 3, 4].map((s) => (
+                                            <button
+                                                key={s}
+                                                type="button"
+                                                onClick={() => setEditModalStep(s)}
+                                                className={`h-2 rounded-full transition-all ${s === editModalStep ? "w-6 bg-primary-600" : "w-2 bg-gray-300 hover:bg-gray-400"}`}
+                                                aria-label={`Go to step ${s}`}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                                <p className="text-xs text-gray-500">
+                                    {editModalStep === 1 && "Agency Information"}
+                                    {editModalStep === 2 && "Primary Contact"}
+                                    {editModalStep === 3 && "Business Address & White Label Subdomain"}
+                                    {editModalStep === 4 && "Billing & Subscription"}
+                                </p>
+                            </div>
+                            <div className="p-6 overflow-y-auto flex-1 min-h-0">
+                                {editModalStep === 1 && (
                                 <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -1678,8 +1762,8 @@ const AgenciesPage = () => {
                                         </div>
                                     </div>
                                 </section>
-
-                                {/* Section B: Primary Contact */}
+                                )}
+                                {editModalStep === 2 && (
                                 <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-emerald-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -1704,8 +1788,9 @@ const AgenciesPage = () => {
                                         </div>
                                     </div>
                                 </section>
-
-                                {/* Section C: Business Address */}
+                                )}
+                                {editModalStep === 3 && (
+                                <>
                                 <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -1752,8 +1837,9 @@ const AgenciesPage = () => {
                                         <p className="mt-1 text-xs text-gray-500">e.g. tkmdigital → tkmdigital.yourplatform.com. Leave blank if not needed.</p>
                                     </div>
                                 </section>
-
-                                {/* Section E: Billing & Subscription */}
+                                </>
+                                )}
+                                {editModalStep === 4 && (
                                 <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
                                     <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
@@ -1844,14 +1930,37 @@ const AgenciesPage = () => {
                                         )}
                                     </div>
                                 </section>
+                                )}
                             </div>
-                            <div className="flex gap-3 px-6 py-4 border-t border-gray-200 shrink-0 bg-gray-100/80 rounded-b-2xl">
-                                <button type="button" onClick={() => { setShowEditAgencyModal(false); setEditingAgency(null); }} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium">
-                                    Cancel
+                            <div className="grid grid-cols-2 gap-3 px-6 py-4 h-[72px] shrink-0 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl items-center">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditModalStep((s) => Math.max(1, s - 1))}
+                                    disabled={editModalStep === 1}
+                                    className="w-full max-w-[140px] inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronLeft className="h-4 w-4 shrink-0" /> Previous
                                 </button>
-                                <button type="button" onClick={() => handleUpdateAgency()} disabled={loading} className="flex-1 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                                    {loading ? "Saving..." : "Save Changes"}
-                                </button>
+                                <div className="flex justify-end">
+                                    {editModalStep < 4 ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditModalStep((s) => s + 1)}
+                                            className="w-full max-w-[140px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
+                                        >
+                                            Next <ChevronRight className="h-4 w-4 shrink-0" />
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleUpdateAgency()}
+                                            disabled={loading}
+                                            className="w-full max-w-[160px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {loading ? "Saving..." : "Save Changes"}
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </form>
                         )}
