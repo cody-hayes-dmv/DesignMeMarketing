@@ -994,26 +994,22 @@ const AgenciesPage = () => {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <a
-                                                className="text-sm font-medium text-primary-600 hover:text-primary-700 underline underline-offset-1 decoration-primary-300 hover:decoration-primary-500 transition-colors"
-                                                href={
-                                                    agency.subdomain
-                                                        ? `https://${agency.subdomain}.yourseodashboard.com`
-                                                        : "#"
-                                                }
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    if (!agency.subdomain) {
-                                                        e.preventDefault();
-                                                    }
-                                                }}
-                                            >
-                                                {agency.subdomain
-                                                    ? `${agency.subdomain}.yourseodashboard.com`
-                                                    : "-"}
-                                            </a>
+                                            {(() => {
+                                                const sd = agency.subdomain != null ? String(agency.subdomain).trim() : "";
+                                                const isBlank = !sd || sd.toLowerCase() === "null";
+                                                return isBlank ? (
+                                                    <span className="text-sm text-gray-500">-</span>
+                                                ) : (
+                                                    <a
+                                                        className="text-sm font-medium text-primary-600 hover:text-primary-700 underline underline-offset-1 decoration-primary-300 hover:decoration-primary-500 transition-colors"
+                                                        href={`https://${sd}.yourseodashboard.com`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                    >
+                                                        {sd}.yourseodashboard.com
+                                                    </a>
+                                                );
+                                            })()}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span className="inline-flex items-center justify-center min-w-[2rem] px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
@@ -2289,11 +2285,13 @@ const AgenciesPage = () => {
                                                     className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
                                                 >
                                                     <div className="font-medium text-gray-900">{agency.name}</div>
-                                                    {agency.subdomain && (
-                                                        <div className="text-sm text-gray-500">
-                                                            {agency.subdomain}.yourseodashboard.com
-                                                        </div>
-                                                    )}
+                                                    {(() => {
+                                                        const sd = agency.subdomain != null ? String(agency.subdomain).trim() : "";
+                                                        const hasSubdomain = sd && sd.toLowerCase() !== "null";
+                                                        return hasSubdomain ? (
+                                                            <div className="text-sm text-gray-500">{sd}.yourseodashboard.com</div>
+                                                        ) : null;
+                                                    })()}
                                                 </button>
                                             ))}
                                         </div>
