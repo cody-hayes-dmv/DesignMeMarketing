@@ -520,8 +520,8 @@ const AgenciesPage = () => {
                 state: editForm.state || undefined,
                 zip: editForm.zip || undefined,
                 country: editForm.country || undefined,
-                // Send null when blank so backend clears agency subdomain; otherwise send trimmed value
-                subdomain: editForm.subdomain != null && editForm.subdomain.trim() !== "" ? editForm.subdomain.trim() : null,
+                // Send empty string when blank so backend clears agency subdomain (converts "" to null)
+                subdomain: editForm.subdomain != null && editForm.subdomain.trim() !== "" ? editForm.subdomain.trim() : "",
                 billingType: editForm.billingType || undefined,
                 subscriptionTier: editForm.subscriptionTier || undefined,
                 customPricing: editForm.billingType === "custom" && editForm.customPricing !== "" ? Number(editForm.customPricing) : undefined,
@@ -1631,7 +1631,7 @@ const AgenciesPage = () => {
                         {loadingEditAgency ? (
                             <div className="p-12 text-center text-gray-500">Loading agency...</div>
                         ) : (
-                        <form onSubmit={(e) => { e.preventDefault(); handleUpdateAgency(e); }} action="javascript:void(0)" className="flex flex-col min-h-0 bg-gray-50/50">
+                        <form onSubmit={(e) => { e.preventDefault(); handleUpdateAgency(e); }} className="flex flex-col min-h-0 bg-gray-50/50">
                             <div className="p-6 overflow-y-auto space-y-5 flex-1">
                                 {/* Section A: Agency Information */}
                                 <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">

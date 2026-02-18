@@ -1479,7 +1479,7 @@ const updateAgencySuperAdminSchema = z.object({
   agencySize: z.string().optional(),
   numberOfClients: z.coerce.number().int().min(0).optional().nullable(),
   contactName: z.string().optional(),
-  contactEmail: z.string().email().optional(),
+  contactEmail: z.union([z.string().email(), z.literal('')]).optional(),
   contactPhone: z.string().optional(),
   contactJobTitle: z.string().optional(),
   streetAddress: z.string().optional(),
@@ -1592,7 +1592,10 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
     if (updateData.agencySize !== undefined) payload.agencySize = updateData.agencySize;
     if (updateData.numberOfClients !== undefined) payload.numberOfClients = updateData.numberOfClients;
     if (updateData.contactName !== undefined) payload.contactName = updateData.contactName;
-    if (updateData.contactEmail !== undefined) payload.contactEmail = updateData.contactEmail;
+    if (updateData.contactEmail !== undefined) {
+      const email = String(updateData.contactEmail).trim();
+      payload.contactEmail = email || null;
+    }
     if (updateData.contactPhone !== undefined) payload.contactPhone = updateData.contactPhone;
     if (updateData.contactJobTitle !== undefined) payload.contactJobTitle = updateData.contactJobTitle;
     if (updateData.streetAddress !== undefined) payload.streetAddress = updateData.streetAddress;
