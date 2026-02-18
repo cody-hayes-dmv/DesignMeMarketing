@@ -115,8 +115,51 @@ router.get('/included-for-client/:clientId', authenticateToken, async (req, res)
     });
     res.json(inclusions.map(i => i.agencyId));
   } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('does not exist') || msg.includes('ER_NO_SUCH_TABLE') || error?.code === 'P2021') {
+      return res.json([]);
+    }
     console.error('Get included for client error:', error);
-    res.status(500).json({ message: error.message || 'Internal server error' });
+    return res.json([]);
+  }
+});
+
+// Get included client IDs only (lightweight, for Clients page metric). No enrichment - avoids 500 from missing tables.
+router.get('/included-clients/ids', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user?.role) {
+      return res.json([]);
+    }
+    let clientIds: string[] = [];
+    if (req.user.role === 'SUPER_ADMIN') {
+      const rows = await prisma.clientAgencyIncluded.findMany({
+        select: { clientId: true },
+      });
+      clientIds = Array.from(new Set(rows.map((r) => r.clientId)));
+    } else if (req.user.role === 'AGENCY' || req.user.role === 'ADMIN') {
+      const memberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const agencyIds = memberships.map((m) => m.agencyId);
+      if (agencyIds.length > 0) {
+        const rows = await prisma.clientAgencyIncluded.findMany({
+          where: { agencyId: { in: agencyIds } },
+          select: { clientId: true },
+        });
+        const unique = new Set(rows.map((r) => r.clientId));
+        clientIds = Array.from(unique);
+      }
+    }
+    res.json(clientIds);
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('does not exist') || msg.includes('ER_NO_SUCH_TABLE') || error?.code === 'P2021') {
+      return res.json([]);
+    }
+    console.error('Get included client IDs error:', error);
+    // Return empty array on any error so Clients page loads; metric will show 0
+    return res.json([]);
   }
 });
 
@@ -191,34 +234,45 @@ router.get('/included-clients', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Add stats (keywords, avgPosition, topRankings, traffic) like Clients page
+    // Add stats (keywords, avgPosition, topRankings, traffic) like Clients page. Defensive: skip null client, catch per-row errors.
     const enriched = await Promise.all(inclusions.map(async (row) => {
       const c = row.client;
-      const [keywordStats, topRankingsCount, trafficSource, ga4Metrics] = await Promise.all([
-        prisma.keyword.aggregate({ where: { clientId: c.id }, _count: { id: true }, _avg: { currentPosition: true } }),
-        prisma.keyword.count({ where: { clientId: c.id, currentPosition: { lte: 10, not: null } } }),
-        prisma.trafficSource.findFirst({ where: { clientId: c.id }, select: { totalEstimatedTraffic: true, organicEstimatedTraffic: true } }),
-        prisma.ga4Metrics.findUnique({ where: { clientId: c.id }, select: { totalSessions: true } }),
-      ]);
-      const keywords = keywordStats._count.id || 0;
-      const avgPosition = keywordStats._avg.currentPosition ? Math.round(keywordStats._avg.currentPosition * 10) / 10 : null;
-      const traffic = trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0;
-      const traffic30d = ga4Metrics?.totalSessions ?? null;
+      if (!c?.id) return null;
+      let keywords = 0;
+      let avgPosition: number | null = null;
+      let topRankingsCount = 0;
+      let traffic = 0;
+      let traffic30d: number | null = null;
+      try {
+        const [keywordStats, topRankings, trafficSource, ga4Metrics] = await Promise.all([
+          prisma.keyword.aggregate({ where: { clientId: c.id }, _count: { id: true }, _avg: { currentPosition: true } }).catch(() => ({ _count: { id: 0 }, _avg: { currentPosition: null } })),
+          prisma.keyword.count({ where: { clientId: c.id, currentPosition: { lte: 10, not: null } } }).catch(() => 0),
+          prisma.trafficSource.findFirst({ where: { clientId: c.id }, select: { totalEstimatedTraffic: true, organicEstimatedTraffic: true } }).catch(() => null),
+          prisma.ga4Metrics.findUnique({ where: { clientId: c.id }, select: { totalSessions: true } }).catch(() => null),
+        ]);
+        keywords = keywordStats._count?.id || 0;
+        avgPosition = keywordStats._avg?.currentPosition != null ? Math.round(keywordStats._avg.currentPosition * 10) / 10 : null;
+        topRankingsCount = topRankings || 0;
+        traffic = trafficSource?.organicEstimatedTraffic ?? trafficSource?.totalEstimatedTraffic ?? 0;
+        traffic30d = ga4Metrics?.totalSessions ?? null;
+      } catch (err) {
+        console.warn('Enrich included client', c.id, err);
+      }
       return {
         ...row,
         client: {
           ...c,
           keywords,
           avgPosition: avgPosition ?? 0,
-          topRankings: topRankingsCount || 0,
+          topRankings: topRankingsCount,
           traffic,
           traffic30d,
-          agencyNames: [row.agency.name],
+          agencyNames: [row.agency?.name ?? ''],
         },
       };
     }));
 
-    res.json(enriched);
+    res.json(enriched.filter(Boolean));
   } catch (error: any) {
     console.error('Get included clients error:', error);
     res.status(500).json({ message: error.message || 'Internal server error' });
@@ -2791,6 +2845,12 @@ router.post('/:agencyId/include-client/:clientId', authenticateToken, async (req
     });
     res.json({ message: 'Client included for agency successfully', clientId, agencyId });
   } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('does not exist') || msg.includes('ER_NO_SUCH_TABLE') || error?.code === 'P2021') {
+      return res.status(503).json({
+        message: 'Included clients feature is not available. Run database migrations: npx prisma migrate deploy',
+      });
+    }
     console.error('Include client for agency error:', error);
     res.status(500).json({ message: error.message || 'Internal server error' });
   }
@@ -2808,6 +2868,12 @@ router.post('/:agencyId/uninclude-client/:clientId', authenticateToken, async (r
     });
     res.json({ message: 'Client unincluded from agency successfully', clientId, agencyId });
   } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('does not exist') || msg.includes('ER_NO_SUCH_TABLE') || error?.code === 'P2021') {
+      return res.status(503).json({
+        message: 'Included clients feature is not available. Run database migrations: npx prisma migrate deploy',
+      });
+    }
     console.error('Uninclude client from agency error:', error);
     res.status(500).json({ message: error.message || 'Internal server error' });
   }

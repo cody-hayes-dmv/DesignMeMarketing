@@ -64,6 +64,7 @@ async function canStaffAccessClient(user: { userId: string; role: string }, clie
         select: {
             id: true,
             userId: true,
+            belongsToAgencyId: true,
             ...(includeGoogleAds ? {
                 googleAdsAccessToken: true,
                 googleAdsRefreshToken: true,
@@ -88,16 +89,36 @@ async function canStaffAccessClient(user: { userId: string; role: string }, clie
 
     if (isAdmin || isOwner) return { client, hasAccess: true };
 
-  // Agency/Specialist users: check if in same agency
+  // Agency/Specialist users: check if in same agency (owner's membership), client belongs to agency, included, or specialist has tasks for client
   if (user.role === 'AGENCY' || user.role === 'SPECIALIST') {
         const userMemberships = await prisma.userAgency.findMany({
             where: { userId: user.userId },
             select: { agencyId: true },
         });
         const userAgencyIds = userMemberships.map(m => m.agencyId);
-        const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+        const clientAgencyIds = (client.user?.memberships ?? []).map(m => m.agencyId);
         const sameAgency = clientAgencyIds.some(id => userAgencyIds.includes(id));
-        return { client, hasAccess: sameAgency };
+        if (sameAgency) return { client, hasAccess: true };
+        // Client belongs to specialist's agency (belongsToAgencyId)
+        if (client.belongsToAgencyId && userAgencyIds.includes(client.belongsToAgencyId)) {
+            return { client, hasAccess: true };
+        }
+        // Specialist has a task assigned for this client
+        if (user.role === 'SPECIALIST') {
+            const taskForClient = await prisma.task.findFirst({
+                where: { clientId, assigneeId: user.userId },
+            });
+            if (taskForClient) return { client, hasAccess: true };
+        }
+        // Client is "included" for specialist's agency (ClientAgencyIncluded)
+        try {
+            const included = await prisma.clientAgencyIncluded.findFirst({
+                where: { clientId, agencyId: { in: userAgencyIds } },
+            });
+            return { client, hasAccess: !!included };
+        } catch {
+            return { client, hasAccess: false };
+        }
     }
 
     return { client, hasAccess: false };
@@ -503,6 +524,44 @@ router.put('/users/:userId/access', authenticateToken, async (req, res) => {
         }
         console.error('Update client user access error:', error);
         return res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+// Get single client by ID (for Specialist view company info, etc.)
+router.get('/:id', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+        const { hasAccess } = await canStaffAccessClient(req.user, clientId);
+        if (!hasAccess) {
+            return res.status(404).json({ message: 'Client not found' });
+        }
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        memberships: { select: { agency: { select: { name: true } } } },
+                    },
+                },
+            },
+        });
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        const agencyNames = (client.user?.memberships ?? [])
+            .map((m: { agency?: { name: string } }) => m.agency?.name)
+            .filter(Boolean);
+        res.json({
+            ...client,
+            agencyNames,
+        });
+    } catch (error) {
+        console.error('Get client error:', error);
+        res.status(500).json({ message: 'Internal server error' });
     }
 });
 

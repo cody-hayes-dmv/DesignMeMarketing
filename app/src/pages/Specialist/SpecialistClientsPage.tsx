@@ -33,6 +33,8 @@ const SpecialistClientsPage = () => {
   const [loading, setLoading] = useState(true);
   const [clientsById, setClientsById] = useState<Record<string, Client>>({});
   const [companyInfoClientId, setCompanyInfoClientId] = useState<string | null>(null);
+  const [companyInfoClient, setCompanyInfoClient] = useState<Client | null>(null);
+  const [loadingCompanyInfo, setLoadingCompanyInfo] = useState(false);
   const [addBacklinkClient, setAddBacklinkClient] = useState<{ id: string; domain: string } | null>(null);
 
   useEffect(() => {
@@ -65,10 +67,9 @@ const SpecialistClientsPage = () => {
   }, []);
 
   const companyInfoForm = useMemo(() => {
-    if (!companyInfoClientId) return EMPTY_CLIENT_FORM;
-    const client = clientsById[companyInfoClientId];
-    return client ? clientToFormState(client) : EMPTY_CLIENT_FORM;
-  }, [companyInfoClientId, clientsById]);
+    if (!companyInfoClient) return EMPTY_CLIENT_FORM;
+    return clientToFormState(companyInfoClient);
+  }, [companyInfoClient]);
 
   const clients: ClientRow[] = useMemo(() => {
     const byId = new Map<string, ClientRow>();
@@ -165,10 +166,24 @@ const SpecialistClientsPage = () => {
                   <td className="px-6 py-4 text-sm">
                     <button
                       type="button"
-                      onClick={() => setCompanyInfoClientId(client.id)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-800 font-medium hover:bg-indigo-100 transition-colors"
+                      onClick={async () => {
+                        setCompanyInfoClientId(client.id);
+                        setLoadingCompanyInfo(true);
+                        setCompanyInfoClient(null);
+                        try {
+                          const res = await api.get<Client>(`/clients/${client.id}`);
+                          setCompanyInfoClient(res.data);
+                        } catch {
+                          const fallback = clientsById[client.id];
+                          setCompanyInfoClient(fallback || null);
+                        } finally {
+                          setLoadingCompanyInfo(false);
+                        }
+                      }}
+                      disabled={loadingCompanyInfo}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-800 font-medium hover:bg-indigo-100 transition-colors disabled:opacity-60"
                     >
-                      <Info className="h-4 w-4" />
+                      {loadingCompanyInfo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Info className="h-4 w-4" />}
                       View
                     </button>
                   </td>
@@ -179,16 +194,27 @@ const SpecialistClientsPage = () => {
         </div>
       )}
 
-      <ClientAccountFormModal
-        open={companyInfoClientId !== null}
-        title="Company Information"
-        subtitle="Account information (read-only)"
-        form={companyInfoForm}
-        setForm={() => {}}
-        canEdit={false}
-        showStatus={false}
-        onClose={() => setCompanyInfoClientId(null)}
-      />
+      {companyInfoClientId && (
+        <ClientAccountFormModal
+          open={true}
+          title="Company Information"
+          subtitle={
+            loadingCompanyInfo
+              ? "Loading…"
+              : companyInfoClient
+                ? `${companyInfoClient.name} – Account information (read-only)`
+                : "Account information (read-only)"
+          }
+          form={companyInfoForm}
+          setForm={() => {}}
+          canEdit={false}
+          showStatus={false}
+          onClose={() => {
+            setCompanyInfoClientId(null);
+            setCompanyInfoClient(null);
+          }}
+        />
+      )}
 
       {addBacklinkClient && (
         <AddBacklinkModal

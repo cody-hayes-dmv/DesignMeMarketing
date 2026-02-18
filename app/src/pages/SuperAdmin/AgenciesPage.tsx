@@ -1706,7 +1706,11 @@ const AgenciesPage = () => {
                                     <div className="space-y-3">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type</label>
-                                            <select value={editForm.billingType} onChange={(e) => setEditForm({ ...editForm, billingType: e.target.value as typeof editForm.billingType, subscriptionTier: e.target.value === "free" ? "" : editForm.subscriptionTier })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                            <select value={editForm.billingType} onChange={(e) => {
+                                                const newBilling = e.target.value as typeof editForm.billingType;
+                                                const clearFreeTier = newBilling === "free" || (newBilling === "paid" && editForm.subscriptionTier === "free");
+                                                setEditForm({ ...editForm, billingType: newBilling, subscriptionTier: clearFreeTier ? "" : editForm.subscriptionTier });
+                                            }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
                                                 <option value="">Select...</option>
                                                 <option value="paid">Paid (Charge to Card)</option>
                                                 <option value="free">Free / No Charge</option>
@@ -1716,10 +1720,10 @@ const AgenciesPage = () => {
                                         {editForm.billingType && editForm.billingType !== "free" && (
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier</label>
-                                                <select value={editForm.subscriptionTier} onChange={(e) => setEditForm({ ...editForm, subscriptionTier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                                <select value={editForm.billingType === "paid" && editForm.subscriptionTier === "free" ? "" : editForm.subscriptionTier} onChange={(e) => setEditForm({ ...editForm, subscriptionTier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
                                                     <option value="">Select tier</option>
                                                     <optgroup label="Agency tiers">
-                                                        <option value="free">Free – 0 dashboards</option>
+                                                        {editForm.billingType !== "paid" && <option value="free">Free – 0 dashboards</option>}
                                                         <option value="solo">Solo ($147/mo) – 3 dashboards</option>
                                                         <option value="starter">Starter ($297/mo) – 10 dashboards</option>
                                                         <option value="growth">Growth ($597/mo) – 25 dashboards</option>

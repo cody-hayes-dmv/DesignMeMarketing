@@ -277,10 +277,10 @@ const ClientsPage = () => {
     if (user?.role !== "SUPER_ADMIN") return;
     const fetchIncluded = () => {
       api
-        .get<Array<{ clientId: string }>>("/agencies/included-clients")
+        .get<string[]>("/agencies/included-clients/ids")
         .then((r) => {
           const data = Array.isArray(r.data) ? r.data : [];
-          setIncludedClientIds(new Set(data.map((row) => row.clientId)));
+          setIncludedClientIds(new Set(data));
         })
         .catch(() => setIncludedClientIds(new Set()));
     };
