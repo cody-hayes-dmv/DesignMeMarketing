@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, Loader2, AlertCircle, Building2 } from "lucide-react";
+import { useSelector } from "react-redux";
+import { Bell, Loader2, AlertCircle, Building2, CreditCard, TrendingUp, TrendingDown } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import api from "@/lib/api";
+import { RootState } from "@/store";
 
 interface NotificationItem {
   id: string;
@@ -20,15 +22,19 @@ interface NotificationsResponse {
 
 const NotificationBell: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useSelector((state: RootState) => state.auth);
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<NotificationsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
+  const notificationsUrl = isSuperAdmin ? "/seo/super-admin/notifications" : "/agencies/me/notifications";
+
   const fetchNotifications = async () => {
     setLoading(true);
     try {
-      const res = await api.get<NotificationsResponse>("/seo/super-admin/notifications");
+      const res = await api.get<NotificationsResponse>(notificationsUrl);
       setData(res.data);
     } catch {
       setData({ unreadCount: 0, items: [] });
@@ -41,7 +47,7 @@ const NotificationBell: React.FC = () => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [notificationsUrl]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -110,6 +116,12 @@ const NotificationBell: React.FC = () => {
                       <span className="shrink-0 mt-0.5">
                         {item.type === "managed_service_request" ? (
                           <AlertCircle className="h-4 w-4 text-amber-500" />
+                        ) : item.type === "managed_service_approved" || item.type === "plan_upgrade" ? (
+                          <TrendingUp className="h-4 w-4 text-green-500" />
+                        ) : item.type === "managed_service_rejected" || item.type === "plan_downgrade" ? (
+                          <TrendingDown className="h-4 w-4 text-gray-500" />
+                        ) : item.type === "payment_failed" ? (
+                          <CreditCard className="h-4 w-4 text-rose-500" />
                         ) : (
                           <Building2 className="h-4 w-4 text-primary-500" />
                         )}
@@ -133,7 +145,7 @@ const NotificationBell: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  navigate("/superadmin/dashboard");
+                  navigate(isSuperAdmin ? "/superadmin/dashboard" : "/agency/dashboard");
                 }}
                 className="w-full text-center text-xs font-medium text-primary-600 hover:text-primary-700 py-1.5"
               >

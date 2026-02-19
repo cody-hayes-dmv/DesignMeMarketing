@@ -404,6 +404,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 <option value="TODO">TODO</option>
                                 <option value="IN_PROGRESS">IN_PROGRESS</option>
                                 <option value="REVIEW">REVIEW</option>
+                                <option value="NEEDS_APPROVAL">NEEDS_APPROVAL</option>
                                 <option value="DONE">DONE</option>
                             </select>
                         </div>
@@ -444,7 +445,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                     }}
                                     onFocus={() => !isSpecialistView && setAssignToOpen(true)}
                                     disabled={isSpecialistView}
-                                    placeholder="Search by name or email (Super Admin, Admin, Specialist)"
+                                    placeholder="Search by name or email"
                                     className={`flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 />
                                 {form.assigneeId && !isSpecialistView && (

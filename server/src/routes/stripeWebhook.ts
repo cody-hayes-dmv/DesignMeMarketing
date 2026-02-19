@@ -2,10 +2,15 @@ import express from "express";
 import Stripe from "stripe";
 import { getStripe } from "../lib/stripe.js";
 import { prisma } from "../lib/prisma.js";
-import { normalizeTierId } from "../lib/tiers.js";
+import { normalizeTierId, getTierConfig } from "../lib/tiers.js";
 import { getTierFromSubscriptionItems } from "../lib/stripeTierSync.js";
 
 const router = express.Router();
+
+function tierLevel(tier: string | null): number {
+  const cfg = getTierConfig(tier);
+  return cfg?.priceMonthlyUsd ?? 0;
+}
 
 /**
  * Stripe webhook handler. Expects raw body (mount with express.raw).
@@ -43,7 +48,7 @@ router.post("/", async (req, res) => {
 
   const agency = await prisma.agency.findFirst({
     where: { stripeCustomerId: customerId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, subscriptionTier: true },
   });
 
   if (!agency) {
@@ -51,6 +56,19 @@ router.post("/", async (req, res) => {
   }
 
   try {
+    if (event.type === "invoice.payment_failed") {
+      await prisma.notification.create({
+        data: {
+          agencyId: agency.id,
+          type: "payment_failed",
+          title: "Payment failed",
+          message: "We couldn't charge your payment method. Please update it in Subscription & Billing to avoid service interruption.",
+          link: "/agency/subscription",
+        },
+      }).catch((e) => console.warn("[Stripe webhook] Create payment_failed notification failed:", e?.message));
+      return res.status(200).json({ received: true });
+    }
+
     if (event.type === "customer.subscription.deleted") {
       await prisma.agency.update({
         where: { id: agency.id },
@@ -62,6 +80,7 @@ router.post("/", async (req, res) => {
     if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.created") {
       const sub = event.data.object as Stripe.Subscription;
       const subscriptionId = sub.id;
+      const oldTier = agency.subscriptionTier ?? null;
       if (sub.status === "active") {
         const items = sub.items?.data ?? [];
         const tierId = getTierFromSubscriptionItems(items);
@@ -73,6 +92,21 @@ router.post("/", async (req, res) => {
             stripeSubscriptionId: subscriptionId,
           },
         });
+        if (event.type === "customer.subscription.updated" && oldTier !== normalized) {
+          const tierName = getTierConfig(normalized)?.name ?? normalized ?? "your plan";
+          const isUpgrade = tierLevel(normalized) > tierLevel(oldTier);
+          await prisma.notification.create({
+            data: {
+              agencyId: agency.id,
+              type: isUpgrade ? "plan_upgrade" : "plan_downgrade",
+              title: isUpgrade ? "Plan upgraded" : "Plan changed",
+              message: isUpgrade
+                ? `Your subscription has been upgraded to ${tierName}.`
+                : `Your subscription has been changed to ${tierName}.`,
+              link: "/agency/subscription",
+            },
+          }).catch((e) => console.warn("[Stripe webhook] Create plan change notification failed:", e?.message));
+        }
       } else {
         await prisma.agency.update({
           where: { id: agency.id },

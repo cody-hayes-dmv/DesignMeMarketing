@@ -54,7 +54,7 @@ const parseDate = (value?: string | null) => {
   }
 };
 
-const statusOrder: TaskStatus[] = ["TODO", "IN_PROGRESS", "REVIEW", "DONE"];
+const statusOrder: TaskStatus[] = ["TODO", "IN_PROGRESS", "REVIEW", "NEEDS_APPROVAL", "DONE"];
 
 const getNextStatus = (status: TaskStatus): TaskStatus | null => {
   const currentIndex = statusOrder.indexOf(status);
@@ -71,6 +71,8 @@ const getStatusBadgeClasses = (status: TaskStatus) => {
     case "IN_PROGRESS":
       return "bg-blue-100 text-blue-700";
     case "REVIEW":
+      return "bg-amber-100 text-amber-700";
+    case "NEEDS_APPROVAL":
       return "bg-amber-100 text-amber-700";
     case "DONE":
       return "bg-emerald-100 text-emerald-700";

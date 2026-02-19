@@ -296,12 +296,24 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, []);
 
-  const filteredClients = searchQuery.trim()
+  // Normalize URL input to domain for matching (e.g. https://ablelockshop.com/ -> ablelockshop.com)
+  const searchNormalized = (() => {
+    const raw = searchQuery.trim();
+    if (!raw) return "";
+    try {
+      const domain = getDomainFromUrl(raw);
+      if (domain && domain !== raw) return domain.toLowerCase();
+    } catch {
+      // not a URL
+    }
+    return raw.toLowerCase();
+  })();
+
+  const filteredClients = searchNormalized
     ? clients.filter((c) => {
-        const q = searchQuery.toLowerCase().trim();
         const name = (c.name || "").toLowerCase();
         const domain = (c.domain || "").toLowerCase();
-        return name.includes(q) || domain.includes(q) || name.startsWith(q) || domain.startsWith(q);
+        return name.includes(searchNormalized) || domain.includes(searchNormalized) || domain === searchNormalized || name.startsWith(searchNormalized) || domain.startsWith(searchNormalized);
       })
     : clients;
 
@@ -620,20 +632,24 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               onFocus={() => setSearchOpen(true)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setSearchOpen(false);
-                if (e.key === "Enter" && !selectedClient && filteredClients.length === 1) {
-                  setSelectedClientId(filteredClients[0].id);
-                  setSearchQuery("");
-                  setSearchOpen(false);
+                if (e.key === "Enter" && !selectedClient) {
+                  if (filteredClients.length === 1) {
+                    setSelectedClientId(filteredClients[0].id);
+                    setSearchQuery("");
+                    setSearchOpen(false);
+                  } else {
+                    setSearchOpen(false);
+                  }
                 }
               }}
-              placeholder="Search client name or domain (e.g. Design ME)"
+              placeholder="Search by name, domain, or paste a URL (e.g. https://ablelockshop.com/)"
               className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             />
             {searchOpen && !selectedClient && (
               <div className="absolute z-30 mt-1 left-0 right-0 rounded-lg border border-gray-200 bg-white shadow-xl max-h-60 overflow-y-auto">
                 {filteredClients.length === 0 ? (
                   <div className="px-4 py-3 text-sm text-gray-500">
-                    {searchQuery.trim() ? `No client matching "${searchQuery}". Try a different search.` : "Type to search clients."}
+                    {searchQuery.trim() ? `No client matching "${searchNormalized || searchQuery.trim()}". Add this domain as a client to research it.` : "Type or paste a URL to search."}
                   </div>
                 ) : (
                   filteredClients.slice(0, 20).map((c) => (
@@ -690,9 +706,9 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
           <p className="mt-4 text-gray-600">
             {searchQuery.trim()
               ? filteredClients.length === 0
-                ? `No client matching "${searchQuery}". Try a different name or domain.`
+                ? `No client matching "${searchNormalized || searchQuery.trim()}". Add this domain as a client to research it.`
                 : "Select a client from the dropdown above to view domain overview."
-              : "Type a client name or domain (e.g. Design ME) and select from the dropdown to view domain overview."}
+              : "Type a client name, domain, or paste any URL (e.g. https://ablelockshop.com/) and select a client to view domain overview."}
           </p>
         </div>
       )}

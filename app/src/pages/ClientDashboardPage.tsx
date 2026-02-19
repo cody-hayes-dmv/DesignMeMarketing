@@ -104,7 +104,7 @@ interface ClientReport {
   clientId: string;
 }
 
-type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
+type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
 type WorkLogTask = {
   id: string;
   title: string;
@@ -616,6 +616,7 @@ const ClientDashboardPage: React.FC = () => {
     assigneeDisplay: string;
     status: TaskStatus;
     attachments: WorkLogAttachment[];
+    approvalNotifyUserIds: string[];
   }>({
     title: "",
     description: "",
@@ -626,7 +627,10 @@ const ClientDashboardPage: React.FC = () => {
     assigneeDisplay: "",
     status: "TODO",
     attachments: [],
+    approvalNotifyUserIds: [],
   });
+  const [approvalRecipients, setApprovalRecipients] = useState<{ id: string; name: string | null; email: string }[]>([]);
+  const [approvalRecipientsLoading, setApprovalRecipientsLoading] = useState(false);
   const [assignableUsers, setAssignableUsers] = useState<{ id: string; name: string | null; email: string; role: string }[]>([]);
   const [assignableLoading, setAssignableLoading] = useState(false);
   const [assignableSearch, setAssignableSearch] = useState("");
@@ -669,6 +673,28 @@ const ClientDashboardPage: React.FC = () => {
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
   }, [assignToOpen]);
+
+  useEffect(() => {
+    if (!workLogModalOpen || !clientId) {
+      setApprovalRecipients([]);
+      return;
+    }
+    let cancelled = false;
+    setApprovalRecipientsLoading(true);
+    api
+      .get(`/tasks/worklog/${clientId}/approval-recipients`)
+      .then((res) => {
+        if (!cancelled) setApprovalRecipients(Array.isArray(res.data) ? res.data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setApprovalRecipients([]);
+      })
+      .finally(() => {
+        if (!cancelled) setApprovalRecipientsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [workLogModalOpen, clientId]);
+
   const [workLogDeleteConfirm, setWorkLogDeleteConfirm] = useState<{
     isOpen: boolean;
     taskId: string | null;
@@ -1003,6 +1029,8 @@ const ClientDashboardPage: React.FC = () => {
         return "In Progress";
       case "REVIEW":
         return "In Review";
+      case "NEEDS_APPROVAL":
+        return "Needs Approval";
       default:
         return "Pending";
     }
@@ -1016,6 +1044,8 @@ const ClientDashboardPage: React.FC = () => {
         return "bg-blue-100 text-blue-800";
       case "REVIEW":
         return "bg-purple-100 text-purple-800";
+      case "NEEDS_APPROVAL":
+        return "bg-amber-100 text-amber-800";
       default:
         return "bg-yellow-100 text-yellow-800";
     }
@@ -1025,7 +1055,7 @@ const ClientDashboardPage: React.FC = () => {
     setWorkLogAddMenuOpen(false);
     setWorkLogModalMode("create");
     setSelectedWorkLogTaskId(null);
-    setWorkLogForm({ title: "", description: "", taskNotes: "", category: "", dueDate: "", assigneeId: "", assigneeDisplay: "", status: "TODO", attachments: [] });
+    setWorkLogForm({ title: "", description: "", taskNotes: "", category: "", dueDate: "", assigneeId: "", assigneeDisplay: "", status: "TODO", attachments: [], approvalNotifyUserIds: [] });
     setWorkLogUrlInput("");
     setWorkLogUrlType("url");
     setAssignableSearch("");
@@ -1069,6 +1099,8 @@ const ClientDashboardPage: React.FC = () => {
       const dueDateRaw = (task as any).dueDate;
       const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
       const assignee = task.assignee;
+      const rawApproval = (task as any).approvalNotifyUserIds;
+      const approvalIds: string[] = Array.isArray(rawApproval) ? rawApproval : (typeof rawApproval === "string" ? (() => { try { const a = JSON.parse(rawApproval); return Array.isArray(a) ? a : []; } catch { return []; } })() : []);
       setWorkLogForm({
         title: titleForForm,
         description: titleForForm,
@@ -1079,6 +1111,7 @@ const ClientDashboardPage: React.FC = () => {
         assigneeDisplay: assignee ? (assignee.name || assignee.email || "") : "",
         status: task.status,
         attachments,
+        approvalNotifyUserIds: approvalIds,
       });
     }
     setWorkLogModalMode("view");
@@ -1096,6 +1129,8 @@ const ClientDashboardPage: React.FC = () => {
       const dueDateRaw = (task as any).dueDate;
       const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
       const assignee = task.assignee;
+      const rawApproval = (task as any).approvalNotifyUserIds;
+      const approvalIds: string[] = Array.isArray(rawApproval) ? rawApproval : (typeof rawApproval === "string" ? (() => { try { const a = JSON.parse(rawApproval); return Array.isArray(a) ? a : []; } catch { return []; } })() : []);
       setWorkLogForm({
         title: titleForForm,
         description: titleForForm,
@@ -1106,6 +1141,7 @@ const ClientDashboardPage: React.FC = () => {
         assigneeDisplay: assignee ? (assignee.name || assignee.email || "") : "",
         status: task.status,
         attachments,
+        approvalNotifyUserIds: approvalIds,
       });
     }
     setWorkLogModalMode("edit");
@@ -1143,7 +1179,7 @@ const ClientDashboardPage: React.FC = () => {
             .filter((a) => /^https?:\/\//.test(a.value))
         : undefined;
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       title: titleValue,
       description: titleValue || undefined,
       taskNotes: taskNotesValue,
@@ -1154,6 +1190,9 @@ const ClientDashboardPage: React.FC = () => {
       clientId,
       proof: proofItems ?? [],
     };
+    if (workLogForm.status === "NEEDS_APPROVAL" && workLogForm.approvalNotifyUserIds?.length) {
+      payload.approvalNotifyUserIds = workLogForm.approvalNotifyUserIds;
+    }
 
     if (!titleValue) {
       toast.error("Title is required.");
@@ -6819,7 +6858,7 @@ const ClientDashboardPage: React.FC = () => {
                                   if (workLogForm.assigneeId && e.target.value !== workLogForm.assigneeDisplay) setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" }));
                                 }}
                                 onFocus={() => setAssignToOpen(true)}
-                                placeholder="Search by name or email (Super Admin, Admin, Specialist)"
+                                placeholder="Search by name or email"
                                 className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                               />
                               {workLogForm.assigneeId && (
@@ -6977,8 +7016,40 @@ const ClientDashboardPage: React.FC = () => {
                           <option value="TODO">Pending</option>
                           <option value="IN_PROGRESS">In Progress</option>
                           <option value="REVIEW">In Review</option>
+                          <option value="NEEDS_APPROVAL">Needs Approval</option>
                           <option value="DONE">Completed</option>
                         </select>
+                        {workLogForm.status === "NEEDS_APPROVAL" && workLogModalMode !== "view" && (
+                          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                            <p className="text-xs font-medium text-amber-800 mb-2">Send approval request to (select who should be notified):</p>
+                            {approvalRecipientsLoading ? (
+                              <p className="text-sm text-amber-700">Loading recipients…</p>
+                            ) : approvalRecipients.length === 0 ? (
+                              <p className="text-sm text-amber-700">No users available for this account.</p>
+                            ) : (
+                              <div className="max-h-40 overflow-y-auto space-y-1.5">
+                                {approvalRecipients.map((u) => (
+                                  <label key={u.id} className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={workLogForm.approvalNotifyUserIds.includes(u.id)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setWorkLogForm({ ...workLogForm, approvalNotifyUserIds: [...(workLogForm.approvalNotifyUserIds || []), u.id] });
+                                        } else {
+                                          setWorkLogForm({ ...workLogForm, approvalNotifyUserIds: (workLogForm.approvalNotifyUserIds || []).filter((id) => id !== u.id) });
+                                        }
+                                      }}
+                                      className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                    />
+                                    <span className="text-sm text-gray-800">{u.name || u.email || u.id}</span>
+                                    {u.email && u.name && <span className="text-xs text-gray-500">({u.email})</span>}
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                     </div>
@@ -8654,7 +8725,7 @@ const ClientDashboardPage: React.FC = () => {
                               if (workLogForm.assigneeId && e.target.value !== workLogForm.assigneeDisplay) setWorkLogForm((p) => ({ ...p, assigneeId: "", assigneeDisplay: "" }));
                             }}
                             onFocus={() => setAssignToOpen(true)}
-                            placeholder="Search by name or email (Super Admin, Admin, Specialist)"
+                            placeholder="Search by name or email"
                             className="flex-1 border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 transition-shadow"
                           />
                           {workLogForm.assigneeId && (
@@ -8807,8 +8878,40 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="TODO">Pending</option>
                       <option value="IN_PROGRESS">In Progress</option>
                       <option value="REVIEW">In Review</option>
+                      <option value="NEEDS_APPROVAL">Needs Approval</option>
                       <option value="DONE">Completed</option>
                     </select>
+                    {workLogForm.status === "NEEDS_APPROVAL" && workLogModalMode !== "view" && (
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                        <p className="text-xs font-medium text-amber-800 mb-2">Send approval request to (select who should be notified):</p>
+                        {approvalRecipientsLoading ? (
+                          <p className="text-sm text-amber-700">Loading recipients…</p>
+                        ) : approvalRecipients.length === 0 ? (
+                          <p className="text-sm text-amber-700">No users available for this account.</p>
+                        ) : (
+                          <div className="max-h-40 overflow-y-auto space-y-1.5">
+                            {approvalRecipients.map((u) => (
+                              <label key={u.id} className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={workLogForm.approvalNotifyUserIds.includes(u.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setWorkLogForm({ ...workLogForm, approvalNotifyUserIds: [...(workLogForm.approvalNotifyUserIds || []), u.id] });
+                                    } else {
+                                      setWorkLogForm({ ...workLogForm, approvalNotifyUserIds: (workLogForm.approvalNotifyUserIds || []).filter((id) => id !== u.id) });
+                                    }
+                                  }}
+                                  className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                />
+                                <span className="text-sm text-gray-800">{u.name || u.email || u.id}</span>
+                                {u.email && u.name && <span className="text-xs text-gray-500">({u.email})</span>}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 </div>

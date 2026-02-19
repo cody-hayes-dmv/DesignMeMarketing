@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   DollarSign,
   Loader2,
@@ -6,6 +6,9 @@ import {
   TrendingUp,
   X,
   AlertCircle,
+  BarChart3,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import {
   PieChart,
@@ -13,6 +16,8 @@ import {
   Cell,
   LineChart,
   Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -61,15 +66,40 @@ interface SubscriptionActivityResponse {
   message?: string;
 }
 
+interface DataForSeoDailyExpense {
+  date: string;
+  total: number;
+  byApi: Record<string, number>;
+}
+
+interface DataForSeoUsageResponse {
+  configured: boolean;
+  message?: string;
+  balance?: number;
+  totalDeposited?: number;
+  backlinksSubscriptionExpiry?: string | null;
+  llmMentionsSubscriptionExpiry?: string | null;
+  dailyExpenses: DataForSeoDailyExpense[];
+}
+
 const formatCurrency = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(n);
 
 const FinancialOverviewPage: React.FC = () => {
   const [mrrLoading, setMrrLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [dataForSeoLoading, setDataForSeoLoading] = useState(false);
   const [mrrData, setMrrData] = useState<MrrBreakdownResponse | null>(null);
   const [activityData, setActivityData] = useState<SubscriptionActivityResponse | null>(null);
+  const [dataForSeoData, setDataForSeoData] = useState<DataForSeoUsageResponse | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<MrrSegment | null>(null);
+  const [dataForSeoDateStart, setDataForSeoDateStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [dataForSeoDateEnd, setDataForSeoDateEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dataForSeoSort, setDataForSeoSort] = useState<"date_asc" | "date_desc" | "total_asc" | "total_desc">("date_desc");
 
   const fetchMrrBreakdown = async () => {
     setMrrLoading(true);
@@ -95,14 +125,28 @@ const FinancialOverviewPage: React.FC = () => {
     }
   };
 
+  const fetchDataForSeoUsage = async () => {
+    setDataForSeoLoading(true);
+    try {
+      const res = await api.get<DataForSeoUsageResponse>("/financial/dataforseo-usage");
+      setDataForSeoData(res.data);
+    } catch {
+      setDataForSeoData(null);
+    } finally {
+      setDataForSeoLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchMrrBreakdown();
     fetchActivity();
+    fetchDataForSeoUsage();
   }, []);
 
   const handleRefresh = () => {
     fetchMrrBreakdown();
     fetchActivity();
+    fetchDataForSeoUsage();
   };
 
   const pieData = (mrrData?.segments || []).map((s) => ({
@@ -116,6 +160,47 @@ const FinancialOverviewPage: React.FC = () => {
     dateShort: d.date.slice(5),
   }));
 
+  const dataForSeoFilteredAndSorted = useMemo(() => {
+    const list = dataForSeoData?.dailyExpenses ?? [];
+    const start = dataForSeoDateStart || "";
+    const end = dataForSeoDateEnd || "";
+    let filtered = list;
+    if (start) filtered = filtered.filter((d) => d.date >= start);
+    if (end) filtered = filtered.filter((d) => d.date <= end);
+    const sorted = [...filtered].sort((a, b) => {
+      if (dataForSeoSort === "date_asc") return a.date.localeCompare(b.date);
+      if (dataForSeoSort === "date_desc") return b.date.localeCompare(a.date);
+      if (dataForSeoSort === "total_asc") return a.total - b.total;
+      return b.total - a.total;
+    });
+    return sorted;
+  }, [dataForSeoData?.dailyExpenses, dataForSeoDateStart, dataForSeoDateEnd, dataForSeoSort]);
+
+  const dataForSeoChartData = useMemo(
+    () =>
+      dataForSeoFilteredAndSorted.map((d) => ({
+        ...d,
+        dateShort: d.date.slice(5).replace(/-/, "/"),
+      })),
+    [dataForSeoFilteredAndSorted]
+  );
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dataForSeoSummaries = useMemo(() => {
+    const list = dataForSeoData?.dailyExpenses ?? [];
+    const today = list.find((d) => d.date === todayStr)?.total ?? 0;
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - 7);
+    const weekStartStr = weekStart.toISOString().slice(0, 10);
+    const thisWeek = list.filter((d) => d.date >= weekStartStr && d.date <= todayStr).reduce((s, d) => s + d.total, 0);
+    const monthStart = new Date();
+    monthStart.setDate(monthStart.getDate() - 30);
+    const monthStartStr = monthStart.toISOString().slice(0, 10);
+    const thisMonth = list.filter((d) => d.date >= monthStartStr && d.date <= todayStr).reduce((s, d) => s + d.total, 0);
+    const rangeTotal = dataForSeoFilteredAndSorted.reduce((s, d) => s + d.total, 0);
+    return { today, thisWeek, thisMonth, rangeTotal };
+  }, [dataForSeoData?.dailyExpenses, dataForSeoFilteredAndSorted, todayStr]);
+
   const notConfigured = !mrrData?.configured && !activityData?.configured;
 
   return (
@@ -126,10 +211,10 @@ const FinancialOverviewPage: React.FC = () => {
           <h2 className="text-xl font-semibold text-gray-900">Financial Overview</h2>
           <button
             onClick={handleRefresh}
-            disabled={mrrLoading || activityLoading}
+            disabled={mrrLoading || activityLoading || dataForSeoLoading}
             className="inline-flex items-center gap-2 rounded-lg border border-primary-200 bg-white px-4 py-2 text-sm font-medium text-primary-700 shadow-sm hover:bg-primary-50 disabled:opacity-50"
           >
-            <RefreshCw className={`h-4 w-4 ${mrrLoading || activityLoading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-4 w-4 ${mrrLoading || activityLoading || dataForSeoLoading ? "animate-spin" : ""}`} />
             Refresh
           </button>
         </div>
@@ -327,6 +412,154 @@ const FinancialOverviewPage: React.FC = () => {
             </div>
           )}
           </div>
+        </div>
+      </div>
+
+      {/* DataForSEO Spending (Super Admin) */}
+      <div className="mt-8 rounded-xl border border-gray-200 border-l-4 border-l-slate-600 bg-white shadow-sm overflow-hidden">
+        <div className="px-6 py-4 bg-gradient-to-r from-slate-600 via-slate-700 to-slate-800">
+          <h3 className="text-lg font-semibold text-white">DataForSEO Spending</h3>
+          <p className="mt-1 text-sm text-white/90">
+            Balance, usage, and daily spend from your DataForSEO account. Change dates to compare periods (e.g. last month vs this month). Sort by date or amount.
+          </p>
+        </div>
+        <div className="p-6 bg-slate-50/30">
+          {dataForSeoLoading ? (
+            <div className="flex h-48 items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+            </div>
+          ) : !dataForSeoData?.configured ? (
+            <div className="flex flex-col items-center justify-center rounded-lg border border-amber-200 bg-amber-50/60 p-6 text-center text-gray-600">
+              <BarChart3 className="mb-2 h-12 w-12 text-amber-500" />
+              <p className="text-sm">{dataForSeoData?.message ?? "DataForSEO usage is available to Super Admins. Configure DATAFORSEO_BASE64 to see balance and spending."}</p>
+            </div>
+          ) : (
+            <>
+              <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
+                {typeof dataForSeoData.balance === "number" && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Balance</p>
+                    <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoData.balance)}</p>
+                  </div>
+                )}
+                {typeof dataForSeoData.totalDeposited === "number" && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Total deposited</p>
+                    <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoData.totalDeposited)}</p>
+                  </div>
+                )}
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Today</p>
+                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.today)}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">This week</p>
+                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.thisWeek)}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Last 30 days</p>
+                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.thisMonth)}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Selected range</p>
+                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.rangeTotal)}</p>
+                </div>
+              </div>
+              {dataForSeoData.backlinksSubscriptionExpiry != null && (
+                <p className="mb-2 text-xs text-gray-600">
+                  Backlinks API expires: {new Date(dataForSeoData.backlinksSubscriptionExpiry).toLocaleDateString()}
+                  {dataForSeoData.llmMentionsSubscriptionExpiry != null && (
+                    <> · LLM Mentions API expires: {new Date(dataForSeoData.llmMentionsSubscriptionExpiry).toLocaleDateString()}</>
+                  )}
+                </p>
+              )}
+              <div className="mb-4 flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">From</label>
+                  <input
+                    type="date"
+                    value={dataForSeoDateStart}
+                    onChange={(e) => setDataForSeoDateStart(e.target.value)}
+                    className="rounded border border-gray-300 px-3 py-1.5 text-sm"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">To</label>
+                  <input
+                    type="date"
+                    value={dataForSeoDateEnd}
+                    onChange={(e) => setDataForSeoDateEnd(e.target.value)}
+                    className="rounded border border-gray-300 px-3 py-1.5 text-sm"
+                  />
+                </div>
+                <span className="text-sm text-gray-500">Sort:</span>
+                <div className="flex gap-1">
+                  {[
+                    { id: "date_desc" as const, label: "Date ↓", icon: ArrowDown },
+                    { id: "date_asc" as const, label: "Date ↑", icon: ArrowUp },
+                    { id: "total_desc" as const, label: "Amount ↓", icon: ArrowDown },
+                    { id: "total_asc" as const, label: "Amount ↑", icon: ArrowUp },
+                  ].map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => setDataForSeoSort(id)}
+                      className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium ${dataForSeoSort === id ? "border-slate-500 bg-slate-100 text-slate-800" : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50"}`}
+                    >
+                      <Icon className="h-3 w-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {dataForSeoChartData.length > 0 ? (
+                <div className="mb-6 h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={dataForSeoChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="dateShort" tick={{ fontSize: 11 }} />
+                      <YAxis tickFormatter={(v) => `$${v}`} tick={{ fontSize: 11 }} width={50} />
+                      <Tooltip formatter={(v: number) => formatCurrency(v)} labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ""} />
+                      <Legend />
+                      <Area type="monotone" dataKey="total" name="Total spend" stroke="#475569" fill="#64748b" fillOpacity={0.5} strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : null}
+              <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium uppercase text-gray-600">
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3 text-right">Total</th>
+                      <th className="px-4 py-3">By API</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dataForSeoFilteredAndSorted.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                          No daily data in selected range. DataForSEO returns spending per day when available.
+                        </td>
+                      </tr>
+                    ) : (
+                      dataForSeoFilteredAndSorted.map((row) => (
+                        <tr key={row.date} className="border-b border-gray-100 hover:bg-slate-50/50">
+                          <td className="px-4 py-2 font-medium text-gray-900">{row.date}</td>
+                          <td className="px-4 py-2 text-right font-medium">{formatCurrency(row.total)}</td>
+                          <td className="px-4 py-2 text-gray-600">
+                            {Object.entries(row.byApi)
+                              .filter(([, v]) => v > 0)
+                              .map(([api, val]) => `${api}: ${formatCurrency(val)}`)
+                              .join(" · ") || "—"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

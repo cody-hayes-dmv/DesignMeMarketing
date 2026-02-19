@@ -279,9 +279,9 @@ const ClientsPage = () => {
     }
   }, [user?.role]);
 
-  // Fetch included clients count for SUPER_ADMIN (Included Dashboards metric)
+  // Fetch included client IDs: SUPER_ADMIN (metric + filter); AGENCY/ADMIN (exclude these from Clients tab so they only appear in Included tab)
   useEffect(() => {
-    if (user?.role !== "SUPER_ADMIN") return;
+    if (user?.role !== "SUPER_ADMIN" && user?.role !== "AGENCY" && user?.role !== "ADMIN") return;
     const fetchIncluded = () => {
       api
         .get<string[]>("/agencies/included-clients/ids")
@@ -755,13 +755,22 @@ const ClientsPage = () => {
 
   const nonVendasta = modifiedClients.filter((c) => !c.vendasta);
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
+  // For Agency/ADMIN, exclude included clients from Clients tab (they only appear in Included tab)
+  const clientsForClientsTab =
+    user?.role === "AGENCY" || user?.role === "ADMIN"
+      ? modifiedClients.filter((c) => !includedClientIds.has(c.id))
+      : modifiedClients;
+  const nonVendastaForCounts =
+    user?.role === "AGENCY" || user?.role === "ADMIN"
+      ? clientsForClientsTab.filter((c) => !c.vendasta)
+      : nonVendasta;
   // Active Clients = all clients with status ACTIVE (includes non-Vendasta and Vendasta active clients)
-  const activeCount = modifiedClients.filter((m) => m.status === "ACTIVE").length;
-  const totalCount = modifiedClients.length;
-  const pendingCount = nonVendasta.filter((m) => m.status === "PENDING").length;
-  const dashboardOnlyCount = nonVendasta.filter((m) => m.status === "DASHBOARD_ONLY").length;
-  const canceledCount = nonVendasta.filter((m) => m.status === "CANCELED").length;
-  const archivedCount = nonVendasta.filter((m) => isArchivedStatus(m.status)).length;
+  const activeCount = clientsForClientsTab.filter((m) => m.status === "ACTIVE").length;
+  const totalCount = clientsForClientsTab.length;
+  const pendingCount = nonVendastaForCounts.filter((m) => m.status === "PENDING").length;
+  const dashboardOnlyCount = nonVendastaForCounts.filter((m) => m.status === "DASHBOARD_ONLY").length;
+  const canceledCount = nonVendastaForCounts.filter((m) => m.status === "CANCELED").length;
+  const archivedCount = nonVendastaForCounts.filter((m) => isArchivedStatus(m.status)).length;
   const includedCount = isSuperAdmin ? includedClientIds.size : 0;
 
   const handleSort = (field: "name" | "domain" | "industry") => {
@@ -799,6 +808,8 @@ const ClientsPage = () => {
 
   const filteredClients = modifiedClients
     .filter((client) => {
+      // Agency Panel: clients in the Included tab must not appear in the Clients tab
+      if ((user?.role === "AGENCY" || user?.role === "ADMIN") && includedClientIds.has(client.id)) return false;
       // For "Active", "Total", and "Included", include Vendasta clients; for other filters show only non-Vendasta
       if (statusFilter !== "total" && statusFilter !== "active" && statusFilter !== "included" && client.vendasta) return false;
       if (statusFilter === "active") {

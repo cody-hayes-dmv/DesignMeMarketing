@@ -3,11 +3,15 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from '../middleware/auth.js';
+import { requireAgencyTrialNotExpired } from '../middleware/requireAgencyTrialNotExpired.js';
 import { sendEmail } from '../lib/email.js';
 import { getAgencyTierContext, canAddDashboard } from '../lib/agencyLimits.js';
 
 const router = express.Router();
+
+// Restrict agency users with expired trial
+router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
 const inviteClientUsersSchema = z.object({
     emails: z.array(z.string().email()).min(1),

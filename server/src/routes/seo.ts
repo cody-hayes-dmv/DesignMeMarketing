@@ -2,13 +2,17 @@ import crypto from "crypto";
 import express from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
-import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
+import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from "../middleware/auth.js";
+import { requireAgencyTrialNotExpired } from "../middleware/requireAgencyTrialNotExpired.js";
 import jwt from "jsonwebtoken";
 import { getAgencyTierContext, canAddTargetKeyword, hasResearchCredits, useResearchCredits } from "../lib/agencyLimits.js";
 import { getTierConfig, getRankRefreshIntervalMs, getAiRefreshIntervalMs } from "../lib/tiers.js";
 import { syncAgencyTierFromStripe } from "../lib/stripeTierSync.js";
 
 const router = express.Router();
+
+// Restrict agency users with expired trial to subscription/me/activate only
+router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
 type DataForSEOGoogleAdsLocation = {
   location_code: number;

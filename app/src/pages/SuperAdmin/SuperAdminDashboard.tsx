@@ -466,7 +466,11 @@ const SuperAdminDashboard = () => {
                         ? "In progress"
                         : task.status === "REVIEW"
                           ? "In review"
-                          : task.status;
+                          : task.status === "NEEDS_APPROVAL"
+                            ? "Needs Approval"
+                            : task.status === "DONE"
+                              ? "Completed"
+                              : task.status;
                   const statusClass =
                     task.status === "DONE"
                       ? "bg-gray-100 text-gray-800"
@@ -474,7 +478,9 @@ const SuperAdminDashboard = () => {
                         ? "bg-blue-100 text-blue-800"
                         : task.status === "REVIEW"
                           ? "bg-amber-100 text-amber-800"
-                          : "bg-gray-100 text-gray-700";
+                          : task.status === "NEEDS_APPROVAL"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-gray-100 text-gray-700";
                   return (
                     <li key={task.id}>
                       <button

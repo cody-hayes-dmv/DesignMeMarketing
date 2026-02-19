@@ -2,9 +2,13 @@ import express from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, optionalAuthenticateToken } from "../middleware/auth.js";
+import { requireAgencyTrialNotExpired } from "../middleware/requireAgencyTrialNotExpired.js";
 
 const router = express.Router();
+
+// Restrict agency users with expired trial
+router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(process.cwd(), "uploads");

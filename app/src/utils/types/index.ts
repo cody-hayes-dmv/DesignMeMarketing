@@ -1,4 +1,4 @@
-export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
+export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
 export type ROLE = "SUPER_ADMIN" | "ADMIN" | "AGENCY" | "SPECIALIST" | "USER";
 
 export interface ProofItem {
@@ -36,6 +36,7 @@ export interface Task {
     id: string;
     name: string;
   } | null;
+  approvalNotifyUserIds?: string[] | string | null; // JSON array of user IDs when status is NEEDS_APPROVAL
 }
 
 export type Column = {

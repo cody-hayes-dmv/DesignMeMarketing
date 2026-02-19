@@ -20,6 +20,14 @@ const requireFinancialAccess = (req: express.Request, res: express.Response, nex
   next();
 };
 
+// Require SUPER_ADMIN only (for DataForSEO account usage / credentials)
+const requireSuperAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.user?.role !== "SUPER_ADMIN") {
+    return res.status(403).json({ message: "Access denied. Super Admin only." });
+  }
+  next();
+};
+
 interface MrrSegment {
   category: string;
   label: string;
@@ -342,5 +350,209 @@ router.get("/subscription-activity", authenticateToken, requireFinancialAccess, 
     });
   }
 });
+
+// --- DataForSEO usage (balance, spending by day) - SUPER_ADMIN only ---
+type DataForSeoDailyExpense = { date: string; total: number; byApi: Record<string, number> };
+type DataForSeoUsageResponse = {
+  configured: boolean;
+  message?: string;
+  balance?: number;
+  totalDeposited?: number;
+  backlinksSubscriptionExpiry?: string | null;
+  llmMentionsSubscriptionExpiry?: string | null;
+  dailyExpenses: DataForSeoDailyExpense[];
+};
+
+/** Recursively sum all numeric values in an object (for "total" spend in a day/block). */
+function sumNumericInObject(obj: unknown): number {
+  if (obj === null || obj === undefined) return 0;
+  if (typeof obj === "number" && !Number.isNaN(obj)) return obj;
+  if (Array.isArray(obj)) return obj.reduce((s, v) => s + sumNumericInObject(v), 0);
+  if (typeof obj === "object") {
+    return Object.values(obj).reduce((s, v) => s + sumNumericInObject(v), 0);
+  }
+  return 0;
+}
+
+/** Build byApi from top-level keys (serp, backlinks, dataforseo_labs, etc.) with sum of that subtree. */
+function byApiFromBlock(block: unknown): Record<string, number> {
+  const byApi: Record<string, number> = {};
+  if (!block || typeof block !== "object" || Array.isArray(block)) return byApi;
+  const o = block as Record<string, unknown>;
+  for (const [k, v] of Object.entries(o)) {
+    if (k === "value") continue;
+    const sum = sumNumericInObject(v);
+    if (sum > 0) byApi[k] = Math.round(sum * 10000) / 10000;
+  }
+  return byApi;
+}
+
+/** Normalize money.statistics.day into dailyExpenses (array of { date, total, byApi }). */
+function parseMoneyStatisticsDay(dayBlock: unknown): DataForSeoDailyExpense[] {
+  const entries: DataForSeoDailyExpense[] = [];
+  if (!dayBlock || typeof dayBlock !== "object") return entries;
+
+  const push = (date: string, block: unknown) => {
+    const total = sumNumericInObject(block);
+    const byApi = byApiFromBlock(block);
+    entries.push({ date, total: Math.round(total * 10000) / 10000, byApi });
+  };
+
+  const o = dayBlock as Record<string, unknown>;
+  if (Array.isArray(o)) {
+    for (const item of o) {
+      const it = item as Record<string, unknown>;
+      const date = typeof it?.value === "string" ? it.value.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      push(date, item);
+    }
+    return entries;
+  }
+  // Object keyed by date (e.g. "2025-01-01": { serp: {... }, ... })
+  const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
+  const dateKeys = Object.keys(o).filter((k) => dateKeyPattern.test(k));
+  if (dateKeys.length > 0) {
+    for (const date of dateKeys.sort()) {
+      push(date, o[date]);
+    }
+    return entries;
+  }
+  const date = typeof o.value === "string" ? o.value.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  push(date, dayBlock);
+  return entries;
+}
+
+/** Aggregate minute-level statistics (value: "yyyy-MM-dd HH:mm") into daily totals. */
+function aggregateMinuteToDaily(minuteBlock: unknown): DataForSeoDailyExpense[] {
+  const byDate = new Map<string, { total: number; byApi: Record<string, number> }>();
+  const collect = (block: unknown, date: string) => {
+    const total = sumNumericInObject(block);
+    const byApi = byApiFromBlock(block);
+    const existing = byDate.get(date);
+    if (!existing) {
+      byDate.set(date, { total, byApi });
+    } else {
+      existing.total += total;
+      for (const [k, v] of Object.entries(byApi)) {
+        existing.byApi[k] = (existing.byApi[k] || 0) + v;
+      }
+    }
+  };
+
+  if (Array.isArray(minuteBlock)) {
+    for (const item of minuteBlock) {
+      const it = item as Record<string, unknown>;
+      const value = it?.value;
+      const date = typeof value === "string" ? value.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      collect(item, date);
+    }
+  } else if (minuteBlock && typeof minuteBlock === "object") {
+    const o = minuteBlock as Record<string, unknown>;
+    const value = o.value;
+    const date = typeof value === "string" ? value.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    collect(minuteBlock, date);
+  }
+
+  return Array.from(byDate.entries())
+    .map(([date, { total, byApi }]) => ({
+      date,
+      total: Math.round(total * 10000) / 10000,
+      byApi: Object.fromEntries(Object.entries(byApi).map(([k, v]) => [k, Math.round(v * 10000) / 10000])),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+router.get(
+  "/dataforseo-usage",
+  authenticateToken,
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const base64Auth = process.env.DATAFORSEO_BASE64;
+      if (!base64Auth) {
+        return res.json({
+          configured: false,
+          dailyExpenses: [],
+          message: "DataForSEO credentials not configured. Set DATAFORSEO_BASE64.",
+        } as DataForSeoUsageResponse);
+      }
+
+      const response = await fetch("https://api.dataforseo.com/v3/appendix/user_data", {
+        method: "GET",
+        headers: {
+          Authorization: `Basic ${base64Auth}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = (await response.json()) as {
+        status_code?: number;
+        status_message?: string;
+        tasks?: Array<{
+          status_code?: number;
+          result?: Array<{
+            money?: { total?: number; balance?: number; statistics?: { day?: unknown } };
+            backlinks_subscription_expiry_date?: string | null;
+            llm_mentions_subscription_expiry_date?: string | null;
+          }>;
+        }>;
+      };
+
+      if (data.status_code !== 20000 || !data.tasks?.length || data.tasks[0].status_code !== 20000) {
+        return res.json({
+          configured: true,
+          dailyExpenses: [],
+          message: data.status_message || "DataForSEO API error",
+        } as DataForSeoUsageResponse);
+      }
+
+      const rawResult = data.tasks[0].result;
+      const result = Array.isArray(rawResult) ? rawResult[0] : rawResult && typeof rawResult === "object" ? (rawResult as Record<string, unknown>) : null;
+      if (!result || typeof result !== "object") {
+        return res.json({
+          configured: true,
+          dailyExpenses: [],
+          message: "No user data in response",
+        } as DataForSeoUsageResponse);
+      }
+
+      const resultObj = result as Record<string, unknown>;
+      const money = resultObj.money as Record<string, unknown> | undefined;
+      const statistics = money?.statistics as Record<string, unknown> | undefined;
+      const dayBlock = statistics?.day;
+      const minuteBlock = statistics?.minute;
+
+      let dailyExpenses: DataForSeoDailyExpense[] = [];
+      if (dayBlock !== undefined && dayBlock !== null) {
+        dailyExpenses = parseMoneyStatisticsDay(dayBlock);
+      }
+      if (dailyExpenses.length === 0 && minuteBlock !== undefined && minuteBlock !== null && typeof minuteBlock === "object") {
+        dailyExpenses = aggregateMinuteToDaily(minuteBlock);
+      }
+
+      const balanceRaw = money?.balance;
+      const totalRaw = money?.total;
+      const balance = typeof balanceRaw === "number" && !Number.isNaN(balanceRaw) ? balanceRaw : typeof balanceRaw === "string" ? Number(balanceRaw) : undefined;
+      const totalDeposited = typeof totalRaw === "number" && !Number.isNaN(totalRaw) ? totalRaw : typeof totalRaw === "string" ? Number(totalRaw) : undefined;
+
+      const payload: DataForSeoUsageResponse = {
+        configured: true,
+        balance: typeof balance === "number" && !Number.isNaN(balance) ? balance : undefined,
+        totalDeposited: typeof totalDeposited === "number" && !Number.isNaN(totalDeposited) ? totalDeposited : undefined,
+        backlinksSubscriptionExpiry: (resultObj.backlinks_subscription_expiry_date as string | null) ?? null,
+        llmMentionsSubscriptionExpiry: (resultObj.llm_mentions_subscription_expiry_date as string | null) ?? null,
+        dailyExpenses: dailyExpenses.sort((a, b) => a.date.localeCompare(b.date)),
+      };
+
+      res.json(payload);
+    } catch (err: any) {
+      console.error("[financial] dataforseo-usage error:", err);
+      res.status(500).json({
+        configured: true,
+        dailyExpenses: [],
+        message: err?.message || "Failed to fetch DataForSEO usage",
+      } as DataForSeoUsageResponse);
+    }
+  }
+);
 
 export default router;

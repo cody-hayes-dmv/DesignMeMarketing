@@ -1,9 +1,13 @@
 import express from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, optionalAuthenticateToken } from "../middleware/auth.js";
+import { requireAgencyTrialNotExpired } from "../middleware/requireAgencyTrialNotExpired.js";
 
 const router = express.Router();
+
+// Restrict agency users with expired trial
+router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
 // Default onboarding tasks used when ensuring an agency has at least one template
 const DEFAULT_ONBOARDING_TASKS = [

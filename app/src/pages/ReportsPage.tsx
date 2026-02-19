@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Download,
   Plus,
@@ -88,6 +88,17 @@ const ReportsPage: React.FC = () => {
   const [schedules, setSchedules] = useState<ReportSchedule[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [filterClientId, setFilterClientId] = useState<string>("all");
+  /** "active" = only reports for clients with status ACTIVE (default); "all" = every report */
+  const [reportViewMode, setReportViewMode] = useState<"active" | "all">("active");
+
+  const activeClientIds = useMemo(
+    () => new Set(clients.filter((c) => c.status === "ACTIVE").map((c) => c.id)),
+    [clients]
+  );
+  const activeReports = useMemo(
+    () => reports.filter((r) => activeClientIds.has(r.clientId)),
+    [reports, activeClientIds]
+  );
 
   useEffect(() => {
     // Fetch clients first if not already loaded
@@ -265,10 +276,10 @@ const ReportsPage: React.FC = () => {
   };
 
   const handleExportReports = () => {
-    // Filter reports based on selected client
-    const reportsToExport = filterClientId === "all" 
-      ? reports 
-      : reports.filter(r => r.clientId === filterClientId);
+    // Filter reports based on view mode (active vs all) and selected client
+    const reportsToExport = filterClientId === "all"
+      ? reportsForView
+      : reportsForView.filter((r) => r.clientId === filterClientId);
     
     if (reportsToExport.length === 0) {
       toast.error("No reports to export");
@@ -335,9 +346,18 @@ const ReportsPage: React.FC = () => {
 
   // Calculate statistics from actual database reports
   const totalReports = reports.length;
+  const activeReportsCount = activeReports.length;
   const sentReports = reports.filter(r => r.status === "sent" || r.status === "Sent").length;
   const scheduledReports = reports.filter(r => r.status === "scheduled" || r.status === "Scheduled").length;
   const draftReports = reports.filter(r => !r.status || r.status === "draft" || r.status === "Draft").length;
+
+  const reportsForView = reportViewMode === "active" ? activeReports : reports;
+  const clientsForFilter = reportViewMode === "active"
+    ? clients.filter((c) => c.status === "ACTIVE")
+    : clients;
+  const filteredReports = reportsForView.filter(
+    (report) => filterClientId === "all" || report.clientId === filterClientId
+  );
 
   return (
     <div className="p-8 space-y-8">
@@ -371,7 +391,7 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         <div className="bg-white p-6 rounded-xl border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
@@ -380,6 +400,16 @@ const ReportsPage: React.FC = () => {
             </div>
             <FileText className="h-8 w-8 text-primary-600" />
           </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Active Reports</p>
+              <p className="text-2xl font-bold text-emerald-600">{activeReportsCount}</p>
+            </div>
+            <FileText className="h-8 w-8 text-emerald-600" />
+          </div>
+          <p className="text-xs text-gray-500 mt-1">Reports for active clients only</p>
         </div>
         <div className="bg-white p-6 rounded-xl border border-gray-200">
           <div className="flex items-center justify-between">
@@ -411,16 +441,48 @@ const ReportsPage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">All Reports</h2>
+        <div className="p-6 border-b border-gray-200 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-gray-900">
+              {reportViewMode === "active" ? "Active Reports" : "All Reports"}
+            </h2>
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setReportViewMode("active");
+                  if (filterClientId !== "all" && !activeClientIds.has(filterClientId)) {
+                    setFilterClientId("all");
+                  }
+                }}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  reportViewMode === "active" ? "bg-white text-primary-700 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                Active Reports
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportViewMode("all")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  reportViewMode === "all" ? "bg-white text-primary-700 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                All Reports
+              </button>
+            </div>
+            {reportViewMode === "active" && (
+              <span className="text-xs text-gray-500">Only clients with status Active</span>
+            )}
+          </div>
           <div className="flex items-center space-x-4">
             <select 
               value={filterClientId}
               onChange={(e) => setFilterClientId(e.target.value)}
               className="text-sm border border-gray-300 rounded-lg px-3 py-2"
             >
-              <option value="all">All Clients</option>
-              {clients.map((client) => (
+              <option value="all">{reportViewMode === "active" ? "All Active Clients" : "All Clients"}</option>
+              {clientsForFilter.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.name}
                 </option>
@@ -448,28 +510,21 @@ const ReportsPage: React.FC = () => {
                     Loading reports...
                   </td>
                 </tr>
-              ) : reports.length === 0 ? (
+              ) : filteredReports.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-amber-50/50">
-                    No reports found. Create a report for a client first.
+                    {reportViewMode === "active"
+                      ? "No reports for active clients. Switch to All Reports or create a report for an active client."
+                      : "No reports found. Create a report for a client first."}
                   </td>
                 </tr>
               ) : (
-                reports
-                  .filter(report => filterClientId === "all" || report.clientId === filterClientId)
-                  .map((report, index) => (
+                filteredReports.map((report, index) => (
                 <tr key={report.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div>
                         <div className="text-sm font-medium text-gray-900">
                           {report.period ? report.period.charAt(0).toUpperCase() + report.period.slice(1) : "Report"} Report - {report.client?.name || "Unknown Client"}
-                        </div>
-                      <div className="text-xs text-gray-500">
-                          {report.averagePosition !== null && report.averagePosition !== undefined 
-                            ? `Avg pos: ${report.averagePosition.toFixed(1)}` 
-                            : "No position data"} • {report.averageCtr !== null && report.averageCtr !== undefined
-                            ? `CTR: ${(report.averageCtr * 100).toFixed(2)}%`
-                            : "No CTR data"}
                         </div>
                       </div>
                     </td>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useLocation, Link } from "react-router-dom";
+import { useLocation, Link, Navigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
 import Sidebar from "./Sidebar";
@@ -15,6 +15,9 @@ interface AgencyMe {
   id?: string;
   trialExpired?: boolean;
   isBusinessTier?: boolean;
+  /** "trial" = No Charge during 7 days trial */
+  billingType?: string | null;
+  trialDaysLeft?: number | null;
 }
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
@@ -80,6 +83,19 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
   const trialExpired = isAgencyRoute && agencyMe?.trialExpired === true;
   const onSubscriptionPage = location.pathname === "/agency/subscription";
+  const isTrialBilling = agencyMe?.billingType === "trial";
+  const trialDaysLeft = agencyMe?.trialDaysLeft ?? 0;
+  const trialActiveRequireTier = isAgencyRoute && isTrialBilling && trialDaysLeft > 0 && !trialExpired;
+
+  // Restrict access when trial expired: only Subscription page is allowed
+  if (trialExpired && !onSubscriptionPage) {
+    return <Navigate to="/agency/subscription" replace />;
+  }
+
+  // Require tier selection before trial expiration (No Charge during 7 days trial): redirect to Subscription until they choose a plan
+  if (trialActiveRequireTier && !onSubscriptionPage) {
+    return <Navigate to="/agency/subscription?require_tier=1" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -92,13 +108,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       >
         <div className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
-          {user?.role === "SUPER_ADMIN" && <NotificationBell />}
+          {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY") && <NotificationBell />}
         </div>
         {trialExpired && (
           <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
             <p className="text-sm font-medium text-amber-800 flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 flex-shrink-0" />
-              Trial ended. Contact support to add a paid plan to continue.
+              Your free trial has ended. Choose a paid plan below to continue using the agency panel.
             </p>
             <Link
               to="/agency/subscription"
@@ -109,27 +125,16 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             </Link>
           </div>
         )}
+        {trialActiveRequireTier && onSubscriptionPage && (
+          <div className="bg-primary-50 border-b border-primary-200 px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
+            <p className="text-sm font-medium text-primary-800 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+              You have <strong>{trialDaysLeft} days</strong> left in your free trial. Select a paid plan before it ends to keep your account active.
+            </p>
+          </div>
+        )}
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          {trialExpired && !onSubscriptionPage ? (
-            <div className="p-8 flex items-center justify-center min-h-[60vh]">
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 max-w-md text-center">
-                <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">Trial ended</h2>
-                <p className="text-gray-600 mb-6">
-                  Your free trial has ended. Contact support to add a paid plan to continue using the agency panel.
-                </p>
-                <Link
-                  to="/agency/subscription"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 text-white font-medium hover:bg-primary-700"
-                >
-                  <CreditCard className="h-4 w-4" />
-                  Go to Subscription
-                </Link>
-              </div>
-            </div>
-          ) : (
-            children
-          )}
+          {children}
         </div>
       </div>
     </div>

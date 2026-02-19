@@ -109,14 +109,22 @@ api.interceptors.response.use(
           localStorage.removeItem("token");
           toast.error("Session expired. Please login again.");
         } else if (status === 403) {
-          // 403 on /auth/me usually means invalid/expired token - clear it and treat like logout
-          const isAuthMe = /\/auth\/me/i.test(url);
-          const isInvalidToken = /invalid token|token/i.test((error.response?.data?.message || "").toLowerCase());
-          if (isAuthMe || isInvalidToken) {
-            localStorage.removeItem("token");
-            toast.error("Session expired. Please login again.");
+          const code = error.response?.data?.code;
+          if (code === "TRIAL_EXPIRED") {
+            toast.error(error.response?.data?.message || "Your free trial has ended. Please choose a paid plan to continue.");
+            if (typeof window !== "undefined" && window.location.pathname.startsWith("/agency") && !window.location.pathname.endsWith("/subscription")) {
+              window.location.replace("/agency/subscription");
+            }
           } else {
-            toast.error("Access denied. You don't have permission to perform this action.");
+            // 403 on /auth/me usually means invalid/expired token - clear it and treat like logout
+            const isAuthMe = /\/auth\/me/i.test(url);
+            const isInvalidToken = /invalid token|token/i.test((error.response?.data?.message || "").toLowerCase());
+            if (isAuthMe || isInvalidToken) {
+              localStorage.removeItem("token");
+              toast.error("Session expired. Please login again.");
+            } else {
+              toast.error("Access denied. You don't have permission to perform this action.");
+            }
           }
         } else if (status === 404) {
           toast.error("Resource not found.");

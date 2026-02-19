@@ -3,7 +3,7 @@ import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
 import api from "@/lib/api";
 
 // Keep Task in sync with API shape (nullable optionals allowed)
-export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
+export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
 
 export interface ProofItem {
   type: "image" | "video" | "url";
@@ -249,6 +249,7 @@ export const selectCountsByStatus = (s: { task: TaskState }) => {
     IN_PROGRESS: 0,
     REVIEW: 0,
     DONE: 0,
+    NEEDS_APPROVAL: 0,
   };
   for (const t of s.task.tasks) counts[t.status] += 1;
   return counts;

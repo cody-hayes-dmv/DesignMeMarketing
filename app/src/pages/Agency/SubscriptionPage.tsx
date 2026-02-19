@@ -60,6 +60,8 @@ const PLANS = [
   { id: "pro", name: "Pro", price: 997, priceLabel: "$997", clients: 50, clientsLabel: "50 clients" },
   { id: "enterprise", name: "Enterprise", price: null, priceLabel: "Custom", clients: null, clientsLabel: "Unlimited" },
 ];
+// Plans available in Activate Subscription modal (no Enterprise/Custom/Unlimited)
+const ACTIVATE_PLANS = PLANS.filter((p) => p.id !== "enterprise");
 
 interface SubscriptionData {
   currentPlan: string;
@@ -111,11 +113,12 @@ const SubscriptionPage = () => {
 
   const applySubscriptionData = (resData: Record<string, unknown>) => {
     const u = (resData.usage || {}) as Record<string, unknown>;
+    const paymentMethod = (resData.paymentMethod as SubscriptionData["paymentMethod"]) ?? null;
     setData({
       currentPlan: (resData.currentPlan as string) ?? defaultSubscription.currentPlan,
       currentPlanPrice: (resData.currentPlanPrice as number | null) ?? defaultSubscription.currentPlanPrice,
       nextBillingDate: (resData.nextBillingDate as string) ?? defaultSubscription.nextBillingDate,
-      paymentMethod: (resData.paymentMethod as SubscriptionData["paymentMethod"]) ?? defaultSubscription.paymentMethod,
+      paymentMethod,
       trialEndsAt: (resData.trialEndsAt as string | null) ?? null,
       trialDaysLeft: (resData.trialDaysLeft as number | null) ?? null,
       billingType: (resData.billingType as string | null) ?? null,
@@ -210,8 +213,9 @@ const SubscriptionPage = () => {
       toast.error("Please wait for the payment form to load.");
       return;
     }
+    const tierToActivate = ACTIVATE_PLANS.some((p) => p.id === activateTier) ? activateTier : "solo";
     setActivateSubmitting(true);
-    sessionStorage.setItem(ACTIVATION_TIER_KEY, activateTier);
+    sessionStorage.setItem(ACTIVATION_TIER_KEY, tierToActivate);
     try {
       const paymentMethodId = await activatePaymentRef.current.confirmAndGetPaymentMethod();
       if (!paymentMethodId) {
@@ -220,7 +224,7 @@ const SubscriptionPage = () => {
       }
       await api.post("/agencies/activate-trial-subscription", {
         paymentMethodId,
-        tier: activateTier,
+        tier: tierToActivate,
       });
       sessionStorage.removeItem(ACTIVATION_TIER_KEY);
       toast.success("Subscription activated successfully!");
@@ -318,16 +322,25 @@ const SubscriptionPage = () => {
   const currentPlanMeta = PLANS.find((p) => p.id === data.currentPlan);
   const currentPriceLabel =
     currentPlanMeta?.priceLabel ?? (data.currentPlanPrice != null ? formatCurrency(data.currentPlanPrice) : "—");
-  const nextBillingFormatted = data.nextBillingDate
-    ? new Date(data.nextBillingDate).toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      })
-    : "—";
-  const paymentMethodLabel = data.paymentMethod
-    ? `•••• ${data.paymentMethod.last4} (${(data.paymentMethod.brand || "").charAt(0).toUpperCase() + (data.paymentMethod.brand || "").slice(1).toLowerCase()})`
-    : "—";
+  // Before activation: free/trial accounts, no payment method, or no billing type yet → show N/A for Next Billing and Payment Method
+  const hasActivatedSubscription =
+    Boolean(data.paymentMethod) &&
+    data.billingType != null &&
+    data.billingType !== "free" &&
+    data.billingType !== "trial";
+  const nextBillingFormatted =
+    !hasActivatedSubscription
+      ? "N/A"
+      : data.nextBillingDate
+        ? new Date(data.nextBillingDate).toLocaleDateString("en-US", {
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          })
+        : "N/A";
+  const paymentMethodLabel = hasActivatedSubscription
+    ? `•••• ${data.paymentMethod!.last4} (${(data.paymentMethod!.brand || "").charAt(0).toUpperCase() + (data.paymentMethod!.brand || "").slice(1).toLowerCase()})`
+    : "N/A";
   const hasTrial = data.trialDaysLeft != null && data.trialDaysLeft > 0;
   const trialExpired = data.trialExpired === true;
   const billingManagedByAdmin = data.billingType === "custom";
@@ -682,11 +695,11 @@ const SubscriptionPage = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Subscription Tier</label>
                     <select
-                      value={activateTier}
+                      value={ACTIVATE_PLANS.some((p) => p.id === activateTier) ? activateTier : "solo"}
                       onChange={(e) => setActivateTier(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                     >
-                      {PLANS.map((plan) => (
+                      {ACTIVATE_PLANS.map((plan) => (
                         <option key={plan.id} value={plan.id}>
                           {plan.name} – {plan.priceLabel}
                           {plan.price != null ? "/mo" : ""} – {plan.clientsLabel}

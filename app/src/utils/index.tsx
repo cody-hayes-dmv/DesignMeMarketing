@@ -17,6 +17,7 @@ export const getStatusBadge = (status: string) => {
     IN_PROGRESS: "bg-blue-400 text-white",
     REVIEW: "bg-orange-400 text-white",
     DONE: "bg-green-600 text-white",
+    NEEDS_APPROVAL: "bg-amber-400 text-white",
   };
   return styles[status as keyof typeof styles] || styles.TODO;
 };

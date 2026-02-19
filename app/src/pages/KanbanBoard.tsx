@@ -7,7 +7,7 @@ import { format } from "date-fns";
 
 interface KanbanBoardProps {
     tasks: Task[];
-    onMove?: (id: string, status: "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE") => void;
+    onMove?: (id: string, status: Task["status"]) => void;
     onTaskClick?: (task: Task) => void;
 }
 
@@ -16,6 +16,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, onMove, onTaskClick })
         TODO: tasks.filter((t) => t.status === "TODO"),
         IN_PROGRESS: tasks.filter((t) => t.status === "IN_PROGRESS"),
         REVIEW: tasks.filter((t) => t.status === "REVIEW"),
+        NEEDS_APPROVAL: tasks.filter((t) => t.status === "NEEDS_APPROVAL"),
         DONE: tasks.filter((t) => t.status === "DONE"),
     };
 

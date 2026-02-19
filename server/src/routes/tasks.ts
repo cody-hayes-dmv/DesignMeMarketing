@@ -1,9 +1,15 @@
 import express from "express";
 import { z } from "zod";
+import type { TaskStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { sendEmail } from "../lib/email.js";
+import { authenticateToken, optionalAuthenticateToken } from "../middleware/auth.js";
+import { requireAgencyTrialNotExpired } from "../middleware/requireAgencyTrialNotExpired.js";
 
 const router = express.Router();
+
+// Restrict agency users with expired trial
+router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
 const proofItemSchema = z.object({
   type: z.enum(["image", "video", "url"]),
@@ -11,18 +17,21 @@ const proofItemSchema = z.object({
   name: z.string().optional(), // Optional name/description
 });
 
+const taskStatusEnum = z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE", "NEEDS_APPROVAL"]);
+
 const createTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   taskNotes: z.string().optional(),
   category: z.string().optional(),
-  status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+  status: taskStatusEnum.optional(),
   dueDate: z.coerce.date().optional(), // accepts ISO string or Date
   assigneeId: z.string().optional(),
   clientId: z.string().optional(),
   priority: z.string().optional(),
   estimatedHours: z.number().int().positive().optional(),
   proof: z.array(proofItemSchema).optional(), // Array of proof items
+  approvalNotifyUserIds: z.array(z.string().min(1)).optional(),
 });
 
 const updateTaskSchema = z.object({
@@ -30,13 +39,14 @@ const updateTaskSchema = z.object({
   description: z.string().optional(),
   taskNotes: z.string().nullable().optional(),
   category: z.string().optional(),
-  status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+  status: taskStatusEnum.optional(),
   dueDate: z.coerce.date().nullable().optional(),
   assigneeId: z.string().nullable().optional(),
   clientId: z.string().nullable().optional(),
   priority: z.string().optional(),
   estimatedHours: z.number().int().positive().optional(),
   proof: z.array(proofItemSchema).nullable().optional(), // Array of proof items
+  approvalNotifyUserIds: z.array(z.string().min(1)).nullable().optional(),
 });
 
 const bulkCreateTaskSchema = z.object({
@@ -44,7 +54,7 @@ const bulkCreateTaskSchema = z.object({
     title: z.string().min(1),
     description: z.string().optional(),
     category: z.string().optional(),
-    status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+    status: taskStatusEnum.optional(),
     dueDate: z.coerce.date().nullable().optional(),
     assigneeId: z.string().nullable().optional(),
     clientId: z.string().nullable().optional(),
@@ -58,7 +68,7 @@ const createRecurringTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   category: z.string().optional(),
-  status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+  status: taskStatusEnum.optional(),
   priority: z.string().optional(),
   estimatedHours: z.number().int().positive().optional(),
   assigneeId: z.string().optional(),
@@ -74,7 +84,7 @@ const updateRecurringTaskSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
   category: z.string().optional(),
-  status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]).optional(),
+  status: taskStatusEnum.optional(),
   priority: z.string().optional(),
   estimatedHours: z.number().int().positive().optional(),
   assigneeId: z.string().optional().nullable(),
@@ -91,19 +101,83 @@ const updateRecurringTaskSchema = z.object({
 const taskInclude = {
   assignee: { select: { id: true, name: true, email: true } },
   agency: { select: { id: true, name: true } },
-  client: { 
-    select: { 
-      id: true, 
-      name: true, 
+  client: {
+    select: {
+      id: true,
+      name: true,
       domain: true,
       loginUrl: true,
       username: true,
       password: true,
-      notes: true
-    } 
+      notes: true,
+    },
   },
-  // Note: proof is a JSON field, so it's automatically included
+  createdBy: { select: { id: true, name: true, email: true } },
 };
+
+async function sendTaskApprovalRequestEmails(
+  userIds: string[],
+  task: { title: string; id: string; client?: { name: string } | null },
+  createdByName: string
+): Promise<void> {
+  if (userIds.length === 0) return;
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { email: true, name: true },
+  });
+  const clientName = task.client?.name ?? "Client";
+  const subject = `Content needs your approval: ${task.title}`;
+  const body = `<p>${createdByName} has requested approval for the following task:</p>
+<p><strong>${task.title}</strong></p>
+<p>Client: ${clientName}</p>
+<p>Please review and approve in the dashboard.</p>`;
+  for (const u of users) {
+    if (u.email) {
+      sendEmail({ to: u.email, subject, html: body }).catch((e) =>
+        console.warn("[Task] Approval email failed", u.email, e?.message)
+      );
+    }
+  }
+}
+
+async function sendTaskCompletedEmails(
+  task: {
+    title: string;
+    id: string;
+    client?: { name: string } | null;
+    assignee?: { email: string | null; name: string | null } | null;
+    createdBy?: { email: string | null; name: string | null } | null;
+    approvalNotifyUserIds?: string | null;
+  },
+  approvalNotifyUserIds: string | null
+): Promise<void> {
+  const toEmails: string[] = [];
+  if (task.assignee?.email) toEmails.push(task.assignee.email);
+  if (approvalNotifyUserIds) {
+    try {
+      const ids = JSON.parse(approvalNotifyUserIds) as string[];
+      const users = await prisma.user.findMany({
+        where: { id: { in: ids } },
+        select: { email: true },
+      });
+      users.forEach((u) => u.email && toEmails.push(u.email));
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+  const unique = [...new Set(toEmails)];
+  if (unique.length === 0) return;
+  const clientName = task.client?.name ?? "Client";
+  const subject = `Task completed: ${task.title}`;
+  const html = `<p>The following task has been marked completed:</p>
+<p><strong>${task.title}</strong></p>
+<p>Client: ${clientName}</p>`;
+  for (const to of unique) {
+    sendEmail({ to, subject, html }).catch((e) =>
+      console.warn("[Task] Completion email failed", to, e?.message)
+    );
+  }
+}
 
 const commentBodySchema = z.object({
   body: z.string().min(1).max(5000),
@@ -238,25 +312,58 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
-// List users who can be assigned to work log tasks (Super Admins, Admins, Specialists — not agencies)
+// List users who can be assigned to work log tasks.
+// SUPER_ADMIN / ADMIN: can assign to Super Admins, Admins, Specialists (system-wide).
+// AGENCY: can assign ONLY to users in their own agency (same team).
 router.get("/assignable-users", authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN" && req.user.role !== "AGENCY") {
       return res.status(403).json({ message: "Access denied" });
     }
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const searchFilter = search
+      ? {
+          OR: [
+            { name: { contains: search } },
+            { email: { contains: search } },
+          ],
+        }
+      : {};
+
+    if (req.user.role === "AGENCY") {
+      // Agency users may only assign to members of their own agency (team).
+      const myMemberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const myAgencyIds = myMemberships.map((m) => m.agencyId);
+      if (myAgencyIds.length === 0) {
+        return res.json([]);
+      }
+      const teamUserIds = await prisma.userAgency.findMany({
+        where: { agencyId: { in: myAgencyIds } },
+        select: { userId: true },
+      });
+      const uniqueIds = [...new Set(teamUserIds.map((m) => m.userId))];
+      const users = await prisma.user.findMany({
+        where: {
+          id: { in: uniqueIds },
+          verified: true,
+          ...searchFilter,
+        },
+        select: { id: true, name: true, email: true, role: true },
+        orderBy: [{ name: "asc" }],
+        take: 100,
+      });
+      return res.json(users);
+    }
+
+    // SUPER_ADMIN and ADMIN: system-wide assignable users (Super Admins, Admins, Specialists only).
     const users = await prisma.user.findMany({
       where: {
         role: { in: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
         verified: true,
-        ...(search
-          ? {
-              OR: [
-                { name: { contains: search } },
-                { email: { contains: search } },
-              ],
-            }
-          : {}),
+        ...searchFilter,
       },
       select: { id: true, name: true, email: true, role: true },
       orderBy: [{ role: "asc" }, { name: "asc" }],
@@ -327,6 +434,7 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
         status: true,
         dueDate: true,
         proof: true,
+        approvalNotifyUserIds: true,
         createdAt: true,
         updatedAt: true,
         assignee: { select: { id: true, name: true, email: true } },
@@ -337,6 +445,65 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
     return res.json(tasks);
   } catch (error) {
     console.error("Fetch client work log error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// List users who can receive approval notifications for a client's work log (agency members or client users)
+router.get("/worklog/:clientId/approval-recipients", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: { include: { memberships: { select: { agencyId: true } } } },
+      },
+    });
+    if (!client) return res.status(404).json({ message: "Client not found" });
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const isOwner = client.userId === req.user.userId;
+    let hasAccess = isAdmin || isOwner;
+    if (!hasAccess) {
+      const memberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const userAgencyIds = memberships.map((m) => m.agencyId);
+      const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+      hasAccess = clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    }
+    if (!hasAccess) {
+      const clientUser = await prisma.clientUser.findFirst({
+        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      hasAccess = Boolean(clientUser);
+    }
+    if (!hasAccess) return res.status(403).json({ message: "Access denied" });
+
+    const agencyId = client.belongsToAgencyId ?? client.user.memberships[0]?.agencyId ?? null;
+    if (agencyId) {
+      const members = await prisma.userAgency.findMany({
+        where: { agencyId },
+        select: { userId: true },
+      });
+      const userIds = [...new Set(members.map((m) => m.userId))];
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds }, verified: true },
+        select: { id: true, name: true, email: true },
+        orderBy: [{ name: "asc" }],
+      });
+      return res.json(users);
+    }
+    const clientUsers = await prisma.clientUser.findMany({
+      where: { clientId, status: "ACTIVE" },
+      select: { user: { select: { id: true, name: true, email: true } } },
+    });
+    const users = clientUsers.map((cu) => cu.user).filter((u) => u?.email);
+    return res.json(users);
+  } catch (error) {
+    console.error("Approval recipients error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -734,6 +901,10 @@ router.post("/", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "No agency found or provide a client for work log." });
     }
 
+    const approvalJson =
+      (parsed.approvalNotifyUserIds?.length ?? 0) > 0
+        ? JSON.stringify(parsed.approvalNotifyUserIds)
+        : undefined;
     const task = await prisma.task.create({
       data: {
         title: parsed.title,
@@ -749,9 +920,22 @@ router.post("/", authenticateToken, async (req, res) => {
         priority: parsed.priority,
         estimatedHours: parsed.estimatedHours,
         proof: parsed.proof ? JSON.stringify(parsed.proof) : undefined,
+        approvalNotifyUserIds: approvalJson,
       },
       include: taskInclude,
     });
+
+    if (task.status === "NEEDS_APPROVAL" && (parsed.approvalNotifyUserIds?.length ?? 0) > 0) {
+      const createdBy = await prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { name: true, email: true },
+      });
+      sendTaskApprovalRequestEmails(
+        parsed.approvalNotifyUserIds!,
+        { id: task.id, title: task.title, client: task.client ?? undefined },
+        createdBy?.name || createdBy?.email || "A user"
+      ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
+    }
 
     res.status(201).json(task);
   } catch (error: any) {
@@ -788,12 +972,39 @@ router.put("/:id", authenticateToken, async (req, res) => {
     if (updates.proof !== undefined) {
       updateData.proof = updates.proof ? JSON.stringify(updates.proof) : null;
     }
+    if (updates.approvalNotifyUserIds !== undefined) {
+      updateData.approvalNotifyUserIds =
+        (updates.approvalNotifyUserIds?.length ?? 0) > 0
+          ? JSON.stringify(updates.approvalNotifyUserIds)
+          : null;
+    }
 
     const updatedTask = await prisma.task.update({
       where: { id },
-      data: updateData,
+      data: updateData as Parameters<typeof prisma.task.update>[0]["data"],
       include: taskInclude,
     });
+
+    if (updatedTask.status === "NEEDS_APPROVAL" && (updates.approvalNotifyUserIds?.length ?? 0) > 0) {
+      const createdBy = await prisma.user.findUnique({
+        where: { id: updatedTask.createdById ?? "" },
+        select: { name: true, email: true },
+      });
+      sendTaskApprovalRequestEmails(
+        updates.approvalNotifyUserIds!,
+        { id: updatedTask.id, title: updatedTask.title, client: updatedTask.client ?? undefined },
+        createdBy?.name || createdBy?.email || "A user"
+      ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
+    }
+    if (updatedTask.status === "DONE") {
+      sendTaskCompletedEmails(
+        {
+          ...updatedTask,
+          approvalNotifyUserIds: updatedTask.approvalNotifyUserIds ?? undefined,
+        },
+        updatedTask.approvalNotifyUserIds
+      ).catch((e) => console.warn("[Task] Completion emails failed", e?.message));
+    }
 
     res.json(updatedTask);
   } catch (error: any) {
@@ -809,21 +1020,56 @@ router.put("/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// Partial update: status only (useful for Kanban drag)
+// Partial update: status only (optional approvalNotifyUserIds when status is NEEDS_APPROVAL)
 router.patch("/:id/status", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = z.object({ status: z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE"]) }).parse(req.body);
+    const body = z
+      .object({
+        status: taskStatusEnum,
+        approvalNotifyUserIds: z.array(z.string().min(1)).optional(),
+      })
+      .parse(req.body);
 
     const task = await getTaskForAccess(id);
     if (!task) return res.status(404).json({ message: "Task not found" });
     if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
+    const updateData: { status: TaskStatus; approvalNotifyUserIds?: string | null } = {
+      status: body.status as TaskStatus,
+    };
+    if (body.status === "NEEDS_APPROVAL" && (body.approvalNotifyUserIds?.length ?? 0) > 0) {
+      updateData.approvalNotifyUserIds = JSON.stringify(body.approvalNotifyUserIds);
+    } else if (body.status !== "NEEDS_APPROVAL") {
+      updateData.approvalNotifyUserIds = null;
+    }
+
     const updated = await prisma.task.update({
       where: { id },
-      data: { status },
+      data: updateData,
       include: taskInclude,
     });
+
+    if (updated.status === "NEEDS_APPROVAL" && (body.approvalNotifyUserIds?.length ?? 0) > 0) {
+      const createdBy = await prisma.user.findUnique({
+        where: { id: updated.createdById ?? "" },
+        select: { name: true, email: true },
+      });
+      sendTaskApprovalRequestEmails(
+        body.approvalNotifyUserIds!,
+        { id: updated.id, title: updated.title, client: updated.client ?? undefined },
+        createdBy?.name || createdBy?.email || "A user"
+      ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
+    }
+    if (updated.status === "DONE") {
+      sendTaskCompletedEmails(
+        {
+          ...updated,
+          approvalNotifyUserIds: updated.approvalNotifyUserIds ?? undefined,
+        },
+        updated.approvalNotifyUserIds
+      ).catch((e) => console.warn("[Task] Completion emails failed", e?.message));
+    }
 
     res.json(updated);
   } catch (error) {

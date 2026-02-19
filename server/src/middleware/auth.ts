@@ -45,5 +45,23 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
   }
 };
 
+/** Like authenticateToken but does not 401 when no token; sets req.user only when token is valid. Used before trial check on routers with mixed public/protected routes. */
+export const optionalAuthenticateToken = (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) {
+    next();
+    return;
+  }
+  try {
+    const secret = getJwtSecret();
+    const decoded = jwt.verify(token, secret) as JwtPayload;
+    req.user = decoded;
+  } catch {
+    // invalid token: leave req.user unset
+  }
+  next();
+};
+
 // Export getJwtSecret for use in other files
 export { getJwtSecret };

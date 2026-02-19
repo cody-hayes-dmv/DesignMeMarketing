@@ -4,7 +4,8 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
-import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from '../middleware/auth.js';
+import { requireAgencyTrialNotExpired } from '../middleware/requireAgencyTrialNotExpired.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 import { getTierConfig, AGENCY_TIER_IDS, type TierId } from '../lib/tiers.js';
 import {
@@ -14,6 +15,9 @@ import {
 } from '../lib/stripeTierSync.js';
 
 const router = express.Router();
+
+// Restrict agency users with expired trial to subscription/me/activate only
+router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
 const inviteSchema = z.object({
   email: z.string().email(),
@@ -1236,6 +1240,43 @@ router.get('/me', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get user agency error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Agency in-app notifications (for bell dropdown). Must be BEFORE /:agencyId.
+router.get('/me/notifications', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    if (user.role === 'SUPER_ADMIN') {
+      return res.json({ unreadCount: 0, items: [] });
+    }
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId },
+      select: { agencyId: true },
+    });
+    if (!membership) {
+      return res.json({ unreadCount: 0, items: [] });
+    }
+    const notifications = await prisma.notification.findMany({
+      where: { agencyId: membership.agencyId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const unreadCount = notifications.filter((n) => !n.read).length;
+    return res.json({
+      unreadCount,
+      items: notifications.map((n) => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        link: n.link ?? '',
+        createdAt: n.createdAt.toISOString(),
+      })),
+    });
+  } catch (err: any) {
+    console.error('Agency notifications error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to load notifications' });
   }
 });
 
@@ -2550,6 +2591,16 @@ router.patch('/managed-services/:id/approve', authenticateToken, async (req, res
     const agencyName = row.agency.name;
     const clientName = row.client.name;
     const packageName = row.packageName;
+    const agencyId = (row.agency as { id: string }).id;
+    await prisma.notification.create({
+      data: {
+        agencyId,
+        type: 'managed_service_approved',
+        title: `Managed service approved: ${clientName}`,
+        message: `Package: ${packageName}. Billing has started. You can now provide full managed services for this client.`,
+        link: '/agency/managed-services',
+      },
+    }).catch((e) => console.warn('Create approval notification failed:', e?.message));
     const seen = new Set<string>();
     for (const m of row.agency.members) {
       const email = (m as any).user?.email;
@@ -2611,6 +2662,16 @@ router.patch('/managed-services/:id/reject', authenticateToken, async (req, res)
     ]);
 
     const clientName = row.client.name;
+    const agencyId = (row.agency as { id: string }).id;
+    await prisma.notification.create({
+      data: {
+        agencyId,
+        type: 'managed_service_rejected',
+        title: `Managed service request not approved: ${clientName}`,
+        message: 'The client remains in Dashboard Only mode.',
+        link: '/agency/managed-services',
+      },
+    }).catch((e) => console.warn('Create reject notification failed:', e?.message));
     const seen = new Set<string>();
     for (const m of row.agency.members) {
       const email = (m as any).user?.email;

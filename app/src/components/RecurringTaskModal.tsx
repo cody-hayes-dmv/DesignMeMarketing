@@ -17,7 +17,7 @@ const FREQUENCIES = [
   { value: "SEMIANNUAL", label: "Every 6 months" },
 ] as const;
 
-type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
+type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
 
 export type RecurringRuleForEdit = {
   id: string;
@@ -285,6 +285,7 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                     <option value="TODO">TODO</option>
                     <option value="IN_PROGRESS">IN_PROGRESS</option>
                     <option value="REVIEW">REVIEW</option>
+                    <option value="NEEDS_APPROVAL">NEEDS_APPROVAL</option>
                     <option value="DONE">DONE</option>
                   </select>
                 </div>
@@ -340,7 +341,7 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                       }
                     }}
                     onFocus={() => setAssignToOpen(true)}
-                    placeholder="Search by name or email (Super Admin, Admin, Specialist)"
+                    placeholder="Search by name or email"
                     className="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                   {form.assigneeId && (

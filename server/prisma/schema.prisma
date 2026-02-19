@@ -97,27 +97,28 @@ model UserAgency {
 }
 
 model Task {
-  id             String     @id @default(cuid())
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  title          String
-  description    String?    @db.Text
-  taskNotes      String?    @db.LongText
-  category       String?
-  dueDate        DateTime?
-  status         TaskStatus @default(TODO)
-  priority       String?
-  estimatedHours Int?
-  proof          String?    @db.LongText
-  agencyId       String?
-  createdById    String?
-  assigneeId     String?
-  clientId       String?
-  comments       TaskComment[]
-  agency         Agency?    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
-  client         Client?    @relation(fields: [clientId], references: [id])
-  createdBy      User?      @relation("TaskCreator", fields: [createdById], references: [id])
+  id                    String     @id @default(cuid())
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  title                 String
+  description           String?    @db.Text
+  taskNotes             String?    @db.LongText
+  category              String?
+  dueDate               DateTime?
+  status                TaskStatus @default(TODO)
+  priority              String?
+  estimatedHours        Int?
+  proof                 String?    @db.LongText
+  agencyId              String?
+  createdById           String?
+  assigneeId            String?
+  clientId              String?
+  approvalNotifyUserIds String?    @db.Text // JSON array of user IDs to notify when status is NEEDS_APPROVAL
+  comments              TaskComment[]
+  agency                Agency?    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  assignee              User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  client                 Client?    @relation(fields: [clientId], references: [id])
+  createdBy             User?      @relation("TaskCreator", fields: [createdById], references: [id])
 
   @@index([agencyId, status])
   @@index([assigneeId])
@@ -336,7 +337,8 @@ model AgencyAddOn {
 
 model Notification {
   id        String   @id @default(cuid())
-  type      String   @db.VarChar(80)   // managed_service_request, cancellation, etc.
+  agencyId  String?  @db.VarChar(255)  // when set, notification is for this agency (in-app bell)
+  type      String   @db.VarChar(80)   // managed_service_approved, managed_service_rejected, payment_failed, plan_upgrade, plan_downgrade, etc.
   title     String   @db.VarChar(255)
   message   String   @db.Text
   link      String?  @db.VarChar(500)
@@ -344,6 +346,7 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([type])
+  @@index([agencyId])
   @@index([createdAt])
   @@map("notifications")
 }
@@ -712,6 +715,7 @@ enum TaskStatus {
   IN_PROGRESS
   REVIEW
   DONE
+  NEEDS_APPROVAL
 }
 
 enum Status {

@@ -3,12 +3,16 @@ import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
 import { Prisma, Role } from "@prisma/client";
-import { authenticateToken, getJwtSecret } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from '../middleware/auth.js';
+import { requireAgencyTrialNotExpired } from '../middleware/requireAgencyTrialNotExpired.js';
 import { sendEmail } from '../lib/email.js';
 import jwt from 'jsonwebtoken';
 import { getAgencyTierContext, canAddTeamMember } from '../lib/agencyLimits.js';
 
 const router = express.Router();
+
+// Restrict agency users with expired trial
+router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
 type UserWithMemberships = Prisma.UserGetPayload<{
     include: { memberships: { include: { agency: { select: { id: true; name: true; contactName: true; contactEmail: true } } } } };
