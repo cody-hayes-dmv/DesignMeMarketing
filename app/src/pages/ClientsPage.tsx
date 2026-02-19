@@ -36,7 +36,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { format } from "date-fns";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -224,7 +224,8 @@ const EMPTY_CLIENT_FORM: ClientFormState = {
 
 const ClientsPage = () => {
   const dispatch = useDispatch();
-  const navigate = useNavigate()
+  const navigate = useNavigate();
+  const location = useLocation();
   const { clients } = useSelector(
     (state: RootState) => state.client
   );
@@ -551,6 +552,28 @@ const ClientsPage = () => {
     });
     setShowEditModal(true);
   };
+
+  // When navigated from Agencies or Vendasta with openEditClientId, fetch client and open Edit modal
+  useEffect(() => {
+    const openEditClientId = (location.state as { openEditClientId?: string } | null)?.openEditClientId;
+    if (!openEditClientId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<Client>(`/clients/${openEditClientId}`);
+        if (cancelled || !res.data) return;
+        handleEditClick(res.data);
+      } catch (err) {
+        console.error("Failed to load client for edit", err);
+        toast.error("Failed to load client");
+      } finally {
+        if (!cancelled) {
+          navigate(location.pathname, { replace: true, state: {} });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [location.state, location.pathname, navigate]);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
     isOpen: false,

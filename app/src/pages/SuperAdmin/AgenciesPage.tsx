@@ -7,7 +7,7 @@ import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, updateAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, ChevronLeft, Archive, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, ChevronLeft, Archive, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle, FileText, Copy, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -789,6 +789,10 @@ const AgenciesPage = () => {
         navigate(`/agency/clients/${client.id}`, { state: { client } });
     };
 
+    const handleViewReportClick = (client: AgencyClient) => {
+        navigate(`/agency/clients/${client.id}`, { state: { client, tab: "report" } });
+    };
+
     const handleShareClick = async (client: AgencyClient) => {
         try {
             const res = await api.post(`/seo/share-link/${client.id}`);
@@ -819,8 +823,7 @@ const AgenciesPage = () => {
     };
 
     const handleEditClick = (client: AgencyClient) => {
-        // Navigate to edit or open edit modal - for now just navigate to client page
-        navigate(`/agency/clients/${client.id}`);
+        navigate("/agency/clients", { state: { openEditClientId: client.id } });
     };
 
     const handleDeleteClient = (id: string) => {
@@ -1010,11 +1013,11 @@ const AgenciesPage = () => {
                                                 ) : (
                                                     <a
                                                         className="text-sm font-medium text-primary-600 hover:text-primary-700 underline underline-offset-1 decoration-primary-300 hover:decoration-primary-500 transition-colors"
-                                                        href={`https://${sd}.yourseodashboard.com`}
+                                                        href={`https://${sd}`}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
                                                     >
-                                                        {sd}.yourseodashboard.com
+                                                        {sd}
                                                     </a>
                                                 );
                                             })()}
@@ -1201,8 +1204,19 @@ const AgenciesPage = () => {
                                                                                             e.stopPropagation();
                                                                                             handleViewClick(client);
                                                                                         }}
+                                                                                        title="Open Dashboard"
                                                                                     >
                                                                                         <Eye className="h-4 w-4" />
+                                                                                    </button>
+                                                                                    <button
+                                                                                        className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleViewReportClick(client);
+                                                                                        }}
+                                                                                        title="View Report"
+                                                                                    >
+                                                                                        <FileText className="h-4 w-4" />
                                                                                     </button>
                                                                                     <button
                                                                                         className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
@@ -1220,6 +1234,7 @@ const AgenciesPage = () => {
                                                                                             e.stopPropagation();
                                                                                             handleEditClick(client);
                                                                                         }}
+                                                                                        title="Edit"
                                                                                     >
                                                                                         <Edit className="h-4 w-4" />
                                                                                     </button>
@@ -2113,7 +2128,7 @@ const AgenciesPage = () => {
                                         <tr>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industy</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industry</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -2215,8 +2230,16 @@ const AgenciesPage = () => {
                                                         <button
                                                             className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
                                                             onClick={() => handleViewClick(client)}
+                                                            title="Open Dashboard"
                                                         >
                                                             <Eye className="h-4 w-4" />
+                                                        </button>
+                                                        <button
+                                                            className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
+                                                            onClick={() => handleViewReportClick(client)}
+                                                            title="View Report"
+                                                        >
+                                                            <FileText className="h-4 w-4" />
                                                         </button>
                                                         <button
                                                             className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
@@ -2228,6 +2251,7 @@ const AgenciesPage = () => {
                                                         <button
                                                             className="p-1 text-gray-400 hover:text-primary-600 transition-colors"
                                                             onClick={() => handleEditClick(client)}
+                                                            title="Edit"
                                                         >
                                                             <Edit className="h-4 w-4" />
                                                         </button>
@@ -2261,46 +2285,60 @@ const AgenciesPage = () => {
                 </div>
             )}
 
-            {/* Share Modal */}
+            {/* Share Client Dashboard modal - same as Clients page */}
             {showShareModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-xl font-bold text-gray-900">Share Client Dashboard</h2>
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl overflow-hidden ring-2 ring-blue-200/80 max-w-md w-full">
+                        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 border-b-2 border-indigo-500/50">
+                            <h3 className="text-lg font-bold text-white drop-shadow-sm">Share Client Dashboard</h3>
                             <button
                                 onClick={() => {
                                     setShowShareModal(false);
                                     setShareLink("");
                                 }}
-                                className="text-gray-400 hover:text-gray-600"
+                                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
                             >
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Shareable Link
-                                </label>
-                                <div className="flex items-center space-x-2">
+                        <div className="p-6 bg-gradient-to-b from-slate-50/80 to-white space-y-4">
+                            <p className="text-sm text-gray-600 rounded-xl border-l-4 border-blue-500 bg-blue-50/60 px-4 py-3">
+                                Share this link to give others access to view the client dashboard. The link does not expire.
+                            </p>
+                            <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60 p-3">
+                                <label className="block text-sm font-semibold text-emerald-800 mb-2">Share link</label>
+                                <div className="flex items-center gap-2">
                                     <input
                                         type="text"
                                         value={shareLink}
                                         readOnly
-                                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm"
+                                        className="flex-1 px-4 py-2.5 border-2 border-emerald-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-emerald-500"
                                     />
                                     <button
                                         onClick={handleCopyLink}
-                                        className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm"
+                                        className="p-2.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                                        title="Copy link"
                                     >
-                                        Copy
+                                        <Copy className="h-5 w-5" />
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                        <div className="px-6 py-4 border-t-2 border-gray-200 flex items-center gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
+                            <button
+                                onClick={() => {
+                                    setShowShareModal(false);
+                                    setShareLink("");
+                                }}
+                                className="flex-1 px-4 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
+                            >
+                                Close
+                            </button>
                             <button
                                 onClick={handleOpenLink}
-                                className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors text-sm"
+                                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md flex items-center justify-center gap-2"
                             >
+                                <ExternalLink className="h-4 w-4" />
                                 Open Link
                             </button>
                         </div>

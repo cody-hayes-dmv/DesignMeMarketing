@@ -140,7 +140,7 @@ const VendastaPage = () => {
   };
 
   const handleEditClick = (client: Client) => {
-    navigate(`/agency/clients/${client.id}`, { state: { client, edit: true } });
+    navigate("/agency/clients", { state: { openEditClientId: client.id } });
   };
 
   const handleAssignToAgency = (client: Client) => {
@@ -673,47 +673,58 @@ const VendastaPage = () => {
         />
       )}
 
-      {/* Share Modal */}
+      {/* Share Client Dashboard modal - same as Clients page */}
       {showShareModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Share Client Dashboard</h3>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden ring-2 ring-blue-200/80 max-w-md w-full">
+            <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 border-b-2 border-indigo-500/50">
+              <h3 className="text-lg font-bold text-white drop-shadow-sm">Share Client Dashboard</h3>
               <button
-                onClick={() => setShowShareModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                onClick={() => {
+                  setShowShareModal(false);
+                  setShareLink("");
+                }}
+                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <p className="text-sm text-gray-600 mb-4">
-              Share this link to give others access to view the client dashboard. The link does not expire.
-            </p>
-            <div className="flex items-center gap-2 mb-4">
-              <input
-                type="text"
-                value={shareLink}
-                readOnly
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm"
-              />
-              <button
-                onClick={handleCopyLink}
-                className="p-2 text-gray-600 hover:text-primary-600 transition-colors"
-                title="Copy link"
-              >
-                <Copy className="h-5 w-5" />
-              </button>
+            <div className="p-6 bg-gradient-to-b from-slate-50/80 to-white space-y-4">
+              <p className="text-sm text-gray-600 rounded-xl border-l-4 border-blue-500 bg-blue-50/60 px-4 py-3">
+                Share this link to give others access to view the client dashboard. The link does not expire.
+              </p>
+              <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/60 p-3">
+                <label className="block text-sm font-semibold text-emerald-800 mb-2">Share link</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={shareLink}
+                    readOnly
+                    className="flex-1 px-4 py-2.5 border-2 border-emerald-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    onClick={handleCopyLink}
+                    className="p-2.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                    title="Copy link"
+                  >
+                    <Copy className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="px-6 py-4 border-t-2 border-gray-200 flex items-center gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
               <button
-                onClick={() => setShowShareModal(false)}
-                className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+                onClick={() => {
+                  setShowShareModal(false);
+                  setShareLink("");
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:bg-gray-100 hover:border-gray-300 transition-colors"
               >
                 Close
               </button>
               <button
                 onClick={handleOpenLink}
-                className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md flex items-center justify-center gap-2"
               >
                 <ExternalLink className="h-4 w-4" />
                 Open Link
