@@ -138,6 +138,8 @@ const KeywordsPage: React.FC = () => {
   const [serpFeatureExpanded, setSerpFeatureExpanded] = useState<{ local_pack: boolean; people_also_ask: boolean; things_to_know: boolean }>({ local_pack: false, people_also_ask: false, things_to_know: false });
   const [serpAnalysisLoading, setSerpAnalysisLoading] = useState(false);
   const [serpAnalysisOffset, setSerpAnalysisOffset] = useState(0);
+  type SerpCached = NonNullable<typeof serpAnalysis>;
+  const serpCacheRef = useRef<{ key: string; byOffset: Record<number, SerpCached> }>({ key: "", byOffset: {} });
 
   useEffect(() => {
     const loadClients = async () => {
@@ -329,9 +331,27 @@ const KeywordsPage: React.FC = () => {
           setKeywordDetail(null);
         }
         if (serpRes.data?.items) {
-          setSerpAnalysis({ ...serpRes.data, offset: 0 });
+          const page0 = { ...serpRes.data, offset: 0 } as SerpCached;
+          setSerpAnalysis(page0);
           setSerpAnalysisOffset(0);
           setSerpFeatureExpanded({ local_pack: false, people_also_ask: false, things_to_know: false });
+          const cacheKey = `${researchSeed.trim()}|${researchLocation}|${researchLanguage}`;
+          if (serpCacheRef.current.key !== cacheKey) serpCacheRef.current = { key: cacheKey, byOffset: {} };
+          serpCacheRef.current.byOffset[0] = page0;
+          [10, 20].forEach((off) => {
+            api
+              .get("/seo/serp-analysis", {
+                params: { keyword: researchSeed.trim(), locationCode: researchLocation, languageCode: researchLanguage, offset: off },
+                timeout: 30000,
+              })
+              .then((res) => {
+                if (cancelled) return;
+                if (res.data?.items && serpCacheRef.current.key === cacheKey) {
+                  serpCacheRef.current.byOffset[off] = { ...res.data, offset: off } as SerpCached;
+                }
+              })
+              .catch(() => {});
+          });
         } else {
           setSerpAnalysis(null);
         }
@@ -351,6 +371,15 @@ const KeywordsPage: React.FC = () => {
 
   const loadSerpPage = (offset: number) => {
     if (!researchSeed.trim()) return;
+    const cacheKey = `${researchSeed.trim()}|${researchLocation}|${researchLanguage}`;
+    if (serpCacheRef.current.key !== cacheKey) serpCacheRef.current = { key: cacheKey, byOffset: {} };
+    const cached = serpCacheRef.current.byOffset[offset];
+    if (cached) {
+      setSerpAnalysis(cached);
+      setSerpAnalysisOffset(offset);
+      setSerpAnalysisLoading(false);
+      return;
+    }
     setSerpAnalysisLoading(true);
     api
       .get("/seo/serp-analysis", {
@@ -359,8 +388,12 @@ const KeywordsPage: React.FC = () => {
       })
       .then((res) => {
         if (res.data?.items) {
-          setSerpAnalysis({ ...res.data, offset });
-          setSerpAnalysisOffset(offset);
+          const data = { ...res.data, offset } as SerpCached;
+          serpCacheRef.current.byOffset[offset] = data;
+          if (serpCacheRef.current.key === cacheKey) {
+            setSerpAnalysis(data);
+            setSerpAnalysisOffset(offset);
+          }
         }
       })
       .finally(() => setSerpAnalysisLoading(false));
@@ -971,7 +1004,7 @@ const KeywordsPage: React.FC = () => {
                   <span className="w-1 h-6 rounded-full bg-gradient-to-b from-violet-500 to-fuchsia-500" aria-hidden />
                   Keyword Ideas
                 </h3>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="rounded-xl border border-gray-200 border-l-4 border-l-blue-500 p-5 shadow-sm bg-blue-50/40">
                     <h4 className="font-semibold text-gray-900">Keyword Variations</h4>
                     {(() => {
@@ -1060,37 +1093,11 @@ const KeywordsPage: React.FC = () => {
                       );
                     })()}
                   </div>
-                  <div className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 p-5 shadow-sm bg-emerald-50/40">
-                    <h4 className="font-semibold text-gray-900">Keyword Strategy</h4>
-                    <p className="mt-1 text-sm text-gray-600">Get topics, pillar and subpages <strong>automatically</strong></p>
-                    <div className="mt-4 flex flex-col items-center">
-                      <div className="rounded-full bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-800">{keywordIdeas.strategy.pillar || researchSeed || "seed"}</div>
-                      <div className="w-px h-4 bg-gray-300" />
-                      <div className="flex flex-col gap-2 mt-2 w-full max-w-xs">
-                        {(keywordIdeas.strategy.items || []).slice(0, 6).map((r) => {
-                          const items = keywordIdeas.strategy.items || [];
-                          const maxVol = Math.max(...items.map((x) => x.searchVolume || 0), 1);
-                          const pct = ((r.searchVolume || 0) / maxVol) * 100;
-                          return (
-                            <div key={r.keyword} className="flex items-center gap-2">
-                              <div className="flex-1 h-2 bg-gray-100 rounded overflow-hidden">
-                                <div className="h-full bg-primary-500 rounded" style={{ width: `${pct}%` }} />
-                              </div>
-                              <span className="text-xs font-medium text-gray-700 truncate max-w-[140px]" title={r.keyword}>{r.keyword}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <button type="button" className="mt-4 w-full rounded-lg border border-emerald-200 bg-emerald-100 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-200 transition-colors">
-                      View all clusters
-                    </button>
-                  </div>
                 </div>
               </div>
             )}
 
-            {/* Modal: All keywords (Variations or Questions) with optional Track for variations */}
+            {/* Modal: All keywords (Variations or Questions) with Track action for both */}
             {keywordIdeasModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setKeywordIdeasModal(null)}>
                 <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
@@ -1102,7 +1109,7 @@ const KeywordsPage: React.FC = () => {
                       <X className="h-5 w-5" />
                     </button>
                   </div>
-                  {keywordIdeasModal.type === "variations" && !assignClientId && (
+                  {!assignClientId && (
                     <div className="px-6 py-2 bg-amber-50 border-b border-amber-100 text-sm text-amber-800">
                       Select a client in the research section above to track keywords.
                     </div>
@@ -1114,9 +1121,7 @@ const KeywordsPage: React.FC = () => {
                           <th className="text-left py-3 font-semibold text-gray-700">Keywords</th>
                           <th className="text-right py-3 font-semibold text-gray-700">Volume</th>
                           <th className="text-right py-3 font-semibold text-gray-700">KD %</th>
-                          {keywordIdeasModal.type === "variations" && (
-                            <th className="text-right py-3 font-semibold text-gray-700 w-24">Action</th>
-                          )}
+                          <th className="text-right py-3 font-semibold text-gray-700 w-24">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -1132,18 +1137,16 @@ const KeywordsPage: React.FC = () => {
                               <span className={`inline-block w-2 h-2 rounded-full mr-1 align-middle ${(r.difficulty ?? 0) >= 70 ? "bg-red-500" : (r.difficulty ?? 0) >= 40 ? "bg-amber-500" : "bg-green-500"}`} />
                               {r.difficulty ?? "—"}
                             </td>
-                            {keywordIdeasModal.type === "variations" && (
-                              <td className="py-2 text-right">
-                                <button
-                                  type="button"
-                                  onClick={() => handleAssignSingle(r)}
-                                  disabled={!assignClientId || assigningKeywords}
-                                  className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
-                                >
-                                  Track
-                                </button>
-                              </td>
-                            )}
+                            <td className="py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleAssignSingle(r)}
+                                disabled={!assignClientId || assigningKeywords}
+                                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                              >
+                                Track
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>

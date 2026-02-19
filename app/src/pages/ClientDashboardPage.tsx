@@ -4530,9 +4530,9 @@ const ClientDashboardPage: React.FC = () => {
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="name" />
                             <YAxis />
-                            <Tooltip />
+                            <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} />
                             <Legend />
-                            <Line type="monotone" dataKey="newUsers" stroke="#3B82F6" strokeWidth={2} name="Current" />
+                            <Line type="monotone" dataKey="newUsers" stroke="#3B82F6" strokeWidth={2} name="Current" isAnimationActive={false} />
                             {dashboardSummaryCompare != null && (
                               <Line type="monotone" dataKey="previousPeriod" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 2" name={compareTo === "previous_year" ? "Previous year" : "Previous period"} />
                             )}
@@ -4572,9 +4572,9 @@ const ClientDashboardPage: React.FC = () => {
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="name" />
                             <YAxis />
-                            <Tooltip />
+                            <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} />
                             <Legend />
-                            <Line type="monotone" dataKey="totalUsers" name="Current" stroke="#10B981" strokeWidth={2} />
+                            <Line type="monotone" dataKey="totalUsers" name="Current" stroke="#10B981" strokeWidth={2} isAnimationActive={false} />
                             {dashboardSummaryCompare != null && (
                               <Line type="monotone" dataKey="previousPeriod" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 2" name={compareTo === "previous_year" ? "Previous year" : "Previous period"} />
                             )}
@@ -5262,7 +5262,7 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm min-h-[140px] flex flex-col border-t-4 border-t-emerald-500">
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                               AI Search Volume
-                              <span className="ml-1 inline-flex align-middle" title="Total number of AI searches where your business could have appeared based on your industry and keywords.">
+                              <span className="ml-1 inline-flex align-middle" title={aiIntelligence.meta?.kpiVolumeFromTrend ? "From keyword trend (last month) when domain-level volume is not yet available. Matches the graph below." : "Total number of AI searches where your business could have appeared based on your industry and keywords."}>
                                 <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" aria-hidden />
                               </span>
                             </p>
@@ -5548,8 +5548,8 @@ const ClientDashboardPage: React.FC = () => {
                                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                   <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#6b7280" />
                                   <YAxis tick={{ fontSize: 11 }} stroke="#6b7280" tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : String(v))} />
-                                  <Tooltip formatter={(value: number) => [value.toLocaleString(), "AI Search Vol"]} labelFormatter={(l) => l} />
-                                  <Line type="monotone" dataKey="volume" name="AI Search Volume" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                  <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} formatter={(value: number) => [value.toLocaleString(), "AI Search Vol"]} labelFormatter={(l) => l} />
+                                  <Line type="monotone" dataKey="volume" name="AI Search Volume" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
                                 </LineChart>
                               </ResponsiveContainer>
                             </div>
@@ -5613,7 +5613,13 @@ const ClientDashboardPage: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="bg-white divide-y divide-gray-100">
-                                {(aiIntelligence.competitorQueries ?? []).map((q) => (
+                                {(aiIntelligence.competitorQueries ?? []).length === 0 ? (
+                                  <tr>
+                                    <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500">
+                                      No competitor gap data yet. Opportunities appear when we have competitor domains and DataForSEO data for queries where competitors are mentioned but you are not. Add competitors in SEO settings or check back after more data is collected.
+                                    </td>
+                                  </tr>
+                                ) : (aiIntelligence.competitorQueries ?? []).map((q) => (
                                   <tr key={q.query} className="hover:bg-gray-50">
                                     <td className="px-6 py-4 font-medium text-gray-900">{q.query}</td>
                                     <td className="px-6 py-4 text-gray-700">{q.compMentions}</td>
@@ -9433,9 +9439,9 @@ const ClientDashboardPage: React.FC = () => {
                               <CartesianGrid strokeDasharray="3 3" />
                               <XAxis dataKey="name" />
                               <YAxis />
-                              <Tooltip />
+                              <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} />
                               <Legend />
-                              <Line type="monotone" dataKey="newUsers" stroke="#3B82F6" strokeWidth={2} />
+                              <Line type="monotone" dataKey="newUsers" stroke="#3B82F6" strokeWidth={2} isAnimationActive={false} />
                             </LineChart>
                           </ResponsiveContainer>
                         ) : (
@@ -9461,9 +9467,9 @@ const ClientDashboardPage: React.FC = () => {
                               <CartesianGrid strokeDasharray="3 3" />
                               <XAxis dataKey="name" />
                               <YAxis />
-                              <Tooltip />
+                              <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} />
                               <Legend />
-                              <Line type="monotone" dataKey="totalUsers" name="Total Users" stroke="#10B981" strokeWidth={2} />
+                              <Line type="monotone" dataKey="totalUsers" name="Total Users" stroke="#10B981" strokeWidth={2} isAnimationActive={false} />
                             </LineChart>
                           </ResponsiveContainer>
                         ) : (

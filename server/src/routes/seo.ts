@@ -6116,14 +6116,26 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 
     const scoreExplanation = `Based on: mentions (×2), AI search volume (÷100), and platform diversity (ChatGPT, Google AI, Perplexity). Max 99. Data: DataForSEO.`;
 
+    // When domain-level AI search volume is 0 but we have 12-month keyword trend data, show the latest month in the KPI so the top section matches the line graph.
+    let kpiAiSearchVolume = totalAiSearchVolume || 0;
+    let kpiAiSearchVolumeTrend = aiSearchVolumeTrend;
+    let kpiVolumeFromTrend = false;
+    if (totalAiSearchVolume === 0 && aiSearchVolumeTrend12Months.length > 0) {
+      const last = aiSearchVolumeTrend12Months[aiSearchVolumeTrend12Months.length - 1];
+      kpiAiSearchVolume = last.searchVolume;
+      const prev = aiSearchVolumeTrend12Months.length >= 2 ? aiSearchVolumeTrend12Months[aiSearchVolumeTrend12Months.length - 2] : null;
+      kpiAiSearchVolumeTrend = prev ? last.searchVolume - prev.searchVolume : 0;
+      kpiVolumeFromTrend = true;
+    }
+
     return res.json({
       kpis: {
         aiVisibilityScore: Math.round(aiVisibilityScore),
         aiVisibilityScoreTrend: aiVisibilityScoreTrend,
         totalAiMentions: totalMentions || 0,
         totalAiMentionsTrend: totalAiMentionsTrend,
-        aiSearchVolume: totalAiSearchVolume || 0,
-        aiSearchVolumeTrend: aiSearchVolumeTrend,
+        aiSearchVolume: kpiAiSearchVolume,
+        aiSearchVolumeTrend: kpiAiSearchVolumeTrend,
         monthlyTrendPercent: monthlyTrendPercent,
       },
       platforms,
@@ -6152,6 +6164,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         dataSource: "DataForSEO",
         queriesFilteredByRelevance: hasRelevanceSignal,
         industry: client.industry || null,
+        kpiVolumeFromTrend: kpiVolumeFromTrend,
       },
     });
   } catch (error: any) {
