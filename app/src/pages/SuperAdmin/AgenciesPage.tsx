@@ -6,8 +6,8 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, updateAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
-import { updateClient, deleteClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, ChevronLeft, Archive, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle, FileText, Copy, ExternalLink } from "lucide-react";
+import { updateClient, deleteClient, archiveClient, restoreClient } from "@/store/slices/clientSlice";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, ChevronLeft, Archive, RotateCcw, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle, FileText, Copy, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -119,7 +119,11 @@ const AgenciesPage = () => {
     const [openStatusId, setOpenStatusId] = useState("");
     const [showShareModal, setShowShareModal] = useState(false);
     const [shareLink, setShareLink] = useState("");
-    const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
+    const [archiveConfirm, setArchiveConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
+        isOpen: false,
+        clientId: null,
+    });
+    const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
         isOpen: false,
         clientId: null,
     });
@@ -826,26 +830,53 @@ const AgenciesPage = () => {
         navigate("/agency/clients", { state: { openEditClientId: client.id } });
     };
 
-    const handleDeleteClient = (id: string) => {
-        setDeleteConfirm({ isOpen: true, clientId: id });
+    const handleArchiveClient = (id: string) => {
+        setArchiveConfirm({ isOpen: true, clientId: id });
     };
 
-    const confirmDeleteClient = async () => {
-        if (!deleteConfirm.clientId) return;
+    const confirmArchiveClient = async () => {
+        if (!archiveConfirm.clientId) return;
         try {
-            await dispatch(deleteClient(deleteConfirm.clientId) as any);
-            toast.success("Client deleted successfully!");
-            setDeleteConfirm({ isOpen: false, clientId: null });
-            // Refresh clients list
-            if (selectedAgencyId) {
-                handleViewClients(selectedAgencyId, selectedAgencyName);
-            }
-            if (expandedAgencyId) {
-                await refreshAgencyClientsCache(expandedAgencyId);
-            }
+            await dispatch(archiveClient(archiveConfirm.clientId) as any);
+            toast.success("Client archived successfully!");
+            setArchiveConfirm({ isOpen: false, clientId: null });
+            if (selectedAgencyId) handleViewClients(selectedAgencyId, selectedAgencyName);
+            if (expandedAgencyId) await refreshAgencyClientsCache(expandedAgencyId);
+        } catch (error: any) {
+            console.error("Failed to archive client:", error);
+            toast.error(error?.message || "Failed to archive client");
+            setArchiveConfirm({ isOpen: false, clientId: null });
+        }
+    };
+
+    const handlePermanentDeleteClient = (id: string) => {
+        setPermanentDeleteConfirm({ isOpen: true, clientId: id });
+    };
+
+    const confirmPermanentDeleteClient = async () => {
+        if (!permanentDeleteConfirm.clientId) return;
+        try {
+            await dispatch(deleteClient(permanentDeleteConfirm.clientId) as any);
+            toast.success("Client permanently deleted!");
+            setPermanentDeleteConfirm({ isOpen: false, clientId: null });
+            if (selectedAgencyId) handleViewClients(selectedAgencyId, selectedAgencyName);
+            if (expandedAgencyId) await refreshAgencyClientsCache(expandedAgencyId);
         } catch (error: any) {
             console.error("Failed to delete client:", error);
-            setDeleteConfirm({ isOpen: false, clientId: null });
+            toast.error(error?.message || "Failed to delete client");
+            setPermanentDeleteConfirm({ isOpen: false, clientId: null });
+        }
+    };
+
+    const handleRestoreClient = async (id: string) => {
+        try {
+            await dispatch(restoreClient(id) as any);
+            toast.success("Client restored successfully!");
+            if (selectedAgencyId) handleViewClients(selectedAgencyId, selectedAgencyName);
+            if (expandedAgencyId) await refreshAgencyClientsCache(expandedAgencyId);
+        } catch (error: any) {
+            console.error("Failed to restore client:", error);
+            toast.error(error?.message || "Failed to restore client");
         }
     };
 
@@ -1248,16 +1279,32 @@ const AgenciesPage = () => {
                                                                                     >
                                                                                         <UserMinus className="h-4 w-4" />
                                                                                     </button>
-                                                                                    <button
-                                                                                        className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation();
-                                                                                            handleDeleteClient(client.id);
-                                                                                        }}
-                                                                                        title="Delete Client"
-                                                                                    >
-                                                                                        <Trash2 className="h-4 w-4" />
-                                                                                    </button>
+                                                                                    {client.status === "ARCHIVED" || client.status === "REJECTED" ? (
+                                                                                        <>
+                                                                                            <button
+                                                                                                className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                                                                                                onClick={(e) => { e.stopPropagation(); handleRestoreClient(client.id); }}
+                                                                                                title="Restore Client"
+                                                                                            >
+                                                                                                <RotateCcw className="h-4 w-4" />
+                                                                                            </button>
+                                                                                            <button
+                                                                                                className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                                                                                onClick={(e) => { e.stopPropagation(); handlePermanentDeleteClient(client.id); }}
+                                                                                                title="Delete Permanently"
+                                                                                            >
+                                                                                                <Trash2 className="h-4 w-4" />
+                                                                                            </button>
+                                                                                        </>
+                                                                                    ) : (
+                                                                                        <button
+                                                                                            className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+                                                                                            onClick={(e) => { e.stopPropagation(); handleArchiveClient(client.id); }}
+                                                                                            title="Archive Client"
+                                                                                        >
+                                                                                            <Archive className="h-4 w-4" />
+                                                                                        </button>
+                                                                                    )}
                                                                                 </div>
                                                                             </td>
                                                                         </tr>
@@ -2266,13 +2313,32 @@ const AgenciesPage = () => {
                                                         >
                                                             <UserMinus className="h-4 w-4" />
                                                         </button>
-                                                        <button
-                                                            className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                                            onClick={() => handleDeleteClient(client.id)}
-                                                            title="Delete Client"
-                                                        >
-                                                            <Trash2 className="h-4 w-4" />
-                                                        </button>
+                                                        {client.status === "ARCHIVED" || client.status === "REJECTED" ? (
+                                                            <>
+                                                                <button
+                                                                    className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                                                                    onClick={() => handleRestoreClient(client.id)}
+                                                                    title="Restore Client"
+                                                                >
+                                                                    <RotateCcw className="h-4 w-4" />
+                                                                </button>
+                                                                <button
+                                                                    className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                                                    onClick={() => handlePermanentDeleteClient(client.id)}
+                                                                    title="Delete Permanently"
+                                                                >
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <button
+                                                                className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
+                                                                onClick={() => handleArchiveClient(client.id)}
+                                                                title="Archive Client"
+                                                            >
+                                                                <Archive className="h-4 w-4" />
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2346,15 +2412,28 @@ const AgenciesPage = () => {
                 </div>
             )}
 
-            {/* Delete Confirmation Dialog */}
-            {deleteConfirm.isOpen && (
+            {/* Archive Confirmation Dialog */}
+            {archiveConfirm.isOpen && (
                 <ConfirmDialog
-                    isOpen={deleteConfirm.isOpen}
-                    onClose={() => setDeleteConfirm({ isOpen: false, clientId: null })}
-                    onConfirm={confirmDeleteClient}
-                    title="Delete Client"
-                    message="Are you sure you want to delete this client? This action cannot be undone."
-                    confirmText="Delete"
+                    isOpen={archiveConfirm.isOpen}
+                    onClose={() => setArchiveConfirm({ isOpen: false, clientId: null })}
+                    onConfirm={confirmArchiveClient}
+                    title="Archive Client"
+                    message="This client will be moved to the archive. All data fetching and billing will stop. You can restore it later."
+                    confirmText="Archive"
+                    variant="danger"
+                />
+            )}
+
+            {/* Permanent Delete Confirmation Dialog */}
+            {permanentDeleteConfirm.isOpen && (
+                <ConfirmDialog
+                    isOpen={permanentDeleteConfirm.isOpen}
+                    onClose={() => setPermanentDeleteConfirm({ isOpen: false, clientId: null })}
+                    onConfirm={confirmPermanentDeleteClient}
+                    title="Permanently Delete Client"
+                    message="Are you sure you want to permanently delete this client? This action cannot be undone and all data will be removed forever."
+                    confirmText="Delete Forever"
                     requireConfirmText="DELETE"
                     variant="danger"
                 />

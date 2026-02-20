@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store";
-import { fetchClients, createClient, updateClient, deleteClient, Client } from "../store/slices/clientSlice";
+import { fetchClients, createClient, updateClient, deleteClient, archiveClient, restoreClient, Client } from "../store/slices/clientSlice";
 import { fetchAgencies } from "../store/slices/agencySlice";
 import {
   Plus,
@@ -15,6 +15,8 @@ import {
   Search,
   Table,
   List,
+  Archive,
+  RotateCcw,
   Trash2,
   Edit,
   Building2,
@@ -30,7 +32,6 @@ import {
   LayoutDashboard,
   Clock,
   XCircle,
-  Archive,
   FolderPlus,
   ChevronLeft,
   ChevronRight,
@@ -575,13 +576,21 @@ const ClientsPage = () => {
     return () => { cancelled = true; };
   }, [location.state, location.pathname, navigate]);
 
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
+  const [archiveConfirm, setArchiveConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
+    isOpen: false,
+    clientId: null,
+  });
+  const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
     isOpen: false,
     clientId: null,
   });
 
-  const handleDeleteClient = async (id: string) => {
-    setDeleteConfirm({ isOpen: true, clientId: id });
+  const handleArchiveClient = (id: string) => {
+    setArchiveConfirm({ isOpen: true, clientId: id });
+  };
+
+  const handlePermanentDeleteClient = (id: string) => {
+    setPermanentDeleteConfirm({ isOpen: true, clientId: id });
   };
 
   const handleMoveToVendasta = async (client: Client) => {
@@ -636,15 +645,45 @@ const ClientsPage = () => {
     }
   };
 
-  const confirmDeleteClient = async () => {
-    if (!deleteConfirm.clientId) return;
+  const confirmArchiveClient = async () => {
+    if (!archiveConfirm.clientId) return;
     try {
-      await dispatch(deleteClient(deleteConfirm.clientId) as any);
-      toast.success("Client deleted successfully!");
-      setDeleteConfirm({ isOpen: false, clientId: null });
+      const result = await dispatch(archiveClient(archiveConfirm.clientId) as any);
+      if (result?.error) throw new Error(result.error.message || "Failed to archive client");
+      toast.success("Client archived successfully!");
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Failed to archive client:", error);
+      toast.error(error?.message || "Failed to archive client");
+    } finally {
+      setArchiveConfirm({ isOpen: false, clientId: null });
+    }
+  };
+
+  const confirmPermanentDeleteClient = async () => {
+    if (!permanentDeleteConfirm.clientId) return;
+    try {
+      const result = await dispatch(deleteClient(permanentDeleteConfirm.clientId) as any);
+      if (result?.error) throw new Error(result.error.message || "Failed to delete client");
+      toast.success("Client permanently deleted!");
+      dispatch(fetchClients() as any);
     } catch (error: any) {
       console.error("Failed to delete client:", error);
-      setDeleteConfirm({ isOpen: false, clientId: null });
+      toast.error(error?.message || "Failed to delete client");
+    } finally {
+      setPermanentDeleteConfirm({ isOpen: false, clientId: null });
+    }
+  };
+
+  const handleRestoreClient = async (id: string) => {
+    try {
+      const result = await dispatch(restoreClient(id) as any);
+      if (result?.error) throw new Error(result.error.message || "Failed to restore client");
+      toast.success("Client restored successfully!");
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      console.error("Failed to restore client:", error);
+      toast.error(error?.message || "Failed to restore client");
     }
   };
 
@@ -1228,13 +1267,32 @@ const ClientsPage = () => {
                         >
                           <Edit className="h-4 w-4" />
                         </button>
-                        <button
-                          className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          onClick={() => handleDeleteClient(client.id)}
-                          title="Delete"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {isArchivedStatus(client.status) ? (
+                          <>
+                            <button
+                              className="p-2 rounded-lg text-gray-500 hover:text-secondary-600 hover:bg-secondary-50 transition-colors"
+                              onClick={() => handleRestoreClient(client.id)}
+                              title="Restore"
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              onClick={() => handlePermanentDeleteClient(client.id)}
+                              title="Delete Permanently"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="p-2 rounded-lg text-gray-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                            onClick={() => handleArchiveClient(client.id)}
+                            title="Archive"
+                          >
+                            <Archive className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1401,15 +1459,41 @@ const ClientsPage = () => {
                               Move to Vendasta
                             </button>
                           )}
-                          <button
-                            className="w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 last:rounded-b-md"
-                            onClick={() => {
-                              setOpenCardMenuId(null);
-                              handleDeleteClient(client.id);
-                            }}
-                          >
-                            Delete Client
-                          </button>
+                          {isArchivedStatus(client.status) ? (
+                            <>
+                              <button
+                                className="w-full text-left px-4 py-2 text-xs hover:bg-secondary-50 text-secondary-600 flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handleRestoreClient(client.id);
+                                }}
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                Restore Client
+                              </button>
+                              <button
+                                className="w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 last:rounded-b-md flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handlePermanentDeleteClient(client.id);
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                Delete Permanently
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              className="w-full text-left px-4 py-2 text-xs hover:bg-amber-50 text-amber-600 last:rounded-b-md flex items-center gap-2"
+                              onClick={() => {
+                                setOpenCardMenuId(null);
+                                handleArchiveClient(client.id);
+                              }}
+                            >
+                              <Archive className="h-3 w-3" />
+                              Archive Client
+                            </button>
+                          )}
                         </div>,
                         document.body
                       )}
@@ -2661,14 +2745,26 @@ const ClientsPage = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
+      {/* Archive Confirmation Dialog */}
       <ConfirmDialog
-        isOpen={deleteConfirm.isOpen}
-        onClose={() => setDeleteConfirm({ isOpen: false, clientId: null })}
-        onConfirm={confirmDeleteClient}
-        title="Delete Client"
-        message="Are you sure you want to delete this client? This action cannot be undone and all associated data will be permanently removed."
-        confirmText="Delete"
+        isOpen={archiveConfirm.isOpen}
+        onClose={() => setArchiveConfirm({ isOpen: false, clientId: null })}
+        onConfirm={confirmArchiveClient}
+        title="Archive Client"
+        message="This client will be moved to the archive. All data fetching and billing will stop. You can restore it later from the Archived tab."
+        confirmText="Archive"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      {/* Permanent Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={permanentDeleteConfirm.isOpen}
+        onClose={() => setPermanentDeleteConfirm({ isOpen: false, clientId: null })}
+        onConfirm={confirmPermanentDeleteClient}
+        title="Permanently Delete Client"
+        message="Are you sure you want to permanently delete this client? This action cannot be undone and all associated data will be removed forever."
+        confirmText="Delete Forever"
         requireConfirmText="DELETE"
         cancelText="Cancel"
         variant="danger"

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
-import { Bell, Loader2, AlertCircle, Building2, CreditCard, TrendingUp, TrendingDown } from "lucide-react";
+import { Bell, Loader2, AlertCircle, Building2, CreditCard, TrendingUp, TrendingDown, CheckCircle2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import api from "@/lib/api";
 import { RootState } from "@/store";
@@ -114,7 +114,9 @@ const NotificationBell: React.FC = () => {
                       }}
                     >
                       <span className="shrink-0 mt-0.5">
-                        {item.type === "managed_service_request" ? (
+                        {item.type === "task_completed" ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        ) : item.type === "managed_service_request" ? (
                           <AlertCircle className="h-4 w-4 text-amber-500" />
                         ) : item.type === "managed_service_approved" || item.type === "plan_upgrade" ? (
                           <TrendingUp className="h-4 w-4 text-green-500" />

@@ -3,7 +3,6 @@ import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
 import {
-  BarChart3,
   Users,
   Activity,
   Target,
@@ -11,6 +10,13 @@ import {
   RefreshCw,
   CreditCard,
   ChevronRight,
+  TrendingUp,
+  TrendingDown,
+  Zap,
+  Trophy,
+  Sparkles,
+  ArrowUpRight,
+  Clock,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
@@ -190,164 +196,175 @@ const AgencyDashboardPage = () => {
   };
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Welcome back, {user?.name || user?.email}
-          </h1>
-          <p className="text-gray-600 mt-1">
-            Here's what's happening with your SEO performance today.
-          </p>
-        </div>
-        <div className="flex items-center space-x-4">
-          <select
-            value={selectedPeriod}
-            onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          >
-            <option value="7">Last 7 days</option>
-            <option value="30">Last 30 days</option>
-            <option value="90">Last 90 days</option>
-          </select>
-          {user?.role === "SUPER_ADMIN" && (
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              title="Refresh dashboard data from DataForSEO"
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 p-8">
+      {/* Header with gradient accent */}
+      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-primary-600 via-violet-600 to-rose-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">
+              Welcome back, {user?.name || user?.email}
+            </h1>
+            <p className="mt-2 text-primary-100 text-sm md:text-base">
+              Here's what's happening with your SEO performance today.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              className="rounded-lg border-0 bg-white/20 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30 focus:ring-2 focus:ring-white/50 focus:outline-none [&>option]:text-gray-900"
             >
-              {refreshing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Refreshing...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4" />
-                  <span>Refresh</span>
-                </>
-              )}
-            </button>
-          )}
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+            </select>
+            {user?.role === "SUPER_ADMIN" && (
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="flex items-center gap-2 rounded-lg bg-white/20 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                title="Refresh dashboard data from DataForSEO"
+              >
+                {refreshing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Refreshing...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4" />
+                    <span>Refresh</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* SECTION 1: Top metrics cards (same card design as Client Dashboard "Website Visitors" etc.) */}
+      {/* SECTION 1: Top metrics cards with colored gradients */}
       <section className="mb-10">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Card 1 - Active Clients */}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+          {/* Card 1 - Active Clients (Blue) */}
           <Link
             to="/agency/clients"
-            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+            className="group relative overflow-hidden rounded-2xl border border-primary-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-primary-100/50"
           >
-            <div className="flex items-center justify-between">
+            <div className="absolute right-0 top-0 h-24 w-24 translate-x-6 -translate-y-6 rounded-full bg-gradient-to-br from-primary-400/20 to-primary-600/20 transition-transform group-hover:scale-150" />
+            <div className="relative flex items-start justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Active Clients</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {stats.totalProjects} / {(stats.tierLimit ?? 10) + 1}
+                <p className="text-sm font-medium text-gray-500">Active Clients</p>
+                <p className="mt-2 text-3xl font-bold text-gray-900">
+                  {stats.totalProjects}
+                  <span className="text-lg font-normal text-gray-400"> / {(stats.tierLimit ?? 10) + 1}</span>
                 </p>
                 {(() => {
                   const limit = (stats.tierLimit ?? 10) + 1;
                   const used = stats.totalProjects;
                   const slotsLeft = limit - used;
-                  if (slotsLeft <= 0) {
-                    return (
-                      <p className="mt-1 text-sm font-medium text-red-600">
-                        At capacity - Upgrade
-                      </p>
-                    );
-                  }
-                  if (slotsLeft === 1) {
-                    return (
-                      <p className="mt-1 text-sm font-medium text-amber-600">
-                        {slotsLeft} slot left
-                      </p>
-                    );
-                  }
-                  return <p className="mt-1 text-xs text-gray-500">{slotsLeft} slots left</p>;
+                  if (slotsLeft <= 0)
+                    return <p className="mt-1 text-sm font-semibold text-rose-500">At capacity &mdash; Upgrade</p>;
+                  if (slotsLeft === 1)
+                    return <p className="mt-1 text-sm font-medium text-amber-500">{slotsLeft} slot left</p>;
+                  return <p className="mt-1 text-xs text-gray-400">{slotsLeft} slots available</p>;
                 })()}
               </div>
-              <Users className="h-8 w-8 text-primary-600" />
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-lg shadow-primary-200">
+                <Users className="h-6 w-6 text-white" />
+              </div>
             </div>
-            <p className="mt-3 text-xs text-primary-600 font-medium flex items-center gap-1">
-              View clients <ChevronRight className="h-3 w-3" />
+            <p className="mt-4 flex items-center gap-1 text-xs font-semibold text-primary-600 group-hover:text-primary-700">
+              View clients <ArrowUpRight className="h-3.5 w-3.5" />
             </p>
           </Link>
 
-          {/* Card 2 - Total Keywords Tracked */}
+          {/* Card 2 - Total Keywords Tracked (Green/Teal) */}
           <Link
             to="/agency/keywords"
-            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+            className="group relative overflow-hidden rounded-2xl border border-teal-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-teal-100/50"
           >
-            {(() => {
-              const limit = stats.keywordLimit ?? 500;
-              const used = stats.totalKeywords;
-              const pct = limit ? (used / limit) * 100 : 0;
-              return (
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-600">Total Keywords Tracked</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {used.toLocaleString()} / {limit.toLocaleString()}
-                    </p>
-                    {pct >= 100 ? (
-                      <p className="mt-1 text-sm font-medium text-red-600">At limit - Upgrade</p>
-                    ) : pct >= 90 ? (
-                      <p className="mt-1 text-sm font-medium text-amber-600">Approaching limit</p>
-                    ) : (
-                      <p className="mt-1 text-xs text-gray-500">
-                        {Math.max(0, limit - used).toLocaleString()} remaining
+            <div className="absolute right-0 top-0 h-24 w-24 translate-x-6 -translate-y-6 rounded-full bg-gradient-to-br from-teal-400/20 to-secondary-600/20 transition-transform group-hover:scale-150" />
+            <div className="relative">
+              {(() => {
+                const limit = stats.keywordLimit ?? 500;
+                const used = stats.totalKeywords;
+                const pct = limit ? (used / limit) * 100 : 0;
+                return (
+                  <div className="flex items-start justify-between">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-500">Keywords Tracked</p>
+                      <p className="mt-2 text-3xl font-bold text-gray-900">
+                        {used.toLocaleString()}
+                        <span className="text-lg font-normal text-gray-400"> / {limit.toLocaleString()}</span>
                       </p>
-                    )}
-                    <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${Math.min(100, pct)}%`,
-                          backgroundColor:
-                            pct >= 100 ? "rgb(220 38 38)" : pct >= 90 ? "rgb(217 119 6)" : "rgb(34 197 94)",
-                        }}
-                      />
+                      {pct >= 100 ? (
+                        <p className="mt-1 text-sm font-semibold text-rose-500">At limit &mdash; Upgrade</p>
+                      ) : pct >= 90 ? (
+                        <p className="mt-1 text-sm font-medium text-amber-500">Approaching limit</p>
+                      ) : (
+                        <p className="mt-1 text-xs text-gray-400">
+                          {Math.max(0, limit - used).toLocaleString()} remaining
+                        </p>
+                      )}
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(100, pct)}%`,
+                            background:
+                              pct >= 100
+                                ? "linear-gradient(90deg, #f43f5e, #e11d48)"
+                                : pct >= 90
+                                  ? "linear-gradient(90deg, #f59e0b, #d97706)"
+                                  : "linear-gradient(90deg, #14b8a6, #059669)",
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="ml-3 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-secondary-600 shadow-lg shadow-teal-200">
+                      <Target className="h-6 w-6 text-white" />
                     </div>
                   </div>
-                  <Target className="h-8 w-8 text-green-600 shrink-0 ml-3" />
-                </div>
-              );
-            })()}
-            <p className="mt-3 text-xs text-primary-600 font-medium flex items-center gap-1">
-              Keyword breakdown <ChevronRight className="h-3 w-3" />
+                );
+              })()}
+            </div>
+            <p className="mt-4 flex items-center gap-1 text-xs font-semibold text-teal-600 group-hover:text-teal-700">
+              Keyword breakdown <ArrowUpRight className="h-3.5 w-3.5" />
             </p>
           </Link>
 
-          {/* Card 3 - Your Plan */}
+          {/* Card 3 - Your Plan (Violet) */}
           <Link
             to="/agency/subscription"
-            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+            className="group relative overflow-hidden rounded-2xl border border-violet-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-100/50"
           >
-            <div className="flex items-center justify-between">
+            <div className="absolute right-0 top-0 h-24 w-24 translate-x-6 -translate-y-6 rounded-full bg-gradient-to-br from-violet-400/20 to-violet-600/20 transition-transform group-hover:scale-150" />
+            <div className="relative flex items-start justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Your Plan</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.currentTier ?? "Growth"}</p>
+                <p className="text-sm font-medium text-gray-500">Your Plan</p>
+                <p className="mt-2 text-3xl font-bold text-gray-900">{stats.currentTier ?? "Growth"}</p>
               </div>
-              <BarChart3 className="h-8 w-8 text-amber-600" />
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-violet-700 shadow-lg shadow-violet-200">
+                <Sparkles className="h-6 w-6 text-white" />
+              </div>
             </div>
-            <span className="mt-3 inline-block px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm">
-              Manage Plan
+            <span className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-violet-600 to-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md">
+              Manage Plan <ChevronRight className="h-3.5 w-3.5" />
             </span>
           </Link>
 
-          {/* Card 4 - Monthly Spend */}
+          {/* Card 4 - Monthly Spend (Amber/Orange) */}
           <Link
             to="/agency/subscription#invoices"
-            className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all block text-left"
+            className="group relative overflow-hidden rounded-2xl border border-amber-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-amber-100/50"
           >
-            <div className="flex items-center justify-between">
+            <div className="absolute right-0 top-0 h-24 w-24 translate-x-6 -translate-y-6 rounded-full bg-gradient-to-br from-amber-400/20 to-accent-600/20 transition-transform group-hover:scale-150" />
+            <div className="relative flex items-start justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Monthly Spend</p>
-                <p className="text-2xl font-bold text-gray-900">
+                <p className="text-sm font-medium text-gray-500">Monthly Spend</p>
+                <p className="mt-2 text-3xl font-bold text-gray-900">
                   {(() => {
                     const val = stats.monthlySpend;
                     if (val == null) return "$0.00";
@@ -355,32 +372,42 @@ const AgencyDashboardPage = () => {
                     return Number.isFinite(num) ? `$${num.toFixed(2)}` : `$${String(val)}`;
                   })()}
                 </p>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-gray-400">
                   {stats.nextBillingDate
                     ? `Next billing: ${new Date(stats.nextBillingDate).toLocaleDateString("en-US", {
                         month: "short",
                         day: "numeric",
                       })}`
-                    : "—"}
+                    : "\u2014"}
                 </p>
               </div>
-              <CreditCard className="h-8 w-8 text-gray-600" />
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-accent-600 shadow-lg shadow-amber-200">
+                <CreditCard className="h-6 w-6 text-white" />
+              </div>
             </div>
-            <p className="mt-3 text-xs text-primary-600 font-medium flex items-center gap-1">
-              Invoice history <ChevronRight className="h-3 w-3" />
+            <p className="mt-4 flex items-center gap-1 text-xs font-semibold text-amber-600 group-hover:text-amber-700">
+              Invoice history <ArrowUpRight className="h-3.5 w-3.5" />
             </p>
           </Link>
         </div>
       </section>
 
       {/* SECTION 2: Main content area - two columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
         {/* LEFT COLUMN - 60% (3/5) */}
-        <div className="lg:col-span-3 space-y-8">
+        <div className="space-y-8 lg:col-span-3">
           {/* Panel 1 - Client Performance Overview */}
-          <div className="bg-white rounded-xl border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Client Performance Overview</h2>
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="border-b border-gray-100 bg-gradient-to-r from-primary-50/80 to-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-100">
+                  <TrendingUp className="h-5 w-5 text-primary-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Client Performance</h2>
+                  <p className="text-xs text-gray-500">Traffic changes across your portfolio</p>
+                </div>
+              </div>
             </div>
             <div className="p-6">
               {loading ? (
@@ -388,34 +415,52 @@ const AgencyDashboardPage = () => {
                   <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
                 </div>
               ) : (stats.clientPerformance?.length ?? 0) === 0 ? (
-                <p className="text-sm text-gray-500 py-4">No client performance data yet.</p>
+                <p className="py-4 text-sm text-gray-400">No client performance data yet.</p>
               ) : (
-                <ul className="space-y-3">
+                <ul className="space-y-1">
                   {(stats.clientPerformance ?? [])
                     .sort((a, b) => (b.trafficChangePercent ?? 0) - (a.trafficChangePercent ?? 0))
                     .slice(0, 5)
                     .map((row) => {
                       const pct = row.trafficChangePercent ?? 0;
-                      const dot =
-                        pct >= 10 ? "bg-green-500" : pct >= 0 ? "bg-yellow-500" : "bg-red-500";
+                      const isPositive = pct >= 0;
                       return (
-                        <li key={row.clientId} className="flex items-center justify-between py-2">
+                        <li
+                          key={row.clientId}
+                          className="flex items-center justify-between rounded-xl px-4 py-3 transition-colors hover:bg-gray-50"
+                        >
                           <div className="flex items-center gap-3">
-                            <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${dot}`} />
+                            <div
+                              className={`flex h-8 w-8 items-center justify-center rounded-full ${
+                                pct >= 10
+                                  ? "bg-secondary-100 text-secondary-600"
+                                  : pct >= 0
+                                    ? "bg-amber-100 text-amber-600"
+                                    : "bg-rose-100 text-rose-600"
+                              }`}
+                            >
+                              {isPositive ? (
+                                <TrendingUp className="h-4 w-4" />
+                              ) : (
+                                <TrendingDown className="h-4 w-4" />
+                              )}
+                            </div>
                             <span className="text-sm font-medium text-gray-900">{row.clientName}</span>
                           </div>
                           <div className="text-right">
                             <span
-                              className={
-                                pct >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"
-                              }
+                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                                isPositive
+                                  ? "bg-secondary-50 text-secondary-700"
+                                  : "bg-rose-50 text-rose-700"
+                              }`}
                             >
-                              {pct >= 0 ? "+" : ""}
-                              {pct}% traffic
+                              {isPositive ? "+" : ""}
+                              {pct}%
                             </span>
-                            <span className="block text-xs text-gray-500">
-                              {row.trafficChangeVisits >= 0 ? "↑" : "↓"}{" "}
-                              {Math.abs(row.trafficChangeVisits).toLocaleString()} visits
+                            <span className="mt-0.5 block text-xs text-gray-400">
+                              {row.trafficChangeVisits >= 0 ? "+" : ""}
+                              {row.trafficChangeVisits.toLocaleString()} visits
                             </span>
                           </div>
                         </li>
@@ -425,152 +470,210 @@ const AgencyDashboardPage = () => {
               )}
               <Link
                 to="/agency/clients"
-                className="mt-4 inline-block text-sm font-medium text-primary-600 hover:text-primary-700"
+                className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary-600 hover:text-primary-700"
               >
-                View All Clients →
+                View All Clients <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
             </div>
           </div>
 
           {/* Panel 2 - Quick Wins Across Clients */}
-          <div className="bg-white rounded-xl border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Quick Wins Across Clients</h2>
-              <p className="text-sm text-gray-500 mt-0.5">Keywords in Position 4-10 (easy wins)</p>
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="border-b border-gray-100 bg-gradient-to-r from-secondary-50/80 to-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary-100">
+                  <Zap className="h-5 w-5 text-secondary-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Quick Wins</h2>
+                  <p className="text-xs text-gray-500">Keywords in Position 4-10 (easy wins)</p>
+                </div>
+              </div>
             </div>
             <div className="p-6">
               {loading ? (
                 <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                  <Loader2 className="h-6 w-6 animate-spin text-secondary-600" />
                 </div>
               ) : (stats.quickWins?.length ?? 0) === 0 ? (
-                <p className="text-sm text-gray-500 py-4">No quick win keywords in position 4-10.</p>
+                <p className="py-4 text-sm text-gray-400">No quick win keywords in position 4-10.</p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-1">
                   {(stats.quickWins ?? []).slice(0, 5).map((row, i) => (
-                    <li key={i} className="text-sm text-gray-700 py-1.5">
-                      <span className="font-medium text-gray-900">{row.clientName}</span>
-                      {" – "}
-                      <span className="text-gray-600">&apos;{row.keyword}&apos;</span>
-                      <span className="text-gray-500"> (pos {row.position})</span>
+                    <li
+                      key={i}
+                      className="flex items-center justify-between rounded-xl px-4 py-3 transition-colors hover:bg-gray-50"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-100 text-teal-600">
+                          <Target className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{row.clientName}</p>
+                          <p className="text-xs text-gray-500">&apos;{row.keyword}&apos;</p>
+                        </div>
+                      </div>
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                        #{row.position}
+                      </span>
                     </li>
                   ))}
                 </ul>
               )}
               <Link
                 to="/agency/keywords"
-                className="mt-4 inline-block text-sm font-medium text-primary-600 hover:text-primary-700"
+                className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-secondary-600 hover:text-secondary-700"
               >
-                View All Opportunities →
+                View All Opportunities <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
             </div>
           </div>
         </div>
 
         {/* RIGHT COLUMN - 40% (2/5) */}
-        <div className="lg:col-span-2 space-y-8">
+        <div className="space-y-8 lg:col-span-2">
           {/* Panel 1 - Keyword Research Credits */}
-          <div className="bg-white rounded-xl border border-gray-200">
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="border-b border-gray-100 bg-gradient-to-r from-violet-50/80 to-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-100">
+                  <Sparkles className="h-5 w-5 text-violet-600" />
+                </div>
+                <h2 className="text-lg font-semibold text-gray-900">Research Credits</h2>
+              </div>
+            </div>
             <div className="p-6">
-              <h2 className="text-lg font-semibold text-gray-900">Keyword Research Credits</h2>
-              <div className="mt-4">
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-gray-600">
-                    {(stats.researchCredits?.used ?? 0)} / {(stats.researchCredits?.limit ?? 150)} used
-                  </span>
-                </div>
-                <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        ((stats.researchCredits?.used ?? 0) / (stats.researchCredits?.limit ?? 150)) * 100
-                      )}%`,
-                      backgroundColor:
-                        (stats.researchCredits?.used ?? 0) >= (stats.researchCredits?.limit ?? 150)
-                          ? "rgb(220 38 38)"
-                          : (stats.researchCredits?.used ?? 0) / (stats.researchCredits?.limit ?? 150) >= 0.9
-                            ? "rgb(217 119 6)"
-                            : "var(--tw-gradient-from, rgb(59 130 246))",
-                    }}
-                  />
-                </div>
-                {(() => {
-                  const used = stats.researchCredits?.used ?? 0;
-                  const limit = stats.researchCredits?.limit ?? 150;
-                  if (used >= limit) {
-                    return (
-                      <p className="mt-2 text-sm font-medium text-red-600">
-                        At limit — buy more credits to continue research
-                      </p>
-                    );
-                  }
-                  if (limit && used >= limit * 0.9) {
-                    return (
-                      <p className="mt-2 text-sm font-medium text-amber-600">
-                        Approaching limit — consider buying a credit pack
-                      </p>
-                    );
-                  }
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-bold text-gray-900">
+                  {stats.researchCredits?.used ?? 0}
+                </span>
+                <span className="text-sm text-gray-400">
+                  of {stats.researchCredits?.limit ?? 150} used
+                </span>
+              </div>
+              <div className="mt-3 h-3 overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      ((stats.researchCredits?.used ?? 0) / (stats.researchCredits?.limit ?? 150)) * 100
+                    )}%`,
+                    background:
+                      (stats.researchCredits?.used ?? 0) >= (stats.researchCredits?.limit ?? 150)
+                        ? "linear-gradient(90deg, #f43f5e, #e11d48)"
+                        : (stats.researchCredits?.used ?? 0) / (stats.researchCredits?.limit ?? 150) >= 0.9
+                          ? "linear-gradient(90deg, #f59e0b, #d97706)"
+                          : "linear-gradient(90deg, #8b5cf6, #7c3aed)",
+                  }}
+                />
+              </div>
+              {(() => {
+                const used = stats.researchCredits?.used ?? 0;
+                const limit = stats.researchCredits?.limit ?? 150;
+                if (used >= limit)
                   return (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Resets in {(stats.researchCredits?.resetsInDays ?? 30)} days
+                    <p className="mt-2 text-sm font-medium text-rose-500">
+                      At limit &mdash; buy more credits to continue research
                     </p>
                   );
-                })()}
-                <Link
-                  to="/agency/add-ons"
-                  className="mt-3 inline-block px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm"
-                >
-                  Buy Credit Pack
-                </Link>
-              </div>
+                if (limit && used >= limit * 0.9)
+                  return (
+                    <p className="mt-2 text-sm font-medium text-amber-500">
+                      Approaching limit &mdash; consider buying a credit pack
+                    </p>
+                  );
+                return (
+                  <p className="mt-2 text-xs text-gray-400">
+                    Resets in {stats.researchCredits?.resetsInDays ?? 30} days
+                  </p>
+                );
+              })()}
+              <Link
+                to="/agency/add-ons"
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-violet-600 to-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md"
+              >
+                Buy Credit Pack <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
             </div>
           </div>
 
           {/* Panel 2 - Recent Activity */}
-          <div className="bg-white rounded-xl border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="border-b border-gray-100 bg-gradient-to-r from-rose-50/80 to-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-100">
+                  <Clock className="h-5 w-5 text-rose-600" />
+                </div>
+                <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
+              </div>
             </div>
             <div className="p-6">
               {(stats.recentActivity?.length ?? 0) === 0 ? (
-                <p className="text-sm text-gray-500">No recent activity.</p>
+                <p className="text-sm text-gray-400">No recent activity.</p>
               ) : (
                 <ul className="space-y-3">
                   {(stats.recentActivity ?? []).slice(0, 4).map((item, i) => (
-                    <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                      <Activity className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
-                      <span>{item.text}</span>
+                    <li
+                      key={i}
+                      className="flex items-start gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-gray-50"
+                    >
+                      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-50">
+                        <Activity className="h-3.5 w-3.5 text-rose-400" />
+                      </div>
+                      <span className="text-gray-700">{item.text}</span>
                     </li>
                   ))}
                 </ul>
               )}
               <Link
                 to="/agency/settings"
-                className="mt-4 inline-block text-sm font-medium text-primary-600 hover:text-primary-700"
+                className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-rose-600 hover:text-rose-700"
               >
-                View All Activity →
+                View All Activity <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
             </div>
           </div>
 
           {/* Panel 3 - Number 1 Rankings Portfolio */}
-          <div className="bg-white rounded-xl border border-gray-200">
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="border-b border-gray-100 bg-gradient-to-r from-amber-50/80 to-white px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100">
+                  <Trophy className="h-5 w-5 text-amber-600" />
+                </div>
+                <h2 className="text-lg font-semibold text-gray-900">#1 Rankings</h2>
+              </div>
+            </div>
             <div className="p-6">
-              <h2 className="text-lg font-semibold text-gray-900">Number 1 Rankings Across Portfolio</h2>
-              <p className="mt-2 text-2xl font-bold text-gray-900">
-                Total #1 Rankings: {(stats.numberOneRankings?.total ?? 0).toLocaleString()}
-              </p>
-              <ul className="mt-4 space-y-2">
-                {(stats.numberOneRankings?.byClient ?? []).slice(0, 4).map((row) => (
-                  <li key={row.clientId} className="flex items-center gap-2 text-sm">
-                    <span className="text-lg">🏆</span>
-                    <span className="font-medium text-gray-900">{row.clientName}</span>
-                    <span className="text-gray-500">({row.count})</span>
-                  </li>
-                ))}
+              <div className="mb-4 flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-gray-900">
+                  {(stats.numberOneRankings?.total ?? 0).toLocaleString()}
+                </span>
+                <span className="text-sm text-gray-400">across portfolio</span>
+              </div>
+              <ul className="space-y-2">
+                {(stats.numberOneRankings?.byClient ?? []).slice(0, 4).map((row, i) => {
+                  const medals = ["from-amber-400 to-amber-600", "from-gray-300 to-gray-500", "from-amber-600 to-amber-800", "from-primary-400 to-primary-600"];
+                  return (
+                    <li
+                      key={row.clientId}
+                      className="flex items-center justify-between rounded-xl px-4 py-3 transition-colors hover:bg-gray-50"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-white text-xs font-bold shadow-sm ${medals[i] ?? medals[3]}`}
+                        >
+                          {i + 1}
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">{row.clientName}</span>
+                      </div>
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                        {row.count} keywords
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </div>

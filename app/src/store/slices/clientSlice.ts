@@ -112,6 +112,34 @@ export const createClient = createAsyncThunk(
   }
 );
 
+export const archiveClient = createAsyncThunk(
+  "client/archiveClient",
+  async (id: string) => {
+    try {
+      await api.patch(`/clients/${id}/archive`);
+      return id;
+    } catch (error: any) {
+      throw new Error(
+        error.response?.data?.message || "Failed to archive client"
+      );
+    }
+  }
+);
+
+export const restoreClient = createAsyncThunk(
+  "client/restoreClient",
+  async (id: string) => {
+    try {
+      await api.patch(`/clients/${id}/restore`);
+      return id;
+    } catch (error: any) {
+      throw new Error(
+        error.response?.data?.message || "Failed to restore client"
+      );
+    }
+  }
+);
+
 export const deleteClient = createAsyncThunk(
   "client/deleteClient",
   async (id: string) => {
@@ -321,6 +349,18 @@ const clientSlice = createSlice({
       })
       .addCase(fetchRankings.fulfilled, (state, action) => {
         state.rankings = action.payload;
+      })
+      .addCase(archiveClient.fulfilled, (state, action) => {
+        const idx = state.clients.findIndex((c) => c.id === action.payload);
+        if (idx !== -1) {
+          state.clients[idx] = { ...state.clients[idx], status: "ARCHIVED" };
+        }
+      })
+      .addCase(restoreClient.fulfilled, (state, action) => {
+        const idx = state.clients.findIndex((c) => c.id === action.payload);
+        if (idx !== -1) {
+          state.clients[idx] = { ...state.clients[idx], status: "DASHBOARD_ONLY" };
+        }
       })
       .addCase(deleteClient.fulfilled, (state, action) => {
         state.clients = state.clients.filter((c) => c.id !== action.payload);
