@@ -373,34 +373,37 @@ const ReportsPage: React.FC = () => {
   );
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-600 mt-2">View all generated reports across your clients.</p>
-        </div>
-        <div className="flex items-center space-x-4">
-          <button 
-            onClick={handleExportReports}
-            className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-          >
-            <Download className="h-4 w-4" />
-            <span>Export</span>
-          </button>
-          <button
-            onClick={() => setShowGenerateModal(true)}
-            className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
-          >
-            <Plus className="h-5 w-5" />
-            <span>Generate Report</span>
-          </button>
-          <button
-            onClick={() => setShowScheduleModal(true)}
-            className="bg-secondary-600 text-white px-6 py-3 rounded-lg hover:bg-secondary-700 transition-colors flex items-center space-x-2"
-          >
-            <Calendar className="h-5 w-5" />
-            <span>Schedule Report</span>
-          </button>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-rose-50/30 p-8 space-y-8">
+      <div className="relative mb-2 overflow-hidden rounded-2xl bg-gradient-to-r from-rose-600 via-pink-600 to-red-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">Reports</h1>
+            <p className="mt-2 text-rose-100 text-sm md:text-base">View all generated reports across your clients.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleExportReports}
+              className="flex items-center gap-2 rounded-lg bg-white/20 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+            >
+              <Download className="h-4 w-4" />
+              <span>Export</span>
+            </button>
+            <button
+              onClick={() => setShowGenerateModal(true)}
+              className="flex items-center gap-2 rounded-lg bg-white/20 px-5 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+            >
+              <Plus className="h-5 w-5" />
+              <span>Generate Report</span>
+            </button>
+            <button
+              onClick={() => setShowScheduleModal(true)}
+              className="flex items-center gap-2 rounded-lg bg-white/20 px-5 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+            >
+              <Calendar className="h-5 w-5" />
+              <span>Schedule Report</span>
+            </button>
+          </div>
         </div>
       </div>
 

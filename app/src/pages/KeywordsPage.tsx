@@ -623,14 +623,19 @@ const KeywordsPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="p-8 space-y-8 bg-gradient-to-br from-gray-50 via-white to-gray-50 min-h-screen">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-2">
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Research Hub</h1>
-          <p className="text-base text-gray-600 leading-relaxed">
-            Research new keyword opportunities and track the phrases that matter for each client.
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-cyan-50/30 p-8 space-y-8">
+      <div className="relative mb-2 overflow-hidden rounded-2xl bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">Research Hub</h1>
+            <p className="mt-2 text-cyan-100 text-sm md:text-base">
+              Research new keyword opportunities and track the phrases that matter for each client.
+            </p>
+          </div>
         </div>
+      </div>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-end">
         <div className="flex items-center gap-3 bg-white rounded-xl border border-gray-200 p-1.5 shadow-sm">
           <button
             onClick={() => setActiveTab("tracked")}

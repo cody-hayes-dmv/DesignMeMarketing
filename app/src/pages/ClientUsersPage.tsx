@@ -453,31 +453,34 @@ const ClientUsersPage: React.FC = () => {
   }, [rows, search]);
 
   return (
-    <div className="p-8">
-      <div className="flex items-start justify-between gap-6 mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Users</h1>
-          <p className="text-gray-600 mt-2">All client portal users across your clients.</p>
-        </div>
-        <div className="w-full max-w-xl flex items-center justify-end gap-3">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search..."
-            className="w-full max-w-sm border border-gray-300 rounded-lg px-3 py-2 text-sm"
-          />
-          <button
-            type="button"
-            onClick={openInviteModal}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
-          >
-            <Plus className="h-4 w-4" />
-            Invite User
-          </button>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-sky-50/30 p-8">
+      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">Users</h1>
+            <p className="mt-2 text-sky-100 text-sm md:text-base">All client portal users across your clients.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search..."
+              className="w-full max-w-sm rounded-lg border-0 bg-white/20 px-4 py-2.5 text-sm text-white placeholder-white/60 backdrop-blur-sm focus:ring-2 focus:ring-white/50 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={openInviteModal}
+              className="inline-flex items-center gap-2 rounded-lg bg-white/20 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+            >
+              <Plus className="h-4 w-4" />
+              Invite User
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <p className="text-xs text-gray-500">
             Showing {filtered.length} of {rows.length} Rows

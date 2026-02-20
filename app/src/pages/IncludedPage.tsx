@@ -169,13 +169,16 @@ const IncludedPage = () => {
   }
 
   return (
-    <div className="p-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-teal-50/30 p-8">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Included Clients</h1>
-        <p className="text-gray-600 mt-2">
-          Clients marked as &quot;Included&quot; in the Assign Client to Agency modal. These are free and do not count toward your dashboard tier limit.
-        </p>
+      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-teal-600 via-secondary-600 to-emerald-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative">
+          <h1 className="text-2xl font-bold text-white md:text-3xl">Included Clients</h1>
+          <p className="mt-2 text-teal-100 text-sm md:text-base">
+            Clients marked as &quot;Included&quot; — free and do not count toward your dashboard tier limit.
+          </p>
+        </div>
       </div>
 
       {inclusions.length === 0 ? (
@@ -188,8 +191,8 @@ const IncludedPage = () => {
         </div>
       ) : (
         <>
-          {/* Filters - same style as Clients */}
-          <div className="bg-white p-6 rounded-xl border border-gray-200 mb-8">
+          {/* Filters */}
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm mb-8">
             <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1">
                 <div className="relative">

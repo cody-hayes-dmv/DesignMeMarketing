@@ -917,138 +917,155 @@ const ClientsPage = () => {
     });
 
   return (
-    <div className="p-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 p-8">
       {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">
-            {agencyMe?.isBusinessTier ? "Your Business" : "Clients"}
-          </h1>
-          <p className="text-gray-600 mt-2">
-            {agencyMe?.isBusinessTier
-              ? "Manage your business dashboard"
-              : "Manage your all clients and view their details"}
-          </p>
+      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">
+              {agencyMe?.isBusinessTier ? "Your Business" : "Clients"}
+            </h1>
+            <p className="mt-2 text-blue-100 text-sm md:text-base">
+              {agencyMe?.isBusinessTier
+                ? "Manage your business dashboard"
+                : "Manage all your clients and view their details"}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {!(agencyMe?.isBusinessTier || (dashboardLimit && dashboardLimit.used >= dashboardLimit.limit)) && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 rounded-lg bg-white/20 px-5 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+              >
+                <Plus className="h-5 w-5" />
+                <span>New Client</span>
+              </button>
+            )}
+            {!agencyMe?.isBusinessTier && dashboardLimit && dashboardLimit.used >= dashboardLimit.limit && (
+              <a
+                href="/agency/subscription"
+                className="flex items-center gap-2 rounded-lg bg-amber-400/90 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-amber-400"
+              >
+                <span>Upgrade to add more dashboards</span>
+              </a>
+            )}
+          </div>
         </div>
-        {!(agencyMe?.isBusinessTier || (dashboardLimit && dashboardLimit.used >= dashboardLimit.limit)) && (
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
-          >
-            <Plus className="h-5 w-5" />
-            <span>New Client</span>
-          </button>
-        )}
-        {!agencyMe?.isBusinessTier && dashboardLimit && dashboardLimit.used >= dashboardLimit.limit && (
-          <a
-            href="/agency/subscription"
-            className="bg-amber-500 text-white px-6 py-3 rounded-lg hover:bg-amber-600 transition-colors flex items-center space-x-2"
-          >
-            <span>Upgrade to add more dashboards</span>
-          </a>
-        )}
       </div>
 
-      {/* Filter cards: default view = Active Clients (managed services). Super Admin: 7 metrics in 1 line. */}
-      <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8 ${isSuperAdmin ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}>
+      {/* Filter cards */}
+      <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-10 ${isSuperAdmin ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}>
         <button
           type="button"
           onClick={() => setStatusFilter("active")}
-          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "active" ? "border-green-300 ring-2 ring-green-100" : "border-gray-200 hover:bg-gray-50"}`}
+          className={`group relative overflow-hidden bg-white p-5 rounded-2xl border transition-all text-left hover:-translate-y-0.5 hover:shadow-lg ${statusFilter === "active" ? "border-green-300 ring-2 ring-green-100 shadow-md shadow-green-100/50" : "border-green-100 hover:shadow-green-100/50"}`}
           title="Clients with active status"
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-green-400/20 to-green-600/20 transition-transform group-hover:scale-150" />
+          <div className="relative flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-600">Active Clients</p>
-              <p className="text-xl font-bold text-green-600">{activeCount}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Clients with active status</p>
+              <p className="text-sm font-medium text-gray-500">Active Clients</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{activeCount}</p>
             </div>
-            <UserCheck className="h-8 w-8 text-green-600 shrink-0" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-green-500 to-green-700 shadow-lg shadow-green-200">
+              <UserCheck className="h-5 w-5 text-white" />
+            </div>
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => setStatusFilter("total")}
-          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "total" ? "border-primary-300 ring-2 ring-primary-100" : "border-gray-200 hover:bg-gray-50"}`}
+          className={`group relative overflow-hidden bg-white p-5 rounded-2xl border transition-all text-left hover:-translate-y-0.5 hover:shadow-lg ${statusFilter === "total" ? "border-primary-300 ring-2 ring-primary-100 shadow-md shadow-primary-100/50" : "border-primary-100 hover:shadow-primary-100/50"}`}
           title="All client dashboards"
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-primary-400/20 to-primary-600/20 transition-transform group-hover:scale-150" />
+          <div className="relative flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-600">Total Dashboards</p>
-              <p className="text-xl font-bold text-primary-600">{totalCount}</p>
-              <p className="text-xs text-gray-500 mt-0.5">All client dashboards</p>
+              <p className="text-sm font-medium text-gray-500">Total Dashboards</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{totalCount}</p>
             </div>
-            <LayoutDashboard className="h-8 w-8 text-primary-600 shrink-0" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-lg shadow-primary-200">
+              <LayoutDashboard className="h-5 w-5 text-white" />
+            </div>
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => setStatusFilter("pending")}
-          className={`relative bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "pending" ? "border-amber-300 ring-2 ring-amber-100" : "border-gray-200 hover:bg-gray-50"}`}
+          className={`group relative overflow-hidden bg-white p-5 rounded-2xl border transition-all text-left hover:-translate-y-0.5 hover:shadow-lg ${statusFilter === "pending" ? "border-amber-300 ring-2 ring-amber-100 shadow-md shadow-amber-100/50" : "border-amber-100 hover:shadow-amber-100/50"}`}
           title="Awaiting approval"
         >
+          <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-amber-400/20 to-amber-600/20 transition-transform group-hover:scale-150" />
           {pendingCount > 0 && (
-            <span className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">
+            <span className="absolute top-2 right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">
               {pendingCount}
             </span>
           )}
-          <div className="flex items-center justify-between gap-2">
+          <div className="relative flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-600">Pending Requests</p>
-              <p className="text-xl font-bold text-amber-600">{pendingCount}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Awaiting approval</p>
+              <p className="text-sm font-medium text-gray-500">Pending Requests</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{pendingCount}</p>
             </div>
-            <Clock className="h-8 w-8 text-amber-600 shrink-0" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 shadow-lg shadow-amber-200">
+              <Clock className="h-5 w-5 text-white" />
+            </div>
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => setStatusFilter("dashboard_only")}
-          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "dashboard_only" ? "border-blue-300 ring-2 ring-blue-100" : "border-gray-200 hover:bg-gray-50"}`}
+          className={`group relative overflow-hidden bg-white p-5 rounded-2xl border transition-all text-left hover:-translate-y-0.5 hover:shadow-lg ${statusFilter === "dashboard_only" ? "border-blue-300 ring-2 ring-blue-100 shadow-md shadow-blue-100/50" : "border-blue-100 hover:shadow-blue-100/50"}`}
           title="No managed services"
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-blue-400/20 to-blue-600/20 transition-transform group-hover:scale-150" />
+          <div className="relative flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-600">Dashboard Only</p>
-              <p className="text-xl font-bold text-blue-600">{dashboardOnlyCount}</p>
-              <p className="text-xs text-gray-500 mt-0.5">No managed services</p>
+              <p className="text-sm font-medium text-gray-500">Dashboard Only</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{dashboardOnlyCount}</p>
             </div>
-            <LayoutDashboard className="h-8 w-8 text-blue-600 shrink-0" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-200">
+              <LayoutDashboard className="h-5 w-5 text-white" />
+            </div>
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => setStatusFilter("canceled")}
-          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "canceled" ? "border-orange-300 ring-2 ring-orange-100" : "border-gray-200 hover:bg-gray-50"}`}
+          className={`group relative overflow-hidden bg-white p-5 rounded-2xl border transition-all text-left hover:-translate-y-0.5 hover:shadow-lg ${statusFilter === "canceled" ? "border-orange-300 ring-2 ring-orange-100 shadow-md shadow-orange-100/50" : "border-orange-100 hover:shadow-orange-100/50"}`}
           title="Services ending"
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-orange-400/20 to-orange-600/20 transition-transform group-hover:scale-150" />
+          <div className="relative flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-600">Canceled</p>
-              <p className="text-xl font-bold text-orange-600">{canceledCount}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Services ending</p>
+              <p className="text-sm font-medium text-gray-500">Canceled</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{canceledCount}</p>
             </div>
-            <XCircle className="h-8 w-8 text-orange-600 shrink-0" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 shadow-lg shadow-orange-200">
+              <XCircle className="h-5 w-5 text-white" />
+            </div>
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => setStatusFilter("archived")}
-          className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "archived" ? "border-gray-400 ring-2 ring-gray-100" : "border-gray-200 hover:bg-gray-50"}`}
+          className={`group relative overflow-hidden bg-white p-5 rounded-2xl border transition-all text-left hover:-translate-y-0.5 hover:shadow-lg ${statusFilter === "archived" ? "border-gray-400 ring-2 ring-gray-200 shadow-md shadow-gray-100/50" : "border-gray-200 hover:shadow-gray-100/50"}`}
           title="Past clients"
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-gray-300/20 to-gray-500/20 transition-transform group-hover:scale-150" />
+          <div className="relative flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-600">Archived</p>
-              <p className="text-xl font-bold text-gray-700">{archivedCount}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Past clients</p>
+              <p className="text-sm font-medium text-gray-500">Archived</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{archivedCount}</p>
             </div>
-            <Archive className="h-8 w-8 text-gray-500 shrink-0" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-gray-400 to-gray-600 shadow-lg shadow-gray-200">
+              <Archive className="h-5 w-5 text-white" />
+            </div>
           </div>
         </button>
 
@@ -1056,24 +1073,25 @@ const ClientsPage = () => {
           <button
             type="button"
             onClick={() => setStatusFilter("included")}
-            className={`bg-white p-5 rounded-xl border transition-colors text-left ${statusFilter === "included" ? "border-teal-300 ring-2 ring-teal-100" : "border-gray-200 hover:bg-gray-50"}`}
+            className={`group relative overflow-hidden bg-white p-5 rounded-2xl border transition-all text-left hover:-translate-y-0.5 hover:shadow-lg ${statusFilter === "included" ? "border-teal-300 ring-2 ring-teal-100 shadow-md shadow-teal-100/50" : "border-teal-100 hover:shadow-teal-100/50"}`}
             title="Included dashboards (free, no tier limit)"
           >
-            <div className="flex items-center justify-between gap-2">
+            <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-teal-400/20 to-teal-600/20 transition-transform group-hover:scale-150" />
+            <div className="relative flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-600">Included Dashboards</p>
-                <p className="text-xl font-bold text-teal-600">{includedCount}</p>
-                <p className="text-xs text-gray-500 mt-0.5">Free, no tier limit</p>
+                <p className="text-sm font-medium text-gray-500">Included</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{includedCount}</p>
               </div>
-              <FolderPlus className="h-8 w-8 text-teal-600 shrink-0" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg shadow-teal-200">
+                <FolderPlus className="h-5 w-5 text-white" />
+              </div>
             </div>
           </button>
         )}
       </div>
 
-
       {/* Filters */}
-      <div className="bg-white p-6 rounded-xl border border-gray-200 mb-8">
+      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm mb-8">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1">
             <div className="relative">

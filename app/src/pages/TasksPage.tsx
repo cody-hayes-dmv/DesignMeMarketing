@@ -341,56 +341,59 @@ const TasksPage = () => {
     };
 
     return (
-        <div className="p-8">
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8">
             {/* Header */}
-            <div className="flex justify-between items-end mb-8">
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-900">Tasks</h1>
-                    <p className="text-gray-600 mt-2">
-                        Manage all tasks and assign to the specialists
-                    </p>
-                    {overdueCount > 0 && (
-                        <div className="mt-2 flex items-center text-red-600">
-                            <AlertTriangle className="h-4 w-4 mr-1" />
-                            <span className="text-sm font-medium">
-                                {overdueCount} overdue task{overdueCount !== 1 ? 's' : ''}
-                            </span>
-                        </div>
-                    )}
-                </div>
-                {canCreate && (
-                    <div className="flex flex-wrap items-center gap-3">
-                        <button
-                            onClick={() => setShowOnboardingModal(true)}
-                            className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-                        >
-                            <ListTodo className="h-5 w-5" />
-                            <span>Onboarding Tasks</span>
-                        </button>
-                        <button
-                            onClick={() => { setEditingRecurringRule(null); setShowRecurringModal(true); }}
-                            className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2"
-                        >
-                            <Repeat className="h-5 w-5" />
-                            <span>Add Recurring Task</span>
-                        </button>
-                        <button
-                            onClick={handleCreateClick}
-                            className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
+            <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-500 p-8 shadow-lg">
+                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+                <div className="relative flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <h1 className="text-2xl font-bold text-white md:text-3xl">Tasks</h1>
+                        <p className="mt-2 text-violet-100 text-sm md:text-base">
+                            Manage all tasks and assign to the specialists
+                        </p>
+                        {overdueCount > 0 && (
+                            <div className="mt-2 flex items-center text-rose-200">
+                                <AlertTriangle className="h-4 w-4 mr-1" />
+                                <span className="text-sm font-medium">
+                                    {overdueCount} overdue task{overdueCount !== 1 ? 's' : ''}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                    {canCreate && (
+                        <div className="flex flex-wrap items-center gap-3">
+                            <button
+                                onClick={() => setShowOnboardingModal(true)}
+                                className="flex items-center gap-2 rounded-lg bg-white/20 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+                            >
+                                <ListTodo className="h-5 w-5" />
+                                <span>Onboarding Tasks</span>
+                            </button>
+                            <button
+                                onClick={() => { setEditingRecurringRule(null); setShowRecurringModal(true); }}
+                                className="flex items-center gap-2 rounded-lg bg-white/20 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+                            >
+                                <Repeat className="h-5 w-5" />
+                                <span>Add Recurring Task</span>
+                            </button>
+                            <button
+                                onClick={handleCreateClick}
+                            className="flex items-center gap-2 rounded-lg bg-white/20 px-5 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
                         >
                             <Plus className="h-5 w-5" />
                             <span>Create Task</span>
                         </button>
                     </div>
                 )}
+                </div>
             </div>
 
-            {/* Task metrics: click to filter table by status */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+            {/* Task metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-10">
                 <button
                     type="button"
                     onClick={() => setFilterStatus("upcoming")}
-                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "upcoming" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                    className={`group relative overflow-hidden bg-white p-6 rounded-2xl border text-left transition-all hover:-translate-y-0.5 hover:shadow-lg focus:outline-none ${filterStatus === "upcoming" ? "border-primary-300 ring-2 ring-primary-100 shadow-md shadow-primary-100/50" : "border-primary-100 hover:shadow-primary-100/50"}`}
                 >
                     <div className="flex items-center justify-between">
                         <div>
@@ -403,80 +406,95 @@ const TasksPage = () => {
                 <button
                     type="button"
                     onClick={() => setFilterStatus("TODO")}
-                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "TODO" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                    className={`group relative overflow-hidden bg-white p-6 rounded-2xl border text-left transition-all hover:-translate-y-0.5 hover:shadow-lg focus:outline-none ${filterStatus === "TODO" ? "border-gray-400 ring-2 ring-gray-200 shadow-md shadow-gray-100/50" : "border-gray-200 hover:shadow-gray-100/50"}`}
                 >
-                    <div className="flex items-center justify-between">
+                    <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-gray-300/20 to-gray-500/20 transition-transform group-hover:scale-150" />
+                    <div className="relative flex items-center justify-between">
                         <div>
-                            <p className="text-sm font-medium text-gray-600">TODO</p>
-                            <p className="text-2xl font-bold text-gray-400">
+                            <p className="text-sm font-medium text-gray-500">Todo</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">
                                 {tasks.filter((m) => m.status === "TODO").length}
                             </p>
                         </div>
-                        <ListTodo className="h-8 w-8 text-gray-400" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-gray-400 to-gray-600 shadow-lg shadow-gray-200">
+                            <ListTodo className="h-5 w-5 text-white" />
+                        </div>
                     </div>
                 </button>
                 <button
                     type="button"
                     onClick={() => setFilterStatus("IN_PROGRESS")}
-                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "IN_PROGRESS" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                    className={`group relative overflow-hidden bg-white p-6 rounded-2xl border text-left transition-all hover:-translate-y-0.5 hover:shadow-lg focus:outline-none ${filterStatus === "IN_PROGRESS" ? "border-blue-300 ring-2 ring-blue-100 shadow-md shadow-blue-100/50" : "border-blue-100 hover:shadow-blue-100/50"}`}
                 >
-                    <div className="flex items-center justify-between">
+                    <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-blue-400/20 to-blue-600/20 transition-transform group-hover:scale-150" />
+                    <div className="relative flex items-center justify-between">
                         <div>
-                            <p className="text-sm font-medium text-gray-600">IN_PROGRESS</p>
-                            <p className="text-2xl font-bold text-blue-400">
+                            <p className="text-sm font-medium text-gray-500">In Progress</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">
                                 {tasks.filter((m) => m.status === "IN_PROGRESS").length}
                             </p>
                         </div>
-                        <Edit className="h-8 w-8 text-blue-400" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-200">
+                            <Edit className="h-5 w-5 text-white" />
+                        </div>
                     </div>
                 </button>
                 <button
                     type="button"
                     onClick={() => setFilterStatus("REVIEW")}
-                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "REVIEW" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                    className={`group relative overflow-hidden bg-white p-6 rounded-2xl border text-left transition-all hover:-translate-y-0.5 hover:shadow-lg focus:outline-none ${filterStatus === "REVIEW" ? "border-orange-300 ring-2 ring-orange-100 shadow-md shadow-orange-100/50" : "border-orange-100 hover:shadow-orange-100/50"}`}
                 >
-                    <div className="flex items-center justify-between">
+                    <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-orange-400/20 to-orange-600/20 transition-transform group-hover:scale-150" />
+                    <div className="relative flex items-center justify-between">
                         <div>
-                            <p className="text-sm font-medium text-gray-600">REVIEW</p>
-                            <p className="text-2xl font-bold text-orange-400">
+                            <p className="text-sm font-medium text-gray-500">Review</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">
                                 {tasks.filter((m) => m.status === "REVIEW").length}
                             </p>
                         </div>
-                        <CheckCircle className="h-8 w-8 text-orange-400" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 shadow-lg shadow-orange-200">
+                            <CheckCircle className="h-5 w-5 text-white" />
+                        </div>
                     </div>
                 </button>
                 <button
                     type="button"
                     onClick={() => setFilterStatus("overdue")}
-                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "overdue" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                    className={`group relative overflow-hidden bg-white p-6 rounded-2xl border text-left transition-all hover:-translate-y-0.5 hover:shadow-lg focus:outline-none ${filterStatus === "overdue" ? "border-rose-300 ring-2 ring-rose-100 shadow-md shadow-rose-100/50" : "border-rose-100 hover:shadow-rose-100/50"}`}
                 >
-                    <div className="flex items-center justify-between">
+                    <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-rose-400/20 to-rose-600/20 transition-transform group-hover:scale-150" />
+                    <div className="relative flex items-center justify-between">
                         <div>
-                            <p className="text-sm font-medium text-gray-600">OVERDUE</p>
-                            <p className="text-2xl font-bold text-rose-500">{overdueCount}</p>
+                            <p className="text-sm font-medium text-gray-500">Overdue</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">{overdueCount}</p>
                         </div>
-                        <AlertTriangle className="h-8 w-8 text-rose-500" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-rose-500 to-rose-700 shadow-lg shadow-rose-200">
+                            <AlertTriangle className="h-5 w-5 text-white" />
+                        </div>
                     </div>
                 </button>
                 <button
                     type="button"
                     onClick={() => setFilterStatus("DONE")}
-                    className={`bg-white p-6 rounded-xl border text-left transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${filterStatus === "DONE" ? "border-primary-500 ring-2 ring-primary-200" : "border-gray-200"}`}
+                    className={`group relative overflow-hidden bg-white p-6 rounded-2xl border text-left transition-all hover:-translate-y-0.5 hover:shadow-lg focus:outline-none ${filterStatus === "DONE" ? "border-secondary-300 ring-2 ring-secondary-100 shadow-md shadow-secondary-100/50" : "border-secondary-100 hover:shadow-secondary-100/50"}`}
                 >
-                    <div className="flex items-center justify-between">
+                    <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-gradient-to-br from-secondary-400/20 to-secondary-600/20 transition-transform group-hover:scale-150" />
+                    <div className="relative flex items-center justify-between">
                         <div>
-                            <p className="text-sm font-medium text-gray-600">DONE</p>
-                            <p className="text-2xl font-bold text-secondary-600">
+                            <p className="text-sm font-medium text-gray-500">Done</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">
                                 {tasks.filter((m) => m.status === "DONE").length}
                             </p>
                         </div>
-                        <CheckCheck className="h-8 w-8 text-secondary-600" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-secondary-500 to-secondary-700 shadow-lg shadow-secondary-200">
+                            <CheckCheck className="h-5 w-5 text-white" />
+                        </div>
                     </div>
                 </button>
             </div>
 
             {/* Filters */}
-            <div className="bg-white p-6 rounded-xl border border-gray-200 mb-8">
+            <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm mb-8">
                 <div className="flex flex-col md:flex-row gap-4">
                     <div className="flex-1">
                         <div className="relative">

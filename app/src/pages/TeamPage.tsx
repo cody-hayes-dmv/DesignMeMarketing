@@ -292,33 +292,36 @@ const TeamPage = () => {
         : totalUsers;
 
   return (
-    <div className="p-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-fuchsia-50/30 p-8">
       {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Team</h1>
-          <p className="text-gray-600 mt-2">
-            Manage your team members and their access
-          </p>
+      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-fuchsia-600 via-pink-600 to-rose-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">Team</h1>
+            <p className="mt-2 text-fuchsia-100 text-sm md:text-base">
+              Manage your team members and their access
+            </p>
+          </div>
+          {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
+            <button
+              onClick={() => setShowInviteModal(true)}
+              className="flex items-center gap-2 rounded-lg bg-white/20 px-5 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+            >
+              <Plus className="h-5 w-5" />
+              <span>Invite Specialist</span>
+            </button>
+          )}
         </div>
-        {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
-          <button
-            onClick={() => setShowInviteModal(true)}
-            className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors flex items-center space-x-2"
-          >
-            <Plus className="h-5 w-5" />
-            <span>Invite Specialist</span>
-          </button>
-        )}
       </div>
 
       {/* Team Views */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
         <button
           type="button"
           onClick={() => setActiveView("myTeam")}
-          className={`bg-white p-6 rounded-xl border shadow-sm text-left transition-all ${
-            activeView === "myTeam" ? "border-primary-500 ring-2 ring-primary-100" : "border-gray-200 hover:shadow-md"
+          className={`group relative overflow-hidden bg-white p-6 rounded-2xl border shadow-sm text-left transition-all hover:-translate-y-0.5 hover:shadow-lg ${
+            activeView === "myTeam" ? "border-fuchsia-300 ring-2 ring-fuchsia-100 shadow-fuchsia-100/50" : "border-gray-200 hover:shadow-gray-100/50"
           }`}
         >
           <div className="flex items-center justify-between">

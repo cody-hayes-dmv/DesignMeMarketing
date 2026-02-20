@@ -143,12 +143,15 @@ const AddOnsPage = () => {
   };
 
   return (
-    <div className="p-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-indigo-50/30 p-8">
       {/* Top Section - Header */}
-      <header className="mb-10">
-        <h1 className="text-2xl font-bold text-gray-900">Add-Ons & Upgrades</h1>
-        <p className="text-gray-600 mt-1">Expand your capabilities without changing your plan</p>
-      </header>
+      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-blue-600 to-sky-500 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative">
+          <h1 className="text-2xl font-bold text-white md:text-3xl">Add-Ons & Upgrades</h1>
+          <p className="mt-2 text-indigo-100 text-sm md:text-base">Expand your capabilities without changing your plan</p>
+        </div>
+      </div>
 
       {agencyMe && (agencyMe.accountActivated === false || agencyMe.trialActive) && (
         <section className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
