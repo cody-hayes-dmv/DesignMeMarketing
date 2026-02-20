@@ -2179,6 +2179,34 @@ router.get("/share/:token/top-pages", async (req, res) => {
   }
 });
 
+// Share endpoint for top-pages per-page keywords (matches /top-pages/:clientId/keywords)
+router.get("/share/:token/top-pages/keywords", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { url } = req.query;
+    const tokenData = await resolveShareToken(token);
+    if (!tokenData) {
+      return res.status(401).json({ message: "Invalid or expired share link" });
+    }
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ message: "URL parameter is required" });
+    }
+    const client = await prisma.client.findUnique({
+      where: { id: tokenData.clientId },
+      select: { id: true, domain: true },
+    });
+    if (!client || !client.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+    const targetDomain = client.domain.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "").toLowerCase();
+    const keywords = await fetchRankedKeywordsForPageFromDataForSEO(targetDomain, url, 2840, "English", 100);
+    res.json(keywords);
+  } catch (error: any) {
+    console.error("Share top-pages keywords error:", error);
+    res.status(500).json({ message: "Failed to fetch page keywords" });
+  }
+});
+
 // Share endpoint for backlinks list
 router.get("/share/:token/backlinks", async (req, res) => {
   try {
@@ -5179,7 +5207,13 @@ async function fetchAiSearchMentions(
 
     const items = Array.isArray(result0?.items) ? result0.items : [];
     if (items.length === 0 && data?.status_code === 20000) {
-      console.log("[AI Intelligence] API returned success but no items - domain may not have AI mentions yet");
+      console.log("[AI Intelligence] API returned success but no items - domain may not have AI mentions yet", {
+        target,
+        targetType,
+        locationCode,
+        languageCode,
+        limit,
+      });
     }
     return items;
   } catch (error: any) {
@@ -5688,11 +5722,16 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     // Process current metrics result
     if (currentMetricsResult.status === 'fulfilled') {
       currentMetrics = currentMetricsResult.value;
+      const totalObj = currentMetrics?.total;
+      const platformArr = Array.isArray(totalObj?.platform) ? totalObj.platform : [];
+      const loggedTotalMentions = platformArr.reduce((s: number, p: any) => s + Number(p?.mentions || 0), 0);
+      const loggedAiSearchVolume = platformArr.reduce((s: number, p: any) => s + Number(p?.ai_search_volume || 0), 0);
       console.log("[AI Intelligence] Aggregated metrics response:", {
         hasData: !!currentMetrics,
-        totalMentions: currentMetrics?.total_mentions,
-        aiSearchVolume: currentMetrics?.ai_search_volume,
-        aggregatedDataLength: currentMetrics?.aggregated_data?.length || 0,
+        platformKeys: platformArr.map((p: any) => p?.key).filter(Boolean),
+        totalMentions: loggedTotalMentions,
+        aiSearchVolume: loggedAiSearchVolume,
+        aggregatedDataLength: Array.isArray(currentMetrics?.aggregated_data) ? currentMetrics.aggregated_data.length : 0,
       });
     } else {
       console.error("[AI Intelligence] DataForSEO aggregated metrics fetch failed:", {
@@ -5729,13 +5768,33 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       });
     }
 
-    // AI Intelligence uses DataForSEO only; no GA4 or SERP cache fallbacks
+    // AI Intelligence: get competitors from SERP (tracked keywords) first; fallback to domains from AI mention sources
     let competitorDomains: string[] = [];
     const competitorDomainsResult = await Promise.allSettled([extractCompetitorDomainsFromSerp(clientId, 10)]);
     if (competitorDomainsResult[0].status === 'fulfilled') {
       competitorDomains = competitorDomainsResult[0].value;
     } else {
-      console.warn("[AI Intelligence] Failed to extract competitor domains:", competitorDomainsResult[0].reason);
+      console.warn("[AI Intelligence] Failed to extract competitor domains from SERP:", competitorDomainsResult[0].reason);
+    }
+    // Fallback: when SERP gives no competitors, derive from AI search mention sources (domains that co-appear with client)
+    if (competitorDomains.length === 0 && searchMentions.length > 0) {
+      const domainCounts = new Map<string, number>();
+      for (const item of searchMentions) {
+        const sources = Array.isArray(item?.sources) ? item.sources : [];
+        for (const s of sources) {
+          const d = (s?.domain || "").toLowerCase().replace(/^www\./, "").split("/")[0];
+          if (!d || d.includes(targetDomain) || d.length < 4) continue;
+          if (d.includes("google") || d.includes("youtube") || d.includes("wikipedia") || d.includes("facebook")) continue;
+          domainCounts.set(d, (domainCounts.get(d) || 0) + 1);
+        }
+      }
+      competitorDomains = Array.from(domainCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([d]) => d);
+      if (competitorDomains.length > 0) {
+        console.log("[AI Intelligence] Using competitor fallback from AI mention sources:", competitorDomains);
+      }
     }
 
     // Parse aggregated metrics from DataForSEO: result[0].total.platform (array of group_element)
@@ -5897,8 +5956,8 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     };
 
     // Parse search mentions into queries array
+    // Only include queries where the client's domain actually appears in sources (mentions > 0)
     // API response structure: items[] with question, answer, sources[], ai_search_volume, platform
-    // Filter by relevance to client industry/keywords to avoid irrelevant queries (e.g. "breakfast near me" for landscapers)
     let queriesWhereYouAppear = searchMentions
       .map((item: any) => {
         const query = item?.question || "";
@@ -5914,16 +5973,22 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
           const sourceDomain = (s?.domain || "").toLowerCase();
           return sourceDomain.includes(targetDomain.toLowerCase());
         }).length;
-        return { query, aiVolPerMo: Number(item?.ai_search_volume || 0), platforms: platformName, mentions: mentions || 1 };
+        return { query, aiVolPerMo: Number(item?.ai_search_volume || 0), platforms: platformName, mentions };
       })
-      .filter((item: { query: string }) => isQueryRelevant(item.query));
+      .filter((item: { query: string; mentions: number }) => item.mentions > 0 && isQueryRelevant(item.query));
 
-    // Only DataForSEO-sourced queries; no placeholders from SERP cache
     const totalQueriesCount = queriesWhereYouAppear.length;
 
-    // Build "How AI Platforms Mention You" from search mentions (relevance-filtered)
+    // Build "How AI Platforms Mention You" only from items where client is actually cited in sources
     let howAiMentionsYou = searchMentions
-      .filter((item: any) => isQueryRelevant(item?.question || ""))
+      .filter((item: any) => {
+        if (!isQueryRelevant(item?.question || "")) return false;
+        const sources = Array.isArray(item?.sources) ? item.sources : [];
+        const hasClientSource = sources.some((s: any) =>
+          (s?.domain || "").toLowerCase().includes(targetDomain.toLowerCase())
+        );
+        return hasClientSource;
+      })
       .map((item: any, idx: number) => {
       const query = item?.question || "";
       const platformStr = String(item?.platform || "google").toLowerCase();
@@ -5933,17 +5998,13 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       } else if (platformStr.includes("perplexity")) {
         platform = "Perplexity";
       }
-      
-      // Get snippet from answer or first source
-      const answer = item?.answer || "";
       const sources = Array.isArray(item?.sources) ? item.sources : [];
-      const firstSource = sources.find((s: any) => {
-        const sourceDomain = (s?.domain || "").toLowerCase();
-        return sourceDomain.includes(targetDomain.toLowerCase());
-      });
-      const snippet = firstSource?.snippet || answer.substring(0, 200) || `...${clientName}...`;
+      const firstSource = sources.find((s: any) =>
+        (s?.domain || "").toLowerCase().includes(targetDomain.toLowerCase())
+      );
+      const snippet = firstSource?.snippet || (item?.answer || "").substring(0, 200) || `...${clientName}...`;
       const sourceUrl = firstSource?.url || `https://${domain}`;
-      
+
       return {
         query,
         platform,
@@ -6062,6 +6123,15 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     if (competitors.length > 0 && !competitors[0].isYou) {
       competitors[0].isLeader = true;
     }
+    // Cap at 5 total (you + up to 4 competitors), keep score order, and re-mark leader
+    const youEntry = competitors.find((c) => c.isYou);
+    const others = competitors.filter((c) => !c.isYou).slice(0, 4);
+    competitors.forEach((c) => { c.isLeader = false; });
+    competitors.length = 0;
+    if (youEntry) competitors.push(youEntry, ...others);
+    else competitors.push(...others);
+    competitors.sort((a, b) => b.score - a.score);
+    if (competitors.length > 0 && !competitors[0].isYou) competitors[0].isLeader = true;
 
     const leader = competitors.find((c) => c.isLeader);
     const you = competitors.find((c) => c.isYou);
@@ -6163,12 +6233,16 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         competitorDomainsCount: competitorDomains.length,
         hasDataForSeoCredentials: !!process.env.DATAFORSEO_BASE64,
         targetDomain,
+        hasAiMentions: (totalMentions || 0) > 0 || searchMentions.length > 0,
         apiResponseStatus: (currentMetrics || totalMentions > 0) ? "success" : "no_data_or_error",
         scoreExplanation,
         dataSource: "DataForSEO",
         queriesFilteredByRelevance: hasRelevanceSignal,
         industry: client.industry || null,
         kpiVolumeFromTrend: kpiVolumeFromTrend,
+        hasQueryLevelData: totalQueriesCount > 0,
+        hasCompetitorData: competitors.some((c) => !c.isYou),
+        searchMentionsItemCount: searchMentions.length,
       },
     });
   } catch (error: any) {

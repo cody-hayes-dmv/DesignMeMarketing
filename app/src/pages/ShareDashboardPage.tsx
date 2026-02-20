@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
-import { Download, TrendingUp, TrendingDown, Search, Users, Loader2, UserPlus, Activity } from "lucide-react";
+import { Download, TrendingUp, TrendingDown, Search, Users, Loader2, UserPlus, Activity, ChevronDown, ChevronRight, Plus } from "lucide-react";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import api from "@/lib/api";
@@ -167,6 +167,9 @@ const ShareDashboardPage: React.FC = () => {
   const [aiSearchRows, setAiSearchRows] = useState<AiSearchVisibilityRow[]>([]);
   const [aiSearchLoading, setAiSearchLoading] = useState(false);
   const [aiSearchError, setAiSearchError] = useState<string | null>(null);
+  const [expandedPageUrls, setExpandedPageUrls] = useState<Set<string>>(new Set());
+  const [pageKeywords, setPageKeywords] = useState<Record<string, any[]>>({});
+  const [loadingPageKeywords, setLoadingPageKeywords] = useState<Record<string, boolean>>({});
   const [exportingPdf, setExportingPdf] = useState(false);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
   const [dateRange, setDateRange] = useState("30");
@@ -194,82 +197,167 @@ const ShareDashboardPage: React.FC = () => {
       setExportingPdf(true);
       document.body.style.overflow = "hidden";
 
-      // Temporarily remove padding for full-width capture
-      const contentWrapper = element.parentElement;
-      const originalPadding = contentWrapper?.style.padding ?? "";
-      if (contentWrapper) contentWrapper.style.padding = "0";
+      const sections = Array.from(element.querySelectorAll(".pdf-section")) as HTMLElement[];
+      if (sections.length === 0) {
+        toast.error("No sections found to export.");
+        setExportingPdf(false);
+        return;
+      }
 
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        scrollY: -window.scrollY,
-        scrollX: -window.scrollX,
-        backgroundColor: "#FFFFFF",
-        ignoreElements: (el) => el.getAttribute?.("data-pdf-hide") === "true",
-      });
+      const ignoreFilter = (el: Element) => el.getAttribute?.("data-pdf-hide") === "true";
+      const sectionCanvases: HTMLCanvasElement[] = [];
+      for (const sec of sections) {
+        const cvs = await html2canvas(sec, {
+          scale: 2,
+          useCORS: true,
+          scrollY: -window.scrollY,
+          scrollX: -window.scrollX,
+          backgroundColor: "#FFFFFF",
+          ignoreElements: ignoreFilter,
+        });
+        sectionCanvases.push(cvs);
+      }
 
-      // Restore padding
-      if (contentWrapper) contentWrapper.style.padding = originalPadding;
-
-      const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
 
-      const domain = dashboardSummary?.client?.domain;
-      const headerHeightMm = domain ? 18 : 14;
-      const gapMm = 4;
-      const contentTopMm = headerHeightMm + gapMm;
       const websiteName = dashboardSummary?.client?.name || dashboardSummary?.client?.domain || "Shared Dashboard";
+      const domain = dashboardSummary?.client?.domain || "";
+      const generatedDate = format(new Date(), "MMMM d, yyyy");
+      const periodLabel = dateRange === "7" ? "Last 7 Days" : dateRange === "90" ? "Last 90 Days" : dateRange === "365" ? "Last Year" : "Last 30 Days";
 
-      // Title style: match ShareDashboard nav (gradient blue bar, white text) but centered
-      pdf.setFillColor(37, 99, 235); // primary-600 / blue-600
-      pdf.rect(0, 0, pageWidth, headerHeightMm, "F");
-      pdf.setDrawColor(59, 130, 246); // primary-500 border
-      pdf.setLineWidth(0.4);
-      pdf.line(0, headerHeightMm, pageWidth, headerHeightMm);
-      pdf.setFontSize(18);
-      pdf.setFont("helvetica", "bold");
-      pdf.setTextColor(255, 255, 255);
-      pdf.text(websiteName, pageWidth / 2, domain ? 6 : headerHeightMm / 2 + 2.5, { align: "center" });
-      if (domain) {
-        pdf.setFontSize(10);
+      const marginX = 12;
+      const headerH = 16;
+      const footerH = 10;
+      const contentMarginTop = headerH + 3;
+      const contentMarginBottom = footerH + 2;
+      const usableWidth = pageWidth - marginX * 2;
+      const usableHeight = pageHeight - contentMarginTop - contentMarginBottom;
+      const sectionGap = 4;
+
+      const drawHeader = () => {
+        pdf.setFillColor(15, 23, 42);
+        pdf.rect(0, 0, pageWidth, headerH, "F");
+        pdf.setFillColor(59, 130, 246);
+        pdf.rect(0, headerH, pageWidth, 0.8, "F");
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11);
+        pdf.setTextColor(255, 255, 255);
+        pdf.text(websiteName, marginX, 7);
+        if (domain) {
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+          pdf.setTextColor(148, 163, 184);
+          pdf.text(domain, marginX, 12);
+        }
         pdf.setFont("helvetica", "normal");
-        pdf.text(`Domain: ${domain}`, pageWidth / 2, 12, { align: "center" });
+        pdf.setFontSize(8);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(periodLabel, pageWidth - marginX, 7, { align: "right" });
+        pdf.text(generatedDate, pageWidth - marginX, 12, { align: "right" });
+      };
+
+      const drawFooter = (pageNum: number, totalPages: number) => {
+        const footerY = pageHeight - footerH / 2;
+        pdf.setDrawColor(226, 232, 240);
+        pdf.setLineWidth(0.3);
+        pdf.line(marginX, pageHeight - footerH, pageWidth - marginX, pageHeight - footerH);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: "center" });
+        pdf.setFontSize(7);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(`Generated ${generatedDate}`, marginX, footerY);
+        pdf.text("Confidential", pageWidth - marginX, footerY, { align: "right" });
+      };
+
+      // ───── Cover page ─────
+      pdf.setFillColor(15, 23, 42);
+      pdf.rect(0, 0, pageWidth, pageHeight, "F");
+      pdf.setFillColor(59, 130, 246);
+      pdf.rect(0, 0, pageWidth, 3, "F");
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(11);
+      pdf.setTextColor(148, 163, 184);
+      const labelY = pageHeight * 0.32;
+      pdf.text("SEO PERFORMANCE REPORT", pageWidth / 2, labelY, { align: "center" });
+      const lineW = 50;
+      pdf.setDrawColor(59, 130, 246);
+      pdf.setLineWidth(0.6);
+      pdf.line(pageWidth / 2 - lineW / 2, labelY + 4, pageWidth / 2 + lineW / 2, labelY + 4);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(28);
+      pdf.setTextColor(255, 255, 255);
+      pdf.text(websiteName, pageWidth / 2, labelY + 18, { align: "center" });
+      if (domain) {
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(12);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(domain, pageWidth / 2, labelY + 28, { align: "center" });
       }
       pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(`${periodLabel}  ·  ${generatedDate}`, pageWidth / 2, labelY + 42, { align: "center" });
+      pdf.setFillColor(59, 130, 246);
+      pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
 
-      // Dashboard: always full page width; add gap below title; multi-page if tall
-      const imgWidth = pageWidth;
-      const fullImgHeightMm = (canvas.height * pageWidth) / canvas.width;
-      const firstPageContentMm = pageHeight - contentTopMm;
-      let srcY = 0;
-      let remainingHeightMm = fullImgHeightMm;
-      let isFirstPage = true;
-      while (remainingHeightMm > 0) {
-        const contentAreaMm = isFirstPage ? firstPageContentMm : pageHeight;
-        const sliceHeightMm = Math.min(remainingHeightMm, contentAreaMm);
-        const sliceHeightPx = (sliceHeightMm / fullImgHeightMm) * canvas.height;
-        const sliceCanvas = document.createElement("canvas");
-        sliceCanvas.width = canvas.width;
-        sliceCanvas.height = Math.ceil(sliceHeightPx);
-        const ctx = sliceCanvas.getContext("2d")!;
-        ctx.drawImage(canvas, 0, srcY, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
-        const sliceData = sliceCanvas.toDataURL("image/png");
-        const imgY = isFirstPage ? contentTopMm : 0;
-        pdf.addImage(sliceData, "PNG", 0, imgY, imgWidth, sliceHeightMm);
-        remainingHeightMm -= sliceHeightMm;
-        srcY += sliceHeightPx;
-        if (remainingHeightMm > 0) {
-          pdf.addPage();
-          isFirstPage = false;
+      // ───── Section-based content pages ─────
+      // Pre-calculate section heights in mm
+      const sectionHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
+
+      // First pass: figure out how many content pages we'll need
+      const pageAssignments: { pageIdx: number; cursorY: number; sectionIdx: number }[] = [];
+      let curPage = 0;
+      let cursorY = 0;
+      for (let i = 0; i < sectionCanvases.length; i++) {
+        const h = sectionHeights[i];
+        const fitsOnCurrentPage = cursorY === 0 || cursorY + sectionGap + h <= usableHeight;
+        if (!fitsOnCurrentPage) {
+          curPage++;
+          cursorY = 0;
         }
+        const yPos = cursorY === 0 ? 0 : cursorY + sectionGap;
+        pageAssignments.push({ pageIdx: curPage, cursorY: yPos, sectionIdx: i });
+        cursorY = yPos + h;
+      }
+      const totalContentPages = curPage + 1;
+      const totalPages = 1 + totalContentPages;
+
+      // Second pass: render content pages
+      let currentPageRendered = -1;
+      for (const assignment of pageAssignments) {
+        if (assignment.pageIdx !== currentPageRendered) {
+          pdf.addPage();
+          drawHeader();
+          currentPageRendered = assignment.pageIdx;
+        }
+
+        const cvs = sectionCanvases[assignment.sectionIdx];
+        const h = sectionHeights[assignment.sectionIdx];
+        const imgData = cvs.toDataURL("image/png");
+        pdf.addImage(imgData, "PNG", marginX, contentMarginTop + assignment.cursorY, usableWidth, h);
       }
 
-      const sanitizedName = dashboardSummary?.client?.name 
-        ? dashboardSummary.client.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() 
+      // Draw footers on all content pages
+      for (let p = 0; p < totalContentPages; p++) {
+        pdf.setPage(p + 2); // page 1 = cover, pages 2+ = content
+        drawFooter(p + 2, totalPages);
+      }
+
+      // Cover page footer
+      pdf.setPage(1);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(`Page 1 of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
+
+      const sanitizedName = dashboardSummary?.client?.name
+        ? dashboardSummary.client.name.replace(/[^a-z0-9]/gi, "-").toLowerCase()
         : "shared-dashboard";
-      const fileName = `${sanitizedName}-${format(new Date(), "yyyyMMdd")}.pdf`;
+      const fileName = `${sanitizedName}-report-${format(new Date(), "yyyyMMdd")}.pdf`;
       pdf.save(fileName);
       toast.success("Dashboard exported successfully!");
     } catch (error: any) {
@@ -279,7 +367,7 @@ const ShareDashboardPage: React.FC = () => {
       document.body.style.overflow = previousOverflow;
       setExportingPdf(false);
     }
-  }, [dashboardSummary?.client?.name, dashboardSummary?.client?.domain]);
+  }, [dashboardSummary?.client?.name, dashboardSummary?.client?.domain, dateRange]);
 
   const formatNumber = (value: number) => {
     if (!Number.isFinite(value)) return "0";
@@ -766,7 +854,7 @@ const ShareDashboardPage: React.FC = () => {
               </p>
             )}
           </div>
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3" data-pdf-hide="true">
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
@@ -816,7 +904,7 @@ const ShareDashboardPage: React.FC = () => {
             <ShareDashboardErrorBoundary>
             <>
             {/* Report View - GA4 Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="pdf-section grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/60 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
@@ -899,7 +987,7 @@ const ShareDashboardPage: React.FC = () => {
             </div>
 
             {/* Trend Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="pdf-section grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="rounded-xl border-l-4 border-blue-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-blue-900">New Users Trending</h3>
@@ -962,26 +1050,30 @@ const ShareDashboardPage: React.FC = () => {
 
             {/* Target Keywords first (same order as Dashboard SEO Overview) */}
             {dashboardSummary?.client?.id && token && (
-              <TargetKeywordsOverview
-                clientId={dashboardSummary.client.id}
-                clientName={dashboardSummary.client.name}
-                shareToken={token}
-              />
+              <div className="pdf-section">
+                <TargetKeywordsOverview
+                  clientId={dashboardSummary.client.id}
+                  clientName={dashboardSummary.client.name}
+                  shareToken={token}
+                />
+              </div>
             )}
 
             {/* Ranked Keywords Overview */}
             {dashboardSummary?.client?.id && token && (
-              <RankedKeywordsOverview
-                clientId={dashboardSummary.client.id}
-                clientName={dashboardSummary.client.name}
-                title="Total Keywords Ranked"
-                subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
-                shareToken={token}
-                enableRefresh={false}
-              />
+              <div className="pdf-section">
+                <RankedKeywordsOverview
+                  clientId={dashboardSummary.client.id}
+                  clientName={dashboardSummary.client.name}
+                  title="Total Keywords Ranked"
+                  subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
+                  shareToken={token}
+                  enableRefresh={false}
+                />
+              </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="pdf-section grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="rounded-xl border-l-4 border-violet-500 bg-white p-4 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-semibold text-violet-900">Traffic Sources</h3>
@@ -1082,7 +1174,7 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="pdf-section grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="rounded-xl border-l-4 border-teal-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-teal-900">Visitor Sources</h3>
@@ -1146,7 +1238,7 @@ const ShareDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
+            <div className="pdf-section rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
               <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-primary-50/50 to-blue-50/50">
                 <h3 className="text-lg font-semibold text-primary-900">Top Pages</h3>
                 {topPagesError && (
@@ -1169,7 +1261,7 @@ const ShareDashboardPage: React.FC = () => {
                       <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Paid Traffic</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-white divide-y divide-gray-100">
                     {topPagesLoading ? (
                       <tr>
                         <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500">
@@ -1183,81 +1275,163 @@ const ShareDashboardPage: React.FC = () => {
                         </td>
                       </tr>
                     ) : (
-                      resolvedTopPages.map((page, index) => (
-                        <tr key={`${page.url}-${index}`} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <a
-                              href={page.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm font-medium text-blue-600 hover:text-blue-800 break-all"
-                            >
-                              {page.url}
-                            </a>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {topPagesLoading ? "..." : formatNumber(page.keywords)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {topPagesLoading ? "..." : formatNumber(page.estimatedTraffic)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {topPagesLoading ? "..." : formatNumber(page.top1)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {topPagesLoading ? "..." : formatNumber(page.top3)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {topPagesLoading ? "..." : formatNumber(page.top10)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                            {topPagesLoading ? (
-                              <span>...</span>
-                            ) : (
-                              <div className="flex flex-col items-end space-y-1">
-                                {page.newKeywords > 0 && (
-                                  <div className="flex items-center gap-1 text-green-600">
-                                    <span className="text-xs font-medium">+</span>
-                                    <span className="text-xs">{formatNumber(page.newKeywords)}</span>
+                      resolvedTopPages.map((page, index) => {
+                        const isExpanded = expandedPageUrls.has(page.url);
+                        const keywords = pageKeywords[page.url] || [];
+                        const isLoadingKw = loadingPageKeywords[page.url] || false;
+
+                        const handleToggleExpand = async () => {
+                          if (isExpanded) {
+                            setExpandedPageUrls(prev => {
+                              const newSet = new Set(prev);
+                              newSet.delete(page.url);
+                              return newSet;
+                            });
+                          } else {
+                            setExpandedPageUrls(prev => new Set(prev).add(page.url));
+                            if (!pageKeywords[page.url] && token) {
+                              setLoadingPageKeywords(prev => ({ ...prev, [page.url]: true }));
+                              try {
+                                const res = await api.get(`/seo/share/${encodeURIComponent(token)}/top-pages/keywords`, {
+                                  params: { url: page.url },
+                                });
+                                setPageKeywords(prev => ({ ...prev, [page.url]: res.data || [] }));
+                              } catch {
+                                setPageKeywords(prev => ({ ...prev, [page.url]: [] }));
+                              } finally {
+                                setLoadingPageKeywords(prev => ({ ...prev, [page.url]: false }));
+                              }
+                            }
+                          }
+                        };
+
+                        return (
+                          <React.Fragment key={`${page.url}-${index}`}>
+                            <tr className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center gap-2">
+                                  <button onClick={handleToggleExpand} className="text-gray-400 hover:text-gray-600" title="Show keywords ranking for this page" data-pdf-hide="true">
+                                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                  </button>
+                                  <a href={page.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:text-blue-800 break-all">
+                                    {page.url}
+                                  </a>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatNumber(page.keywords)}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatNumber(page.estimatedTraffic)}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatNumber(page.top1)}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatNumber(page.top3)}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatNumber(page.top10)}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
+                                <div className="flex flex-row items-end space-x-1">
+                                  {page.newKeywords > 0 && (
+                                    <div className="flex items-center gap-1 text-green-600">
+                                      <Plus className="h-3.5 w-3.5" />
+                                      <span>{formatNumber(page.newKeywords)}</span>
+                                    </div>
+                                  )}
+                                  {page.upKeywords > 0 && (
+                                    <div className="flex items-center gap-1 text-blue-600">
+                                      <TrendingUp className="h-3.5 w-3.5" />
+                                      <span>{formatNumber(page.upKeywords)}</span>
+                                    </div>
+                                  )}
+                                  {page.downKeywords > 0 && (
+                                    <div className="flex items-center gap-1 text-orange-600">
+                                      <TrendingDown className="h-3.5 w-3.5" />
+                                      <span>{formatNumber(page.downKeywords)}</span>
+                                    </div>
+                                  )}
+                                  {page.lostKeywords > 0 && (
+                                    <div className="flex items-center gap-1 text-rose-600">
+                                      <TrendingDown className="h-3.5 w-3.5" />
+                                      <span>{formatNumber(page.lostKeywords)}</span>
+                                    </div>
+                                  )}
+                                  {page.newKeywords === 0 && page.upKeywords === 0 && page.downKeywords === 0 && page.lostKeywords === 0 && (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatNumber(page.paidTraffic)}</td>
+                            </tr>
+                            {isExpanded && (
+                              <tr>
+                                <td colSpan={8} className="px-6 py-4 bg-gray-50">
+                                  <div className="space-y-2">
+                                    <h4 className="text-sm font-semibold text-gray-900 mb-3">Keywords Ranking for This Page</h4>
+                                    {isLoadingKw ? (
+                                      <div className="flex items-center justify-center py-4">
+                                        <Loader2 className="h-4 w-4 animate-spin text-primary-600 mr-2" />
+                                        <span className="text-sm text-gray-500">Loading keywords...</span>
+                                      </div>
+                                    ) : keywords.length === 0 ? (
+                                      <div className="text-sm text-gray-500 text-center py-4">No keywords found ranking for this page.</div>
+                                    ) : (
+                                      <div className="max-h-64 overflow-y-auto">
+                                        <table className="w-full text-sm">
+                                          <thead className="bg-gray-100 sticky top-0">
+                                            <tr>
+                                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Keyword</th>
+                                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Position</th>
+                                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Change</th>
+                                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Search Volume</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="bg-white divide-y divide-gray-200">
+                                            {keywords.map((kw: any, idx: number) => {
+                                              const isNew = kw.isNew || false;
+                                              const isLost = kw.isLost || false;
+                                              const isUp = kw.isUp || false;
+                                              const isDown = kw.isDown || false;
+                                              const positionChange = kw.previousPosition !== null && kw.currentPosition !== null
+                                                ? kw.currentPosition - kw.previousPosition : null;
+                                              let statusBadge = null;
+                                              if (isNew) statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">New</span>;
+                                              else if (isLost) statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-800">Lost</span>;
+                                              else if (isUp) statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">↑ Up</span>;
+                                              else if (isDown) statusBadge = <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">↓ Down</span>;
+                                              return (
+                                                <tr key={kw.keyword || idx} className="hover:bg-gray-50">
+                                                  <td className="px-3 py-2">
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="text-gray-900">{kw.keyword}</span>
+                                                      {statusBadge}
+                                                    </div>
+                                                  </td>
+                                                  <td className="px-3 py-2 text-gray-900">{kw.currentPosition !== null ? `#${kw.currentPosition}` : "—"}</td>
+                                                  <td className="px-3 py-2">
+                                                    {positionChange !== null && positionChange !== 0 ? (
+                                                      <span className={`text-xs font-medium ${positionChange < 0 ? "text-green-600" : "text-red-600"}`}>
+                                                        {positionChange < 0 ? "↑" : "↓"} {Math.abs(positionChange)}
+                                                      </span>
+                                                    ) : (
+                                                      <span className="text-xs text-gray-400">—</span>
+                                                    )}
+                                                  </td>
+                                                  <td className="px-3 py-2 text-gray-700">{kw.searchVolume && kw.searchVolume > 0 ? kw.searchVolume.toLocaleString() : "—"}</td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                                {page.upKeywords > 0 && (
-                                  <div className="flex items-center gap-1 text-blue-600">
-                                    <TrendingUp className="h-3.5 w-3.5" />
-                                    <span className="text-xs">{formatNumber(page.upKeywords)}</span>
-                                  </div>
-                                )}
-                                {page.downKeywords > 0 && (
-                                  <div className="flex items-center gap-1 text-orange-600">
-                                    <TrendingDown className="h-3.5 w-3.5" />
-                                    <span className="text-xs">{formatNumber(page.downKeywords)}</span>
-                                  </div>
-                                )}
-                                {page.lostKeywords > 0 && (
-                                  <div className="flex items-center gap-1 text-rose-600">
-                                    <span className="text-xs font-medium">−</span>
-                                    <span className="text-xs">{formatNumber(page.lostKeywords)}</span>
-                                  </div>
-                                )}
-                                {page.newKeywords === 0 &&
-                                  page.upKeywords === 0 &&
-                                  page.downKeywords === 0 &&
-                                  page.lostKeywords === 0 && <span className="text-gray-400">—</span>}
-                              </div>
+                                </td>
+                              </tr>
                             )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {topPagesLoading ? "..." : formatNumber(page.paidTraffic)}
-                          </td>
-                        </tr>
-                      ))
+                          </React.Fragment>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            <div className="rounded-xl border-l-4 border-emerald-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
+            <div className="pdf-section rounded-xl border-l-4 border-emerald-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
               <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-emerald-50/60 to-teal-50/50 flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-emerald-900">New Links</h3>

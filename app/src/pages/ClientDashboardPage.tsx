@@ -457,6 +457,9 @@ const ClientDashboardPage: React.FC = () => {
       dataSource?: string;
       queriesFilteredByRelevance?: boolean;
       industry?: string | null;
+      hasQueryLevelData?: boolean;
+      hasCompetitorData?: boolean;
+      searchMentionsItemCount?: number;
     };
   } | null>(null);
   const [aiIntelligenceLoading, setAiIntelligenceLoading] = useState(false);
@@ -5227,7 +5230,7 @@ const ClientDashboardPage: React.FC = () => {
                           <InfoTooltip content="Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data from DataForSEO." iconClassName="h-4 w-4 text-gray-400 cursor-help" />
                         </h2>
                         <p className="text-sm text-gray-500 mt-0.5">
-                          Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data source: DataForSEO. Numbers here may differ from other dashboard widgets that use different sources.
+                          Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data source: DataForSEO.
                         </p>
                       </div>
                     </div>
@@ -5430,6 +5433,13 @@ const ClientDashboardPage: React.FC = () => {
                                 <span className="px-3 py-1 rounded-full bg-primary-100 text-primary-700 text-xs font-semibold whitespace-nowrap">{q.mentions} mentions</span>
                               </div>
                             ))}
+                            {(aiIntelligence.queriesWhereYouAppear ?? []).length === 0 && (aiIntelligence.kpis?.totalAiMentions ?? 0) > 0 && (
+                              <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
+                                <p className="font-medium">Your visibility score is from aggregated metrics.</p>
+                                <p className="mt-1 text-amber-800">Query-level breakdown (which exact queries trigger your mentions) may not be returned yet by the data provider for your domain. This section will populate when that data is available.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -5475,6 +5485,13 @@ const ClientDashboardPage: React.FC = () => {
                                 )}
                               </div>
                             ))}
+                            {(!aiIntelligence.meta?.hasCompetitorData && (aiIntelligence.competitors ?? []).filter((c) => !c.isYou).length === 0) && (
+                              <div className="rounded-lg border border-blue-200 bg-blue-50/80 p-4 text-sm text-blue-900">
+                                <p className="font-medium">To see up to 4 competitors here (5 total with you):</p>
+                                <p className="mt-1 text-blue-800">Add and track <strong>target keywords</strong> for this client so we can pull competitor domains from SERP data. If we have AI mention data for your domain, we may also show competitors that co-appear in the same queries.
+                                </p>
+                              </div>
+                            )}
                           </div>
                           {(aiIntelligence.gapBehindLeader ?? 0) > 0 && (
                             <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
@@ -5532,6 +5549,13 @@ const ClientDashboardPage: React.FC = () => {
                                 </div>
                               );
                             })}
+                            {(aiIntelligence.howAiMentionsYou ?? []).length === 0 && (aiIntelligence.kpis?.totalAiMentions ?? 0) > 0 && (
+                              <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
+                                <p className="font-medium">Citation contexts are built from query-level data.</p>
+                                <p className="mt-1 text-amber-800">When the data provider returns per-query results that include your domain, exact snippets and citation URLs will appear here.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
 

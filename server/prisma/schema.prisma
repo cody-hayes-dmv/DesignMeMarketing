@@ -238,6 +238,9 @@ model Client {
   aiSearchSerpCache     AiSearchSerpCache?
   backlinkTimeseries    BacklinkTimeseries[]
   backlinks             Backlink[]
+  aiMentions            AiMention[]
+  aiCompetitors         AiCompetitor[]
+  aiSearchVolumeTrends  AiSearchVolumeTrend[]
   // Tier-based refresh throttle (rank = target keywords/rankings, ai = AI search visibility)
   lastRankRefreshAt     DateTime?               @db.DateTime
   lastAiRefreshAt       DateTime?               @db.DateTime
@@ -602,6 +605,58 @@ model BacklinkTimeseries {
   @@unique([clientId, date])
   @@index([clientId, date])
   @@map("backlink_timeseries")
+}
+
+model AiMention {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  clientId       String
+  query          String   @db.LongText
+  platform       String   @db.VarChar(50) // 'chatgpt', 'google_ai_overview', 'perplexity'
+  mentions       Int
+  aiSearchVolume Int
+  impressions    Int?
+  snippet        String?  @db.LongText
+  referencedUrl  String?  @db.LongText
+  mentionPosition Int?
+  dateRecorded   DateTime @db.Date
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, dateRecorded])
+  @@map("ai_mentions")
+}
+
+model AiCompetitor {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  clientId       String
+  competitorDomain String @db.VarChar(255)
+  mentions       Int
+  aiSearchVolume Int
+  platform       String   @db.VarChar(50)
+  dateRecorded   DateTime @db.Date
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, competitorDomain, dateRecorded])
+  @@map("ai_competitors")
+}
+
+model AiSearchVolumeTrend {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  clientId       String
+  keyword        String   @db.VarChar(255)
+  year           Int
+  month          Int
+  aiSearchVolume Int
+  dateRecorded   DateTime @db.Date
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, keyword, year, month])
+  @@map("ai_search_volume_trends")
 }
 
 model AiSearchSerpCache {
