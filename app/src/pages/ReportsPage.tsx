@@ -88,8 +88,7 @@ const ReportsPage: React.FC = () => {
   const [schedules, setSchedules] = useState<ReportSchedule[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [filterClientId, setFilterClientId] = useState<string>("all");
-  /** "active" = only reports for clients with status ACTIVE (default); "all" = every report */
-  const [reportViewMode, setReportViewMode] = useState<"active" | "all">("active");
+  const [cardFilter, setCardFilter] = useState<"total" | "active" | "sent" | "scheduled" | "draft">("active");
 
   const activeClientIds = useMemo(
     () => new Set(clients.filter((c) => c.status === "ACTIVE").map((c) => c.id)),
@@ -351,8 +350,22 @@ const ReportsPage: React.FC = () => {
   const scheduledReports = reports.filter(r => r.status === "scheduled" || r.status === "Scheduled").length;
   const draftReports = reports.filter(r => !r.status || r.status === "draft" || r.status === "Draft").length;
 
-  const reportsForView = reportViewMode === "active" ? activeReports : reports;
-  const clientsForFilter = reportViewMode === "active"
+  const reportsForView = useMemo(() => {
+    switch (cardFilter) {
+      case "active":
+        return activeReports;
+      case "sent":
+        return reports.filter((r) => r.status === "sent" || r.status === "Sent");
+      case "scheduled":
+        return reports.filter((r) => r.status === "scheduled" || r.status === "Scheduled");
+      case "draft":
+        return reports.filter((r) => !r.status || r.status === "draft" || r.status === "Draft");
+      default:
+        return reports;
+    }
+  }, [cardFilter, reports, activeReports]);
+
+  const clientsForFilter = cardFilter === "active"
     ? clients.filter((c) => c.status === "ACTIVE")
     : clients;
   const filteredReports = reportsForView.filter(
@@ -392,7 +405,13 @@ const ReportsPage: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        <button
+          type="button"
+          onClick={() => { setCardFilter("total"); setFilterClientId("all"); }}
+          className={`text-left bg-white p-6 rounded-xl border-2 transition-all ${
+            cardFilter === "total" ? "border-primary-500 ring-2 ring-primary-200 shadow-md" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Total Reports</p>
@@ -400,8 +419,14 @@ const ReportsPage: React.FC = () => {
             </div>
             <FileText className="h-8 w-8 text-primary-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+        <button
+          type="button"
+          onClick={() => { setCardFilter("active"); setFilterClientId("all"); }}
+          className={`text-left bg-white p-6 rounded-xl border-2 transition-all ${
+            cardFilter === "active" ? "border-emerald-500 ring-2 ring-emerald-200 shadow-md" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Active Reports</p>
@@ -410,8 +435,14 @@ const ReportsPage: React.FC = () => {
             <FileText className="h-8 w-8 text-emerald-600" />
           </div>
           <p className="text-xs text-gray-500 mt-1">Reports for active clients only</p>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+        <button
+          type="button"
+          onClick={() => { setCardFilter("sent"); setFilterClientId("all"); }}
+          className={`text-left bg-white p-6 rounded-xl border-2 transition-all ${
+            cardFilter === "sent" ? "border-secondary-500 ring-2 ring-secondary-200 shadow-md" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Sent</p>
@@ -419,8 +450,14 @@ const ReportsPage: React.FC = () => {
             </div>
             <Mail className="h-8 w-8 text-secondary-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+        <button
+          type="button"
+          onClick={() => { setCardFilter("scheduled"); setFilterClientId("all"); }}
+          className={`text-left bg-white p-6 rounded-xl border-2 transition-all ${
+            cardFilter === "scheduled" ? "border-accent-500 ring-2 ring-accent-200 shadow-md" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Scheduled</p>
@@ -428,8 +465,14 @@ const ReportsPage: React.FC = () => {
             </div>
             <Calendar className="h-8 w-8 text-accent-600" />
           </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
+        </button>
+        <button
+          type="button"
+          onClick={() => { setCardFilter("draft"); setFilterClientId("all"); }}
+          className={`text-left bg-white p-6 rounded-xl border-2 transition-all ${
+            cardFilter === "draft" ? "border-gray-500 ring-2 ring-gray-200 shadow-md" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Drafts</p>
@@ -437,58 +480,31 @@ const ReportsPage: React.FC = () => {
             </div>
             <Edit className="h-8 w-8 text-gray-600" />
           </div>
-        </div>
+        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="p-6 border-b border-gray-200 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-gray-900">
-              {reportViewMode === "active" ? "Active Reports" : "All Reports"}
-            </h2>
-            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setReportViewMode("active");
-                  if (filterClientId !== "all" && !activeClientIds.has(filterClientId)) {
-                    setFilterClientId("all");
-                  }
-                }}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  reportViewMode === "active" ? "bg-white text-primary-700 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                Active Reports
-              </button>
-              <button
-                type="button"
-                onClick={() => setReportViewMode("all")}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  reportViewMode === "all" ? "bg-white text-primary-700 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                All Reports
-              </button>
-            </div>
-            {reportViewMode === "active" && (
-              <span className="text-xs text-gray-500">Only clients with status Active</span>
-            )}
-          </div>
-          <div className="flex items-center space-x-4">
-            <select 
-              value={filterClientId}
-              onChange={(e) => setFilterClientId(e.target.value)}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-2"
-            >
-              <option value="all">{reportViewMode === "active" ? "All Active Clients" : "All Clients"}</option>
-              {clientsForFilter.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <h2 className="text-lg font-semibold text-gray-900">
+            {cardFilter === "total" && "All Reports"}
+            {cardFilter === "active" && "Active Reports"}
+            {cardFilter === "sent" && "Sent Reports"}
+            {cardFilter === "scheduled" && "Scheduled Reports"}
+            {cardFilter === "draft" && "Draft Reports"}
+            <span className="ml-2 text-sm font-normal text-gray-500">({filteredReports.length})</span>
+          </h2>
+          <select
+            value={filterClientId}
+            onChange={(e) => setFilterClientId(e.target.value)}
+            className="text-sm border border-gray-300 rounded-lg px-3 py-2"
+          >
+            <option value="all">{cardFilter === "active" ? "All Active Clients" : "All Clients"}</option>
+            {clientsForFilter.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -513,9 +529,9 @@ const ReportsPage: React.FC = () => {
               ) : filteredReports.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-amber-50/50">
-                    {reportViewMode === "active"
-                      ? "No reports for active clients. Switch to All Reports or create a report for an active client."
-                      : "No reports found. Create a report for a client first."}
+                    {cardFilter === "active"
+                      ? "No reports for active clients. Try \"Total Reports\" or create a report for an active client."
+                      : `No ${cardFilter === "total" ? "" : cardFilter + " "}reports found.`}
                   </td>
                 </tr>
               ) : (

@@ -3933,37 +3933,45 @@ const ClientDashboardPage: React.FC = () => {
               </select>
             </div>
           )}
-          <h1 className="text-3xl font-bold text-gray-900 mt-2">{client?.name || "Client Dashboard"}</h1>
-          {client && (
-            <div className="mt-2 text-gray-500 text-sm space-y-1">
-              <div>
-                <span className="font-medium text-gray-700">Domain:</span>{" "}
-                <a
-                  href={client.domain.startsWith("http") ? client.domain : `https://${client.domain}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary-600 hover:underline"
-                >
-                  {client.domain}
-                </a>
-              </div>
-              {client.industry && (
-                <div>
-                  <span className="font-medium text-gray-700">Industry:</span> {client.industry}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-2">
+            <h1 className="text-3xl font-bold text-gray-900">{client?.name || "Client Dashboard"}</h1>
+            {client && (
+              <>
+                <span className="hidden sm:block h-6 w-px bg-gray-300" />
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-500">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-gray-700">Domain:</span>
+                    <a
+                      href={client.domain.startsWith("http") ? client.domain : `https://${client.domain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary-600 hover:underline"
+                    >
+                      {client.domain}
+                    </a>
+                  </div>
+                  {client.industry && (
+                    <>
+                      <span className="hidden sm:block h-4 w-px bg-gray-300" />
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-gray-700">Industry:</span>
+                        <span>{client.industry}</span>
+                      </div>
+                    </>
+                  )}
+                  <span className="hidden sm:block h-4 w-px bg-gray-300" />
+                  <button
+                    type="button"
+                    onClick={() => setShowViewClientModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors"
+                  >
+                    <Info className="h-4 w-4" />
+                    View Client Information
+                  </button>
                 </div>
-              )}
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowViewClientModal(true)}
-                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors"
-                >
-                  <Info className="h-4 w-4" />
-                  View Client Information
-                </button>
-              </div>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
 
         {/* Actions moved next to tabs (see below) */}
