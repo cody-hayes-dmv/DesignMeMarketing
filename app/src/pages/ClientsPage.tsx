@@ -576,9 +576,11 @@ const ClientsPage = () => {
     return () => { cancelled = true; };
   }, [location.state, location.pathname, navigate]);
 
-  const [archiveConfirm, setArchiveConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
+  const [archiveConfirm, setArchiveConfirm] = useState<{ isOpen: boolean; clientId: string | null; mode: "choose" | "now" | "schedule"; scheduledDate: string }>({
     isOpen: false,
     clientId: null,
+    mode: "choose",
+    scheduledDate: "",
   });
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
     isOpen: false,
@@ -586,7 +588,7 @@ const ClientsPage = () => {
   });
 
   const handleArchiveClient = (id: string) => {
-    setArchiveConfirm({ isOpen: true, clientId: id });
+    setArchiveConfirm({ isOpen: true, clientId: id, mode: "choose", scheduledDate: "" });
   };
 
   const handlePermanentDeleteClient = (id: string) => {
@@ -645,18 +647,27 @@ const ClientsPage = () => {
     }
   };
 
-  const confirmArchiveClient = async () => {
+  const confirmArchiveClient = async (mode: "now" | "schedule" = "now") => {
     if (!archiveConfirm.clientId) return;
     try {
-      const result = await dispatch(archiveClient(archiveConfirm.clientId) as any);
+      const payload: { id: string; scheduledDate?: string } = { id: archiveConfirm.clientId };
+      if (mode === "schedule" && archiveConfirm.scheduledDate) {
+        payload.scheduledDate = archiveConfirm.scheduledDate;
+      }
+      const result = await dispatch(archiveClient(payload) as any);
       if (result?.error) throw new Error(result.error.message || "Failed to archive client");
-      toast.success("Client archived successfully!");
+      if (mode === "schedule" && archiveConfirm.scheduledDate) {
+        const d = new Date(archiveConfirm.scheduledDate);
+        toast.success(`Client scheduled to archive on ${format(d, "MMMM d, yyyy")}`);
+      } else {
+        toast.success("Client archived successfully!");
+      }
       dispatch(fetchClients() as any);
     } catch (error: any) {
       console.error("Failed to archive client:", error);
       toast.error(error?.message || "Failed to archive client");
     } finally {
-      setArchiveConfirm({ isOpen: false, clientId: null });
+      setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" });
     }
   };
 
@@ -672,6 +683,16 @@ const ClientsPage = () => {
       toast.error(error?.message || "Failed to delete client");
     } finally {
       setPermanentDeleteConfirm({ isOpen: false, clientId: null });
+    }
+  };
+
+  const handleCancelScheduledArchive = async (id: string) => {
+    try {
+      await api.patch(`/clients/${id}/cancel-scheduled-archive`);
+      toast.success("Scheduled archive canceled");
+      dispatch(fetchClients() as any);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Failed to cancel scheduled archive");
     }
   };
 
@@ -1202,6 +1223,12 @@ const ClientsPage = () => {
                         {getStatusLabel(client.status)}
                       </span>
                       )}
+                      {client.scheduledArchiveAt && !isArchivedStatus(client.status) && (
+                        <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700" title={`Scheduled to archive on ${format(new Date(client.scheduledArchiveAt), "MMM d, yyyy")}`}>
+                          <Clock className="h-2.5 w-2.5" />
+                          {format(new Date(client.scheduledArchiveAt), "MMM d")}
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-600">
                       {client.createdAt ? format(new Date(client.createdAt), "yyyy-MM-dd") : "-"}
@@ -1284,6 +1311,14 @@ const ClientsPage = () => {
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </>
+                        ) : client.scheduledArchiveAt ? (
+                          <button
+                            className="p-2 rounded-lg text-amber-500 hover:text-amber-700 hover:bg-amber-50 transition-colors"
+                            onClick={() => handleCancelScheduledArchive(client.id)}
+                            title={`Scheduled to archive on ${format(new Date(client.scheduledArchiveAt!), "MMM d, yyyy")} — click to cancel`}
+                          >
+                            <Clock className="h-4 w-4" />
+                          </button>
                         ) : (
                           <button
                             className="p-2 rounded-lg text-gray-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
@@ -1372,6 +1407,12 @@ const ClientsPage = () => {
                         >
                           {getStatusLabel(client.status)}
                         </span>
+                    )}
+                    {client.scheduledArchiveAt && !isArchivedStatus(client.status) && (
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700" title={`Scheduled to archive on ${format(new Date(client.scheduledArchiveAt), "MMM d, yyyy")}`}>
+                        <Clock className="h-2.5 w-2.5" />
+                        {format(new Date(client.scheduledArchiveAt), "MMM d")}
+                      </span>
                     )}
                     <button
                       className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
@@ -1480,6 +1521,33 @@ const ClientsPage = () => {
                               >
                                 <Trash2 className="h-3 w-3" />
                                 Delete Permanently
+                              </button>
+                            </>
+                          ) : client.scheduledArchiveAt ? (
+                            <>
+                              <div className="px-4 py-2 text-xs text-amber-600 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700">
+                                <Clock className="h-3 w-3" />
+                                Archive scheduled: {format(new Date(client.scheduledArchiveAt), "MMM d, yyyy")}
+                              </div>
+                              <button
+                                className="w-full text-left px-4 py-2 text-xs hover:bg-amber-50 text-amber-600 flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handleCancelScheduledArchive(client.id);
+                                }}
+                              >
+                                <XCircle className="h-3 w-3" />
+                                Cancel Scheduled Archive
+                              </button>
+                              <button
+                                className="w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 last:rounded-b-md flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handleArchiveClient(client.id);
+                                }}
+                              >
+                                <Archive className="h-3 w-3" />
+                                Archive Now
                               </button>
                             </>
                           ) : (
@@ -2745,17 +2813,98 @@ const ClientsPage = () => {
         </div>
       )}
 
-      {/* Archive Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={archiveConfirm.isOpen}
-        onClose={() => setArchiveConfirm({ isOpen: false, clientId: null })}
-        onConfirm={confirmArchiveClient}
-        title="Archive Client"
-        message="This client will be moved to the archive. All data fetching and billing will stop. You can restore it later from the Archived tab."
-        confirmText="Archive"
-        cancelText="Cancel"
-        variant="danger"
-      />
+      {/* Archive Dialog with Now / Schedule options */}
+      {archiveConfirm.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" })} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <button
+              onClick={() => setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" })}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30">
+                <Archive className="w-5 h-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Archive Client</h3>
+            </div>
+
+            {archiveConfirm.mode === "choose" && (
+              <>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-5">
+                  This client will be moved to the archive. All data fetching and billing will stop. You can restore it later from the Archived tab.
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => confirmArchiveClient("now")}
+                    className="flex items-center gap-3 w-full px-4 py-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors text-left"
+                  >
+                    <Archive className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+                    <div>
+                      <div className="font-medium text-red-700 dark:text-red-300">Archive Now</div>
+                      <div className="text-xs text-red-500 dark:text-red-400/70">Immediately archive this client</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setArchiveConfirm(prev => ({ ...prev, mode: "schedule" }))}
+                    className="flex items-center gap-3 w-full px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                  >
+                    <Calendar className="w-5 h-5 text-gray-600 dark:text-gray-400 flex-shrink-0" />
+                    <div>
+                      <div className="font-medium text-gray-700 dark:text-gray-200">Schedule Archive Date</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Set a future date to automatically archive</div>
+                    </div>
+                  </button>
+                </div>
+                <div className="flex justify-end mt-4">
+                  <button
+                    onClick={() => setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" })}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+
+            {archiveConfirm.mode === "schedule" && (
+              <>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Choose a date to automatically archive this client. The client will remain active until that date.
+                </p>
+                <div className="mb-5">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Archive Date</label>
+                  <input
+                    type="date"
+                    value={archiveConfirm.scheduledDate}
+                    min={format(new Date(Date.now() + 86400000), "yyyy-MM-dd")}
+                    onChange={(e) => setArchiveConfirm(prev => ({ ...prev, scheduledDate: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="flex justify-between">
+                  <button
+                    onClick={() => setArchiveConfirm(prev => ({ ...prev, mode: "choose", scheduledDate: "" }))}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={() => confirmArchiveClient("schedule")}
+                    disabled={!archiveConfirm.scheduledDate}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Schedule Archive
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Permanent Delete Confirmation Dialog */}
       <ConfirmDialog

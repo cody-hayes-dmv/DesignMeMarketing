@@ -243,6 +243,7 @@ interface DomainResearchViewProps {
 
 const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, clientsError, onGetTopics }) => {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [directDomain, setDirectDomain] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [overview, setOverview] = useState<DomainOverviewData | null>(null);
@@ -268,6 +269,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const aiSearchSectionRef = useRef<HTMLDivElement>(null);
 
   const selectedClient = clients.find((c) => c.id === selectedClientId) || null;
+  const activeDomain = selectedClient?.domain || directDomain || null;
 
   // Derive kpis and platforms from rows for detail sections (API returns rows)
   const aiSearchKpis = React.useMemo(() => {
@@ -317,24 +319,35 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       })
     : clients;
 
-  // Auto-select when exactly one client matches the search (debounced)
-  useEffect(() => {
-    if (selectedClientId || !searchQuery.trim()) return;
-    const timer = setTimeout(() => {
-      if (filteredClients.length === 1) {
-        setSelectedClientId(filteredClients[0].id);
-        setSearchQuery("");
-        setSearchOpen(false);
-      }
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [searchQuery, filteredClients, selectedClientId]);
+  const handleDomainSearch = useCallback(() => {
+    const raw = searchQuery.trim();
+    if (!raw) return;
+    const domain = getDomainFromUrl(raw);
+    const matchedClient = clients.find((c) => {
+      const cd = (c.domain || "").toLowerCase();
+      return cd === domain.toLowerCase() || cd === raw.toLowerCase();
+    });
+    if (matchedClient) {
+      setSelectedClientId(matchedClient.id);
+      setDirectDomain(null);
+    } else {
+      setSelectedClientId(null);
+      setDirectDomain(domain);
+    }
+    setSearchQuery("");
+    setSearchOpen(false);
+  }, [searchQuery, clients]);
 
-  const fetchOverview = useCallback(async (clientId: string) => {
+  const fetchOverview = useCallback(async (clientIdOrDomain: string, isDirect: boolean = false) => {
     setLoading(true);
     setError(null);
     try {
-      const overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview/${clientId}`);
+      let overviewRes;
+      if (isDirect) {
+        overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview-any`, { params: { domain: clientIdOrDomain } });
+      } else {
+        overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
+      }
       setOverview(overviewRes.data);
     } catch (err: any) {
       setOverview(null);
@@ -345,6 +358,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   }, []);
 
   const fetchAiSearch = useCallback(async (clientId: string, timeRange: "1M" | "6M" | "1Y" | "2Y" | "All") => {
+    if (directDomain && !selectedClientId) return;
     setAiSearchError(null);
     try {
       const period = AI_SEARCH_PERIOD_DAYS[timeRange];
@@ -357,7 +371,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       setAiSearch(null);
       setAiSearchError(err?.response?.data?.message || "Unable to load AI Search Visibility");
     }
-  }, []);
+  }, [directDomain, selectedClientId]);
 
   const fetchCitedSources = useCallback(async () => {
     if (!selectedClientId) return;
@@ -480,13 +494,16 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   useEffect(() => {
     if (selectedClientId) {
       setAiSearch(null);
-      fetchOverview(selectedClientId);
+      fetchOverview(selectedClientId, false);
+    } else if (directDomain) {
+      setAiSearch(null);
+      fetchOverview(directDomain, true);
     } else {
       setOverview(null);
       setAiSearch(null);
       setError(null);
     }
-  }, [selectedClientId, fetchOverview]);
+  }, [selectedClientId, directDomain, fetchOverview]);
 
   useEffect(() => {
     if (selectedClientId) {
@@ -614,7 +631,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
   return (
     <div className="space-y-6">
-      {/* Search / client selector - Semrush-style */}
+      {/* Search / domain input - Semrush-style */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 border-b border-gray-200 bg-gradient-to-r from-primary-50/60 via-blue-50/40 to-indigo-50/40">
@@ -622,73 +639,87 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
               type="text"
-              value={selectedClient ? `${selectedClient.domain || selectedClient.name} /` : searchQuery}
+              value={(selectedClient || directDomain) ? `${activeDomain || selectedClient?.name || ""} /` : searchQuery}
               onChange={(e) => {
-                if (!selectedClient) {
+                if (!selectedClient && !directDomain) {
                   setSearchQuery(e.target.value);
                   setSearchOpen(true);
                 }
               }}
-              onFocus={() => setSearchOpen(true)}
+              onFocus={() => { if (!selectedClient && !directDomain) setSearchOpen(true); }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setSearchOpen(false);
-                if (e.key === "Enter" && !selectedClient) {
-                  if (filteredClients.length === 1) {
-                    setSelectedClientId(filteredClients[0].id);
-                    setSearchQuery("");
-                    setSearchOpen(false);
-                  } else {
-                    setSearchOpen(false);
-                  }
+                if (e.key === "Enter" && !selectedClient && !directDomain) {
+                  handleDomainSearch();
                 }
               }}
-              placeholder="Search by name, domain, or paste a URL (e.g. https://ablelockshop.com/)"
+              placeholder="Enter any domain or URL (e.g. competitor.com or https://example.com/)"
               className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             />
-            {searchOpen && !selectedClient && (
+            {searchOpen && !selectedClient && !directDomain && searchQuery.trim() && (
               <div className="absolute z-30 mt-1 left-0 right-0 rounded-lg border border-gray-200 bg-white shadow-xl max-h-60 overflow-y-auto">
-                {filteredClients.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-gray-500">
-                    {searchQuery.trim() ? `No client matching "${searchNormalized || searchQuery.trim()}". Add this domain as a client to research it.` : "Type or paste a URL to search."}
-                  </div>
-                ) : (
-                  filteredClients.slice(0, 20).map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedClientId(c.id);
-                        setSearchQuery("");
-                        setSearchOpen(false);
-                      }}
-                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-50 flex items-center justify-between"
-                    >
-                      <span className="font-medium text-gray-900">{c.name || c.domain || c.id}</span>
-                      <span className="text-gray-500 text-xs">{c.domain}</span>
-                    </button>
-                  ))
+                {filteredClients.length > 0 && (
+                  <>
+                    <div className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">Your Clients</div>
+                    {filteredClients.slice(0, 10).map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedClientId(c.id);
+                          setDirectDomain(null);
+                          setSearchQuery("");
+                          setSearchOpen(false);
+                        }}
+                        className="w-full px-4 py-2.5 text-left text-sm hover:bg-gray-50 flex items-center justify-between"
+                      >
+                        <span className="font-medium text-gray-900">{c.name || c.domain || c.id}</span>
+                        <span className="text-gray-500 text-xs">{c.domain}</span>
+                      </button>
+                    ))}
+                    <div className="border-t border-gray-100" />
+                  </>
                 )}
+                <button
+                  type="button"
+                  onClick={handleDomainSearch}
+                  className="w-full px-4 py-2.5 text-left text-sm hover:bg-primary-50 flex items-center gap-2 text-primary-700 font-medium"
+                >
+                  <Globe className="h-4 w-4" />
+                  Search &quot;{searchNormalized || searchQuery.trim()}&quot; as external domain
+                </button>
               </div>
             )}
           </div>
-          {selectedClient && (
+          {!selectedClient && !directDomain && (
+            <button
+              type="button"
+              onClick={handleDomainSearch}
+              disabled={!searchQuery.trim()}
+              className="px-5 py-2.5 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Search
+            </button>
+          )}
+          {(selectedClient || directDomain) && (
             <button
               type="button"
               onClick={() => {
                 setSelectedClientId(null);
+                setDirectDomain(null);
                 setOverview(null);
               }}
               className="text-sm text-primary-600 hover:text-primary-700 font-medium"
             >
-              Change client
+              New search
             </button>
           )}
         </div>
 
-        {selectedClient && (
+        {(selectedClient || directDomain) && (
           <div className="px-4 py-4 flex flex-wrap items-center justify-between gap-3 bg-white border-b border-gray-100 border-l-4 border-l-primary-500">
             <h2 className="text-xl font-semibold text-gray-900">
-              Domain Overview for {selectedClient.domain || selectedClient.name} /
+              Domain Overview for {activeDomain || selectedClient?.name || ""} /
             </h2>
           </div>
         )}
@@ -700,26 +731,22 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
         </div>
       )}
 
-      {!selectedClientId && (
+      {!selectedClientId && !directDomain && (
         <div className="bg-amber-50/60 rounded-xl border border-amber-200/80 border-l-4 border-l-amber-500 shadow-sm p-12 text-center">
-          <Search className="mx-auto h-12 w-12 text-amber-400" />
+          <Globe className="mx-auto h-12 w-12 text-amber-400" />
           <p className="mt-4 text-gray-600">
-            {searchQuery.trim()
-              ? filteredClients.length === 0
-                ? `No client matching "${searchNormalized || searchQuery.trim()}". Add this domain as a client to research it.`
-                : "Select a client from the dropdown above to view domain overview."
-              : "Type a client name, domain, or paste any URL (e.g. https://ablelockshop.com/) and select a client to view domain overview."}
+            Enter any domain or URL above and press Search to analyze it. Works for any website — clients, competitors, or any domain.
           </p>
         </div>
       )}
 
-      {selectedClientId && loading && !overview && (
+      {(selectedClientId || directDomain) && loading && !overview && (
         <div className="bg-primary-50/60 rounded-xl border border-primary-200/80 border-l-4 border-l-primary-500 shadow-sm p-12 flex items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
         </div>
       )}
 
-      {selectedClientId && error && !overview && (
+      {(selectedClientId || directDomain) && error && !overview && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
           {error}
         </div>

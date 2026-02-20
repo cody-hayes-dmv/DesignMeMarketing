@@ -1367,7 +1367,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Archive a client (replaces direct delete for active clients)
+// Archive a client immediately or schedule for a future date
 router.patch('/:id/archive', authenticateToken, async (req, res) => {
     try {
         const clientId = req.params.id;
@@ -1392,10 +1392,40 @@ router.patch('/:id/archive', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Client is already archived' });
         }
 
+        const { scheduledDate } = req.body || {};
+
+        if (scheduledDate) {
+            const archiveAt = new Date(scheduledDate);
+            archiveAt.setHours(0, 0, 0, 0);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            if (archiveAt <= today) {
+                await prisma.$transaction([
+                    prisma.client.update({
+                        where: { id: clientId },
+                        data: { status: 'ARCHIVED', managedServiceStatus: 'archived', scheduledArchiveAt: null },
+                    }),
+                    prisma.reportSchedule.updateMany({
+                        where: { clientId },
+                        data: { isActive: false },
+                    }),
+                ]);
+                return res.json({ success: true, message: 'Client archived successfully' });
+            }
+
+            await prisma.client.update({
+                where: { id: clientId },
+                data: { scheduledArchiveAt: archiveAt },
+            });
+            const formatted = archiveAt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+            return res.json({ success: true, scheduled: true, scheduledDate: archiveAt.toISOString(), message: `Client scheduled to archive on ${formatted}` });
+        }
+
         await prisma.$transaction([
             prisma.client.update({
                 where: { id: clientId },
-                data: { status: 'ARCHIVED', managedServiceStatus: 'archived' },
+                data: { status: 'ARCHIVED', managedServiceStatus: 'archived', scheduledArchiveAt: null },
             }),
             prisma.reportSchedule.updateMany({
                 where: { clientId },
@@ -1406,6 +1436,31 @@ router.patch('/:id/archive', authenticateToken, async (req, res) => {
         res.json({ success: true, message: 'Client archived successfully' });
     } catch (error: any) {
         console.error('Archive client error:', error);
+        res.status(500).json({ message: error?.message || 'Internal server error' });
+    }
+});
+
+// Cancel a scheduled archive
+router.patch('/:id/cancel-scheduled-archive', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') return res.status(403).json({ message: 'Access denied' });
+
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            select: { id: true, scheduledArchiveAt: true },
+        });
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+        if (!client.scheduledArchiveAt) return res.status(400).json({ message: 'No scheduled archive to cancel' });
+
+        await prisma.client.update({
+            where: { id: clientId },
+            data: { scheduledArchiveAt: null },
+        });
+
+        res.json({ success: true, message: 'Scheduled archive canceled' });
+    } catch (error: any) {
+        console.error('Cancel scheduled archive error:', error);
         res.status(500).json({ message: error?.message || 'Internal server error' });
     }
 });
@@ -1437,7 +1492,7 @@ router.patch('/:id/restore', authenticateToken, async (req, res) => {
 
         await prisma.client.update({
             where: { id: clientId },
-            data: { status: 'DASHBOARD_ONLY', managedServiceStatus: 'none' },
+            data: { status: 'DASHBOARD_ONLY', managedServiceStatus: 'none', scheduledArchiveAt: null },
         });
 
         res.json({ success: true, message: 'Client restored successfully' });

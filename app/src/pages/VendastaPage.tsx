@@ -90,7 +90,7 @@ const VendastaPage = () => {
   const confirmArchiveClient = async () => {
     if (!archiveConfirm.clientId) return;
     try {
-      await dispatch(archiveClient(archiveConfirm.clientId) as any);
+      await dispatch(archiveClient({ id: archiveConfirm.clientId }) as any);
       toast.success("Client archived successfully!");
       setArchiveConfirm({ isOpen: false, clientId: null });
     } catch (error: any) {

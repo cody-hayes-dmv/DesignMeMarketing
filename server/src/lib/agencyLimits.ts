@@ -177,7 +177,8 @@ async function getTargetKeywordCounts(clientIds: string[]) {
 
   let creditsUsed = agency.keywordResearchCreditsUsed;
   let creditsResetsAt: Date | null = agency.keywordResearchCreditsResetAt;
-  if (tierConfig && (agency.keywordResearchCreditsResetAt || agency.keywordResearchCreditsUsed > 0)) {
+  const isFreeOnetime = tierConfig?.id === "free";
+  if (tierConfig && !isFreeOnetime && (agency.keywordResearchCreditsResetAt || agency.keywordResearchCreditsUsed > 0)) {
     const reset = await ensureCreditsReset(agency.id, agency);
     creditsUsed = reset.used;
     creditsResetsAt = reset.resetsAt;
@@ -335,9 +336,12 @@ export function hasResearchCredits(ctx: AgencyTierContext, need: number = 1): { 
   if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
   if (ctx.creditsUsed + need > ctx.creditsLimit) {
+    const isFree = ctx.tierConfig.id === "free";
     return {
       allowed: false,
-      message: `You have used ${ctx.creditsUsed} of ${ctx.creditsLimit} keyword research credits this month. Upgrade or wait until next month.`,
+      message: isFree
+        ? `You have used all ${ctx.creditsLimit} free keyword research credits. Upgrade to a paid plan for more.`
+        : `You have used ${ctx.creditsUsed} of ${ctx.creditsLimit} keyword research credits this month. Upgrade or wait until next month.`,
     };
   }
   return { allowed: true };
@@ -346,8 +350,9 @@ export function hasResearchCredits(ctx: AgencyTierContext, need: number = 1): { 
 /**
  * Consume keyword research credits after a successful research call.
  * Ensures monthly reset if needed, increments used count, and sets resetAt on first use in the period.
+ * For free tier (one-time credits), skip the monthly reset so credits never replenish.
  */
-export async function useResearchCredits(agencyId: string, count: number): Promise<void> {
+export async function useResearchCredits(agencyId: string, count: number, skipReset: boolean = false): Promise<void> {
   const agency = await prisma.agency.findUnique({
     where: { id: agencyId },
     select: { keywordResearchCreditsUsed: true, keywordResearchCreditsResetAt: true },
@@ -355,17 +360,19 @@ export async function useResearchCredits(agencyId: string, count: number): Promi
   if (!agency) return;
 
   let used = agency.keywordResearchCreditsUsed;
-  let resetAt = agency.keywordResearchCreditsResetAt;
-  const n = now();
 
-  if (!resetAt || n > resetAt) {
-    const endOfMonth = new Date(n.getFullYear(), n.getMonth() + 1, 0, 23, 59, 59, 999);
-    await prisma.agency.update({
-      where: { id: agencyId },
-      data: { keywordResearchCreditsUsed: 0, keywordResearchCreditsResetAt: endOfMonth },
-    });
-    used = 0;
-    resetAt = endOfMonth;
+  if (!skipReset) {
+    let resetAt = agency.keywordResearchCreditsResetAt;
+    const n = now();
+
+    if (!resetAt || n > resetAt) {
+      const endOfMonth = new Date(n.getFullYear(), n.getMonth() + 1, 0, 23, 59, 59, 999);
+      await prisma.agency.update({
+        where: { id: agencyId },
+        data: { keywordResearchCreditsUsed: 0, keywordResearchCreditsResetAt: endOfMonth },
+      });
+      used = 0;
+    }
   }
 
   await prisma.agency.update({

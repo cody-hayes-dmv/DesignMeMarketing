@@ -18,6 +18,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import { format } from "date-fns";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
@@ -446,101 +447,170 @@ const KeywordsPage: React.FC = () => {
     const element = keywordResearchPdfRef.current;
     if (!element) return;
     const previousOverflow = document.body.style.overflow;
-    const previousBg = element.style.background;
-    const previousPadding = element.style.padding;
-    const previousMinHeight = element.style.minHeight;
+
     try {
       setExportingPdf(true);
       document.body.style.overflow = "hidden";
-      element.classList.add("pdf-exporting");
-      element.style.background = "#ffffff";
-      element.style.padding = "32px";
-      element.style.boxSizing = "border-box";
-      element.style.minHeight = "auto";
-      element.scrollIntoView({ behavior: "auto", block: "start" });
-      await new Promise((r) => setTimeout(r, 200));
-      await new Promise((r) => requestAnimationFrame(r));
-      await new Promise((r) => requestAnimationFrame(r));
-      await new Promise((r) => setTimeout(r, 450));
-      const rect = element.getBoundingClientRect();
-      const w = Math.max(element.scrollWidth, element.offsetWidth, Math.ceil(rect.width));
-      const h = Math.max(element.scrollHeight, element.offsetHeight, Math.ceil(rect.height));
-      const prevWidth = element.style.width;
-      const prevMinWidth = element.style.minWidth;
-      element.style.width = `${w}px`;
-      element.style.minWidth = `${w}px`;
-      await new Promise((r) => requestAnimationFrame(r));
-      const captureW = element.scrollWidth;
-      const captureH = element.scrollHeight;
-      const canvas = await html2canvas(element, {
-        scale: 3,
-        useCORS: true,
-        logging: false,
-        width: captureW,
-        height: captureH,
-        scrollX: 0,
-        scrollY: 0,
-        x: 0,
-        y: 0,
-        backgroundColor: "#ffffff",
-        windowWidth: captureW,
-        windowHeight: captureH,
-        allowTaint: false,
-        onclone: (clonedDoc, clonedNode) => {
-          const root = clonedNode as HTMLElement;
-          root.style.backgroundColor = "#ffffff";
-          root.style.background = "#ffffff";
-          clonedDoc.body.style.backgroundColor = "#ffffff";
-          clonedDoc.body.style.background = "#ffffff";
-          root.querySelectorAll("[class*='gradient'], .bg-gray-50, .from-primary-50, .to-secondary-50").forEach((el) => {
-            (el as HTMLElement).style.background = "#ffffff";
-          });
-        },
-      });
-      element.style.width = prevWidth;
-      element.style.minWidth = prevMinWidth;
-      element.style.padding = previousPadding;
-      element.style.background = previousBg;
-      element.style.minHeight = previousMinHeight;
-      const imgData = canvas.toDataURL("image/png", 1.0);
+
+      const sections = Array.from(element.querySelectorAll(".pdf-section")) as HTMLElement[];
+      if (sections.length === 0) {
+        toast.error("No sections found to export.");
+        setExportingPdf(false);
+        return;
+      }
+
+      const ignoreFilter = (el: Element) => el.getAttribute?.("data-pdf-hide") === "true";
+      const sectionCanvases: HTMLCanvasElement[] = [];
+      for (const sec of sections) {
+        const cvs = await html2canvas(sec, {
+          scale: 2,
+          useCORS: true,
+          scrollY: -window.scrollY,
+          scrollX: -window.scrollX,
+          backgroundColor: "#FFFFFF",
+          ignoreElements: ignoreFilter,
+        });
+        sectionCanvases.push(cvs);
+      }
+
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 14;
-      const headerHeightMm = 14;
-      const contentHeightMm = pageHeight - margin * 2 - headerHeightMm;
-      const contentWidthMm = pageWidth - margin * 2;
-      let imgWidth = contentWidthMm;
-      let imgHeight = (canvas.height * contentWidthMm) / canvas.width;
-      let x = margin;
-      const y = margin + headerHeightMm;
-      if (imgHeight > contentHeightMm) {
-        const scale = contentHeightMm / imgHeight;
-        imgWidth = contentWidthMm * scale;
-        imgHeight = contentHeightMm;
-        x = margin + (contentWidthMm - imgWidth) / 2;
+
+      const reportTitle = "KEYWORD RESEARCH REPORT";
+      const seedDisplay = researchSeed || "Keyword Research";
+      const generatedDate = format(new Date(), "MMMM d, yyyy");
+      const locationName = LOCATION_OPTIONS.find((o) => o.code === researchLocation)?.name ?? "United States";
+
+      const marginX = 12;
+      const headerH = 16;
+      const footerH = 10;
+      const contentMarginTop = headerH + 3;
+      const contentMarginBottom = footerH + 2;
+      const usableWidth = pageWidth - marginX * 2;
+      const usableHeight = pageHeight - contentMarginTop - contentMarginBottom;
+      const sectionGap = 4;
+
+      const drawHeader = () => {
+        pdf.setFillColor(15, 23, 42);
+        pdf.rect(0, 0, pageWidth, headerH, "F");
+        pdf.setFillColor(59, 130, 246);
+        pdf.rect(0, headerH, pageWidth, 0.8, "F");
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11);
+        pdf.setTextColor(255, 255, 255);
+        pdf.text(`"${seedDisplay}"`, marginX, 7);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(locationName, marginX, 12);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text("Keyword Research", pageWidth - marginX, 7, { align: "right" });
+        pdf.text(generatedDate, pageWidth - marginX, 12, { align: "right" });
+      };
+
+      const drawFooter = (pageNum: number, totalPages: number) => {
+        const footerY = pageHeight - footerH / 2;
+        pdf.setDrawColor(226, 232, 240);
+        pdf.setLineWidth(0.3);
+        pdf.line(marginX, pageHeight - footerH, pageWidth - marginX, pageHeight - footerH);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: "center" });
+        pdf.setFontSize(7);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(`Generated ${generatedDate}`, marginX, footerY);
+        pdf.text("Confidential", pageWidth - marginX, footerY, { align: "right" });
+      };
+
+      // ───── Cover page ─────
+      pdf.setFillColor(15, 23, 42);
+      pdf.rect(0, 0, pageWidth, pageHeight, "F");
+      pdf.setFillColor(59, 130, 246);
+      pdf.rect(0, 0, pageWidth, 3, "F");
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(11);
+      pdf.setTextColor(148, 163, 184);
+      const labelY = pageHeight * 0.32;
+      pdf.text(reportTitle, pageWidth / 2, labelY, { align: "center" });
+      const lineW = 50;
+      pdf.setDrawColor(59, 130, 246);
+      pdf.setLineWidth(0.6);
+      pdf.line(pageWidth / 2 - lineW / 2, labelY + 4, pageWidth / 2 + lineW / 2, labelY + 4);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(28);
+      pdf.setTextColor(255, 255, 255);
+      pdf.text(`"${seedDisplay}"`, pageWidth / 2, labelY + 18, { align: "center" });
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(12);
+      pdf.setTextColor(148, 163, 184);
+      pdf.text(locationName, pageWidth / 2, labelY + 28, { align: "center" });
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(generatedDate, pageWidth / 2, labelY + 42, { align: "center" });
+      pdf.setFillColor(59, 130, 246);
+      pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
+
+      // ───── Section-based content pages ─────
+      const sectionHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
+
+      const pageAssignments: { pageIdx: number; cursorY: number; sectionIdx: number }[] = [];
+      let curPage = 0;
+      let cursorY = 0;
+      for (let i = 0; i < sectionCanvases.length; i++) {
+        const h = sectionHeights[i];
+        const fitsOnCurrentPage = cursorY === 0 || cursorY + sectionGap + h <= usableHeight;
+        if (!fitsOnCurrentPage) {
+          curPage++;
+          cursorY = 0;
+        }
+        const yPos = cursorY === 0 ? 0 : cursorY + sectionGap;
+        pageAssignments.push({ pageIdx: curPage, cursorY: yPos, sectionIdx: i });
+        cursorY = yPos + h;
       }
-      pdf.setFontSize(16);
-      pdf.setTextColor(30, 30, 30);
-      pdf.text("Keyword Research", pageWidth / 2, margin + headerHeightMm / 2 + 4, { align: "center" });
-      pdf.addImage(imgData, "PNG", x, y, imgWidth, imgHeight);
-      const seed = (researchSeed || "keyword-research").replace(/\s+/g, "-").toLowerCase();
-      const date = new Date();
-      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-      pdf.save(`keyword-research-${seed}-${dateStr.replace(/-/g, "")}.pdf`);
+      const totalContentPages = curPage + 1;
+      const totalPages = 1 + totalContentPages;
+
+      let currentPageRendered = -1;
+      for (const assignment of pageAssignments) {
+        if (assignment.pageIdx !== currentPageRendered) {
+          pdf.addPage();
+          drawHeader();
+          currentPageRendered = assignment.pageIdx;
+        }
+
+        const cvs = sectionCanvases[assignment.sectionIdx];
+        const h = sectionHeights[assignment.sectionIdx];
+        const imgData = cvs.toDataURL("image/png");
+        pdf.addImage(imgData, "PNG", marginX, contentMarginTop + assignment.cursorY, usableWidth, h);
+      }
+
+      for (let p = 0; p < totalContentPages; p++) {
+        pdf.setPage(p + 2);
+        drawFooter(p + 2, totalPages);
+      }
+
+      pdf.setPage(1);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(`Page 1 of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
+
+      const sanitizedSeed = (researchSeed || "keyword-research").replace(/[^a-z0-9]/gi, "-").toLowerCase();
+      pdf.save(`keyword-research-${sanitizedSeed}-${format(new Date(), "yyyyMMdd")}.pdf`);
       toast.success("Keyword Research exported as PDF.");
     } catch (err: any) {
       console.error("PDF export error", err);
       toast.error(err?.message || "Failed to export PDF.");
     } finally {
       document.body.style.overflow = previousOverflow;
-      element.classList.remove("pdf-exporting");
-      element.style.padding = previousPadding;
-      element.style.background = previousBg;
-      element.style.minHeight = previousMinHeight;
       setExportingPdf(false);
     }
-  }, [researchSeed]);
+  }, [researchSeed, researchLocation]);
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -604,12 +674,12 @@ const KeywordsPage: React.FC = () => {
               className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 shadow-sm"
             >
               {exportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              Export as PDF
+              Download as PDF
             </button>
           </div>
           <form
             onSubmit={handleResearchSubmit}
-            className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-primary-500"
+            className="pdf-section bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-primary-500"
           >
             <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
             <div className="p-8 space-y-6 bg-gradient-to-br from-primary-50/40 via-blue-50/30 to-indigo-50/30">
@@ -725,7 +795,7 @@ const KeywordsPage: React.FC = () => {
           )}
 
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-blue-500">
-            <div className="flex flex-col gap-4 border-b border-gray-200 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 p-6 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-4 border-b border-gray-200 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 p-6 md:flex-row md:items-center md:justify-between" data-pdf-hide="true">
               <div>
                 <h2 className="text-lg font-semibold text-white">Keyword Suggestions</h2>
                 <p className="text-sm text-white/90">
@@ -807,7 +877,7 @@ const KeywordsPage: React.FC = () => {
               </div>
             )}
 
-            <div className="overflow-x-auto">
+            <div className="pdf-section overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-gradient-to-r from-primary-100 via-blue-100 to-indigo-100">
                   <tr>
@@ -894,7 +964,7 @@ const KeywordsPage: React.FC = () => {
 
             {/* Keyword Detail (4 cards) - screenshot 1: Volume & KD, Global Volume, Intent & Trend, CPC & Competitive Density */}
             {researchResults.length > 0 && (keywordDetail || keywordDetailLoading) && (
-              <div className="border-t border-gray-200 p-6 bg-gradient-to-r from-blue-50/40 to-indigo-50/30">
+              <div className="pdf-section border-t border-gray-200 p-6 bg-gradient-to-r from-blue-50/40 to-indigo-50/30">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <span className="w-1 h-6 rounded-full bg-gradient-to-b from-primary-500 to-indigo-500" aria-hidden />
                   Keyword: {researchSeed || keywordDetail?.keyword}
@@ -999,7 +1069,7 @@ const KeywordsPage: React.FC = () => {
 
             {/* Keyword Ideas — all data from DataForSEO (variations, questions, strategy) */}
             {researchResults.length > 0 && (
-              <div className="border-t border-gray-200 p-6 bg-gradient-to-r from-violet-50/30 via-purple-50/20 to-fuchsia-50/30">
+              <div className="pdf-section border-t border-gray-200 p-6 bg-gradient-to-r from-violet-50/30 via-purple-50/20 to-fuchsia-50/30">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <span className="w-1 h-6 rounded-full bg-gradient-to-b from-violet-500 to-fuchsia-500" aria-hidden />
                   Keyword Ideas
@@ -1158,13 +1228,13 @@ const KeywordsPage: React.FC = () => {
 
             {/* SERP Analysis - screenshot 3: Domain/URL tabs, Results, SERP Features, pagination, expandable sections, Export */}
             {researchResults.length > 0 && (serpAnalysis || serpAnalysisLoading) && (
-              <div className="border-t border-gray-200 p-6 bg-gradient-to-r from-slate-50/60 via-gray-50/40 to-slate-50/60">
+              <div className="pdf-section border-t border-gray-200 p-6 bg-gradient-to-r from-slate-50/60 via-gray-50/40 to-slate-50/60">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                     <span className="w-1 h-6 rounded-full bg-gradient-to-b from-slate-500 to-gray-600" aria-hidden />
                     SERP Analysis
                   </h3>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap" data-pdf-hide="true">
                     <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
                       <button type="button" onClick={() => setSerpViewMode("domain")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${serpViewMode === "domain" ? "bg-primary-600 text-white" : "text-gray-700 hover:bg-gray-200"}`}>Domain</button>
                       <button type="button" onClick={() => setSerpViewMode("url")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${serpViewMode === "url" ? "bg-primary-600 text-white" : "text-gray-700 hover:bg-gray-200"}`}>URL</button>
@@ -1193,7 +1263,7 @@ const KeywordsPage: React.FC = () => {
                         ))}
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2 mb-4">
+                    <div className="flex flex-wrap gap-2 mb-4" data-pdf-hide="true">
                       {[0, 10, 20].map((off) => (
                         <button key={off} type="button" onClick={() => loadSerpPage(off)} disabled={serpAnalysisLoading} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${serpAnalysisOffset === off ? "bg-primary-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
                           Page {off / 10 + 1}

@@ -57,7 +57,7 @@ export const TIERS: Record<TierId, TierConfig> = {
     maxDashboards: 0,
     keywordsPerDashboard: 0,
     keywordsTotal: null,
-    keywordResearchCreditsPerMonth: 0,
+    keywordResearchCreditsPerMonth: 5,
     rankUpdateFrequency: "daily",
     aiUpdateFrequency: "weekly",
     maxTeamUsers: 0,

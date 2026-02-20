@@ -7,6 +7,7 @@ export interface Client {
   domain: string;
   status: "ACTIVE" | "PENDING" | "REJECTED" | "DASHBOARD_ONLY" | "CANCELED" | "SUSPENDED" | "ARCHIVED";
   canceledEndDate?: string | null;
+  scheduledArchiveAt?: string | null;
   industry?: string;
   targets?: string[] | string | null;
   loginUrl?: string | null;
@@ -114,10 +115,10 @@ export const createClient = createAsyncThunk(
 
 export const archiveClient = createAsyncThunk(
   "client/archiveClient",
-  async (id: string) => {
+  async ({ id, scheduledDate }: { id: string; scheduledDate?: string }) => {
     try {
-      await api.patch(`/clients/${id}/archive`);
-      return id;
+      const res = await api.patch(`/clients/${id}/archive`, scheduledDate ? { scheduledDate } : {});
+      return { id, scheduled: res.data?.scheduled ?? false };
     } catch (error: any) {
       throw new Error(
         error.response?.data?.message || "Failed to archive client"
@@ -351,8 +352,9 @@ const clientSlice = createSlice({
         state.rankings = action.payload;
       })
       .addCase(archiveClient.fulfilled, (state, action) => {
-        const idx = state.clients.findIndex((c) => c.id === action.payload);
-        if (idx !== -1) {
+        const { id, scheduled } = action.payload;
+        const idx = state.clients.findIndex((c) => c.id === id);
+        if (idx !== -1 && !scheduled) {
           state.clients[idx] = { ...state.clients[idx], status: "ARCHIVED" };
         }
       })

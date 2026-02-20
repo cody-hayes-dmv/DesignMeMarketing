@@ -204,6 +204,7 @@ model Client {
   status                Status                  @default(PENDING)
   canceledEndDate       DateTime?               // When status is CANCELED, optional end date to display
   keepDashboardAfterEndDate Boolean?            @default(false) // If true, after end date → DASHBOARD_ONLY; else ARCHIVED
+  scheduledArchiveAt    DateTime?               // When set, auto-archive on this date
   loginUrl              String?
   username              String?
   password              String?
