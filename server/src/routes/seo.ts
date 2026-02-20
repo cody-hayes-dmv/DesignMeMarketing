@@ -1489,8 +1489,8 @@ export async function autoSyncBacklinksForStaleClients(params?: { batchSize?: nu
 
   backlinksAutoSyncInFlight = true;
   try {
-    // Client.domain is a required String in this schema; filter out empty strings only.
-    const where: any = { domain: { not: "" } };
+    const statusFilter = { notIn: ["ARCHIVED" as const, "SUSPENDED" as const, "REJECTED" as const] };
+    const where: any = { domain: { not: "" }, status: statusFilter };
     if (backlinksAutoSyncLastClientId) {
       where.id = { gt: backlinksAutoSyncLastClientId };
     }
@@ -1506,7 +1506,7 @@ export async function autoSyncBacklinksForStaleClients(params?: { batchSize?: nu
     if (clients.length === 0 && backlinksAutoSyncLastClientId) {
       backlinksAutoSyncLastClientId = null;
       clients = await prisma.client.findMany({
-        where: { domain: { not: "" } },
+        where: { domain: { not: "" }, status: statusFilter },
         orderBy: { id: "asc" },
         take: batchSize,
         select: { id: true, domain: true, name: true },
@@ -1535,7 +1535,7 @@ export async function autoRefreshSeoDataForDueClients(params?: { batchSize?: num
 
   const batchSize = Math.min(50, Math.max(1, Number(params?.batchSize ?? 5)));
   const clients = await prisma.client.findMany({
-    where: { domain: { not: "" } },
+    where: { domain: { not: "" }, status: { notIn: ["ARCHIVED", "SUSPENDED", "REJECTED"] } },
     select: { id: true, name: true, vendasta: true },
     take: batchSize * 2,
   });
@@ -5119,7 +5119,7 @@ async function fetchAiAggregatedMetrics(
   }
 }
 
-async function fetchAiSearchMentions(
+export async function fetchAiSearchMentions(
   target: string,
   targetType: "domain" | "url",
   locationCode: number,
@@ -5385,7 +5385,7 @@ async function fetchAiTopDomains(
 }
 
 // DataForSEO AI Keyword Data: search volume + 12-month trend per keyword.
-async function fetchAiKeywordSearchVolume(
+export async function fetchAiKeywordSearchVolume(
   keywords: string[],
   locationCode: number,
   languageCode: string
@@ -6472,6 +6472,13 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       return res.status(403).json({
         message: "This client's dashboard is suspended.",
         code: "DASHBOARD_SUSPENDED",
+      });
+    }
+
+    if (client.status === "ARCHIVED") {
+      return res.status(403).json({
+        message: "This client is archived. Restore it to view live data.",
+        code: "DASHBOARD_ARCHIVED",
       });
     }
 

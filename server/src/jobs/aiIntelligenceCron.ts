@@ -1,9 +1,9 @@
-import { prisma } from "../prismaClient";
-import { Client } from "@prisma/client";
+import { prisma } from "../lib/prisma.js";
+import type { Client } from "@prisma/client";
 import {
   fetchAiSearchMentions,
   fetchAiKeywordSearchVolume,
-} from "../routes/seo"; // reuse existing helpers for mentions & keyword volume
+} from "../routes/seo.js";
 
 // NOTE: These cron-style jobs are intended to be wired into a real scheduler
 // (node-cron, bull, external worker, etc.). For now they are plain functions
@@ -135,7 +135,7 @@ export async function updateAISearchVolumeTrends(date: Date = new Date()): Promi
       select: { keyword: true },
       take: 200,
     });
-    const keywordStrings = keywords.map((k) => k.keyword).filter(Boolean) as string[];
+    const keywordStrings = keywords.map((k: { keyword: string }) => k.keyword).filter(Boolean) as string[];
     if (keywordStrings.length === 0) continue;
 
     const keywordVolume = await fetchAiKeywordSearchVolume(keywordStrings, 2840, "en");

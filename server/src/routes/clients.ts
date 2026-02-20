@@ -1367,7 +1367,87 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Delete a client
+// Archive a client (replaces direct delete for active clients)
+router.patch('/:id/archive', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') return res.status(403).json({ message: 'Access denied' });
+
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: { user: { select: { memberships: { select: { agencyId: true } } } } },
+        });
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+
+        const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+        const agencyIds = (client.user as any).memberships?.map((m: { agencyId: string }) => m.agencyId) ?? [];
+        let canArchive = isSuperAdmin;
+        if (!canArchive && (req.user.role === 'AGENCY' || req.user.role === 'ADMIN')) {
+            const membership = await prisma.userAgency.findFirst({ where: { userId: req.user.userId }, select: { agencyId: true } });
+            canArchive = !!(membership && agencyIds.includes(membership.agencyId));
+        }
+        if (!canArchive) return res.status(403).json({ message: 'You can only archive clients that belong to your agency' });
+
+        if (client.status === 'ARCHIVED') {
+            return res.status(400).json({ message: 'Client is already archived' });
+        }
+
+        await prisma.$transaction([
+            prisma.client.update({
+                where: { id: clientId },
+                data: { status: 'ARCHIVED', managedServiceStatus: 'archived' },
+            }),
+            prisma.reportSchedule.updateMany({
+                where: { clientId },
+                data: { isActive: false },
+            }),
+        ]);
+
+        res.json({ success: true, message: 'Client archived successfully' });
+    } catch (error: any) {
+        console.error('Archive client error:', error);
+        res.status(500).json({ message: error?.message || 'Internal server error' });
+    }
+});
+
+// Restore a client from archive
+router.patch('/:id/restore', authenticateToken, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        if (req.user.role === 'USER') return res.status(403).json({ message: 'Access denied' });
+
+        const client = await prisma.client.findUnique({
+            where: { id: clientId },
+            include: { user: { select: { memberships: { select: { agencyId: true } } } } },
+        });
+        if (!client) return res.status(404).json({ message: 'Client not found' });
+
+        const isSuperAdmin = req.user.role === 'SUPER_ADMIN';
+        const agencyIds = (client.user as any).memberships?.map((m: { agencyId: string }) => m.agencyId) ?? [];
+        let canRestore = isSuperAdmin;
+        if (!canRestore && (req.user.role === 'AGENCY' || req.user.role === 'ADMIN')) {
+            const membership = await prisma.userAgency.findFirst({ where: { userId: req.user.userId }, select: { agencyId: true } });
+            canRestore = !!(membership && agencyIds.includes(membership.agencyId));
+        }
+        if (!canRestore) return res.status(403).json({ message: 'You can only restore clients that belong to your agency' });
+
+        if (client.status !== 'ARCHIVED' && client.status !== 'REJECTED') {
+            return res.status(400).json({ message: 'Client is not archived' });
+        }
+
+        await prisma.client.update({
+            where: { id: clientId },
+            data: { status: 'DASHBOARD_ONLY', managedServiceStatus: 'none' },
+        });
+
+        res.json({ success: true, message: 'Client restored successfully' });
+    } catch (error: any) {
+        console.error('Restore client error:', error);
+        res.status(500).json({ message: error?.message || 'Internal server error' });
+    }
+});
+
+// Permanently delete a client (only allowed if already archived)
 router.delete('/:id', authenticateToken, async (req, res) => {
     const clientId = req.params.id;
 
@@ -1375,7 +1455,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         if (req.user.role === 'USER') {
             return res.status(403).json({ message: 'Access denied' });
         }
-        // Check if client exists and user has access
+
         const existing = await prisma.client.findUnique({
             where: { id: clientId },
             include: {
@@ -1393,7 +1473,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             return res.status(404).json({ message: 'Client not found' });
         }
 
-        // Check access: user must own the client or be ADMIN/SUPER_ADMIN
+        if (existing.status !== 'ARCHIVED' && existing.status !== 'REJECTED') {
+            return res.status(400).json({ message: 'Client must be archived before it can be permanently deleted. Archive the client first.' });
+        }
+
         const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
         const isOwner = existing.userId === req.user.userId;
 
@@ -1401,12 +1484,11 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Access denied' });
         }
 
-        // Delete client (cascade will handle related data)
         await prisma.client.delete({
             where: { id: clientId },
         });
 
-        res.json({ message: 'Client deleted successfully' });
+        res.json({ message: 'Client deleted permanently' });
     } catch (error) {
         console.error('Delete client error:', error);
         res.status(500).json({ message: 'Internal server error' });

@@ -144,15 +144,33 @@ async function sendTaskCompletedEmails(
   task: {
     title: string;
     id: string;
+    clientId?: string | null;
     client?: { name: string } | null;
-    assignee?: { email: string | null; name: string | null } | null;
-    createdBy?: { email: string | null; name: string | null } | null;
+    assignee?: { id?: string; email: string | null; name: string | null } | null;
+    createdBy?: { id?: string; email: string | null; name: string | null } | null;
     approvalNotifyUserIds?: string | null;
+    agencyId?: string | null;
   },
-  approvalNotifyUserIds: string | null
+  approvalNotifyUserIds: string | null,
+  completedByUserId?: string
 ): Promise<void> {
   const toEmails: string[] = [];
-  if (task.assignee?.email) toEmails.push(task.assignee.email);
+
+  // 1. Notify client users (the actual client contacts who need to know)
+  if (task.clientId) {
+    const clientUsers = await prisma.clientUser.findMany({
+      where: { clientId: task.clientId, status: "ACTIVE" as const },
+      select: { user: { select: { email: true } } },
+    });
+    clientUsers.forEach((cu: { user: { email: string | null } }) => cu.user.email && toEmails.push(cu.user.email));
+  }
+
+  // 2. Notify the task creator if they didn't complete it themselves
+  if (task.createdBy?.email && task.createdBy.id !== completedByUserId) {
+    toEmails.push(task.createdBy.email);
+  }
+
+  // 3. Notify approval-notify users
   if (approvalNotifyUserIds) {
     try {
       const ids = JSON.parse(approvalNotifyUserIds) as string[];
@@ -165,8 +183,14 @@ async function sendTaskCompletedEmails(
       // ignore invalid JSON
     }
   }
-  const unique = [...new Set(toEmails)];
+
+  // Never email the person who completed the task
+  const excludeEmail = completedByUserId
+    ? (await prisma.user.findUnique({ where: { id: completedByUserId }, select: { email: true } }))?.email
+    : null;
+  const unique = [...new Set(toEmails)].filter((e) => e !== excludeEmail);
   if (unique.length === 0) return;
+
   const clientName = task.client?.name ?? "Client";
   const subject = `Task completed: ${task.title}`;
   const html = `<p>The following task has been marked completed:</p>
@@ -176,6 +200,19 @@ async function sendTaskCompletedEmails(
     sendEmail({ to, subject, html }).catch((e) =>
       console.warn("[Task] Completion email failed", to, e?.message)
     );
+  }
+
+  // 4. Create in-app notification for the agency
+  if (task.agencyId) {
+    prisma.notification.create({
+      data: {
+        agencyId: task.agencyId,
+        type: "task_completed",
+        title: "Task completed",
+        message: `"${task.title}" for ${clientName} has been completed.`,
+        link: `/agency/tasks`,
+      },
+    }).catch((e) => console.warn("[Task] In-app notification failed", e?.message));
   }
 }
 
@@ -1002,7 +1039,8 @@ router.put("/:id", authenticateToken, async (req, res) => {
           ...updatedTask,
           approvalNotifyUserIds: updatedTask.approvalNotifyUserIds ?? undefined,
         },
-        updatedTask.approvalNotifyUserIds
+        updatedTask.approvalNotifyUserIds,
+        req.user.userId
       ).catch((e) => console.warn("[Task] Completion emails failed", e?.message));
     }
 
@@ -1067,7 +1105,8 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
           ...updated,
           approvalNotifyUserIds: updated.approvalNotifyUserIds ?? undefined,
         },
-        updated.approvalNotifyUserIds
+        updated.approvalNotifyUserIds,
+        req.user.userId
       ).catch((e) => console.warn("[Task] Completion emails failed", e?.message));
     }
 

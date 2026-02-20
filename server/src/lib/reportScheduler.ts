@@ -887,12 +887,13 @@ export async function refreshAllGA4Data(): Promise<void> {
 
     console.log(`[GA4 Auto-Refresh] Starting Monday morning refresh at ${now.toISOString()}`);
     
-    // Find all clients with GA4 connected (includes Vendasta clients — they have full features)
+    // Find all non-archived clients with GA4 connected (includes Vendasta clients — they have full features)
     const connectedClients = await prisma.client.findMany({
       where: {
         ga4RefreshToken: { not: null },
         ga4PropertyId: { not: null },
-        ga4ConnectedAt: { not: null }
+        ga4ConnectedAt: { not: null },
+        status: { notIn: ["ARCHIVED", "SUSPENDED", "REJECTED"] },
       },
       select: {
         id: true,
@@ -946,13 +947,16 @@ export async function processScheduledReports(): Promise<void> {
   try {
     const now = new Date();
     
-    // Find all active schedules that are due
+    // Find all active schedules that are due (skip archived/suspended/rejected clients)
     const dueSchedules = await prisma.reportSchedule.findMany({
       where: {
         isActive: true,
         nextRunAt: {
           lte: now
-        }
+        },
+        client: {
+          status: { notIn: ["ARCHIVED", "SUSPENDED", "REJECTED"] },
+        },
       },
       include: {
         client: true
