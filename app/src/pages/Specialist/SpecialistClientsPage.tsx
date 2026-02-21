@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import { Loader2, PersonStanding, Info, Plus } from "lucide-react";
+import { Loader2, PersonStanding, Info, Plus, Users, ClipboardList } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
@@ -102,12 +102,47 @@ const SpecialistClientsPage = () => {
     );
   }
 
+  const totalTasks = clients.reduce((sum, c) => sum + c.taskCount, 0);
+
   return (
-    <div className="p-8">
-      <div className="rounded-xl border-l-4 border-primary-500 bg-gradient-to-r from-primary-50/80 via-blue-50/60 to-indigo-50/50 px-5 py-4 mb-6 shadow-sm">
-        <p className="text-primary-900 font-medium">
-          Clients you have tasks for (read-only). You receive tasks; you cannot create or edit clients.
-        </p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8">
+      {/* Header Banner */}
+      <div className="relative rounded-2xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-500 p-8 shadow-lg overflow-hidden mb-8">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuNSIgZmlsbD0id2hpdGUiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-50" />
+        <div className="relative">
+          <h1 className="text-3xl font-bold text-white">My Clients</h1>
+          <p className="text-violet-100 mt-2">
+            Clients you have tasks for (read-only). You receive tasks; you cannot create or edit clients.
+          </p>
+        </div>
+      </div>
+
+      {/* Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-2xl border border-violet-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-violet-100/50 transition-all duration-200 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-violet-400/20 to-violet-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Total Clients</p>
+              <p className="text-3xl font-extrabold text-gray-900">{clients.length}</p>
+            </div>
+            <div className="bg-gradient-to-br from-violet-500 to-violet-700 p-3 rounded-xl shadow-lg shadow-violet-200">
+              <Users className="h-6 w-6 text-white" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-purple-100/50 transition-all duration-200 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-purple-400/20 to-purple-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Active Tasks</p>
+              <p className="text-3xl font-extrabold text-gray-900">{totalTasks}</p>
+            </div>
+            <div className="bg-gradient-to-br from-purple-500 to-purple-700 p-3 rounded-xl shadow-lg shadow-purple-200">
+              <ClipboardList className="h-6 w-6 text-white" />
+            </div>
+          </div>
+        </div>
       </div>
       {clients.length === 0 ? (
         <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/60 p-12 text-center shadow-sm">
@@ -122,10 +157,10 @@ const SpecialistClientsPage = () => {
           </Link>
         </div>
       ) : (
-        <div className="rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
+        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
           <table className="w-full">
             <thead>
-              <tr className="bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white">
+              <tr className="bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-500 text-white">
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Client</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Domain</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider">Your tasks</th>
@@ -139,7 +174,7 @@ const SpecialistClientsPage = () => {
               {clients.map((client, index) => (
                 <tr
                   key={client.id}
-                  className={index % 2 === 0 ? "hover:bg-blue-50/60" : "bg-slate-50/50 hover:bg-blue-50/60"}
+                  className={`transition-colors ${index % 2 === 0 ? "hover:bg-violet-50/50" : "bg-gray-50/60 hover:bg-violet-50/50"}`}
                 >
                   <td className="px-6 py-4 text-sm font-semibold text-gray-900">{client.name}</td>
                   <td className="px-6 py-4 text-sm text-primary-800/90">{client.domain}</td>

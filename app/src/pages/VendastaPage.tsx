@@ -241,12 +241,13 @@ const VendastaPage = () => {
   const archivedCount = vendastaClients.filter((m) => isArchivedStatus(m.status)).length;
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Vendasta</h1>
-          <p className="text-gray-600 mt-2">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 p-8">
+      {/* Header Banner */}
+      <div className="relative rounded-2xl bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 p-8 shadow-lg overflow-hidden mb-8">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuNSIgZmlsbD0id2hpdGUiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-50" />
+        <div className="relative">
+          <h1 className="text-3xl font-bold text-white">Vendasta</h1>
+          <p className="text-orange-100 mt-2">
             Manage your Vendasta clients and view their details
           </p>
         </div>
@@ -254,34 +255,41 @@ const VendastaPage = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <div className="flex items-center justify-between">
+        <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-orange-100/50 transition-all duration-200 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-orange-400/20 to-orange-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative">
             <div>
               <p className="text-sm font-medium text-gray-600">Total Vendasta Clients</p>
-              <p className="text-2xl font-bold text-primary-600">{totalCount}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{totalCount}</p>
             </div>
-            <Store className="h-8 w-8 text-primary-600" />
+            <div className="bg-gradient-to-br from-orange-500 to-orange-700 p-3 rounded-xl shadow-lg shadow-orange-200">
+              <Store className="h-6 w-6 text-white" />
+            </div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <div className="flex items-center justify-between">
+        <div className="bg-white p-6 rounded-2xl border border-green-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-100/50 transition-all duration-200 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-green-400/20 to-green-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative">
             <div>
               <p className="text-sm font-medium text-gray-600">Active Clients</p>
-              <p className="text-2xl font-bold text-secondary-600">{activeCount}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{activeCount}</p>
             </div>
-            <Building2 className="h-8 w-8 text-secondary-600" />
+            <div className="bg-gradient-to-br from-green-500 to-green-700 p-3 rounded-xl shadow-lg shadow-green-200">
+              <Building2 className="h-6 w-6 text-white" />
+            </div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <div className="flex items-center justify-between">
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gray-100/50 transition-all duration-200 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-gray-400/20 to-gray-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative">
             <div>
               <p className="text-sm font-medium text-gray-600">Archived Clients</p>
-              <p className="text-2xl font-bold text-gray-900">{archivedCount}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{archivedCount}</p>
             </div>
-            <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-semibold">
-              A
+            <div className="bg-gradient-to-br from-gray-500 to-gray-700 p-3 rounded-xl shadow-lg shadow-gray-200">
+              <Building2 className="h-6 w-6 text-white" />
             </div>
           </div>
         </div>

@@ -198,149 +198,127 @@ const SuperAdminDashboard = () => {
 
   return (
     <Layout title="Super Admin Dashboard">
-      <div className="space-y-10">
-        {/* Header */}
-        <div className="pb-2 border-b border-gray-100">
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
-            Super Admin Dashboard
-          </h1>
-          <p className="text-gray-500 mt-2 text-base">
-            Overview of agencies, clients, and platform activity
-          </p>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 space-y-10 p-8 -m-8">
+        {/* Header Banner */}
+        <div className="relative rounded-2xl bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-500 p-8 shadow-lg overflow-hidden">
+          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuNSIgZmlsbD0id2hpdGUiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-50" />
+          <div className="relative">
+            <h1 className="text-3xl font-bold text-white tracking-tight">
+              Super Admin Dashboard
+            </h1>
+            <p className="text-blue-100 mt-2 text-base">
+              Overview of agencies, clients, and platform activity
+            </p>
+          </div>
         </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6 lg:gap-8">
           {/* Total Agencies */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
-            <div className="h-1 w-full bg-primary-500" aria-hidden />
-            <div className="p-6 lg:p-8">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Total Agencies</p>
-                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {statsLoading ? "—" : totalAgencies}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">agencies</p>
-                  {!statsLoading && (
-                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
-                      {newAgenciesLast30Days} new in last 30 days
-                    </p>
-                  )}
-                </div>
-                <div className="bg-primary-50 p-3.5 rounded-xl shrink-0 group-hover:bg-primary-100 transition-colors" aria-hidden>
-                  <Building2 className="h-7 w-7 text-primary-600" />
-                </div>
+          <button className="bg-white rounded-2xl border border-primary-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-primary-400/20 to-primary-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+            <div className="flex items-start justify-between gap-4 relative">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Total Agencies</p>
+                <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                  {statsLoading ? "—" : totalAgencies}
+                </p>
+                {!statsLoading && (
+                  <p className="text-sm text-gray-500 mt-3">{newAgenciesLast30Days} new in last 30 days</p>
+                )}
+              </div>
+              <div className="bg-gradient-to-br from-primary-500 to-primary-700 p-3 rounded-xl shrink-0 shadow-lg shadow-primary-200" aria-hidden>
+                <Building2 className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Active Agencies */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
-            <div className="h-1 w-full bg-green-500" aria-hidden />
-            <div className="p-6 lg:p-8">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Active Agencies</p>
-                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {statsLoading ? "—" : activeAgencies}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">active</p>
-                  {!statsLoading && (
-                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
-                      {totalAgencies > 0 ? Math.round((activeAgencies / totalAgencies) * 100) : 0}% of total
-                    </p>
-                  )}
-                </div>
-                <div className="bg-green-50 p-3.5 rounded-xl shrink-0 group-hover:bg-green-100 transition-colors" aria-hidden>
-                  <CheckCircle className="h-7 w-7 text-green-600" />
-                </div>
+          <button className="bg-white rounded-2xl border border-green-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-green-400/20 to-green-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+            <div className="flex items-start justify-between gap-4 relative">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Active Agencies</p>
+                <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                  {statsLoading ? "—" : activeAgencies}
+                </p>
+                {!statsLoading && (
+                  <p className="text-sm text-gray-500 mt-3">{totalAgencies > 0 ? Math.round((activeAgencies / totalAgencies) * 100) : 0}% of total</p>
+                )}
+              </div>
+              <div className="bg-gradient-to-br from-green-500 to-green-700 p-3 rounded-xl shrink-0 shadow-lg shadow-green-200" aria-hidden>
+                <CheckCircle className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Active Clients */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
-            <div className="h-1 w-full bg-indigo-500" aria-hidden />
-            <div className="p-6 lg:p-8">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Active Clients</p>
-                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {statsLoading ? "—" : activeManagedClients}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">active clients</p>
-                  {!statsLoading && (
-                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
-                      Clients with active status
-                    </p>
-                  )}
-                </div>
-                <div className="bg-indigo-50 p-3.5 rounded-xl shrink-0 group-hover:bg-indigo-100 transition-colors" aria-hidden>
-                  <Users className="h-7 w-7 text-indigo-600" />
-                </div>
+          <button className="bg-white rounded-2xl border border-indigo-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-400/20 to-indigo-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+            <div className="flex items-start justify-between gap-4 relative">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Active Clients</p>
+                <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                  {statsLoading ? "—" : activeManagedClients}
+                </p>
+                {!statsLoading && (
+                  <p className="text-sm text-gray-500 mt-3">Clients with active status</p>
+                )}
+              </div>
+              <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 p-3 rounded-xl shrink-0 shadow-lg shadow-indigo-200" aria-hidden>
+                <Users className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Total Dashboards */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
-            <div className="h-1 w-full bg-blue-500" aria-hidden />
-            <div className="p-6 lg:p-8">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Total Dashboards</p>
-                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {statsLoading ? "—" : totalDashboards}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">dashboards</p>
-                  {!statsLoading && (
-                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
-                      {newClientsLast30Days} new in last 30 days
-                    </p>
-                  )}
-                </div>
-                <div className="bg-blue-50 p-3.5 rounded-xl shrink-0 group-hover:bg-blue-100 transition-colors" aria-hidden>
-                  <Activity className="h-7 w-7 text-blue-600" />
-                </div>
+          <button className="bg-white rounded-2xl border border-blue-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-400/20 to-blue-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+            <div className="flex items-start justify-between gap-4 relative">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Total Dashboards</p>
+                <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                  {statsLoading ? "—" : totalDashboards}
+                </p>
+                {!statsLoading && (
+                  <p className="text-sm text-gray-500 mt-3">{newClientsLast30Days} new in last 30 days</p>
+                )}
+              </div>
+              <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-3 rounded-xl shrink-0 shadow-lg shadow-blue-200" aria-hidden>
+                <Activity className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Pending Requests */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow hover:border-gray-200 transition-all duration-200 overflow-hidden group">
-            <div className="h-1 w-full bg-rose-500" aria-hidden />
-            <div className="p-6 lg:p-8">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-4">Pending Requests</p>
-                  <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
-                    {statsLoading ? "—" : pendingRequests}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">pending</p>
-                  {!statsLoading && (
-                    <p className="text-sm text-gray-500 mt-4 leading-relaxed border-t border-gray-100 pt-4">
-                      Managed service activations
-                    </p>
-                  )}
-                </div>
-                <div className="relative bg-rose-50 p-3.5 rounded-xl shrink-0 group-hover:bg-rose-100 transition-colors" aria-hidden>
-                  <AlertCircle className="h-7 w-7 text-rose-600" />
-                  {pendingRequests > 0 && (
-                    <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-rose-600 px-1 text-xs font-bold text-white ring-2 ring-white">
-                      {pendingRequests}
-                    </span>
-                  )}
-                </div>
+          <button className="bg-white rounded-2xl border border-rose-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-rose-400/20 to-rose-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+            <div className="flex items-start justify-between gap-4 relative">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Pending Requests</p>
+                <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                  {statsLoading ? "—" : pendingRequests}
+                </p>
+                {!statsLoading && (
+                  <p className="text-sm text-gray-500 mt-3">Managed service activations</p>
+                )}
+              </div>
+              <div className="relative bg-gradient-to-br from-rose-500 to-rose-700 p-3 rounded-xl shrink-0 shadow-lg shadow-rose-200" aria-hidden>
+                <AlertCircle className="h-6 w-6 text-white" />
+                {pendingRequests > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1 text-xs font-bold text-white ring-2 ring-white">
+                    {pendingRequests}
+                  </span>
+                )}
               </div>
             </div>
-          </div>
+          </button>
         </div>
 
         {/* Pending managed service approvals */}
         {(loadingPending || pendingManagedServices.length > 0) && (
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-            <div className="p-6 border-b border-gray-200">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-amber-500">
+            <div className="p-6 border-b border-gray-200 bg-amber-50/30">
               <h2 className="text-lg font-semibold text-gray-900">
                 Pending Managed Service Requests ({pendingManagedServices.length})
               </h2>
@@ -434,8 +412,8 @@ const SuperAdminDashboard = () => {
         )}
 
         {/* Upcoming tasks */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-blue-500">
+          <div className="p-6 border-b border-gray-200 bg-blue-50/30 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Upcoming tasks</h2>
             <button
               type="button"
@@ -517,8 +495,8 @@ const SuperAdminDashboard = () => {
         </div>
 
         {/* Financial Overview */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-emerald-500">
+          <div className="p-6 border-b border-gray-200 bg-emerald-50/30 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Financial Overview</h2>
             <div className="flex items-center gap-2">
               <button
@@ -604,8 +582,8 @@ const SuperAdminDashboard = () => {
         {/* Recent Agencies and Clients */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Agencies */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-            <div className="p-6 border-b border-gray-200">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-primary-500">
+            <div className="p-6 border-b border-gray-200 bg-primary-50/30">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-900">Recent Agencies</h2>
                 <button
@@ -653,8 +631,8 @@ const SuperAdminDashboard = () => {
           </div>
 
           {/* Recent Clients */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-            <div className="p-6 border-b border-gray-200">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-indigo-500">
+            <div className="p-6 border-b border-gray-200 bg-indigo-50/30">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-900">Recent Clients</h2>
                 <button
@@ -714,7 +692,7 @@ const SuperAdminDashboard = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-violet-500 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button

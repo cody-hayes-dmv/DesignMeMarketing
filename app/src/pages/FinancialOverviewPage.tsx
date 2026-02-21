@@ -204,15 +204,18 @@ const FinancialOverviewPage: React.FC = () => {
   const notConfigured = !mrrData?.configured && !activityData?.configured;
 
   return (
-    <div className="p-8">
-      <div className="mb-6 rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
-        <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
-        <div className="flex items-center justify-between gap-4 px-6 py-4 bg-gradient-to-r from-primary-50/60 via-blue-50/40 to-indigo-50/40 border-l-4 border-l-primary-500">
-          <h2 className="text-xl font-semibold text-gray-900">Financial Overview</h2>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 p-8">
+      <div className="relative rounded-2xl bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-500 p-8 shadow-lg overflow-hidden mb-8">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuNSIgZmlsbD0id2hpdGUiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-50" />
+        <div className="relative flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-white">Financial Overview</h2>
+            <p className="text-blue-100 mt-1 text-sm">Revenue breakdown, subscription activity, and API spending</p>
+          </div>
           <button
             onClick={handleRefresh}
             disabled={mrrLoading || activityLoading || dataForSeoLoading}
-            className="inline-flex items-center gap-2 rounded-lg border border-primary-200 bg-white px-4 py-2 text-sm font-medium text-primary-700 shadow-sm hover:bg-primary-50 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2 text-sm font-medium text-white hover:bg-white/30 transition-colors disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${mrrLoading || activityLoading || dataForSeoLoading ? "animate-spin" : ""}`} />
             Refresh
@@ -231,7 +234,7 @@ const FinancialOverviewPage: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         {/* Left Panel - MRR Breakdown */}
-        <div className="rounded-xl border border-gray-200 border-l-4 border-l-primary-500 bg-white shadow-sm overflow-hidden">
+        <div className="rounded-xl border border-gray-200 border-l-4 border-l-primary-500 bg-white shadow-sm overflow-hidden hover:shadow-lg hover:shadow-primary-100/50 transition-all duration-200">
           <div className="px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600">
             <h3 className="text-lg font-semibold text-white">Monthly Recurring Revenue Breakdown</h3>
             <p className="mt-1 text-sm text-white/90">
@@ -319,7 +322,7 @@ const FinancialOverviewPage: React.FC = () => {
         </div>
 
         {/* Right Panel - Subscription Activity */}
-        <div className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 bg-white shadow-sm overflow-hidden">
+        <div className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-500 bg-white shadow-sm overflow-hidden hover:shadow-lg hover:shadow-emerald-100/50 transition-all duration-200">
           <div className="px-6 py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600">
             <h3 className="text-lg font-semibold text-white">Subscription Activity (Last 30 Days)</h3>
             <p className="mt-1 text-sm text-white/90">
@@ -380,27 +383,30 @@ const FinancialOverviewPage: React.FC = () => {
               </div>
 
               <div className="mt-6 grid grid-cols-3 gap-4">
-                <div className="rounded-lg border border-gray-200 border-l-4 border-l-emerald-500 bg-emerald-50/50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wider text-gray-600">New MRR added</p>
-                  <p className="mt-1 text-xl font-bold text-emerald-600">
-                    +{formatCurrency(activityData.newMrrAdded)}
-                  </p>
+                <div className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-emerald-400/20 to-emerald-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 p-1.5 rounded-lg"><ArrowUp className="h-3.5 w-3.5 text-white" /></div>
+                    <p className="text-xs font-medium uppercase tracking-wider text-gray-600">New MRR added</p>
+                  </div>
+                  <p className="mt-1 text-xl font-bold text-emerald-600">+{formatCurrency(activityData.newMrrAdded)}</p>
                 </div>
-                <div className="rounded-lg border border-gray-200 border-l-4 border-l-red-500 bg-red-50/50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wider text-gray-600">Churned MRR</p>
-                  <p className="mt-1 text-xl font-bold text-red-600">
-                    -{formatCurrency(activityData.churnedMrr)}
-                  </p>
+                <div className="rounded-xl border border-red-100 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-red-400/20 to-red-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="bg-gradient-to-br from-red-500 to-red-700 p-1.5 rounded-lg"><ArrowDown className="h-3.5 w-3.5 text-white" /></div>
+                    <p className="text-xs font-medium uppercase tracking-wider text-gray-600">Churned MRR</p>
+                  </div>
+                  <p className="mt-1 text-xl font-bold text-red-600">-{formatCurrency(activityData.churnedMrr)}</p>
                 </div>
-                <div className={`rounded-lg border border-gray-200 border-l-4 p-4 ${activityData.netChange >= 0 ? "border-l-teal-500 bg-teal-50/50" : "border-l-amber-500 bg-amber-50/50"}`}>
-                  <p className="text-xs font-medium uppercase tracking-wider text-gray-600">Net change</p>
-                  <p
-                    className={`mt-1 text-xl font-bold ${
-                      activityData.netChange >= 0 ? "text-teal-600" : "text-amber-600"
-                    }`}
-                  >
-                    {activityData.netChange >= 0 ? "+" : ""}
-                    {formatCurrency(activityData.netChange)}
+                <div className={`rounded-xl border bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group ${activityData.netChange >= 0 ? "border-teal-100" : "border-amber-100"}`}>
+                  <div className={`absolute top-0 right-0 w-16 h-16 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500 ${activityData.netChange >= 0 ? "bg-gradient-to-br from-teal-400/20 to-teal-600/20" : "bg-gradient-to-br from-amber-400/20 to-amber-600/20"}`} />
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className={`p-1.5 rounded-lg ${activityData.netChange >= 0 ? "bg-gradient-to-br from-teal-500 to-teal-700" : "bg-gradient-to-br from-amber-500 to-amber-700"}`}><TrendingUp className="h-3.5 w-3.5 text-white" /></div>
+                    <p className="text-xs font-medium uppercase tracking-wider text-gray-600">Net change</p>
+                  </div>
+                  <p className={`mt-1 text-xl font-bold ${activityData.netChange >= 0 ? "text-teal-600" : "text-amber-600"}`}>
+                    {activityData.netChange >= 0 ? "+" : ""}{formatCurrency(activityData.netChange)}
                   </p>
                 </div>
               </div>
@@ -416,7 +422,7 @@ const FinancialOverviewPage: React.FC = () => {
       </div>
 
       {/* DataForSEO Spending (Super Admin) */}
-      <div className="mt-8 rounded-xl border border-gray-200 border-l-4 border-l-slate-600 bg-white shadow-sm overflow-hidden">
+      <div className="mt-8 rounded-xl border border-gray-200 border-l-4 border-l-slate-600 bg-white shadow-sm overflow-hidden hover:shadow-lg hover:shadow-slate-100/50 transition-all duration-200">
         <div className="px-6 py-4 bg-gradient-to-r from-slate-600 via-slate-700 to-slate-800">
           <h3 className="text-lg font-semibold text-white">DataForSEO Spending</h3>
           <p className="mt-1 text-sm text-white/90">
@@ -437,32 +443,38 @@ const FinancialOverviewPage: React.FC = () => {
             <>
               <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
                 {typeof dataForSeoData.balance === "number" && (
-                  <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-slate-400/20 to-slate-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
                     <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Balance</p>
                     <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoData.balance)}</p>
                   </div>
                 )}
                 {typeof dataForSeoData.totalDeposited === "number" && (
-                  <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-slate-400/20 to-slate-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
                     <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Total deposited</p>
                     <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoData.totalDeposited)}</p>
                   </div>
                 )}
-                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-blue-400/20 to-blue-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
                   <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Today</p>
-                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.today)}</p>
+                  <p className="mt-1 text-xl font-bold text-blue-700">{formatCurrency(dataForSeoSummaries.today)}</p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-indigo-400/20 to-indigo-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
                   <p className="text-xs font-medium uppercase tracking-wider text-gray-500">This week</p>
-                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.thisWeek)}</p>
+                  <p className="mt-1 text-xl font-bold text-indigo-700">{formatCurrency(dataForSeoSummaries.thisWeek)}</p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-emerald-400/20 to-emerald-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
                   <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Last 30 days</p>
-                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.thisMonth)}</p>
+                  <p className="mt-1 text-xl font-bold text-emerald-700">{formatCurrency(dataForSeoSummaries.thisMonth)}</p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-amber-400/20 to-amber-600/20 rounded-full -mr-6 -mt-6 group-hover:scale-150 transition-transform duration-500" />
                   <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Selected range</p>
-                  <p className="mt-1 text-xl font-bold text-slate-700">{formatCurrency(dataForSeoSummaries.rangeTotal)}</p>
+                  <p className="mt-1 text-xl font-bold text-amber-700">{formatCurrency(dataForSeoSummaries.rangeTotal)}</p>
                 </div>
               </div>
               {dataForSeoData.backlinksSubscriptionExpiry != null && (

@@ -406,52 +406,83 @@ const SpecialistDashboardPage = () => {
   const teamSnapshot = useMemo(() => teamMembers.slice(0, 4), [teamMembers]);
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome back{user?.name ? `, ${user.name}` : ""}</h1>
-          <p className="text-gray-600 mt-1">
-            Here's what is happening with your tasks today.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            to="/specialist/tasks"
-            className="inline-flex items-center space-x-2 rounded-lg border border-primary-200 px-4 py-2 text-sm font-medium text-primary-600 hover:bg-primary-50"
-          >
-            <span>Go to task board</span>
-          </Link>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8 space-y-8">
+      {/* Header Banner */}
+      <div className="relative rounded-2xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-500 p-8 shadow-lg overflow-hidden">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuNSIgZmlsbD0id2hpdGUiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-50" />
+        <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white">Welcome back{user?.name ? `, ${user.name}` : ""}</h1>
+            <p className="text-violet-100 mt-1">
+              Here's what is happening with your tasks today.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/specialist/tasks"
+              className="inline-flex items-center space-x-2 rounded-lg bg-white/20 backdrop-blur-sm px-4 py-2 text-sm font-medium text-white hover:bg-white/30 transition-colors"
+            >
+              <span>Go to task board</span>
+            </Link>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className={`bg-white rounded-xl border ${stat.border} p-6 flex flex-col justify-between`}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">{stat.label}</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{stat.value}</p>
-                <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map((stat) => {
+          const gradientMap: Record<string, string> = {
+            "text-rose-600": "from-rose-500 to-rose-700",
+            "text-amber-600": "from-amber-500 to-amber-700",
+            "text-emerald-600": "from-emerald-500 to-emerald-700",
+          };
+          const shadowMap: Record<string, string> = {
+            "text-rose-600": "shadow-rose-200",
+            "text-amber-600": "shadow-amber-200",
+            "text-emerald-600": "shadow-emerald-200",
+          };
+          const circleMap: Record<string, string> = {
+            "text-rose-600": "from-rose-400/20 to-rose-600/20",
+            "text-amber-600": "from-amber-400/20 to-amber-600/20",
+            "text-emerald-600": "from-emerald-400/20 to-emerald-600/20",
+          };
+          const borderColorMap: Record<string, string> = {
+            "text-rose-600": "border-rose-100",
+            "text-amber-600": "border-amber-100",
+            "text-emerald-600": "border-emerald-100",
+          };
+          const grad = gradientMap[stat.color] || "from-violet-500 to-violet-700";
+          const shadow = shadowMap[stat.color] || "shadow-violet-200";
+          const circle = circleMap[stat.color] || "from-violet-400/20 to-violet-600/20";
+          const borderClr = borderColorMap[stat.color] || "border-violet-100";
+          return (
+            <div
+              key={stat.label}
+              className={`bg-white rounded-2xl border ${borderClr} shadow-sm p-6 flex flex-col justify-between hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group`}
+            >
+              <div className={`absolute top-0 right-0 w-24 h-24 bg-gradient-to-br ${circle} rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500`} />
+              <div className="flex items-center justify-between relative">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">{stat.label}</p>
+                  <p className="text-3xl font-extrabold text-gray-900">{stat.value}</p>
+                  <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
+                </div>
+                <div className={`bg-gradient-to-br ${grad} p-3 rounded-xl shadow-lg ${shadow}`}>
+                  <stat.icon className="h-6 w-6 text-white" />
+                </div>
               </div>
-              <div className={`p-3 rounded-full ${stat.bg}`}>
-                <stat.icon className={`h-6 w-6 ${stat.color}`} />
-              </div>
+              {stat.label === "Completed This Month" && completedThisMonth.length > 0 && (
+                <p className="text-xs text-gray-500 mt-4 flex items-center gap-1">
+                  <TrendingUp className="h-3 w-3 text-emerald-500" />
+                  Great work! Keep the momentum going.
+                </p>
+              )}
             </div>
-            {stat.label === "Completed This Month" && completedThisMonth.length > 0 && (
-              <p className="text-xs text-gray-500 mt-4 flex items-center gap-1">
-                <TrendingUp className="h-3 w-3 text-emerald-500" />
-                Great work! Keep the momentum going.
-              </p>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
-        <div className="2xl:col-span-3 bg-white border border-gray-200 rounded-xl p-6">
+        <div className="2xl:col-span-3 bg-white border border-gray-200 border-l-4 border-l-violet-500 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Your Upcoming Tasks</h2>
@@ -562,7 +593,7 @@ const SpecialistDashboardPage = () => {
         </div>
 
         <div className="space-y-6">
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 border-l-4 border-l-rose-500 rounded-xl p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-rose-500" />
               Overdue Tasks ({overdueTasks.length})
@@ -599,7 +630,7 @@ const SpecialistDashboardPage = () => {
             )}
           </div>
 
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 border-l-4 border-l-amber-500 rounded-xl p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <CalendarClock className="h-5 w-5 text-amber-500" />
               Due Within 7 Days ({dueWithin7Days.length})
@@ -646,7 +677,7 @@ const SpecialistDashboardPage = () => {
             )}
           </div>
 
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 border-l-4 border-l-purple-500 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">Team Snapshot</h2>
               <Link to="/specialist/team" className="text-xs font-medium text-primary-600 hover:text-primary-700">

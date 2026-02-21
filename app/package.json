@@ -16,7 +16,6 @@
     "@reduxjs/toolkit": "^2.0.1",
     "@stripe/react-stripe-js": "^2.4.0",
     "@stripe/stripe-js": "^2.2.0",
-    "all": "^0.0.0",
     "axios": "^1.11.0",
     "date-fns": "^4.1.0",
     "dnd-kit": "^0.0.2",
@@ -32,6 +31,9 @@
     "react-redux": "^9.0.4",
     "react-router-dom": "^6.26.1",
     "recharts": "^3.3.0"
+  },
+  "overrides": {
+    "minimatch": "^10.2.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
