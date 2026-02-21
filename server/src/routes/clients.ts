@@ -305,62 +305,65 @@ router.get('/', authenticateToken, async (req, res) => {
             pendingList.forEach((m) => { pendingManagedServiceByClientId[m.clientId] = m.id; });
         }
 
-        // Add statistics from database for each client
-        const clientsWithStats = await Promise.all(
-            clients.map(async (client: any) => {
-                // Get keyword count and average position
-                const keywordStats = await prisma.keyword.aggregate({
-                    where: { clientId: client.id },
-                    _count: { id: true },
-                    _avg: { currentPosition: true },
-                });
+        // Batch-fetch stats for all clients in a few queries instead of 4 per client
+        const clientIds = clients.map((c: any) => c.id);
 
-                // Get top rankings (position <= 10)
-                const topRankingsCount = await prisma.keyword.count({
-                    where: {
-                        clientId: client.id,
-                        currentPosition: { lte: 10, not: null },
-                    },
-                });
+        // Keyword stats: grouped by clientId
+        const keywordStatsRaw = await prisma.keyword.groupBy({
+            by: ['clientId'],
+            where: { clientId: { in: clientIds } },
+            _count: { id: true },
+            _avg: { currentPosition: true },
+        });
+        const keywordStatsMap = new Map(keywordStatsRaw.map((k) => [k.clientId, k]));
 
-                // Get traffic from TrafficSource table
-                const trafficSource = await prisma.trafficSource.findFirst({
-                    where: { clientId: client.id },
-                    select: {
-                        totalEstimatedTraffic: true,
-                        organicEstimatedTraffic: true,
-                    },
-                });
+        // Top rankings (position <= 10) grouped by clientId
+        const topRankingsRaw = await prisma.keyword.groupBy({
+            by: ['clientId'],
+            where: { clientId: { in: clientIds }, currentPosition: { lte: 10, not: null } },
+            _count: { id: true },
+        });
+        const topRankingsMap = new Map(topRankingsRaw.map((r) => [r.clientId, r._count.id]));
 
-                // Prefer GA4 total sessions (last saved snapshot is typically last 30 days)
-                // This is DB-only and does not call Google/DataForSEO.
-                const ga4Metrics = await prisma.ga4Metrics.findUnique({
-                    where: { clientId: client.id },
-                    select: { totalSessions: true, endDate: true },
-                });
-                const traffic30d = ga4Metrics?.totalSessions ?? null;
+        // Traffic sources for all clients
+        const trafficSourcesRaw = await prisma.trafficSource.findMany({
+            where: { clientId: { in: clientIds } },
+            select: { clientId: true, totalEstimatedTraffic: true, organicEstimatedTraffic: true },
+        });
+        const trafficMap = new Map(trafficSourcesRaw.map((t) => [t.clientId, t]));
 
-                const agencyNames: string[] = (client.user?.memberships ?? [])
-                    .map((m: { agency?: { name: string } }) => m.agency?.name)
-                    .filter(Boolean);
+        // GA4 metrics for all clients
+        const ga4MetricsRaw = await prisma.ga4Metrics.findMany({
+            where: { clientId: { in: clientIds } },
+            select: { clientId: true, totalSessions: true, endDate: true },
+        });
+        const ga4Map = new Map(ga4MetricsRaw.map((g) => [g.clientId, g]));
 
-                return {
-                    ...client,
-                    keywords: keywordStats._count.id || 0,
-                    avgPosition: keywordStats._avg.currentPosition ? Math.round(keywordStats._avg.currentPosition * 10) / 10 : null,
-                    topRankings: topRankingsCount || 0,
-                    traffic: trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0,
-                    traffic30d,
-                    agencyNames,
-                    ...(includeAgencyNames ? { pendingManagedServiceId: pendingManagedServiceByClientId[client.id] || null } : {}),
-                };
-            })
-        );
+        const clientsWithStats = clients.map((client: any) => {
+            const kw = keywordStatsMap.get(client.id);
+            const trafficSource = trafficMap.get(client.id);
+            const ga4 = ga4Map.get(client.id);
+
+            const agencyNames: string[] = (client.user?.memberships ?? [])
+                .map((m: { agency?: { name: string } }) => m.agency?.name)
+                .filter(Boolean);
+
+            return {
+                ...client,
+                keywords: kw?._count?.id || 0,
+                avgPosition: kw?._avg?.currentPosition ? Math.round(kw._avg.currentPosition * 10) / 10 : null,
+                topRankings: topRankingsMap.get(client.id) || 0,
+                traffic: trafficSource?.organicEstimatedTraffic || trafficSource?.totalEstimatedTraffic || 0,
+                traffic30d: ga4?.totalSessions ?? null,
+                agencyNames,
+                ...(includeAgencyNames ? { pendingManagedServiceId: pendingManagedServiceByClientId[client.id] || null } : {}),
+            };
+        });
 
         res.json(clientsWithStats);
-    } catch (error) {
+    } catch (error: any) {
         console.error('Fetch clients error:', error);
-        res.status(500).json({ message: 'Internal server error' });
+        res.status(500).json({ message: error?.message || 'Internal server error' });
     }
 });
 
