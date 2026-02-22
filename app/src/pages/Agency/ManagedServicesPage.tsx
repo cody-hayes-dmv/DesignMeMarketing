@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
-import { Check, Loader2, ExternalLink, RefreshCw } from "lucide-react";
+import { Check, Loader2, ExternalLink, RefreshCw, Star, Zap } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { Link } from "react-router-dom";
@@ -17,84 +17,122 @@ const PACKAGES = [
     id: "foundation",
     name: "SEO Essentials + Automation",
     price: 750,
-    includes: [
-      "Web chat widget installed on client's site",
-      "SMS and email conversations in one inbox",
-      "Missed call text-back automation",
-      "Review request system (send texts for Google reviews)",
-      "Lead pipeline setup (basic CRM)",
-      "One social channel connected (Facebook Messenger or Instagram DMs)",
-      "Local listings sync (50+ directories)",
-      "Review widget embedded on client's website",
-      "Appointment booking calendar with reminders",
-      "FAQ auto-replies across SMS and 1 social channel",
-      "Monthly backlinks",
-      "2 pieces of content per month",
-      "1 hour of on-page SEO optimization per month",
-      "Call and lead tracking dashboard",
-      "Local listings fully managed",
-      "1,000 SMS + 1,000 emails included",
+    tagline: "Your foundation for getting found online and capturing every lead",
+    badge: null,
+    seoWork: [
+      "Site audit + full on-page SEO fixes",
+      "Google Business Profile optimization",
+      "Local citation building (50+ directories)",
+      "Monthly backlinks to homepage",
+      "Up to 2 pieces of content/month",
     ],
-    buttonLabel: "Activate",
+    platformCredits: "$25/month included",
+    creditNote: "Covers calls, texts, emails, and workflows. Most small businesses never exceed this.",
+    featuresLabel: "What We Set Up For You:",
+    features: [
+      "AI web chat bot on your website",
+      "2-way text & email conversations (one inbox for everything)",
+      "Missed call text-back automation",
+      "Appointment booking with reminders",
+      "Google review request system",
+      "CRM + lead pipeline",
+      "Google Business messaging connected",
+      "50+ local directory listings synced",
+      "Email marketing platform access",
+      "Survey & form builder",
+      "SMS & email templates + workflows",
+      "Full SEO reporting dashboard",
+      "Training video walkthrough",
+    ],
+    buttonLabel: "Get Started",
+    buttonAction: "activate",
   },
   {
     id: "growth",
     name: "Growth & Automation",
     price: 1500,
-    includes: [
-      "Everything in SEO Essentials + Automation package, plus:",
-      "5 pieces of content per month (increased from 2)",
-      "2 hours of on-page SEO optimization (increased from 1 hour)",
-      "2 chatbots (web + one social channel)",
-      "Full nurture sequence (email + SMS drip campaigns)",
-      "Reactivation campaign (text, email, voicemail drop)",
-      "1,500 SMS + 1,500 emails included (increased from 1,000)",
+    tagline: "More content, deeper automations, and social media control",
+    badge: null,
+    seoWork: [
+      "Everything in Essentials",
+      "4 backlinks/month",
+      "Up to 4 pieces of content/month",
     ],
-    buttonLabel: "Activate",
+    platformCredits: "$60/month included",
+    creditNote: "More runway for calls, texts, and campaigns.",
+    featuresLabel: "Everything in Essentials, plus:",
+    features: [
+      "Social media planner (connect and schedule all channels)",
+      "2 chatbots (web + 1 social channel)",
+      "Email + SMS nurture drip sequences",
+      "Reactivation campaign (text, email, voicemail drop)",
+      "Trigger link automations",
+      "AI-powered Google review auto-replies",
+      "Full analytics & reporting suite",
+      "Advanced workflow builder",
+    ],
+    buttonLabel: "Get Started",
+    buttonAction: "activate",
   },
   {
     id: "domination",
     name: "Authority Builder",
     price: 3000,
-    includes: [
-      "Everything in Growth & Automation package, plus:",
-      "10 pieces of content per month (increased from 5)",
-      "PPC and social ads management (Google + Facebook/Instagram)",
-      "3 chatbots (web, Facebook, Instagram + optional email responder)",
-      "Multi-channel nurture campaigns (SMS, email, Facebook, Instagram)",
-      "AI agent setup (handles inbound chats/leads on 1 channel)",
-      "Social planner access (DIY scheduling tool)",
-      "2,500 SMS + 2,500 emails included (increased from 1,500)",
+    tagline: "AI-powered lead handling, ads management, and multi-channel domination",
+    badge: "Most Popular",
+    seoWork: [
+      "Everything prior",
+      "6 backlinks/month",
+      "Up to 6 pieces of content/month",
     ],
-    buttonLabel: "Activate",
+    platformCredits: "$120/month included",
+    creditNote: "Covers AI content, voice, WhatsApp, and more.",
+    featuresLabel: "Everything in Growth, plus:",
+    features: [
+      "Google + Facebook/Instagram ads management",
+      "3 chatbots (web, Facebook, Instagram)",
+      "AI agent that handles inbound leads on 1 channel",
+      "Multi-channel nurture campaigns (SMS, email, FB, IG)",
+      "Facebook Messenger integration",
+      "Google Business call tracking",
+      "Text-to-pay + invoicing system",
+      "Documents & contracts (e-signature)",
+      "AI content generation",
+      "AI conversation & voice agent",
+      "WhatsApp integration",
+      "Quizzes, communities & QR codes",
+    ],
+    buttonLabel: "Get Started",
+    buttonAction: "activate",
   },
   {
     id: "market_domination",
     name: "Market Domination",
     price: 5000,
-    includes: [
-      "Everything in Authority Builder package, plus:",
-      "15 pieces of content per month (increased from 10)",
-      "Full PPC and social ads management (Google, Facebook, Instagram)",
-      "Unlimited chatbot workflows (web, Facebook, Instagram, email, SMS)",
-      "AI Voice Agent (answers inbound calls and texts)",
+    tagline: "The full arsenal — AI voice, unlimited automation, and total market control",
+    badge: null,
+    seoWork: [
+      "Everything prior",
+      "8 backlinks/month",
+      "Up to 8 pieces of content/month",
+    ],
+    platformCredits: "$250/month included",
+    creditNote: "Maximum runway across every channel.",
+    featuresLabel: "Everything in Authority Builder, plus:",
+    features: [
+      "AI Voice Agent (answers inbound calls & texts 24/7)",
+      "Unlimited chatbot workflows",
       "Advanced automations (cart recovery, upsells, win-backs, cross-sells)",
-      "Social Planner (done-for-you posting on Facebook, Instagram, LinkedIn)",
-      "Dedicated monthly strategy and growth consulting",
-      "5,000 SMS + 5,000 emails included (increased from 2,500)",
+      "Done-for-you social posting (Facebook, Instagram, LinkedIn)",
+      "Full funnel builder",
+      "Membership site setup",
+      "Affiliate program manager",
+      "Certificates & digital credentials",
+      "External AI model workflows",
+      "Dedicated monthly strategy & growth call",
     ],
-    buttonLabel: "Activate",
-  },
-  {
-    id: "custom",
-    name: "Custom",
-    price: 5000,
-    includes: [
-      "Fully customized service package based on client needs",
-      "Agency contacts Johnny directly to discuss requirements",
-      "Pricing negotiated based on scope of work",
-    ],
-    buttonLabel: "Contact",
+    buttonLabel: "Let\u2019s Talk",
+    buttonAction: "contact",
   },
 ];
 
@@ -184,8 +222,8 @@ const ManagedServicesPage = () => {
   }, [hasPending]);
 
   const openActivateModal = (pkg: typeof PACKAGES[0]) => {
-    if (pkg.id === "custom") {
-      toast("Contact Design ME Marketing for custom packages.");
+    if (pkg.buttonAction === "contact") {
+      toast("Contact Design ME Marketing to discuss this package.");
       return;
     }
     setSelectedPackage(pkg);
@@ -202,7 +240,7 @@ const ManagedServicesPage = () => {
   };
 
   const handleActivate = async () => {
-    if (!selectedPackage || selectedPackage.id === "custom") return;
+    if (!selectedPackage || selectedPackage.buttonAction === "contact") return;
     if (!selectedClientId) {
       toast.error("Please select a client.");
       return;
@@ -268,7 +306,6 @@ const ManagedServicesPage = () => {
   };
 
   const pkgPriceLabel = (pkg: (typeof PACKAGES)[0]) => {
-    if (pkg.id === "custom") return "Starting at $5,000+/month";
     const formatted = pkg.price >= 1000 ? `$${pkg.price.toLocaleString()}` : formatCurrency(pkg.price);
     return `${formatted}/month`;
   };
@@ -318,37 +355,102 @@ const ManagedServicesPage = () => {
 
       {/* Service Packages */}
       <section className="mb-12">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Available Managed Service Packages</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {PACKAGES.map((pkg) => (
-            <div
-              key={pkg.id}
-              className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col min-h-0"
-            >
-              <h3 className="text-xl font-bold text-gray-900">{pkg.name}</h3>
-              <p className="text-2xl font-bold text-primary-600 mt-2">{pkgPriceLabel(pkg)}</p>
-              <p className="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">What&apos;s included</p>
-              <ul className="mt-2 space-y-1.5 text-sm text-gray-700 overflow-y-auto flex-1 min-h-0 max-h-64 pr-1">
-                {pkg.includes.map((item, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="text-primary-500 mt-0.5 shrink-0">•</span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-4 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => openActivateModal(pkg)}
-                  disabled={!accountActivated || trialActive}
-                  className="w-full py-2.5 rounded-lg font-medium bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {pkg.buttonLabel}
-                </button>
+        <h2 className="text-xl font-semibold text-gray-900 mb-6">Available Managed Service Packages</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6">
+          {PACKAGES.map((pkg) => {
+            const isPopular = pkg.badge === "Most Popular";
+            return (
+              <div
+                key={pkg.id}
+                className={`relative rounded-2xl flex flex-col ${
+                  isPopular
+                    ? "border-2 border-primary-500 shadow-xl shadow-primary-100/50 ring-1 ring-primary-200"
+                    : "border border-gray-200 shadow-sm"
+                } bg-white overflow-hidden`}
+              >
+                {isPopular && (
+                  <div className="bg-primary-600 text-center py-2 text-xs font-bold uppercase tracking-wider text-white flex items-center justify-center gap-1.5">
+                    <Star className="h-3.5 w-3.5 fill-current" />
+                    Most Popular
+                  </div>
+                )}
+
+                <div className="p-6 flex flex-col flex-1">
+                  {/* Header */}
+                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{pkg.name}</h3>
+                  <div className="mt-3 flex items-baseline gap-1">
+                    <span className="text-3xl font-extrabold text-gray-900">{pkgPriceLabel(pkg).replace("/month", "")}</span>
+                    <span className="text-sm font-medium text-gray-500">/month</span>
+                  </div>
+                  <p className="mt-2 text-sm text-gray-600 leading-relaxed">{pkg.tagline}</p>
+
+                  {/* SEO Work Block */}
+                  <div className="mt-5 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/80 p-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-800 mb-2.5 flex items-center gap-1.5">
+                      <Zap className="h-3.5 w-3.5" />
+                      SEO Work Included
+                    </h4>
+                    <ul className="space-y-1.5">
+                      {pkg.seoWork.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-amber-900">
+                          <Check className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Platform Credits */}
+                  <div className="mt-4 rounded-lg bg-blue-50 border border-blue-100 px-4 py-3">
+                    <p className="text-sm font-semibold text-blue-900">Platform Credits: {pkg.platformCredits}</p>
+                    <p className="text-xs text-blue-700/80 mt-1 leading-relaxed">{pkg.creditNote}</p>
+                  </div>
+
+                  {/* Features */}
+                  <div className="mt-5 flex-1">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">{pkg.featuresLabel}</h4>
+                    <ul className="space-y-2">
+                      {pkg.features.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Setup Note */}
+                  <div className="mt-5 rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
+                    <p className="text-xs text-gray-600 leading-relaxed">
+                      Full setup included. We build everything for you and send a training video so you know exactly what&apos;s running.
+                    </p>
+                  </div>
+
+                  {/* CTA */}
+                  <div className="mt-5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openActivateModal(pkg)}
+                      disabled={!accountActivated || trialActive}
+                      className={`w-full py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                        isPopular
+                          ? "bg-primary-600 text-white hover:bg-primary-700 shadow-md shadow-primary-200/50"
+                          : "bg-gray-900 text-white hover:bg-gray-800"
+                      }`}
+                    >
+                      {pkg.buttonLabel}
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+
+        {/* Section Footer */}
+        <p className="mt-6 text-center text-sm text-gray-500 font-medium">
+          No long-term contracts &middot; Cancel anytime
+        </p>
       </section>
 
       {/* Bottom Section - Active Managed Services */}
@@ -470,7 +572,7 @@ const ManagedServicesPage = () => {
       )}
 
       {/* Activation Modal */}
-      {modalOpen && selectedPackage && selectedPackage.id !== "custom" && (
+      {modalOpen && selectedPackage && selectedPackage.buttonAction !== "contact" && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-bold text-gray-900">Activate Managed Service</h3>
