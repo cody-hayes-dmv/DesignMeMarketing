@@ -24,7 +24,7 @@ const fmt = (n: number) =>
     ? `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `$${n.toFixed(2)}`;
 
-const EnterpriseCalculatorPage = () => {
+const EnterpriseCalculatorPage = ({ embedded }: { embedded?: boolean }) => {
   const navigate = useNavigate();
 
   const [dashboards, setDashboards] = useState<number>(100);
@@ -57,22 +57,7 @@ const EnterpriseCalculatorPage = () => {
     navigate(`/agency/agencies?create=1&${params.toString()}`);
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8">
-      {/* Header */}
-      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-gray-900 via-gray-800 to-violet-900 p-8 shadow-lg">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
-        <div className="relative flex items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-sm">
-            <Calculator className="h-7 w-7 text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white md:text-3xl">Enterprise Calculator</h1>
-            <p className="mt-1 text-sm text-gray-300">Internal pricing tool — calculate cost and margin for custom enterprise accounts</p>
-          </div>
-        </div>
-      </div>
-
+  const content = (
       <div className="grid grid-cols-1 gap-8 xl:grid-cols-5">
         {/* LEFT: Input Fields */}
         <div className="xl:col-span-2">
@@ -294,6 +279,25 @@ const EnterpriseCalculatorPage = () => {
           </div>
         </div>
       </div>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8">
+      <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-gray-900 via-gray-800 to-violet-900 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-sm">
+            <Calculator className="h-7 w-7 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-white md:text-3xl">Enterprise Calculator</h1>
+            <p className="mt-1 text-sm text-gray-300">Internal pricing tool — calculate cost and margin for custom enterprise accounts</p>
+          </div>
+        </div>
+      </div>
+      {content}
     </div>
   );
 };

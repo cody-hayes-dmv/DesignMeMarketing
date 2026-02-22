@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, DollarSign, BookOpen, Loader2, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import api from "@/lib/api";
 import { Keyword } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
@@ -70,6 +70,8 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
 }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [newKeywordValue, setNewKeywordValue] = useState("");
+  const [newKeywordType, setNewKeywordType] = useState<"money" | "topical">("money");
+  const [activeKeywordTab, setActiveKeywordTab] = useState<"money" | "topical">("money");
   const [addingKeyword, setAddingKeyword] = useState(false);
   const [addingProgress, setAddingProgress] = useState<{ current: number; total: number } | null>(null);
   const [addKeywordMessage, setAddKeywordMessage] = useState<string | null>(null);
@@ -97,9 +99,12 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
   const setTrackSearchTerm = onTrackSearchTermChange || setTrackSearchTermInternal;
 
   const effectiveClientId = clientId || selectedClientId || "";
+  const tabKeywords = trackedKeywords.filter((k) => (k.type || "money") === activeKeywordTab);
   const filteredKeywords = trackSearchTerm
-    ? trackedKeywords.filter((k) => k.keyword.toLowerCase().includes(trackSearchTerm.toLowerCase()))
-    : trackedKeywords;
+    ? tabKeywords.filter((k) => k.keyword.toLowerCase().includes(trackSearchTerm.toLowerCase()))
+    : tabKeywords;
+  const moneyCount = trackedKeywords.filter((k) => (k.type || "money") === "money").length;
+  const topicalCount = trackedKeywords.filter((k) => (k.type || "money") === "topical").length;
 
   const keywordsPagination = useMemo(() => {
     const totalRows = filteredKeywords.length;
@@ -189,6 +194,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
             location_name: locationNameToSend,
             include_clickstream_data: true,
             include_serp_info: true,
+            type: newKeywordType,
           },
           { timeout: 60000 }
         );
@@ -213,6 +219,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                     location_name: locationNameToSend,
                     include_clickstream_data: true,
                     include_serp_info: true,
+                    type: newKeywordType,
                   },
                   { timeout: 60000 }
                 );
@@ -405,6 +412,47 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
               />
             </div>
           </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Keyword Type</label>
+            <div className="mt-1.5 flex gap-3">
+              <label
+                className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-sm font-semibold transition-all ${
+                  newKeywordType === "money"
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm"
+                    : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="keywordType"
+                  value="money"
+                  checked={newKeywordType === "money"}
+                  onChange={() => setNewKeywordType("money")}
+                  className="sr-only"
+                />
+                <DollarSign className="h-4 w-4" />
+                Money Keyword
+              </label>
+              <label
+                className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-sm font-semibold transition-all ${
+                  newKeywordType === "topical"
+                    ? "border-blue-500 bg-blue-50 text-blue-700 shadow-sm"
+                    : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="keywordType"
+                  value="topical"
+                  checked={newKeywordType === "topical"}
+                  onChange={() => setNewKeywordType("topical")}
+                  className="sr-only"
+                />
+                <BookOpen className="h-4 w-4" />
+                Topical Keyword
+              </label>
+            </div>
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <div ref={locationBoxRef} className="relative flex-1">
               <label className="sr-only">Location</label>
@@ -476,6 +524,38 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="flex border-b border-gray-200">
+          <button
+            type="button"
+            onClick={() => { setActiveKeywordTab("money"); setKeywordsPage(1); }}
+            className={`inline-flex items-center gap-2 px-6 py-3.5 text-sm font-semibold transition-colors ${
+              activeKeywordTab === "money"
+                ? "border-b-2 border-emerald-500 text-emerald-700 bg-emerald-50/50"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <DollarSign className="h-4 w-4" />
+            Money Keywords
+            <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-bold ${
+              activeKeywordTab === "money" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"
+            }`}>{moneyCount}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveKeywordTab("topical"); setKeywordsPage(1); }}
+            className={`inline-flex items-center gap-2 px-6 py-3.5 text-sm font-semibold transition-colors ${
+              activeKeywordTab === "topical"
+                ? "border-b-2 border-blue-500 text-blue-700 bg-blue-50/50"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <BookOpen className="h-4 w-4" />
+            Topical Keywords
+            <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-bold ${
+              activeKeywordTab === "topical" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"
+            }`}>{topicalCount}</span>
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>

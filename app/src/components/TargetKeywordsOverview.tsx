@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X, Info, Download } from "lucide-react";
+import { Loader2, RefreshCw, Search, Star, BarChart3, MapPin, TrendingUp, TrendingDown, ExternalLink, Edit2, Check, X, Info, Download, DollarSign, BookOpen } from "lucide-react";
 import { format } from "date-fns";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
@@ -25,6 +25,7 @@ interface TargetKeyword {
   googlePosition: number | null;
   previousPosition: number | null;
   seResultsCount: string | null;
+  type?: "money" | "topical";
   createdAt: string;
   updatedAt: string;
 }
@@ -89,6 +90,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   const [editDateValue, setEditDateValue] = useState<string>("");
   const [editPositionValue, setEditPositionValue] = useState<string>("");
   const [starredKeywordIds, setStarredKeywordIds] = useState<Set<string>>(new Set());
+  const [activeTypeTab, setActiveTypeTab] = useState<"money" | "topical">("money");
   const initialRefreshDoneRef = useRef<Record<string, boolean>>({});
 
   const starredStorageKey = useMemo(() => {
@@ -180,27 +182,25 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     [persistStarredIds]
   );
 
+  const moneyCount = useMemo(() => keywords.filter((k) => (k.type || "money") === "money").length, [keywords]);
+  const topicalCount = useMemo(() => keywords.filter((k) => (k.type || "money") === "topical").length, [keywords]);
+
   const sortedKeywords = useMemo(() => {
-    // Sort by: starred keywords first, then by ranking (googlePosition), with #1 at top
-    // Keywords without rankings go to the bottom of their group
-    return [...keywords].sort((a, b) => {
+    const filtered = keywords.filter((k) => (k.type || "money") === activeTypeTab);
+    return [...filtered].sort((a, b) => {
       const aStar = starredKeywordIds.has(a.id);
       const bStar = starredKeywordIds.has(b.id);
       
-      // Starred keywords come first (regardless of ranking)
       if (aStar !== bStar) return aStar ? -1 : 1;
       
-      // Within starred/unstarred groups, sort by ranking
-      const aPos = a.googlePosition ?? Infinity; // null/undefined = no ranking = bottom
+      const aPos = a.googlePosition ?? Infinity;
       const bPos = b.googlePosition ?? Infinity;
       
-      // Lower position number = better ranking (1st is better than 2nd)
       if (aPos !== bPos) return aPos - bPos;
       
-      // If same position (or both null), maintain original order
       return 0;
     });
-  }, [keywords, starredKeywordIds]);
+  }, [keywords, starredKeywordIds, activeTypeTab]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -428,6 +428,41 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
         </div>
       )}
 
+      {!loading && keywords.length > 0 && (
+        <div className="flex border-b border-gray-200">
+          <button
+            type="button"
+            onClick={() => setActiveTypeTab("money")}
+            className={`inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold transition-colors ${
+              activeTypeTab === "money"
+                ? "border-b-2 border-emerald-500 text-emerald-700 bg-emerald-50/50"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <DollarSign className="h-4 w-4" />
+            Money Keywords
+            <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-bold ${
+              activeTypeTab === "money" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"
+            }`}>{moneyCount}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTypeTab("topical")}
+            className={`inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold transition-colors ${
+              activeTypeTab === "topical"
+                ? "border-b-2 border-blue-500 text-blue-700 bg-blue-50/50"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <BookOpen className="h-4 w-4" />
+            Topical Keywords
+            <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-bold ${
+              activeTypeTab === "topical" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"
+            }`}>{topicalCount}</span>
+          </button>
+        </div>
+      )}
+
       <div className={`space-y-6 ${showHeader ? "p-6 pt-4" : "p-6"} bg-gradient-to-b from-white to-slate-50/30`}>
         {error && (
           <div className="rounded-xl border-l-4 border-rose-500 bg-rose-50 px-4 py-3 text-sm text-rose-800 font-medium shadow-sm">
@@ -451,6 +486,12 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                 ? "Click Refresh to fetch keywords from DataForSEO."
                 : "Contact your administrator to refresh keyword data."}
             </p>
+          </div>
+        ) : sortedKeywords.length === 0 ? (
+          <div className="flex h-48 flex-col items-center justify-center text-center rounded-xl border-l-4 border-amber-500 bg-amber-50/50 py-8">
+            {activeTypeTab === "money" ? <DollarSign className="h-10 w-10 text-amber-600 mb-2" /> : <BookOpen className="h-10 w-10 text-amber-600 mb-2" />}
+            <p className="text-sm font-medium text-amber-900">No {activeTypeTab === "money" ? "money" : "topical"} keywords yet.</p>
+            <p className="text-xs text-amber-800/80 mt-1">Keywords assigned to this category will appear here.</p>
           </div>
         ) : (
           <div className="space-y-4">

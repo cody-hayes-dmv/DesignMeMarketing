@@ -461,6 +461,7 @@ model Keyword {
   ctr              Float    @default(0)
   clientId         String
   locationName     String?  @db.VarChar(255)
+  type             String   @default("money") @db.VarChar(20)
   client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@unique([clientId, keyword])
@@ -699,6 +700,7 @@ model TargetKeyword {
   googlePosition   Int?
   previousPosition Int?
   seResultsCount   String?
+  type             String   @default("money") @db.VarChar(20)
   clientId         String
   client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 

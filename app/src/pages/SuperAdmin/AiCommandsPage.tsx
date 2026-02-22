@@ -38,7 +38,7 @@ const TOOLBAR_ACTIONS = [
   { icon: Minus, label: "Divider", prefix: "\n---\n", suffix: "" },
 ] as const;
 
-const AiCommandsPage = () => {
+const AiCommandsPage = ({ embedded }: { embedded?: boolean }) => {
   const [commands, setCommands] = useState<AiCommand[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -48,6 +48,8 @@ const AiCommandsPage = () => {
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
   const [editDrafts, setEditDrafts] = useState<Record<string, { title: string; content: string }>>({});
+  const [deleteTarget, setDeleteTarget] = useState<AiCommand | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const newContentRef = useRef<HTMLTextAreaElement>(null);
   const editContentRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
@@ -110,14 +112,18 @@ const AiCommandsPage = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this command?")) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.delete(`/ai-commands/${id}`);
-      setCommands((prev) => prev.filter((c) => c.id !== id));
+      await api.delete(`/ai-commands/${deleteTarget.id}`);
+      setCommands((prev) => prev.filter((c) => c.id !== deleteTarget.id));
       toast.success("Command deleted");
+      setDeleteTarget(null);
     } catch {
       toast.error("Failed to delete command");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -201,30 +207,30 @@ const AiCommandsPage = () => {
     </div>
   );
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8">
-      {/* Header */}
-      <div className="relative mb-8 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-700 via-purple-700 to-indigo-800 p-8 shadow-lg">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
-        <div className="relative flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-sm">
-              <Sparkles className="h-7 w-7 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white md:text-3xl">AI Commands</h1>
-              <p className="mt-1 text-sm text-violet-200">Save and organize your AI prompts and commands</p>
-            </div>
+  const addCommandButton = (
+    <button
+      type="button"
+      onClick={() => { setShowNewForm(true); setExpandedId(null); }}
+      className={embedded
+        ? "inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:from-violet-700 hover:to-indigo-700"
+        : "inline-flex items-center gap-2 rounded-xl bg-white/15 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/25"
+      }
+    >
+      <Plus className="h-4 w-4" /> Add Command
+    </button>
+  );
+
+  const content = (
+    <div>
+      {embedded && (
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">AI Commands</h3>
+            <p className="mt-0.5 text-sm text-gray-500">Save and organize your AI prompts and commands</p>
           </div>
-          <button
-            type="button"
-            onClick={() => { setShowNewForm(true); setExpandedId(null); }}
-            className="inline-flex items-center gap-2 rounded-xl bg-white/15 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/25"
-          >
-            <Plus className="h-4 w-4" /> Add Command
-          </button>
+          {addCommandButton}
         </div>
-      </div>
+      )}
 
       {/* New Command Form */}
       {showNewForm && (
@@ -360,7 +366,7 @@ const AiCommandsPage = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); handleDelete(cmd.id); }}
+                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(cmd); }}
                       className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -421,6 +427,63 @@ const AiCommandsPage = () => {
           })}
         </div>
       )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => !deleting && setDeleteTarget(null)} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-gray-200/80">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-100">
+              <Trash2 className="h-6 w-6 text-red-600" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Delete Command</h3>
+            <p className="mt-2 text-sm text-gray-500">
+              Are you sure you want to delete <span className="font-semibold text-gray-700">"{deleteTarget.title}"</span>? This action cannot be undone.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={confirmDelete}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8">
+      <div className="relative mb-8 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-700 via-purple-700 to-indigo-800 p-8 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
+        <div className="relative flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-sm">
+              <Sparkles className="h-7 w-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white md:text-3xl">AI Commands</h1>
+              <p className="mt-1 text-sm text-violet-200">Save and organize your AI prompts and commands</p>
+            </div>
+          </div>
+          {addCommandButton}
+        </div>
+      </div>
+      {content}
     </div>
   );
 };

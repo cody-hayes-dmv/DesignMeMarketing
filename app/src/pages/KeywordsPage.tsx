@@ -14,6 +14,8 @@ import {
   ChevronRight,
   ChevronDown,
   X,
+  DollarSign,
+  BookOpen,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import html2canvas from "html2canvas";
@@ -102,6 +104,7 @@ const KeywordsPage: React.FC = () => {
   const assignClientBoxRef = useRef<HTMLDivElement | null>(null);
   const [assigningKeywords, setAssigningKeywords] = useState(false);
   const [assignMessage, setAssignMessage] = useState<string | null>(null);
+  const [assignKeywordType, setAssignKeywordType] = useState<"money" | "topical">("money");
 
   const [keywordDetail, setKeywordDetail] = useState<{
     keyword: string;
@@ -268,9 +271,10 @@ const KeywordsPage: React.FC = () => {
               competition:
                 item.competitionLevel ||
                 (item.competition !== null ? item.competition.toFixed(2) : undefined),
-              fetchFromDataForSEO: true, // Auto-fetch ranking data
+              fetchFromDataForSEO: true,
               locationCode: researchLocation,
               languageCode: researchLanguage,
+              type: assignKeywordType,
             },
             { timeout: 60000 }
           )
@@ -854,6 +858,30 @@ const KeywordsPage: React.FC = () => {
                       )}
                     </div>
                   )}
+                </div>
+                <div className="flex h-11 overflow-hidden rounded-xl border-2 border-white/60 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setAssignKeywordType("money")}
+                    className={`inline-flex items-center gap-1.5 px-3.5 text-xs font-semibold transition-colors ${
+                      assignKeywordType === "money"
+                        ? "bg-emerald-500 text-white"
+                        : "bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <DollarSign className="h-3.5 w-3.5" /> Money
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssignKeywordType("topical")}
+                    className={`inline-flex items-center gap-1.5 px-3.5 text-xs font-semibold transition-colors ${
+                      assignKeywordType === "topical"
+                        ? "bg-blue-500 text-white"
+                        : "bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <BookOpen className="h-3.5 w-3.5" /> Topical
+                  </button>
                 </div>
                 <button
                   type="button"

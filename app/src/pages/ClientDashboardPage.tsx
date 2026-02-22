@@ -45,6 +45,8 @@ import {
   Globe,
   ExternalLink,
   Building2,
+  DollarSign,
+  BookOpen,
 } from "lucide-react";
 import api, { getUploadFileUrl } from "@/lib/api";
 import { Client, updateClient } from "@/store/slices/clientSlice";
@@ -85,6 +87,7 @@ type ReportTargetKeywordRow = {
   previousPosition: number | null;
   serpItemTypes: unknown;
   googleUrl: string | null;
+  type?: "money" | "topical";
 };
 
 const BACKLINKS_PAGE_SIZES = [25, 50, 100, 250] as const;
@@ -9279,130 +9282,194 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Target Keywords Card */}
-                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-                  <div className="flex items-center mb-4">
-                    <Target className="h-5 w-5 text-primary-600 mr-2" />
-                    <h2 className="text-xl font-bold text-gray-900">Target Keywords</h2>
-                    <span className="ml-2 text-sm text-gray-500">(Sorted by highest rank)</span>
+                {/* Target Keywords — split by Money / Topical */}
+                {reportPreviewTargetKeywordsError && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                    {reportPreviewTargetKeywordsError}
                   </div>
-                  {reportPreviewTargetKeywordsError && (
-                    <div className="mt-3 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-                      {reportPreviewTargetKeywordsError}
-                    </div>
-                  )}
-                  {reportPreviewTargetKeywordsLoading ? (
-                    <div className="mt-3 flex items-center justify-center py-8 text-gray-500">
+                )}
+                {reportPreviewTargetKeywordsLoading ? (
+                  <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                    <div className="flex items-center justify-center py-8 text-gray-500">
                       <Loader2 className="h-5 w-5 animate-spin mr-2" />
                       <span>Loading target keywords…</span>
                     </div>
-                  ) : reportPreviewTargetKeywords.length === 0 ? (
-                    <div className="mt-3 p-8 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
-                      <Target className="h-12 w-12 mx-auto mb-2 text-gray-400" />
-                      <p>No target keywords available.</p>
-                    </div>
-                  ) : (
-                    <div className="mt-3 overflow-x-auto border border-gray-200 rounded-lg">
-                      <table className="min-w-full">
-                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b-2 border-gray-300">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Keyword</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Location</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date Added</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Position</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Change</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">SERP Features</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">URL</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {reportPreviewTargetKeywords.map((k) => {
-                            const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
-                            const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
-                            const diff = current != null && prev != null ? prev - current : null;
-                            const diffText =
-                              diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
-                            const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
-                            const isRanked = current !== null && current <= 10;
-                            const isTop3 = current !== null && current <= 3;
-                            
-                            return (
-                              <tr key={k.id} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-4 py-3 whitespace-nowrap">
-                                  <div className="flex items-center">
-                                    {isTop3 && <Trophy className="h-4 w-4 text-yellow-500 mr-2" />}
-                                    <span className="font-semibold text-gray-900">{k.keyword}</span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{k.locationName || "United States"}</td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                                  {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}
-                                </td>
-                                <td className="px-4 py-3 whitespace-nowrap">
-                                  {current !== null ? (
-                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                      isTop3 ? 'bg-green-100 text-green-800' : 
-                                      isRanked ? 'bg-blue-100 text-blue-800' : 
-                                      'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {current}
-                                    </span>
-                                  ) : (
-                                    <span className="text-gray-400">—</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 whitespace-nowrap">
-                                  {diff !== null ? (
-                                    <div className="flex items-center">
-                                      {diff > 0 ? (
-                                        <TrendingUp className="h-4 w-4 text-green-500 mr-1" />
-                                      ) : diff < 0 ? (
-                                        <TrendingDown className="h-4 w-4 text-red-500 mr-1" />
-                                      ) : null}
-                                      <span className={`text-sm font-medium ${
-                                        diff > 0 ? 'text-green-600' : 
-                                        diff < 0 ? 'text-red-600' : 
-                                        'text-gray-600'
-                                      }`}>
-                                        {diffText}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-gray-400">—</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                                  <div className="flex flex-wrap gap-1">
-                                    {serp !== "—" ? serp.split(", ").map((feature, idx) => (
-                                      <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">
-                                        {feature}
-                                      </span>
-                                    )) : <span className="text-gray-400">—</span>}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-600 break-all max-w-xs">
-                                  {k.googleUrl ? (
-                                    <a 
-                                      className="text-blue-600 hover:text-blue-800 underline truncate block" 
-                                      href={k.googleUrl} 
-                                      target="_blank" 
-                                      rel="noreferrer"
-                                      title={k.googleUrl}
-                                    >
-                                      {k.googleUrl.length > 50 ? `${k.googleUrl.substring(0, 50)}...` : k.googleUrl}
-                                    </a>
-                                  ) : (
-                                    <span className="text-gray-400">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Money Keywords */}
+                    {(() => {
+                      const moneyKws = reportPreviewTargetKeywords.filter((k) => (k.type || "money") === "money");
+                      return (
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                          <div className="flex items-center mb-4">
+                            <DollarSign className="h-5 w-5 text-emerald-600 mr-2" />
+                            <h2 className="text-xl font-bold text-gray-900">Money Keywords</h2>
+                            <span className="ml-2 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">{moneyKws.length}</span>
+                          </div>
+                          {moneyKws.length === 0 ? (
+                            <div className="p-6 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
+                              <DollarSign className="h-10 w-10 mx-auto mb-2 text-gray-400" />
+                              <p>No money keywords tracked yet.</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                              <table className="min-w-full">
+                                <thead className="bg-gradient-to-r from-emerald-50 to-green-50 border-b-2 border-emerald-200">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Keyword</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Location</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date Added</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Position</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Change</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">SERP Features</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">URL</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {moneyKws.map((k) => {
+                                    const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+                                    const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+                                    const diff = current != null && prev != null ? prev - current : null;
+                                    const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+                                    const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+                                    const isRanked = current !== null && current <= 10;
+                                    const isTop3 = current !== null && current <= 3;
+                                    return (
+                                      <tr key={k.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                          <div className="flex items-center">
+                                            {isTop3 && <Trophy className="h-4 w-4 text-yellow-500 mr-2" />}
+                                            <span className="font-semibold text-gray-900">{k.keyword}</span>
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{k.locationName || "United States"}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                          {current !== null ? (
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${isTop3 ? 'bg-green-100 text-green-800' : isRanked ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>{current}</span>
+                                          ) : <span className="text-gray-400">—</span>}
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                          {diff !== null ? (
+                                            <div className="flex items-center">
+                                              {diff > 0 ? <TrendingUp className="h-4 w-4 text-green-500 mr-1" /> : diff < 0 ? <TrendingDown className="h-4 w-4 text-red-500 mr-1" /> : null}
+                                              <span className={`text-sm font-medium ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-gray-600'}`}>{diffText}</span>
+                                            </div>
+                                          ) : <span className="text-gray-400">—</span>}
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                                          <div className="flex flex-wrap gap-1">
+                                            {serp !== "—" ? serp.split(", ").map((feature, idx) => (
+                                              <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">{feature}</span>
+                                            )) : <span className="text-gray-400">—</span>}
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-600 break-all max-w-xs">
+                                          {k.googleUrl ? (
+                                            <a className="text-blue-600 hover:text-blue-800 underline truncate block" href={k.googleUrl} target="_blank" rel="noreferrer" title={k.googleUrl}>
+                                              {k.googleUrl.length > 50 ? `${k.googleUrl.substring(0, 50)}...` : k.googleUrl}
+                                            </a>
+                                          ) : <span className="text-gray-400">—</span>}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Topical Keywords */}
+                    {(() => {
+                      const topicalKws = reportPreviewTargetKeywords.filter((k) => (k.type || "money") === "topical");
+                      return (
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                          <div className="flex items-center mb-4">
+                            <BookOpen className="h-5 w-5 text-blue-600 mr-2" />
+                            <h2 className="text-xl font-bold text-gray-900">Topical Keywords</h2>
+                            <span className="ml-2 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-bold text-blue-700">{topicalKws.length}</span>
+                          </div>
+                          {topicalKws.length === 0 ? (
+                            <div className="p-6 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
+                              <BookOpen className="h-10 w-10 mx-auto mb-2 text-gray-400" />
+                              <p>No topical keywords tracked yet.</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                              <table className="min-w-full">
+                                <thead className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Keyword</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Location</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date Added</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Position</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Change</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">SERP Features</th>
+                                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">URL</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {topicalKws.map((k) => {
+                                    const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+                                    const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+                                    const diff = current != null && prev != null ? prev - current : null;
+                                    const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+                                    const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+                                    const isRanked = current !== null && current <= 10;
+                                    const isTop3 = current !== null && current <= 3;
+                                    return (
+                                      <tr key={k.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                          <div className="flex items-center">
+                                            {isTop3 && <Trophy className="h-4 w-4 text-yellow-500 mr-2" />}
+                                            <span className="font-semibold text-gray-900">{k.keyword}</span>
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{k.locationName || "United States"}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}</td>
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                          {current !== null ? (
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${isTop3 ? 'bg-green-100 text-green-800' : isRanked ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>{current}</span>
+                                          ) : <span className="text-gray-400">—</span>}
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                          {diff !== null ? (
+                                            <div className="flex items-center">
+                                              {diff > 0 ? <TrendingUp className="h-4 w-4 text-green-500 mr-1" /> : diff < 0 ? <TrendingDown className="h-4 w-4 text-red-500 mr-1" /> : null}
+                                              <span className={`text-sm font-medium ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-gray-600'}`}>{diffText}</span>
+                                            </div>
+                                          ) : <span className="text-gray-400">—</span>}
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                                          <div className="flex flex-wrap gap-1">
+                                            {serp !== "—" ? serp.split(", ").map((feature, idx) => (
+                                              <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">{feature}</span>
+                                            )) : <span className="text-gray-400">—</span>}
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-600 break-all max-w-xs">
+                                          {k.googleUrl ? (
+                                            <a className="text-blue-600 hover:text-blue-800 underline truncate block" href={k.googleUrl} target="_blank" rel="noreferrer" title={k.googleUrl}>
+                                              {k.googleUrl.length > 50 ? `${k.googleUrl.substring(0, 50)}...` : k.googleUrl}
+                                            </a>
+                                          ) : <span className="text-gray-400">—</span>}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
 
                 {/* Live Dashboard Card */}
                 <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">

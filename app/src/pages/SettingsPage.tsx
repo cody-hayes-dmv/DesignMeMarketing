@@ -16,7 +16,11 @@ import {
   Trash2,
   X,
   GripVertical,
+  Calculator,
+  Sparkles,
 } from "lucide-react";
+import EnterpriseCalculatorPage from "./SuperAdmin/EnterpriseCalculatorPage";
+import AiCommandsPage from "./SuperAdmin/AiCommandsPage";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { checkAuth } from "@/store/slices/authSlice";
@@ -76,6 +80,8 @@ const SettingsPage = () => {
 
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
+    { id: "enterprise-calculator", label: "Enterprise Calculator", icon: Calculator, roles: ["SUPER_ADMIN"] },
+    { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
@@ -680,6 +686,12 @@ const SettingsPage = () => {
           </div>
         );
 
+      case "enterprise-calculator":
+        return <EnterpriseCalculatorPage embedded />;
+
+      case "ai-commands":
+        return <AiCommandsPage embedded />;
+
       case "notifications":
         return (
           <div className="space-y-6">
@@ -834,9 +846,13 @@ const SettingsPage = () => {
 
         {/* Content */}
         <div className="lg:col-span-3">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
-            {renderTabContent()}
-          </div>
+          {activeTab === "enterprise-calculator" || activeTab === "ai-commands" ? (
+            renderTabContent()
+          ) : (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
+              {renderTabContent()}
+            </div>
+          )}
         </div>
       </div>
 

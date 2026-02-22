@@ -49,6 +49,7 @@ export interface Keyword {
   clicks?: number;
   impressions?: number;
   ctr?: number;
+  type?: "money" | "topical";
   clientId: string;
   createdAt: string;
   updatedAt: string;
@@ -198,6 +199,7 @@ export const addKeyword = createAsyncThunk(
     fetchFromDataForSEO,
     locationCode,
     languageCode,
+    type,
   }: {
     clientId: string;
     keyword: string;
@@ -211,6 +213,7 @@ export const addKeyword = createAsyncThunk(
     fetchFromDataForSEO?: boolean;
     locationCode?: number;
     languageCode?: string;
+    type?: "money" | "topical";
   }) => {
     try {
       const response = await api.post(`/seo/keywords/${clientId}`, {
@@ -225,6 +228,7 @@ export const addKeyword = createAsyncThunk(
         fetchFromDataForSEO,
         locationCode,
         languageCode,
+        type,
       });
       return { clientId, keyword: response.data.keyword || response.data };
     } catch (error: any) {

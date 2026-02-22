@@ -26,8 +26,6 @@ import {
   Package,
   CreditCard,
   FolderPlus,
-  Calculator,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -127,20 +125,6 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       icon: DollarSign,
       label: "Financial Overview",
       path: "/superadmin/financial-overview",
-      hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
-    },
-    {
-      icon: Calculator,
-      label: "Enterprise Calculator",
-      path: "/superadmin/enterprise-calculator",
-      hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
-    },
-    {
-      icon: Sparkles,
-      label: "AI Commands",
-      path: "/superadmin/ai-commands",
       hasSubMenu: false,
       roles: ["SUPER_ADMIN"],
     },

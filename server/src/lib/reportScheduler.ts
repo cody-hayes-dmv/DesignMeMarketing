@@ -12,6 +12,7 @@ type ReportTargetKeywordRow = {
   previousPosition: number | null;
   serpItemTypes: unknown;
   googleUrl: string | null;
+  type: string;
 };
 
 function escapeHtml(value: unknown): string {
@@ -112,7 +113,6 @@ export async function getReportTargetKeywords(clientId: string): Promise<ReportT
     .filter((tk) => trackedKeywordSet.has(normalizeKeywordKey(tk.keyword)))
     .slice(0, 50);
 
-  // Map to include position data and sort by highest rank (lowest position number) first
   const mapped = filtered.map((tk) => {
     const tracked = trackedByKeyword.get(normalizeKeywordKey(tk.keyword));
     const googlePosition = (tk as any).googlePosition ?? tracked?.currentPosition ?? null;
@@ -125,6 +125,7 @@ export async function getReportTargetKeywords(clientId: string): Promise<ReportT
       previousPosition: (tk as any).previousPosition ?? tracked?.previousPosition ?? null,
       serpItemTypes: (tk as any).serpItemTypes,
       googleUrl: onlyRankingWebsiteUrl((tk as any).googleUrl ?? tracked?.googleUrl) ?? null,
+      type: (tk as any).type || "money",
     };
   });
 
@@ -192,6 +193,76 @@ export function calculateNextRunTime(
   return nextRun;
 }
 
+function buildKeywordTableHtml(keywords: ReportTargetKeywordRow[]): string {
+  return `
+    <div style="overflow-x: auto;">
+      <table style="border-collapse: collapse; width: 100%; font-size: 12px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <thead>
+          <tr style="background: linear-gradient(to right, #f9fafb, #f3f4f6); border-bottom: 2px solid #d1d5db;">
+            <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Keyword</th>
+            <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Location</th>
+            <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Date Added</th>
+            <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Position</th>
+            <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Change</th>
+            <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">SERP Features</th>
+            <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">URL</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${keywords
+            .map((k) => {
+              const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
+              const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
+              const diff = current != null && prev != null ? prev - current : null;
+              const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
+              const dateAdded = k.createdAt ? new Date(k.createdAt as any).toLocaleDateString() : "—";
+              const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
+              const displayUrl = onlyRankingWebsiteUrl(k.googleUrl);
+              const urlCell = displayUrl
+                ? `<a href="${escapeHtml(displayUrl)}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">${escapeHtml(displayUrl.length > 50 ? displayUrl.substring(0, 50) + "..." : displayUrl)}</a>`
+                : "—";
+              const isTop3 = current !== null && current <= 3;
+              const isRanked = current !== null && current <= 10;
+              const positionBadgeColor = isTop3 ? "#dcfce7" : isRanked ? "#dbeafe" : "#f3f4f6";
+              const positionTextColor = isTop3 ? "#166534" : isRanked ? "#1e40af" : "#374151";
+              const diffColor = diff !== null ? (diff > 0 ? "#059669" : diff < 0 ? "#dc2626" : "#6b7280") : "#6b7280";
+              const diffSymbol = diff !== null ? (diff > 0 ? "↑" : diff < 0 ? "↓" : "") : "";
+              
+              return `
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                  <td style="padding: 12px; font-weight: 600; color: #111827;">${isTop3 ? "🏆 " : ""}${escapeHtml(k.keyword)}</td>
+                  <td style="padding: 12px; color: #4b5563;">${escapeHtml(k.locationName || "United States")}</td>
+                  <td style="padding: 12px; color: #6b7280;">${escapeHtml(dateAdded)}</td>
+                  <td style="padding: 12px;">
+                    ${current !== null ? `
+                      <span style="display: inline-block; background-color: ${positionBadgeColor}; color: ${positionTextColor}; padding: 4px 8px; border-radius: 12px; font-weight: 600; font-size: 11px;">
+                        ${current}
+                      </span>
+                    ` : '<span style="color: #9ca3af;">—</span>'}
+                  </td>
+                  <td style="padding: 12px;">
+                    ${diff !== null ? `
+                      <span style="color: ${diffColor}; font-weight: 600;">
+                        ${diffSymbol} ${diffText}
+                      </span>
+                    ` : '<span style="color: #9ca3af;">—</span>'}
+                  </td>
+                  <td style="padding: 12px; color: #4b5563;">
+                    ${serp !== "—" ? serp.split(", ").map((feature: string) => 
+                      `<span style="display: inline-block; background-color: #f3f4f6; color: #374151; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 4px; margin-bottom: 4px;">${escapeHtml(feature)}</span>`
+                    ).join("") : '<span style="color: #9ca3af;">—</span>'}
+                  </td>
+                  <td style="padding: 12px; word-break: break-all; max-width: 200px; color: #4b5563;">${urlCell}</td>
+                </tr>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 /**
  * Generate email HTML for a report
  */
@@ -205,12 +276,13 @@ export function generateReportEmailHTML(
   const safeClientName = escapeHtml(client?.name);
   const safeDomain = client?.domain ? escapeHtml(client.domain) : "";
   const shareUrl = opts?.shareUrl || null;
-  // Sort keywords by highest rank (lowest position number) first
-  const targetKeywords = (opts?.targetKeywords || []).sort((a, b) => {
+  const allKeywords = (opts?.targetKeywords || []).sort((a, b) => {
     const aPos = a.googlePosition ?? Infinity;
     const bPos = b.googlePosition ?? Infinity;
     return aPos - bPos;
   });
+  const moneyKeywords = allKeywords.filter((k) => k.type !== "topical");
+  const topicalKeywords = allKeywords.filter((k) => k.type === "topical");
 
   return `
     <!DOCTYPE html>
@@ -371,85 +443,35 @@ export function generateReportEmailHTML(
             </table>
           </div>
 
-          <!-- Target Keywords Card -->
+          <!-- Money Keywords Card -->
           <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
             <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;">
               <span style="display: inline-block; width: 4px; height: 20px; background-color: #2563eb; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-              Target Keywords
+              Money Keywords
             </h2>
             <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">(Sorted by highest rank)</p>
             ${
-              targetKeywords.length === 0
+              moneyKeywords.length === 0
                 ? `<div style="padding: 32px; text-align: center; color: #6b7280; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
-                    <p style="margin: 0;">No target keywords available.</p>
+                    <p style="margin: 0;">No money keywords available.</p>
                   </div>`
-                : `
-                  <div style="overflow-x: auto;">
-                    <table style="border-collapse: collapse; width: 100%; font-size: 12px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-                      <thead>
-                        <tr style="background: linear-gradient(to right, #f9fafb, #f3f4f6); border-bottom: 2px solid #d1d5db;">
-                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Keyword</th>
-                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Location</th>
-                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Date Added</th>
-                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Position</th>
-                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Change</th>
-                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">SERP Features</th>
-                          <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">URL</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${targetKeywords
-                          .map((k) => {
-                            const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
-                            const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
-                            const diff = current != null && prev != null ? prev - current : null;
-                            const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
-                            const dateAdded = k.createdAt ? new Date(k.createdAt as any).toLocaleDateString() : "—";
-                            const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
-                            const displayUrl = onlyRankingWebsiteUrl(k.googleUrl);
-                            const urlCell = displayUrl
-                              ? `<a href="${escapeHtml(displayUrl)}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">${escapeHtml(displayUrl.length > 50 ? displayUrl.substring(0, 50) + "..." : displayUrl)}</a>`
-                              : "—";
-                            const isTop3 = current !== null && current <= 3;
-                            const isRanked = current !== null && current <= 10;
-                            const positionBadgeColor = isTop3 ? "#dcfce7" : isRanked ? "#dbeafe" : "#f3f4f6";
-                            const positionTextColor = isTop3 ? "#166534" : isRanked ? "#1e40af" : "#374151";
-                            const diffColor = diff !== null ? (diff > 0 ? "#059669" : diff < 0 ? "#dc2626" : "#6b7280") : "#6b7280";
-                            const diffSymbol = diff !== null ? (diff > 0 ? "↑" : diff < 0 ? "↓" : "") : "";
-                            
-                            return `
-                              <tr style="border-bottom: 1px solid #e5e7eb;">
-                                <td style="padding: 12px; font-weight: 600; color: #111827;">${isTop3 ? "🏆 " : ""}${escapeHtml(k.keyword)}</td>
-                                <td style="padding: 12px; color: #4b5563;">${escapeHtml(k.locationName || "United States")}</td>
-                                <td style="padding: 12px; color: #6b7280;">${escapeHtml(dateAdded)}</td>
-                                <td style="padding: 12px;">
-                                  ${current !== null ? `
-                                    <span style="display: inline-block; background-color: ${positionBadgeColor}; color: ${positionTextColor}; padding: 4px 8px; border-radius: 12px; font-weight: 600; font-size: 11px;">
-                                      ${current}
-                                    </span>
-                                  ` : '<span style="color: #9ca3af;">—</span>'}
-                                </td>
-                                <td style="padding: 12px;">
-                                  ${diff !== null ? `
-                                    <span style="color: ${diffColor}; font-weight: 600;">
-                                      ${diffSymbol} ${diffText}
-                                    </span>
-                                  ` : '<span style="color: #9ca3af;">—</span>'}
-                                </td>
-                                <td style="padding: 12px; color: #4b5563;">
-                                  ${serp !== "—" ? serp.split(", ").map((feature) => 
-                                    `<span style="display: inline-block; background-color: #f3f4f6; color: #374151; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-right: 4px; margin-bottom: 4px;">${escapeHtml(feature)}</span>`
-                                  ).join("") : '<span style="color: #9ca3af;">—</span>'}
-                                </td>
-                                <td style="padding: 12px; word-break: break-all; max-width: 200px; color: #4b5563;">${urlCell}</td>
-                              </tr>
-                            `;
-                          })
-                          .join("")}
-                      </tbody>
-                    </table>
-                  </div>
-                `
+                : buildKeywordTableHtml(moneyKeywords)
+            }
+          </div>
+
+          <!-- Topical Keywords Card -->
+          <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+            <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;">
+              <span style="display: inline-block; width: 4px; height: 20px; background-color: #8b5cf6; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
+              Topical Keywords
+            </h2>
+            <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">(Sorted by highest rank)</p>
+            ${
+              topicalKeywords.length === 0
+                ? `<div style="padding: 32px; text-align: center; color: #6b7280; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
+                    <p style="margin: 0;">No topical keywords available.</p>
+                  </div>`
+                : buildKeywordTableHtml(topicalKeywords)
             }
           </div>
 
@@ -562,10 +584,14 @@ export async function generateReportPDFBuffer(
       doc.fillColor("#000000");
     }
 
-    if (targetKeywords.length > 0) {
-      // Put the table on a separate landscape page for readability.
+    const moneyKws = targetKeywords.filter((k) => (k as any).type !== "topical");
+    const topicalKws = targetKeywords.filter((k) => (k as any).type === "topical");
+
+    const drawKeywordTable = (title: string, keywords: ReportTargetKeywordRow[]) => {
+      if (keywords.length === 0) return;
+
       doc.addPage({ layout: "landscape" });
-      doc.fontSize(16).fillColor("#000000").text("Target Keywords");
+      doc.fontSize(16).fillColor("#000000").text(title);
       doc.moveDown(0.5);
 
       const pageLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
@@ -630,10 +656,10 @@ export async function generateReportPDFBuffer(
       y = drawHeader(y);
       doc.fontSize(9);
 
-      for (const k of targetKeywords) {
+      for (const k of keywords) {
         const current = typeof k.googlePosition === "number" ? k.googlePosition : null;
         const prev = typeof k.previousPosition === "number" ? k.previousPosition : null;
-        const diff = current != null && prev != null ? prev - current : null; // positive means improved
+        const diff = current != null && prev != null ? prev - current : null;
         const diffText = diff == null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : `${diff}`;
         const serp = toStringArray(k.serpItemTypes).slice(0, 3).join(", ") || "—";
         const cells = {
@@ -646,7 +672,6 @@ export async function generateReportPDFBuffer(
           url: onlyRankingWebsiteUrl(k.googleUrl) ? String(onlyRankingWebsiteUrl(k.googleUrl)) : "—",
         };
 
-        // Measure row height based on wrapped text.
         let maxH = 0;
         (Object.keys(col) as Array<keyof typeof col>).forEach((key) => {
           const text = (cells as any)[key] as string;
@@ -655,13 +680,12 @@ export async function generateReportPDFBuffer(
         });
         const rowH = Math.max(14, maxH) + rowPaddingY * 2;
 
-        // Pagination
         const pageHeight = safeNumber((doc as any)?.page?.height, 0);
         const marginBottom = safeNumber((doc as any)?.page?.margins?.bottom, defaultMargin);
         const bottomLimit = Math.max(1, pageHeight - marginBottom - 24);
         if (y + rowH > bottomLimit) {
           doc.addPage({ layout: "landscape" });
-          doc.fontSize(16).fillColor("#000000").text("Target Keywords");
+          doc.fontSize(16).fillColor("#000000").text(title);
           doc.moveDown(0.5);
           y = drawHeader(doc.y);
           doc.fontSize(9);
@@ -693,6 +717,11 @@ export async function generateReportPDFBuffer(
 
         y += rowH;
       }
+    };
+
+    if (moneyKws.length > 0 || topicalKws.length > 0) {
+      drawKeywordTable("Money Keywords", moneyKws);
+      drawKeywordTable("Topical Keywords", topicalKws);
 
       if (isHttpUrl(shareUrl)) {
         doc.moveDown(1.5);

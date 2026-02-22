@@ -2999,6 +2999,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       location_name: z.string().min(1).optional(),
       include_clickstream_data: z.boolean().optional(),
       include_serp_info: z.boolean().optional(),
+      type: z.enum(["money", "topical"]).optional().default("money"),
     }).parse(req.body);
 
     const resolvedLocationNameRaw = keywordData.locationName || (keywordData as any).location_name;
@@ -3193,10 +3194,10 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       previousPosition: keywordData.previousPosition,
       bestPosition: keywordData.bestPosition,
       googleUrl: onlyRankingWebsiteUrl(keywordData.googleUrl) ?? undefined,
-      // Prisma stores this as a LongText string; serialize arrays to JSON.
       serpFeatures: Array.isArray(keywordData.serpFeatures) ? JSON.stringify(keywordData.serpFeatures) : undefined,
       totalResults: keywordData.totalResults,
       ...(resolvedLocationName ? { locationName: resolvedLocationName } : {}),
+      type: keywordData.type || "money",
       clientId,
     };
 
@@ -3245,7 +3246,6 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
         cpc: keywordData.cpc ?? undefined,
         competition: keywordData.competition ?? undefined,
         competitionValue: Number.isFinite(competitionValue) ? competitionValue : undefined,
-        // TargetKeyword stores JSON blobs as strings in LongText columns.
         monthlySearches: Array.isArray(monthlySearches) ? JSON.stringify(monthlySearches) : undefined,
         keywordInfo: item?.keyword_info ? JSON.stringify(item.keyword_info) : undefined,
         serpInfo: item?.serp_info ? JSON.stringify(item.serp_info) : undefined,
@@ -3262,6 +3262,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
         languageCode: keywordData.languageCode,
         locationCode: resolvedLocationCode,
         locationName: resolvedLocationName || "United States",
+        type: keywordData.type || "money",
       };
 
       if (serpRankData?.serpData) {
@@ -3323,6 +3324,7 @@ router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
         languageCode: z.string().optional().default("en"),
         locationName: z.string().min(1).optional(),
         location_name: z.string().min(1).optional(),
+        type: z.enum(["money", "topical"]).optional().default("money"),
       })
       .parse(req.body);
 
@@ -3406,6 +3408,7 @@ router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
           keyword: kw,
           searchVolume: 0,
           clientId,
+          type: body.type || "money",
           ...(resolvedLocationName ? { locationName: resolvedLocationName } : {}),
         };
         await prisma.keyword.create({ data: createData });
@@ -3419,6 +3422,7 @@ router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
               locationCode: resolvedLocationCode,
               locationName: resolvedLocationName,
               languageCode: body.languageCode,
+              type: body.type || "money",
             },
             create: {
               keyword: kw,
@@ -3426,6 +3430,7 @@ router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
               locationCode: resolvedLocationCode,
               locationName: resolvedLocationName,
               languageCode: body.languageCode,
+              type: body.type || "money",
             },
           });
         } catch (tkErr: any) {
@@ -11295,6 +11300,7 @@ router.post("/target-keywords/:clientId", authenticateToken, async (req, res) =>
       locationName: z.string().optional(),
       languageCode: z.string().optional().default("en"),
       languageName: z.string().optional(),
+      type: z.enum(["money", "topical"]).optional().default("money"),
     }).parse(req.body);
 
     // Check if user has access to this client
@@ -11384,6 +11390,7 @@ router.post("/target-keywords/:clientId", authenticateToken, async (req, res) =>
         locationName: normalizedLocationName ?? keywordData.locationName ?? null,
         languageCode: keywordData.languageCode || null,
         languageName: keywordData.languageName || null,
+        type: keywordData.type || "money",
       },
     });
 
