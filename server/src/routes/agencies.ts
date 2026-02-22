@@ -2808,6 +2808,24 @@ const addAddOnSchema = z.object({
   addOnOption: z.string().min(1),
 });
 
+const ADDON_PRICE_ENV_KEY: Record<string, Record<string, string>> = {
+  extra_dashboards: {
+    '5_slots': 'STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_5',
+    '10_slots': 'STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_10',
+    '25_slots': 'STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_25',
+  },
+  extra_keywords_tracked: {
+    '50': 'STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_50',
+    '100': 'STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_100',
+    '250': 'STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_250',
+  },
+  extra_keyword_lookups: {
+    '50': 'STRIPE_PRICE_ADDON_EXTRA_CREDITS_50',
+    '150': 'STRIPE_PRICE_ADDON_EXTRA_CREDITS_150',
+    '300': 'STRIPE_PRICE_ADDON_EXTRA_CREDITS_300',
+  },
+};
+
 const ADDON_OPTIONS: Record<string, Record<string, { displayName: string; details: string; priceCents: number; billingInterval: string }>> = {
   extra_dashboards: {
     '5_slots': { displayName: 'Extra Client Dashboards (+5)', details: '+5 client dashboards', priceCents: 9900, billingInterval: 'monthly' },
@@ -2872,8 +2890,8 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
     const stripe = getStripe();
     if (stripe && isStripeConfigured() && customerId) {
       try {
-        const priceKey = `STRIPE_PRICE_ADDON_${body.addOnType.toUpperCase()}_${body.addOnOption.toUpperCase().replace('-', '_')}`;
-        const priceId = (process.env as any)[priceKey];
+        const priceEnvKey = ADDON_PRICE_ENV_KEY[body.addOnType]?.[body.addOnOption];
+        const priceId = priceEnvKey ? process.env[priceEnvKey] : undefined;
         if (priceId) {
           const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
           if (subs.data.length > 0) {

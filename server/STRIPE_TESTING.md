@@ -106,15 +106,15 @@ If you want **managed service approvals** to create Stripe line items:
 If you want **add-ons** to create Stripe line items, create Products/Prices for each add-on option and set in `server/.env`:
 
 ```env
-STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_5_SLOTS=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_10_SLOTS=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_25_SLOTS=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_TRACKED_100=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_TRACKED_250=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_TRACKED_500=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_KEYWORD_LOOKUPS_100=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_KEYWORD_LOOKUPS_300=price_xxx
-STRIPE_PRICE_ADDON_EXTRA_KEYWORD_LOOKUPS_500=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_5=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_10=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_DASHBOARDS_25=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_50=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_100=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_250=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_CREDITS_50=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_CREDITS_150=price_xxx
+STRIPE_PRICE_ADDON_EXTRA_CREDITS_300=price_xxx
 ```
 
 Restart the server after editing `.env`.
@@ -267,7 +267,7 @@ If you approved a managed service but **no new subscription item** appears in St
 
 **Troubleshooting:**
 
-- If the add-on is added in the app but no new line appears in Stripe, check that the correct `STRIPE_PRICE_ADDON_*` is in `.env` (e.g. `STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_TRACKED_100`) and the server was restarted.
+- If the add-on is added in the app but no new line appears in Stripe, check that the correct `STRIPE_PRICE_ADDON_*` is in `.env` (e.g. `STRIPE_PRICE_ADDON_EXTRA_KEYWORDS_100`) and the server was restarted.
 - Add-on availability is tier-based (e.g. Business Lite/Pro cannot add Extra Dashboards).
 
 ---
