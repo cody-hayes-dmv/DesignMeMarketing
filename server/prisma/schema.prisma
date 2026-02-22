@@ -742,6 +742,17 @@ model Ga4Metrics {
   @@map("ga4_metrics")
 }
 
+model AiCommand {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  title     String   @db.VarChar(255)
+  content   String   @db.LongText
+  sortOrder Int      @default(0)
+
+  @@map("ai_commands")
+}
+
 enum Role {
   SUPER_ADMIN
   ADMIN

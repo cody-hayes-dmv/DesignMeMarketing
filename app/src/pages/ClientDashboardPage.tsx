@@ -42,6 +42,9 @@ import {
   Repeat,
   Play,
   StopCircle,
+  Globe,
+  ExternalLink,
+  Building2,
 } from "lucide-react";
 import api, { getUploadFileUrl } from "@/lib/api";
 import { Client, updateClient } from "@/store/slices/clientSlice";
@@ -3890,29 +3893,27 @@ const ClientDashboardPage: React.FC = () => {
 
   return (
     <div className={dashboardOwnsScroll ? "h-full min-h-0 flex flex-col overflow-hidden" : "h-full min-h-0 flex flex-col"}>
-      <div className="px-8 pt-8 space-y-8 shrink-0">
-        <div className="flex items-center justify-between">
+      <div className="px-8 pt-6 space-y-6 shrink-0">
+        {/* Back navigation */}
         <div>
-          <div className="flex items-center space-x-3">
-            {!reportOnly && !clientPortalMode ? (
-              <button
-                onClick={handleBackToClients}
-                className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span>Back to Clients</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleBackToLogin}
-                className="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span>Back to Login</span>
-              </button>
-            )}
-          </div>
+          {!reportOnly && !clientPortalMode ? (
+            <button
+              onClick={handleBackToClients}
+              className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-600 shadow-sm ring-1 ring-gray-200/60 transition-all hover:bg-white hover:text-primary-600 hover:shadow-md hover:ring-primary-200"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Back to Clients</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleBackToLogin}
+              className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-600 shadow-sm ring-1 ring-gray-200/60 transition-all hover:bg-white hover:text-primary-600 hover:shadow-md hover:ring-primary-200"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Back to Login</span>
+            </button>
+          )}
           {clientPortalMode && clientPortalClients.length > 0 && (
             <div className="mt-3 flex items-center gap-2">
               <span className="text-sm text-gray-500">Clients</span>
@@ -3933,52 +3934,61 @@ const ClientDashboardPage: React.FC = () => {
               </select>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-2">
-            <h1 className="text-3xl font-bold text-gray-900">{client?.name || "Client Dashboard"}</h1>
-            {client && (
-              <>
-                <span className="hidden sm:block h-6 w-px bg-gray-300" />
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-500">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-gray-700">Domain:</span>
+        </div>
+
+        {/* Client Info Banner */}
+        <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-gradient-to-r from-white via-white to-primary-50/40 shadow-sm">
+          <div className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-primary-500 via-violet-500 to-teal-500" />
+          <div className="flex flex-wrap items-center justify-between gap-4 py-5 pl-7 pr-6">
+            {/* Left: Name + meta pills */}
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-600 to-violet-600 shadow-md">
+                <span className="text-lg font-bold text-white">
+                  {(client?.name || "C").charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <h1 className="text-xl font-bold text-gray-900 leading-tight">{client?.name || "Client Dashboard"}</h1>
+                {client && (
+                  <div className="flex flex-wrap items-center gap-2">
                     <a
                       href={client.domain.startsWith("http") ? client.domain : `https://${client.domain}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-primary-600 hover:underline"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700 ring-1 ring-sky-200/60 hover:bg-sky-100 transition-colors"
                     >
-                      {client.domain}
+                      <Globe className="h-3 w-3" />
+                      {client.domain.replace(/^https?:\/\//, "")}
+                      <ExternalLink className="h-2.5 w-2.5 opacity-50" />
                     </a>
+                    {client.industry && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-200/60">
+                        <Building2 className="h-3 w-3" />
+                        {client.industry}
+                      </span>
+                    )}
                   </div>
-                  {client.industry && (
-                    <>
-                      <span className="hidden sm:block h-4 w-px bg-gray-300" />
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium text-gray-700">Industry:</span>
-                        <span>{client.industry}</span>
-                      </div>
-                    </>
-                  )}
-                  <span className="hidden sm:block h-4 w-px bg-gray-300" />
-                  <button
-                    type="button"
-                    onClick={() => setShowViewClientModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors"
-                  >
-                    <Info className="h-4 w-4" />
-                    View Client Information
-                  </button>
-                </div>
-              </>
+                )}
+              </div>
+            </div>
+
+            {/* Right: View Info button */}
+            {client && (
+              <button
+                type="button"
+                onClick={() => setShowViewClientModal(true)}
+                className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm ring-1 ring-gray-200 transition-all hover:bg-gray-50 hover:shadow-md"
+              >
+                <Info className="h-4 w-4 text-primary-500" />
+                View Client Info
+              </button>
             )}
           </div>
         </div>
-
-        {/* Actions moved next to tabs (see below) */}
       </div>
 
       {!reportOnly && (
-        <div className="border-b border-gray-200">
+        <div className="border-b border-gray-200 px-8">
           <div className="flex items-end justify-between gap-6">
             <nav className="-mb-px flex space-x-8">
               {(clientPortalMode
@@ -4335,7 +4345,6 @@ const ClientDashboardPage: React.FC = () => {
           </div>
         </div>
       )}
-      </div>
 
       {(!reportOnly && activeTab === "dashboard") ? (
         <div ref={dashboardOuterScrollRef} className="flex-1 min-h-0 px-8 py-8 overflow-y-auto lg:overflow-hidden">

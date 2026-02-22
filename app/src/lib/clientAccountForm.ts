@@ -180,7 +180,13 @@ export function clientToFormState(client: Client): ClientFormState {
     }
   }
   const businessNicheVal = String(info.businessNiche ?? "");
-  const businessNicheKnown = (BUSINESS_NICHE_OPTIONS as readonly string[]).includes(businessNicheVal);
+  const businessNicheKnown = (INDUSTRY_OPTIONS as readonly string[]).includes(businessNicheVal);
+  const fallbackIndustry = businessNicheKnown ? businessNicheVal
+    : industryIsKnown ? currentIndustry
+    : (businessNicheVal || currentIndustry) ? "Other" : "";
+  const fallbackOther = businessNicheKnown ? ""
+    : industryIsKnown ? ""
+    : businessNicheVal || currentIndustry;
 
   return {
     ...EMPTY_CLIENT_FORM,
@@ -192,8 +198,8 @@ export function clientToFormState(client: Client): ClientFormState {
     loginUrl: String((client as { loginUrl?: string }).loginUrl ?? ""),
     loginUsername: String((client as { username?: string }).username ?? ""),
     loginPassword: "",
-    businessNiche: businessNicheKnown ? businessNicheVal : "Other",
-    businessNicheOther: businessNicheKnown ? "" : businessNicheVal,
+    businessNiche: fallbackIndustry,
+    businessNicheOther: fallbackOther,
     businessDescription: String(info.businessDescription ?? ""),
     businessAddress: String(info.businessAddress ?? ""),
     primaryLocationCity: String(info.primaryLocationCity ?? ""),
@@ -238,8 +244,8 @@ export function formStateToUpdatePayload(
   form: ClientFormState,
   options: { includeStatus?: boolean }
 ): Record<string, unknown> {
-  const selectedIndustry = form.industry === "Other" ? form.industryOther.trim() : form.industry.trim();
   const selectedBusinessNiche = form.businessNiche === "Other" ? form.businessNicheOther.trim() : (form.businessNiche || "").trim();
+  const selectedIndustry = selectedBusinessNiche;
   const accountInfo: Record<string, unknown> = {
     businessNiche: selectedBusinessNiche,
     businessDescription: form.businessDescription || "",

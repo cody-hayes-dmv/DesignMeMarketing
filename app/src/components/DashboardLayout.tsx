@@ -59,6 +59,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     if (path === "/superadmin/dashboard") return "Dashboard";
     if (path === "/superadmin/financial-overview") return "Financial Overview";
+    if (path === "/superadmin/enterprise-calculator") return "Enterprise Calculator";
+    if (path === "/superadmin/ai-commands") return "AI Commands";
     if (path === "/superadmin/settings") return "Settings";
     if (path === "/superadmin/clients") return "Clients";
     if (path === "/superadmin/agencies/myagency") return "My Agency";

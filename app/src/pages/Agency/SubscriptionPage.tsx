@@ -10,6 +10,9 @@ import {
   ChevronUp,
   ChevronDown,
   X,
+  Check,
+  Briefcase,
+  Building2,
 } from "lucide-react";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
@@ -53,15 +56,43 @@ const StripePaymentSection = forwardRef<StripePaymentHandle, { clientSecret: str
   );
 });
 
-const PLANS = [
-  { id: "solo", name: "Solo", price: 147, priceLabel: "$147", clients: 3, clientsLabel: "3 clients" },
-  { id: "starter", name: "Starter", price: 297, priceLabel: "$297", clients: 10, clientsLabel: "10 clients" },
-  { id: "growth", name: "Growth", price: 597, priceLabel: "$597", clients: 25, clientsLabel: "25 clients" },
-  { id: "pro", name: "Pro", price: 997, priceLabel: "$997", clients: 50, clientsLabel: "50 clients" },
-  { id: "enterprise", name: "Enterprise", price: null, priceLabel: "Custom", clients: null, clientsLabel: "Unlimited" },
+const AGENCY_PLANS = [
+  {
+    id: "solo", name: "Solo", price: 147, priceLabel: "$147", clientsLabel: "3 clients + 1 free agency",
+    features: ["75 keywords (account-wide)", "25 research credits/mo", "Weekly rank updates", "1 team user"],
+  },
+  {
+    id: "starter", name: "Starter", price: 297, priceLabel: "$297", clientsLabel: "10 clients + 1 free agency",
+    features: ["250 keywords (account-wide)", "75 research credits/mo", "Rank updates every 48h", "3 team users"],
+  },
+  {
+    id: "growth", name: "Growth", price: 597, priceLabel: "$597", clientsLabel: "25 clients + 1 free agency",
+    features: ["500 keywords (account-wide)", "200 research credits/mo", "Daily rank updates", "5 team users"],
+  },
+  {
+    id: "pro", name: "Pro", price: 997, priceLabel: "$997", clientsLabel: "50 clients + 1 free agency",
+    features: ["1,000 keywords (account-wide)", "500 research credits/mo", "Rank updates every 6h", "15 team users"],
+  },
+  {
+    id: "enterprise", name: "Enterprise", price: null as number | null, priceLabel: "Custom", clientsLabel: "Unlimited",
+    features: ["Unlimited keywords", "3,000+ research credits/mo", "Real-time rank updates", "Unlimited team users"],
+  },
 ];
-// Plans available in Activate Subscription modal (no Enterprise/Custom/Unlimited)
-const ACTIVATE_PLANS = PLANS.filter((p) => p.id !== "enterprise");
+
+const BUSINESS_PLANS = [
+  {
+    id: "business_lite", name: "Business Lite", price: 79, priceLabel: "$79", clientsLabel: "1 dashboard",
+    features: ["50 keywords (account-wide)", "25 research credits/mo", "Weekly rank updates", "1 team user"],
+  },
+  {
+    id: "business_pro", name: "Business Pro", price: 197, priceLabel: "$197", clientsLabel: "1 dashboard",
+    features: ["250 keywords (account-wide)", "150 research credits/mo", "Daily rank updates", "5 team users"],
+  },
+];
+
+const ALL_PLANS = [...AGENCY_PLANS, ...BUSINESS_PLANS];
+const PLANS = AGENCY_PLANS;
+const ACTIVATE_PLANS = AGENCY_PLANS.filter((p) => p.id !== "enterprise");
 
 interface SubscriptionData {
   currentPlan: string;
@@ -319,7 +350,7 @@ const SubscriptionPage = () => {
   const formatCurrency = (n: number | null) =>
     n != null ? `$${Number(n).toFixed(2)}` : "—";
 
-  const currentPlanMeta = PLANS.find((p) => p.id === data.currentPlan);
+  const currentPlanMeta = ALL_PLANS.find((p) => p.id === data.currentPlan);
   const currentPriceLabel =
     currentPlanMeta?.priceLabel ?? (data.currentPlanPrice != null ? formatCurrency(data.currentPlanPrice) : "—");
   // Before activation: free/trial accounts, no payment method, or no billing type yet → show N/A for Next Billing and Payment Method
@@ -351,8 +382,12 @@ const SubscriptionPage = () => {
   const showAdminManagedMessage =
     (data.billingType === "free" && trialExpired) || data.billingType === "custom";
 
-  const planOrder = ["solo", "starter", "growth", "pro", "enterprise"];
-  const currentIndex = planOrder.indexOf(data.currentPlan);
+  const agencyPlanOrder = ["solo", "starter", "growth", "pro", "enterprise"];
+  const businessPlanOrder = ["business_lite", "business_pro"];
+  const allPlanOrder = [...businessPlanOrder, ...agencyPlanOrder];
+  const currentIndex = allPlanOrder.indexOf(data.currentPlan);
+  const isOnBusinessPlan = businessPlanOrder.includes(data.currentPlan);
+  const isOnAgencyPlan = agencyPlanOrder.includes(data.currentPlan);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-emerald-50/30 p-8">
@@ -592,76 +627,199 @@ const SubscriptionPage = () => {
 
           {/* Middle Section - Available Plans */}
           <section className="mt-10">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Available Plans</h2>
-            <p className="text-sm text-gray-500 mb-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Available Plans</h2>
+            <p className="text-sm text-gray-500 mb-8">
               {billingManagedByAdmin
                 ? "Plan changes are managed by your administrator. Contact your administrator to change your plan."
-                : "Plan changes use Stripe's billing portal. Upgrades are prorated and take effect immediately. Downgrades take effect at the next billing cycle."}
+                : "Upgrades are prorated and take effect immediately. Downgrades take effect at the next billing cycle."}
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              {PLANS.map((plan) => {
-                const isCurrent = data.currentPlan === plan.id;
-                const planIndex = planOrder.indexOf(plan.id);
-                const isHigher = planIndex > currentIndex;
-                const isLower = planIndex < currentIndex && planIndex >= 0;
 
-                return (
-                  <div
-                    key={plan.id}
-                    className={`relative rounded-xl border-2 p-5 ${
-                      isCurrent ? "border-primary-500 bg-primary-50/50" : "border-gray-200 bg-white"
-                    }`}
-                  >
-                    {isCurrent && (
-                      <span className="absolute top-3 right-3 px-2 py-0.5 rounded text-xs font-bold bg-primary-600 text-white">
-                        CURRENT
-                      </span>
-                    )}
-                    <div className="mb-4">
-                      <h3 className="text-lg font-bold text-gray-900">{plan.name}</h3>
-                      <p className="text-2xl font-bold text-gray-900 mt-1">
-                        {plan.price != null ? formatCurrency(plan.price) : plan.priceLabel}
-                        {plan.price != null && "/month"}
-                      </p>
-                      <p className="text-sm text-gray-600 mt-0.5">{plan.clientsLabel}</p>
-                    </div>
-                    <div className="mt-4">
-                      {isCurrent ? (
-                        <span className="inline-block w-full text-center px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium">
-                          Current plan
+            {/* Agency Plans */}
+            <div className="mb-10">
+              <div className="mb-4 flex items-center gap-2">
+                <Briefcase className="h-4.5 w-4.5 text-primary-600" />
+                <h3 className="text-base font-semibold text-gray-800">Agency Plans</h3>
+                <span className="ml-1 rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">White-label + Client Portal</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {AGENCY_PLANS.filter((p) => p.id !== "enterprise").map((plan) => {
+                  const isCurrent = data.currentPlan === plan.id;
+                  const planIndex = allPlanOrder.indexOf(plan.id);
+                  const isHigher = planIndex > currentIndex;
+                  const isLower = planIndex < currentIndex && planIndex >= 0;
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className={`relative rounded-xl border-2 p-5 flex flex-col ${
+                        isCurrent ? "border-primary-500 bg-primary-50/50" : "border-gray-200 bg-white"
+                      }`}
+                    >
+                      {isCurrent && (
+                        <span className="absolute top-3 right-3 px-2 py-0.5 rounded text-xs font-bold bg-primary-600 text-white">
+                          CURRENT
                         </span>
-                      ) : isHigher ? (
-                        <button
-                          type="button"
-                          onClick={() => handlePlanChange(plan.id, "upgrade")}
-                          disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
-                          className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
-                        >
-                          Upgrade
-                        </button>
-                      ) : isLower ? (
-                        <button
-                          type="button"
-                          onClick={() => handlePlanChange(plan.id, "downgrade")}
-                          disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
-                          className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
-                        >
-                          <ChevronDown className="h-4 w-4" /> Downgrade
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={handleManageBilling}
-                          disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
-                          className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
-                        >
-                          Select
-                        </button>
                       )}
+                      <div className="mb-3">
+                        <h3 className="text-lg font-bold text-gray-900">{plan.name}</h3>
+                        <p className="text-2xl font-bold text-gray-900 mt-1">
+                          {plan.price != null ? formatCurrency(plan.price) : plan.priceLabel}
+                          {plan.price != null && <span className="text-sm font-normal text-gray-500">/mo</span>}
+                        </p>
+                        <p className="text-xs font-medium text-primary-600 mt-0.5">{plan.clientsLabel}</p>
+                      </div>
+                      <ul className="flex-1 space-y-1.5 mb-4">
+                        {plan.features.map((f) => (
+                          <li key={f} className="flex items-start gap-1.5 text-xs text-gray-600">
+                            <Check className="mt-0.5 h-3 w-3 shrink-0 text-primary-500" />
+                            <span>{f}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-auto">
+                        {isCurrent ? (
+                          <span className="inline-block w-full text-center px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium">
+                            Current plan
+                          </span>
+                        ) : isHigher ? (
+                          <button
+                            type="button"
+                            onClick={() => handlePlanChange(plan.id, "upgrade")}
+                            disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
+                            className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
+                          >
+                            <ChevronUp className="h-4 w-4" /> Upgrade
+                          </button>
+                        ) : isLower ? (
+                          <button
+                            type="button"
+                            onClick={() => handlePlanChange(plan.id, "downgrade")}
+                            disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
+                            className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            <ChevronDown className="h-4 w-4" /> Downgrade
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleManageBilling}
+                            disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
+                            className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            Select
+                          </button>
+                        )}
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              {/* Enterprise CTA */}
+              <div className="mt-6 rounded-xl border-2 border-dashed border-gray-300 bg-gradient-to-r from-gray-50 to-white p-6">
+                <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:text-left">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-gray-800 to-gray-900 shadow-md">
+                    <Building2 className="h-6 w-6 text-white" />
                   </div>
-                );
-              })}
+                  <div className="flex-1">
+                    <h4 className="text-lg font-bold text-gray-900">Enterprise — Custom Pricing</h4>
+                    <p className="mt-0.5 text-sm text-gray-500">
+                      Need more than 50 clients or advanced features? Let's build a plan around your agency.
+                    </p>
+                  </div>
+                  <a
+                    href="https://calendly.com/designmemarketing"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-gradient-to-r from-gray-800 to-gray-900 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:from-gray-900 hover:to-black hover:shadow-md"
+                  >
+                    Book a Demo
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Business Plans */}
+            <div>
+              <div className="mb-4 flex items-center gap-2">
+                <Building2 className="h-4.5 w-4.5 text-teal-600" />
+                <h3 className="text-base font-semibold text-gray-800">Business Plans</h3>
+                <span className="ml-1 rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-medium text-teal-700">Single Business SEO</span>
+              </div>
+              <p className="text-xs text-gray-500 mb-4">For businesses tracking their own SEO — no agency features, white-label, or client portal.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 max-w-2xl gap-4">
+                {BUSINESS_PLANS.map((plan) => {
+                  const isCurrent = data.currentPlan === plan.id;
+                  const planIndex = allPlanOrder.indexOf(plan.id);
+                  const isHigher = planIndex > currentIndex;
+                  const isLower = planIndex < currentIndex && planIndex >= 0;
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className={`relative rounded-xl border-2 p-5 flex flex-col ${
+                        isCurrent ? "border-teal-500 bg-teal-50/50" : "border-gray-200 bg-white"
+                      }`}
+                    >
+                      {isCurrent && (
+                        <span className="absolute top-3 right-3 px-2 py-0.5 rounded text-xs font-bold bg-teal-600 text-white">
+                          CURRENT
+                        </span>
+                      )}
+                      <div className="mb-3">
+                        <h3 className="text-lg font-bold text-gray-900">{plan.name}</h3>
+                        <p className="text-2xl font-bold text-gray-900 mt-1">
+                          {formatCurrency(plan.price)}
+                          <span className="text-sm font-normal text-gray-500">/mo</span>
+                        </p>
+                        <p className="text-xs font-medium text-teal-600 mt-0.5">{plan.clientsLabel}</p>
+                      </div>
+                      <ul className="flex-1 space-y-1.5 mb-4">
+                        {plan.features.map((f) => (
+                          <li key={f} className="flex items-start gap-1.5 text-xs text-gray-600">
+                            <Check className="mt-0.5 h-3 w-3 shrink-0 text-teal-500" />
+                            <span>{f}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-auto">
+                        {isCurrent ? (
+                          <span className="inline-block w-full text-center px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium">
+                            Current plan
+                          </span>
+                        ) : isHigher ? (
+                          <button
+                            type="button"
+                            onClick={() => handlePlanChange(plan.id, "upgrade")}
+                            disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
+                            className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-teal-600 text-white text-sm font-semibold hover:bg-teal-700 disabled:opacity-60 shadow-sm"
+                          >
+                            <ChevronUp className="h-4 w-4" /> Upgrade
+                          </button>
+                        ) : isLower ? (
+                          <button
+                            type="button"
+                            onClick={() => handlePlanChange(plan.id, "downgrade")}
+                            disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
+                            className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            <ChevronDown className="h-4 w-4" /> Switch
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleManageBilling}
+                            disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
+                            className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            Select
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </section>
 

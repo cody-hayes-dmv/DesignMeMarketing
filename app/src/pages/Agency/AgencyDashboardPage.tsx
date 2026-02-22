@@ -17,6 +17,9 @@ import {
   Sparkles,
   ArrowUpRight,
   Clock,
+  Check,
+  Building2,
+  Briefcase,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
@@ -679,6 +682,233 @@ const AgencyDashboardPage = () => {
           </div>
         </div>
       </div>
+
+      {/* SECTION 3: Plans & Pricing */}
+      <section className="mt-12">
+        <div className="mb-8 text-center">
+          <h2 className="text-2xl font-bold text-gray-900">Plans & Pricing</h2>
+          <p className="mt-2 text-sm text-gray-500">Everything you need to dominate SEO — choose the plan that fits your scale</p>
+        </div>
+
+        {/* Agency Tiers */}
+        <div className="mb-6">
+          <div className="mb-4 flex items-center gap-2">
+            <Briefcase className="h-5 w-5 text-primary-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Agency Plans</h3>
+            <span className="ml-2 rounded-full bg-primary-50 px-3 py-0.5 text-xs font-medium text-primary-700">White-label + Client Portal</span>
+          </div>
+          <p className="mb-5 text-sm text-gray-500">Every agency plan includes 1 free dashboard for your own website, plus client dashboards.</p>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {([
+              {
+                name: "Solo", price: "$147", badge: null, accent: "primary",
+                features: [
+                  "3 client dashboards + 1 free agency",
+                  "75 tracked keywords (account-wide)",
+                  "25 research credits/mo",
+                  "Weekly rank updates",
+                  "Weekly AI Intelligence",
+                  "1 team user",
+                ],
+              },
+              {
+                name: "Starter", price: "$297", badge: null, accent: "violet",
+                features: [
+                  "10 client dashboards + 1 free agency",
+                  "250 tracked keywords (account-wide)",
+                  "75 research credits/mo",
+                  "Rank updates every 48 hours",
+                  "Weekly AI Intelligence",
+                  "3 team users",
+                ],
+              },
+              {
+                name: "Growth", price: "$597", badge: "Popular", accent: "secondary",
+                features: [
+                  "25 client dashboards + 1 free agency",
+                  "500 tracked keywords (account-wide)",
+                  "200 research credits/mo",
+                  "Daily rank updates",
+                  "Daily AI Intelligence",
+                  "5 team users",
+                ],
+              },
+              {
+                name: "Pro", price: "$997", badge: null, accent: "amber",
+                features: [
+                  "50 client dashboards + 1 free agency",
+                  "1,000 tracked keywords (account-wide)",
+                  "500 research credits/mo",
+                  "Rank updates every 6 hours",
+                  "Daily AI Intelligence",
+                  "15 team users",
+                ],
+              },
+            ] as const).map((plan) => {
+              const isCurrent = stats.currentTier === plan.name;
+              const colors: Record<string, { border: string; gradFrom: string; gradTo: string; badgeBg: string; badgeText: string; check: string }> = {
+                primary:   { border: "border-primary-200", gradFrom: "from-primary-600", gradTo: "to-primary-700", badgeBg: "bg-primary-100", badgeText: "text-primary-700", check: "text-primary-500" },
+                violet:    { border: "border-violet-200", gradFrom: "from-violet-600", gradTo: "to-violet-700", badgeBg: "bg-violet-100", badgeText: "text-violet-700", check: "text-violet-500" },
+                secondary: { border: "border-secondary-200", gradFrom: "from-secondary-600", gradTo: "to-secondary-700", badgeBg: "bg-secondary-100", badgeText: "text-secondary-700", check: "text-secondary-500" },
+                amber:     { border: "border-amber-200", gradFrom: "from-amber-600", gradTo: "to-amber-700", badgeBg: "bg-amber-100", badgeText: "text-amber-700", check: "text-amber-500" },
+              };
+              const c = colors[plan.accent];
+              return (
+                <div
+                  key={plan.name}
+                  className={`relative flex flex-col rounded-2xl border-2 bg-white shadow-sm transition-all hover:shadow-lg ${isCurrent ? "border-primary-500 ring-2 ring-primary-200" : c.border}`}
+                >
+                  {plan.badge && (
+                    <span className={`absolute -top-3 left-1/2 -translate-x-1/2 rounded-full ${c.badgeBg} ${c.badgeText} px-4 py-1 text-xs font-bold shadow-sm`}>
+                      {plan.badge}
+                    </span>
+                  )}
+                  {isCurrent && (
+                    <span className="absolute -top-3 right-4 rounded-full bg-primary-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
+                      CURRENT
+                    </span>
+                  )}
+                  <div className={`rounded-t-xl bg-gradient-to-r ${c.gradFrom} ${c.gradTo} px-6 py-5`}>
+                    <h4 className="text-lg font-bold text-white">{plan.name}</h4>
+                    <p className="mt-1 text-3xl font-extrabold text-white">{plan.price}<span className="text-base font-medium text-white/70">/mo</span></p>
+                  </div>
+                  <ul className="flex-1 space-y-3 px-6 py-5">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-start gap-2.5 text-sm text-gray-700">
+                        <Check className={`mt-0.5 h-4 w-4 shrink-0 ${c.check}`} />
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="px-6 pb-5">
+                    <Link
+                      to="/agency/subscription"
+                      className={`block w-full rounded-lg bg-gradient-to-r ${c.gradFrom} ${c.gradTo} py-2.5 text-center text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md`}
+                    >
+                      {isCurrent ? "Manage Plan" : "Get Started"}
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Enterprise Card */}
+            <div className="relative flex flex-col rounded-2xl border-2 border-dashed border-gray-300 bg-gradient-to-b from-gray-50 to-white shadow-sm transition-all hover:shadow-lg xl:col-span-4">
+              <div className="flex flex-1 flex-col items-center justify-center px-8 py-10 text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-gray-800 to-gray-900 shadow-lg">
+                  <Building2 className="h-7 w-7 text-white" />
+                </div>
+                <h4 className="text-xl font-bold text-gray-900">Enterprise — Custom Pricing</h4>
+                <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
+                  Need more than 50 clients or advanced features? Let's build a plan around your agency.
+                </p>
+                <ul className="mx-auto mt-4 flex flex-wrap justify-center gap-x-6 gap-y-1 text-xs text-gray-500">
+                  <li className="flex items-center gap-1"><Check className="h-3.5 w-3.5 text-gray-400" /> Unlimited dashboards</li>
+                  <li className="flex items-center gap-1"><Check className="h-3.5 w-3.5 text-gray-400" /> Custom keyword limits</li>
+                  <li className="flex items-center gap-1"><Check className="h-3.5 w-3.5 text-gray-400" /> 6-hour rank updates</li>
+                  <li className="flex items-center gap-1"><Check className="h-3.5 w-3.5 text-gray-400" /> Daily AI Intelligence</li>
+                  <li className="flex items-center gap-1"><Check className="h-3.5 w-3.5 text-gray-400" /> Unlimited team users</li>
+                  <li className="flex items-center gap-1"><Check className="h-3.5 w-3.5 text-gray-400" /> Dedicated support</li>
+                </ul>
+                <a
+                  href="https://calendly.com/designmemarketing"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-gray-800 to-gray-900 px-8 py-3 text-sm font-bold text-white shadow-md transition-all hover:from-gray-900 hover:to-black hover:shadow-lg"
+                >
+                  Book a Demo
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Business Tiers */}
+        <div className="mt-10">
+          <div className="mb-4 flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-teal-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Business Plans</h3>
+            <span className="ml-2 rounded-full bg-teal-50 px-3 py-0.5 text-xs font-medium text-teal-700">Single Business SEO</span>
+          </div>
+          <p className="mb-5 text-sm text-gray-500">For businesses tracking their own SEO performance — no agency features or white-label.</p>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-2 max-w-3xl">
+            {([
+              {
+                name: "Business Lite", price: "$79", accent: "teal",
+                features: [
+                  "1 dashboard (your business)",
+                  "50 tracked keywords (account-wide)",
+                  "25 research credits/mo",
+                  "Weekly rank updates",
+                  "Weekly AI Intelligence",
+                  "1 team user",
+                ],
+              },
+              {
+                name: "Business Pro", price: "$197", accent: "cyan",
+                features: [
+                  "1 dashboard (your business)",
+                  "250 tracked keywords (account-wide)",
+                  "150 research credits/mo",
+                  "Daily rank updates",
+                  "Daily AI Intelligence",
+                  "5 team users",
+                ],
+              },
+            ] as const).map((plan) => {
+              const isCurrent = stats.currentTier === plan.name;
+              const colors: Record<string, { border: string; gradFrom: string; gradTo: string; check: string }> = {
+                teal: { border: "border-teal-200", gradFrom: "from-teal-600", gradTo: "to-teal-700", check: "text-teal-500" },
+                cyan: { border: "border-cyan-200", gradFrom: "from-cyan-600", gradTo: "to-cyan-700", check: "text-cyan-500" },
+              };
+              const c = colors[plan.accent];
+              return (
+                <div
+                  key={plan.name}
+                  className={`relative flex flex-col rounded-2xl border-2 bg-white shadow-sm transition-all hover:shadow-lg ${isCurrent ? "border-primary-500 ring-2 ring-primary-200" : c.border}`}
+                >
+                  {isCurrent && (
+                    <span className="absolute -top-3 right-4 rounded-full bg-primary-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
+                      CURRENT
+                    </span>
+                  )}
+                  <div className={`rounded-t-xl bg-gradient-to-r ${c.gradFrom} ${c.gradTo} px-6 py-5`}>
+                    <h4 className="text-lg font-bold text-white">{plan.name}</h4>
+                    <p className="mt-1 text-3xl font-extrabold text-white">{plan.price}<span className="text-base font-medium text-white/70">/mo</span></p>
+                  </div>
+                  <ul className="flex-1 space-y-3 px-6 py-5">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-start gap-2.5 text-sm text-gray-700">
+                        <Check className={`mt-0.5 h-4 w-4 shrink-0 ${c.check}`} />
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="px-6 pb-5">
+                    <Link
+                      to="/agency/subscription"
+                      className={`block w-full rounded-lg bg-gradient-to-r ${c.gradFrom} ${c.gradTo} py-2.5 text-center text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md`}
+                    >
+                      {isCurrent ? "Manage Plan" : "Get Started"}
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Add-ons callout */}
+        <div className="mt-8 rounded-2xl border border-dashed border-gray-300 bg-gray-50/50 p-6 text-center">
+          <p className="text-sm font-medium text-gray-700">Need more? Stack <strong>add-ons</strong> on top of any plan for extra dashboards, keywords, or research credits.</p>
+          <Link
+            to="/agency/add-ons"
+            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-700"
+          >
+            View Add-Ons <ChevronRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
     </div>
   );
 };

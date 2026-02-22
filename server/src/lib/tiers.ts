@@ -1,6 +1,10 @@
 /**
  * Tiered pricing: capacity limits only. All tiers include AI Intelligence.
- * Agency tiers: white-label + client portal. Business tiers: one dashboard "Your Business", no white-label.
+ * Agency tiers: white-label + client portal + 1 free agency dashboard.
+ * Business tiers: one dashboard "Your Business", no white-label.
+ *
+ * Keywords are ALWAYS account-wide (distributed freely across dashboards).
+ * Research credits reset on 1st of each month (no rollover).
  */
 
 export type TierType = "agency" | "business";
@@ -19,14 +23,12 @@ export interface TierConfig {
   id: TierId;
   name: string;
   type: TierType;
-  /** Max client dashboards (agencies) or 1 for business */
-  maxDashboards: number | null; // null = unlimited
-  /** Keywords per dashboard (agency only). Business uses keywordsTotal. */
-  keywordsPerDashboard: number | null;
-  /** Total keywords across the single dashboard (business only) */
-  keywordsTotal: number | null;
-  keywordResearchCreditsPerMonth: number;
-  rankUpdateFrequency: "weekly" | "daily" | "4x_daily" | "realtime";
+  /** Max CLIENT dashboards (agency) or 1 (business). Does NOT include the free agency dashboard. null = unlimited. */
+  maxDashboards: number | null;
+  /** Total tracked keywords across all dashboards (account-wide). */
+  keywordsTotal: number;
+  researchCreditsPerMonth: number;
+  rankUpdateFrequency: "weekly" | "every_48_hours" | "daily" | "4x_daily" | "realtime";
   aiUpdateFrequency: "monthly" | "weekly" | "daily" | "realtime";
   maxTeamUsers: number | null; // null = unlimited
   hasWhiteLabel: boolean;
@@ -55,10 +57,9 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Free",
     type: "agency",
     maxDashboards: 0,
-    keywordsPerDashboard: 0,
-    keywordsTotal: null,
-    keywordResearchCreditsPerMonth: 5,
-    rankUpdateFrequency: "daily",
+    keywordsTotal: 0,
+    researchCreditsPerMonth: 5,
+    rankUpdateFrequency: "weekly",
     aiUpdateFrequency: "weekly",
     maxTeamUsers: 0,
     hasWhiteLabel: true,
@@ -70,10 +71,9 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Solo",
     type: "agency",
     maxDashboards: 3,
-    keywordsPerDashboard: 50,
-    keywordsTotal: null,
-    keywordResearchCreditsPerMonth: 50,
-    rankUpdateFrequency: "daily",
+    keywordsTotal: 75,
+    researchCreditsPerMonth: 25,
+    rankUpdateFrequency: "weekly",
     aiUpdateFrequency: "weekly",
     maxTeamUsers: 1,
     hasWhiteLabel: true,
@@ -85,12 +85,11 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Starter",
     type: "agency",
     maxDashboards: 10,
-    keywordsPerDashboard: 50,
-    keywordsTotal: null,
-    keywordResearchCreditsPerMonth: 150,
-    rankUpdateFrequency: "daily",
-    aiUpdateFrequency: "daily",
-    maxTeamUsers: 2,
+    keywordsTotal: 250,
+    researchCreditsPerMonth: 75,
+    rankUpdateFrequency: "every_48_hours",
+    aiUpdateFrequency: "weekly",
+    maxTeamUsers: 3,
     hasWhiteLabel: true,
     hasClientPortal: true,
     priceMonthlyUsd: 297,
@@ -100,9 +99,8 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Growth",
     type: "agency",
     maxDashboards: 25,
-    keywordsPerDashboard: 100,
-    keywordsTotal: null,
-    keywordResearchCreditsPerMonth: 400,
+    keywordsTotal: 500,
+    researchCreditsPerMonth: 200,
     rankUpdateFrequency: "daily",
     aiUpdateFrequency: "daily",
     maxTeamUsers: 5,
@@ -115,11 +113,10 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Pro",
     type: "agency",
     maxDashboards: 50,
-    keywordsPerDashboard: 200,
-    keywordsTotal: null,
-    keywordResearchCreditsPerMonth: 1000,
+    keywordsTotal: 1000,
+    researchCreditsPerMonth: 500,
     rankUpdateFrequency: "4x_daily",
-    aiUpdateFrequency: "realtime",
+    aiUpdateFrequency: "daily",
     maxTeamUsers: 15,
     hasWhiteLabel: true,
     hasClientPortal: true,
@@ -130,9 +127,8 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Enterprise",
     type: "agency",
     maxDashboards: null,
-    keywordsPerDashboard: 500,
-    keywordsTotal: null,
-    keywordResearchCreditsPerMonth: 3000,
+    keywordsTotal: 5000,
+    researchCreditsPerMonth: 3000,
     rankUpdateFrequency: "realtime",
     aiUpdateFrequency: "realtime",
     maxTeamUsers: null,
@@ -145,11 +141,10 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Business Lite",
     type: "business",
     maxDashboards: 1,
-    keywordsPerDashboard: null,
-    keywordsTotal: 15,
-    keywordResearchCreditsPerMonth: 25,
+    keywordsTotal: 50,
+    researchCreditsPerMonth: 25,
     rankUpdateFrequency: "weekly",
-    aiUpdateFrequency: "monthly",
+    aiUpdateFrequency: "weekly",
     maxTeamUsers: 1,
     hasWhiteLabel: false,
     hasClientPortal: false,
@@ -160,9 +155,8 @@ export const TIERS: Record<TierId, TierConfig> = {
     name: "Business Pro",
     type: "business",
     maxDashboards: 1,
-    keywordsPerDashboard: null,
     keywordsTotal: 250,
-    keywordResearchCreditsPerMonth: 300,
+    researchCreditsPerMonth: 150,
     rankUpdateFrequency: "daily",
     aiUpdateFrequency: "daily",
     maxTeamUsers: 5,
@@ -204,6 +198,8 @@ export function getRankRefreshIntervalMs(tier: TierConfig): number {
       return 6 * MS_HOUR;
     case "daily":
       return MS_DAY;
+    case "every_48_hours":
+      return 2 * MS_DAY;
     case "weekly":
       return MS_WEEK;
     default:

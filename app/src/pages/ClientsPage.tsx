@@ -351,21 +351,12 @@ const ClientsPage = () => {
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const selectedIndustry = clientForm.industry === "Other"
-      ? clientForm.industryOther.trim()
-      : clientForm.industry.trim();
-
-    if (!selectedIndustry) {
-      toast.error("Please select an industry.");
-      return;
-    }
-
     const selectedBusinessNiche = clientForm.businessNiche === "Other"
       ? clientForm.businessNicheOther.trim()
       : (clientForm.businessNiche || "").trim();
 
-    if (isAgencyCreateForm && !selectedBusinessNiche) {
-      toast.error("Please select or enter a business niche.");
+    if (!selectedBusinessNiche) {
+      toast.error("Please select a business niche.");
       return;
     }
 
@@ -422,7 +413,7 @@ const ClientsPage = () => {
       await dispatch(createClient({ data: {
         name: clientForm.name.trim(),
         domain,
-        industry: selectedIndustry,
+        industry: selectedBusinessNiche,
         targets,
         loginUrl: clientForm.loginUrl || undefined,
         username: clientForm.loginUsername || undefined,
@@ -521,8 +512,12 @@ const ClientsPage = () => {
       loginUrl: String((client as any)?.loginUrl ?? ""),
       loginUsername: String((client as any)?.username ?? ""),
       loginPassword: String((client as any)?.password ?? ""),
-      businessNiche: (BUSINESS_NICHE_OPTIONS as readonly string[]).includes(String(info.businessNiche ?? "")) ? String(info.businessNiche ?? "") : "Other",
-      businessNicheOther: (BUSINESS_NICHE_OPTIONS as readonly string[]).includes(String(info.businessNiche ?? "")) ? "" : String(info.businessNiche ?? ""),
+      businessNiche: (INDUSTRY_OPTIONS as readonly string[]).includes(String(info.businessNiche ?? "")) ? String(info.businessNiche ?? "")
+        : (INDUSTRY_OPTIONS as readonly string[]).includes(currentIndustry) ? currentIndustry
+        : (String(info.businessNiche ?? "") || currentIndustry) ? "Other" : "",
+      businessNicheOther: (INDUSTRY_OPTIONS as readonly string[]).includes(String(info.businessNiche ?? "")) ? ""
+        : (INDUSTRY_OPTIONS as readonly string[]).includes(currentIndustry) ? ""
+        : String(info.businessNiche ?? "") || currentIndustry,
       businessDescription: String(info.businessDescription ?? ""),
       businessAddress: String(info.businessAddress ?? ""),
       primaryLocationCity: String(info.primaryLocationCity ?? ""),
@@ -712,18 +707,15 @@ const ClientsPage = () => {
     e.preventDefault();
     if (!editingClient) return;
 
-    const selectedIndustry = clientForm.industry === "Other"
-      ? clientForm.industryOther.trim()
-      : clientForm.industry.trim();
+    const selectedBusinessNicheEdit = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther.trim() : (clientForm.businessNiche || "").trim();
 
-    if (!selectedIndustry) {
-      toast.error("Please select an industry.");
+    if (!selectedBusinessNicheEdit) {
+      toast.error("Please select a business niche.");
       return;
     }
 
     try {
       const targets = parseKeywordsText(clientForm.keywords);
-      const selectedBusinessNicheEdit = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther.trim() : (clientForm.businessNiche || "").trim();
       const accountInfo: Record<string, any> = {
         businessNiche: selectedBusinessNicheEdit,
         businessDescription: clientForm.businessDescription || "",
@@ -762,7 +754,7 @@ const ClientsPage = () => {
       const updatePayload: Record<string, any> = {
         name: clientForm.name,
         domain: clientForm.domain,
-        industry: selectedIndustry,
+        industry: selectedBusinessNicheEdit,
         targets,
         loginUrl: clientForm.loginUrl,
         username: clientForm.loginUsername,
@@ -1704,13 +1696,13 @@ const ClientsPage = () => {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche *</label>
                           <select value={clientForm.businessNiche} onChange={(e) => setClientForm((prev) => ({ ...prev, businessNiche: e.target.value, businessNicheOther: e.target.value === "Other" ? prev.businessNicheOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
-                            <option value="">Select or enter below</option>
-                            {BUSINESS_NICHE_OPTIONS.map((opt) => (
+                            <option value="">Select business niche</option>
+                            {INDUSTRY_OPTIONS.map((opt) => (
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
                           </select>
                           {clientForm.businessNiche === "Other" && (
-                            <input type="text" value={clientForm.businessNicheOther} onChange={(e) => setClientForm({ ...clientForm, businessNicheOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter niche" required />
+                            <input type="text" value={clientForm.businessNicheOther} onChange={(e) => setClientForm({ ...clientForm, businessNicheOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter business niche" required />
                           )}
                         </div>
                         <div className="md:col-span-2">
@@ -1721,18 +1713,6 @@ const ClientsPage = () => {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain *</label>
                           <input type="url" required value={clientForm.domain} onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="https://islandsaltandspa.com" />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Industry *</label>
-                          <select value={clientForm.industry} onChange={(e) => setClientForm((prev) => ({ ...prev, industry: e.target.value, industryOther: e.target.value === "Other" ? prev.industryOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
-                            <option value="">Select industry</option>
-                            {INDUSTRY_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                          {clientForm.industry === "Other" && (
-                            <input type="text" value={clientForm.industryOther} onChange={(e) => setClientForm({ ...clientForm, industryOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter industry" required />
-                          )}
                         </div>
                       </div>
                     </section>
@@ -1909,7 +1889,15 @@ const ClientsPage = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche</label>
-                          <input type="text" value={clientForm.businessNiche} onChange={(e) => setClientForm({ ...clientForm, businessNiche: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Emergency locksmith" />
+                          <select value={clientForm.businessNiche} onChange={(e) => setClientForm((prev) => ({ ...prev, businessNiche: e.target.value, businessNicheOther: e.target.value === "Other" ? prev.businessNicheOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
+                            <option value="" disabled>Select business niche</option>
+                            {INDUSTRY_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {clientForm.businessNiche === "Other" && (
+                            <input type="text" value={clientForm.businessNicheOther} onChange={(e) => setClientForm({ ...clientForm, businessNicheOther: e.target.value })} className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter business niche" required />
+                          )}
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Description</label>
@@ -1918,18 +1906,6 @@ const ClientsPage = () => {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain</label>
                           <input type="text" value={clientForm.domain} onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="example.com or https://example.com" required />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Industry</label>
-                          <select value={clientForm.industry} onChange={(e) => setClientForm((prev) => ({ ...prev, industry: e.target.value, industryOther: e.target.value === "Other" ? prev.industryOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
-                            <option value="" disabled>Select industry</option>
-                            {INDUSTRY_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                          {clientForm.industry === "Other" && (
-                            <input type="text" value={clientForm.industryOther} onChange={(e) => setClientForm({ ...clientForm, industryOther: e.target.value })} className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter industry" required />
-                          )}
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Address</label>
@@ -2029,26 +2005,6 @@ const ClientsPage = () => {
                         </div>
                       </div>
                     </section>
-                    <section className="rounded-xl border-l-4 border-rose-500 bg-rose-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-rose-900 mb-4 flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                        Keywords
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">What are the keywords you want to target?</label>
-                          <textarea value={clientForm.keywords} onChange={(e) => setClientForm({ ...clientForm, keywords: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={5} placeholder="One per line" />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
-                          <input type="number" step="any" value={clientForm.latitude} onChange={(e) => setClientForm({ ...clientForm, latitude: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
-                          <input type="number" step="any" value={clientForm.longitude} onChange={(e) => setClientForm({ ...clientForm, longitude: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
-                        </div>
-                      </div>
-                    </section>
                     {canSeeSeoRoadmapFields && (
                       <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
                         <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
@@ -2097,15 +2053,13 @@ const ClientsPage = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const niche = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther : clientForm.businessNiche;
-                    const industry = clientForm.industry === "Other" ? clientForm.industryOther : clientForm.industry;
+                    const industry = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther : clientForm.businessNiche;
                     const lines = [
                       "--- BUSINESS INFORMATION ---",
                       `Business Name: ${clientForm.name || ""}`,
-                      `Business Niche: ${niche || ""}`,
+                      `Business Niche: ${industry || ""}`,
                       `Business Description: ${clientForm.businessDescription || ""}`,
                       `Primary Domain: ${clientForm.domain || ""}`,
-                      `Industry: ${industry || ""}`,
                       "",
                       "--- LOCATION INFORMATION ---",
                       `Business Address: ${clientForm.businessAddress || ""}`,
@@ -2184,13 +2138,13 @@ const ClientsPage = () => {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche *</label>
                           <select value={clientForm.businessNiche} onChange={(e) => setClientForm((prev) => ({ ...prev, businessNiche: e.target.value, businessNicheOther: e.target.value === "Other" ? prev.businessNicheOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
-                            <option value="">Select or enter below</option>
-                            {BUSINESS_NICHE_OPTIONS.map((opt) => (
+                            <option value="">Select business niche</option>
+                            {INDUSTRY_OPTIONS.map((opt) => (
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
                           </select>
                           {clientForm.businessNiche === "Other" && (
-                            <input type="text" value={clientForm.businessNicheOther} onChange={(e) => setClientForm({ ...clientForm, businessNicheOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter niche" required />
+                            <input type="text" value={clientForm.businessNicheOther} onChange={(e) => setClientForm({ ...clientForm, businessNicheOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter business niche" required />
                           )}
                         </div>
                         <div className="md:col-span-2">
@@ -2208,39 +2162,6 @@ const ClientsPage = () => {
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             placeholder="https://islandsaltandspa.com"
                           />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Industry *</label>
-                          <select
-                            value={clientForm.industry}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setClientForm((prev) => ({
-                                ...prev,
-                                industry: value,
-                                industryOther: value === "Other" ? prev.industryOther : "",
-                              }));
-                            }}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                            required
-                          >
-                            <option value="">Select industry</option>
-                            {INDUSTRY_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                          {clientForm.industry === "Other" && (
-                            <input
-                              type="text"
-                              value={clientForm.industryOther}
-                              onChange={(e) => setClientForm((prev) => ({ ...prev, industryOther: e.target.value }))}
-                              className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                              placeholder="Enter industry"
-                              required
-                            />
-                          )}
                         </div>
                       </div>
                     </section>
@@ -2384,12 +2305,38 @@ const ClientsPage = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche</label>
-                          <input
-                            type="text"
+                          <select
                             value={clientForm.businessNiche}
-                            onChange={(e) => setClientForm({ ...clientForm, businessNiche: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                          />
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setClientForm((prev) => ({
+                                ...prev,
+                                businessNiche: value,
+                                businessNicheOther: value === "Other" ? prev.businessNicheOther : "",
+                              }));
+                            }}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                            required
+                          >
+                            <option value="" disabled>
+                              Select business niche
+                            </option>
+                            {INDUSTRY_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                          {clientForm.businessNiche === "Other" && (
+                            <input
+                              type="text"
+                              value={clientForm.businessNicheOther}
+                              onChange={(e) => setClientForm((prev) => ({ ...prev, businessNicheOther: e.target.value }))}
+                              className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              placeholder="Enter business niche"
+                              required
+                            />
+                          )}
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Description</label>
@@ -2410,41 +2357,6 @@ const ClientsPage = () => {
                             placeholder="example.com or https://example.com"
                             required
                           />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Industry</label>
-                          <select
-                            value={clientForm.industry}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setClientForm((prev) => ({
-                                ...prev,
-                                industry: value,
-                                industryOther: value === "Other" ? prev.industryOther : "",
-                              }));
-                            }}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                            required
-                          >
-                            <option value="" disabled>
-                              Select industry
-                            </option>
-                            {INDUSTRY_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                          {clientForm.industry === "Other" && (
-                            <input
-                              type="text"
-                              value={clientForm.industryOther}
-                              onChange={(e) => setClientForm((prev) => ({ ...prev, industryOther: e.target.value }))}
-                              className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                              placeholder="Enter industry"
-                              required
-                            />
-                          )}
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Address</label>
@@ -2605,23 +2517,6 @@ const ClientsPage = () => {
                       </section>
                     )}
 
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Keywords</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">What are the keywords you want to target?</label>
-                          <textarea value={clientForm.keywords} onChange={(e) => setClientForm({ ...clientForm, keywords: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" rows={5} placeholder="One per line" />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
-                          <input type="number" step="any" value={clientForm.latitude} onChange={(e) => setClientForm({ ...clientForm, latitude: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
-                          <input type="number" step="any" value={clientForm.longitude} onChange={(e) => setClientForm({ ...clientForm, longitude: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
-                        </div>
-                      </div>
-                    </section>
                   </>
                 )}
 
@@ -2653,36 +2548,6 @@ const ClientsPage = () => {
                             placeholder="e.g. 200"
                           />
                           <p className="mt-1 text-xs text-gray-500">Long-term goal/roadmap keywords</p>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">GEOLOCATION DATA</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={clientForm.latitude}
-                            onChange={(e) => setClientForm({ ...clientForm, latitude: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            placeholder="e.g. 40.8682"
-                          />
-                          <p className="mt-1 text-xs text-gray-500">Used for precise local ranking tracking</p>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Longitude</label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={clientForm.longitude}
-                            onChange={(e) => setClientForm({ ...clientForm, longitude: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            placeholder="e.g. -73.4357"
-                          />
-                          <p className="mt-1 text-xs text-gray-500">Used for precise local ranking tracking</p>
                         </div>
                       </div>
                     </section>

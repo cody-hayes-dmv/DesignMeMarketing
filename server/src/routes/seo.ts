@@ -7465,6 +7465,12 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Domain query parameter is required" });
     }
 
+    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    const creditCheck = hasResearchCredits(tierCtx, 1);
+    if (!creditCheck.allowed) {
+      return res.status(403).json({ message: creditCheck.message, code: "CREDITS_EXHAUSTED" });
+    }
+
     const normalizeDomain = (d: string) =>
       d.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
     const domain = normalizeDomain(rawDomain);
@@ -7655,7 +7661,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       };
     });
 
-    res.json({
+    const result = {
       client: { id: "external", name: domain, domain },
       metrics: {
         organicSearch: { keywords: rankedKwData.totalCount, traffic: scaledTraffic, trafficCost: 0 },
@@ -7705,7 +7711,14 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       paidPositionDistribution: { top4: 0, top10: 0, page2: 0, pos21Plus: 0, top4Pct: 0, top10Pct: 0, page2Pct: 0, pos21PlusPct: 0 },
       mainPaidCompetitors: [],
       totalPaidCompetitorsCount: 0,
-    });
+    };
+
+    if (tierCtx.agencyId) {
+      const isFreeOnetime = tierCtx.tierConfig?.id === "free";
+      await useResearchCredits(tierCtx.agencyId, 1, isFreeOnetime);
+    }
+
+    res.json(result);
   } catch (error: any) {
     console.error("Domain overview (any) error:", error);
     res.status(500).json({ message: error?.message || "Internal server error" });
@@ -10874,23 +10887,19 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       .sort((a, b) => b.organicEtv - a.organicEtv)
       .slice(0, 6);
 
-    // Limits from tier config + agency add-ons
+    // Limits from tier config + agency add-ons (all computed by getAgencyTierContext)
     const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
-    let tierLimit = tierCtx.tierConfig?.maxDashboards ?? 10;
+    let tierLimit: number = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
-    const keywordLimit =
-      tierCtx.tierConfig?.keywordsPerDashboard ?? tierCtx.tierConfig?.keywordsTotal ?? 500;
+    const keywordLimit = tierCtx.effectiveKeywordCap || tierCtx.tierConfig?.keywordsTotal || 500;
     let researchLimit = tierCtx.creditsLimit;
     let monthlySpendDollars = tierCtx.tierConfig?.priceMonthlyUsd ?? 0;
     if (agencyIds.length > 0) {
       const addOns = await prisma.agencyAddOn.findMany({
         where: { agencyId: { in: agencyIds } },
-        select: { addOnType: true, addOnOption: true, priceCents: true, billingInterval: true },
+        select: { priceCents: true, billingInterval: true },
       });
       for (const a of addOns) {
-        if (a.addOnType === "extra_slots" && a.addOnOption === "5_slots") tierLimit += 5;
-        if (a.addOnType === "credit_pack" && a.addOnOption === "100") researchLimit += 100;
-        if (a.addOnType === "credit_pack" && a.addOnOption === "500") researchLimit += 500;
         if (a.billingInterval === "monthly") monthlySpendDollars += a.priceCents / 100;
       }
     }
@@ -11009,13 +11018,9 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     const keywordCount = tierCtx.totalKeywords;
 
     // Use tierCtx limits (plan + add-ons from getAgencyTierContext) so Subscription page matches rest of app
-    let tierLimit = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
+    let tierLimit: number = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
-    const keywordLimit =
-      tierCtx.effectiveKeywordCap ??
-      tierCtx.tierConfig?.keywordsPerDashboard ??
-      tierCtx.tierConfig?.keywordsTotal ??
-      500;
+    const keywordLimit = tierCtx.effectiveKeywordCap || tierCtx.tierConfig?.keywordsTotal || 500;
     const researchLimit = tierCtx.creditsLimit;
     let teamMemberLimit = tierCtx.tierConfig?.maxTeamUsers ?? 10;
     if (teamMemberLimit === null) teamMemberLimit = 999999;

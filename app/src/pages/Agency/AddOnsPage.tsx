@@ -23,18 +23,18 @@ const EXTRA_DASHBOARDS = [
 const EXTRA_DASHBOARDS_AVAILABLE = "Solo, Starter, Growth, Pro, Enterprise";
 
 const EXTRA_KEYWORDS_TRACKED = [
+  { option: "50", label: "+50 keywords tracked", priceLabel: "$29/month" },
   { option: "100", label: "+100 keywords tracked", priceLabel: "$49/month" },
-  { option: "250", label: "+250 keywords tracked", priceLabel: "$99/month" },
-  { option: "500", label: "+500 keywords tracked", priceLabel: "$179/month" },
+  { option: "250", label: "+250 keywords tracked", priceLabel: "$89/month" },
 ];
 const EXTRA_KEYWORDS_TRACKED_AVAILABLE = "All tiers (Business Lite, Business Pro, Solo, Starter, Growth, Pro, Enterprise)";
 
-const EXTRA_KEYWORD_LOOKUPS = [
-  { option: "100", label: "+100 keyword lookups/month", priceLabel: "$49/month" },
-  { option: "300", label: "+300 keyword lookups/month", priceLabel: "$129/month" },
-  { option: "500", label: "+500 keyword lookups/month", priceLabel: "$199/month" },
+const EXTRA_RESEARCH_CREDITS = [
+  { option: "50", label: "+50 research credits/month", priceLabel: "$29/month" },
+  { option: "150", label: "+150 research credits/month", priceLabel: "$69/month" },
+  { option: "300", label: "+300 research credits/month", priceLabel: "$119/month" },
 ];
-const EXTRA_KEYWORD_LOOKUPS_AVAILABLE = "All tiers";
+const EXTRA_RESEARCH_CREDITS_AVAILABLE = "All tiers";
 
 const TIER_LABELS: Record<string, string> = {
   business_lite: "Business Lite",
@@ -203,12 +203,12 @@ const AddOnsPage = () => {
         {showTierBreakdown && (
           <div className="mt-4 pt-4 border-t border-gray-200 space-y-4 text-sm text-gray-700">
             {[
-              { tier: "Business Lite", price: "$79/month base", note: "Cannot add: Extra Dashboards (only tracks 1 business). Keywords Tracked +100/250/500; Keyword Research +100/300/500." },
-              { tier: "Business Pro", price: "$197/month base", note: "Cannot add: Extra Dashboards (only tracks 1 business). Keywords Tracked +100/250/500; Keyword Research +100/300/500." },
-              { tier: "Solo", price: "$147/month base", note: "Extra Dashboards +5; all Keywords Tracked and Keyword Research options." },
-              { tier: "Starter", price: "$297/month base", note: "Extra Dashboards +5, +10; all Keywords Tracked and Keyword Research options." },
-              { tier: "Growth", price: "$597/month base", note: "Extra Dashboards +5, +10, +25; all Keywords Tracked and Keyword Research options." },
-              { tier: "Pro", price: "$997/month base", note: "Extra Dashboards +5, +10, +25; all Keywords Tracked and Keyword Research options." },
+              { tier: "Business Lite", price: "$79/month base", note: "Cannot add: Extra Dashboards (only tracks 1 business). Keywords +50/100/250; Research Credits +50/150/300." },
+              { tier: "Business Pro", price: "$197/month base", note: "Cannot add: Extra Dashboards (only tracks 1 business). Keywords +50/100/250; Research Credits +50/150/300." },
+              { tier: "Solo", price: "$147/month base", note: "Extra Dashboards +5; Keywords +50/100/250; Research Credits +50/150/300." },
+              { tier: "Starter", price: "$297/month base", note: "Extra Dashboards +5, +10; Keywords +50/100/250; Research Credits +50/150/300." },
+              { tier: "Growth", price: "$597/month base", note: "Extra Dashboards +5, +10, +25; Keywords +50/100/250; Research Credits +50/150/300." },
+              { tier: "Pro", price: "$997/month base", note: "Extra Dashboards +5, +10, +25; Keywords +50/100/250; Research Credits +50/150/300." },
               { tier: "Enterprise", price: "Custom (~$1,997+/month)", note: "All add-ons available; pricing negotiated case-by-case." },
             ].map((row) => (
               <div key={row.tier}>
@@ -277,11 +277,11 @@ const AddOnsPage = () => {
             <p className="mt-4 text-xs text-gray-500">Available to: All tiers</p>
           </div>
 
-          {/* Card 3 - Extra Keyword Research Lookups */}
+          {/* Card 3 - Extra Research Credits */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col">
-            <h3 className="text-lg font-bold text-gray-900">Add-On #3: Extra Keyword Research Lookups</h3>
+            <h3 className="text-lg font-bold text-gray-900">Add-On #3: Extra Research Credits</h3>
             <ul className="mt-4 space-y-2 text-sm text-gray-700">
-              {EXTRA_KEYWORD_LOOKUPS.filter((pack) => !agencyMe || agencyMe.allowedAddOns.extra_keyword_lookups.includes(pack.option)).map((pack) => (
+              {EXTRA_RESEARCH_CREDITS.filter((pack) => !agencyMe || agencyMe.allowedAddOns.extra_keyword_lookups.includes(pack.option)).map((pack) => (
                 <li key={pack.option} className="flex items-center justify-between gap-2">
                   <span>{pack.label}: {pack.priceLabel}</span>
                   <button

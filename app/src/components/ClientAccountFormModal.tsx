@@ -41,15 +41,13 @@ export default function ClientAccountFormModal({
   if (!open) return null;
 
   const copyAllToClipboard = () => {
-    const niche = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
-    const industry = form.industry === "Other" ? form.industryOther : form.industry;
+    const industry = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
     const lines = [
       "--- BUSINESS INFORMATION ---",
       `Business Name: ${form.name || ""}`,
-      `Business Niche: ${niche || ""}`,
+      `Business Niche: ${industry || ""}`,
       `Business Description: ${form.businessDescription || ""}`,
       `Primary Domain: ${form.domain || ""}`,
-      `Industry: ${industry || ""}`,
       "",
       "--- LOCATION INFORMATION ---",
       `Business Address: ${form.businessAddress || ""}`,
@@ -162,8 +160,8 @@ export default function ClientAccountFormModal({
                         }
                         className={`${inputClass} bg-white`}
                       >
-                        <option value="">Select or enter below</option>
-                        {BUSINESS_NICHE_OPTIONS.map((opt) => (
+                        <option value="">Select business niche</option>
+                        {INDUSTRY_OPTIONS.map((opt) => (
                           <option key={opt} value={opt}>
                             {opt}
                           </option>
@@ -175,7 +173,7 @@ export default function ClientAccountFormModal({
                           value={form.businessNicheOther}
                           onChange={(e) => setForm((f) => ({ ...f, businessNicheOther: e.target.value }))}
                           className={`mt-2 ${inputClass}`}
-                          placeholder="Enter niche"
+                          placeholder="Enter business niche"
                         />
                       )}
                     </>
@@ -213,43 +211,6 @@ export default function ClientAccountFormModal({
                     />
                   ) : (
                     ro(form.domain)
-                  )
-                )}
-                {field(
-                  "Industry",
-                  true,
-                  canEdit ? (
-                    <>
-                      <select
-                        value={form.industry}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            industry: e.target.value,
-                            industryOther: e.target.value === "Other" ? prev.industryOther : "",
-                          }))
-                        }
-                        className={`${inputClass} bg-white`}
-                      >
-                        <option value="">Select industry</option>
-                        {INDUSTRY_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                      {form.industry === "Other" && (
-                        <input
-                          type="text"
-                          value={form.industryOther}
-                          onChange={(e) => setForm((f) => ({ ...f, industryOther: e.target.value }))}
-                          className={`mt-2 ${inputClass}`}
-                          placeholder="Enter industry"
-                        />
-                      )}
-                    </>
-                  ) : (
-                    ro(form.industry === "Other" ? form.industryOther : form.industry)
                   )
                 )}
               </div>

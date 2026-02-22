@@ -9,11 +9,11 @@ export interface AgencyTierContext {
   /** True when agency is free (no-charge) and trial period has ended */
   trialExpired: boolean;
   tierConfig: TierConfig | null;
-  /** Number of client dashboards accessible (for limit check) */
+  /** Number of client dashboards accessible (for limit check) — excludes agency's own free dashboard */
   dashboardCount: number;
-  /** Total keywords across all accessible clients (for business tier limit) */
+  /** Total keywords across all dashboards (account-wide) */
   totalKeywords: number;
-  /** Per-client keyword counts (for agency tier limit). clientId -> count */
+  /** Per-client keyword counts. clientId -> count */
   keywordsByClient: Map<string, number>;
   /** Total target keywords (for limit when adding target keywords) */
   totalTargetKeywords: number;
@@ -22,14 +22,14 @@ export interface AgencyTierContext {
   teamMemberCount: number;
   /** Credits used this month (after applying reset if needed) */
   creditsUsed: number;
-  /** Credits limit from tier + extra keyword research add-ons */
+  /** Credits limit from tier + extra research add-ons */
   creditsLimit: number;
   /** When credits reset (end of current month) */
   creditsResetsAt: Date | null;
-  /** Max dashboards (tier + extra dashboard add-ons). If null, use tierConfig.maxDashboards. */
+  /** Max client dashboards (tier + extra dashboard add-ons). Does NOT include the free agency dashboard. null = unlimited. */
   effectiveMaxDashboards: number | null;
-  /** Total keyword cap (base tier + extra keywords tracked add-ons). Used for business total and agency account-wide cap. */
-  effectiveKeywordCap: number | null;
+  /** Total keyword cap (base tier keywordsTotal + extra keywords tracked add-ons). Account-wide. */
+  effectiveKeywordCap: number;
 }
 
 const now = () => new Date();
@@ -61,48 +61,48 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
     agency: null,
     trialExpired: false,
     tierConfig: null,
-  dashboardCount: 0,
-  totalKeywords: 0,
-  keywordsByClient: new Map(),
-  totalTargetKeywords: 0,
-  targetKeywordsByClient: new Map(),
-  teamMemberCount: 0,
-  creditsUsed: 0,
-  creditsLimit: 0,
-  creditsResetsAt: null,
-  effectiveMaxDashboards: null,
-  effectiveKeywordCap: null,
-};
+    dashboardCount: 0,
+    totalKeywords: 0,
+    keywordsByClient: new Map(),
+    totalTargetKeywords: 0,
+    targetKeywordsByClient: new Map(),
+    teamMemberCount: 0,
+    creditsUsed: 0,
+    creditsLimit: 0,
+    creditsResetsAt: null,
+    effectiveMaxDashboards: null,
+    effectiveKeywordCap: 0,
+  };
 
   if (role === "SUPER_ADMIN" || role === "ADMIN") {
     const allClients = await prisma.client.count();
     const totalKeywords = await prisma.keyword.count();
-  return {
-    ...emptyContext,
-    dashboardCount: allClients,
-    totalKeywords,
-    creditsLimit: 10000,
-    creditsResetsAt: null,
-    effectiveMaxDashboards: null,
-    effectiveKeywordCap: null,
-  };
-}
-
-async function getTargetKeywordCounts(clientIds: string[]) {
-  if (clientIds.length === 0) return { total: 0, byClient: new Map<string, number>() };
-  const rows = await prisma.targetKeyword.groupBy({
-    by: ["clientId"],
-    where: { clientId: { in: clientIds } },
-    _count: { id: true },
-  });
-  const byClient = new Map<string, number>();
-  let total = 0;
-  for (const r of rows) {
-    byClient.set(r.clientId, r._count.id);
-    total += r._count.id;
+    return {
+      ...emptyContext,
+      dashboardCount: allClients,
+      totalKeywords,
+      creditsLimit: 10000,
+      creditsResetsAt: null,
+      effectiveMaxDashboards: null,
+      effectiveKeywordCap: 999999,
+    };
   }
-  return { total, byClient };
-}
+
+  async function getTargetKeywordCounts(clientIds: string[]) {
+    if (clientIds.length === 0) return { total: 0, byClient: new Map<string, number>() };
+    const rows = await prisma.targetKeyword.groupBy({
+      by: ["clientId"],
+      where: { clientId: { in: clientIds } },
+      _count: { id: true },
+    });
+    const byClient = new Map<string, number>();
+    let total = 0;
+    for (const r of rows) {
+      byClient.set(r.clientId, r._count.id);
+      total += r._count.id;
+    }
+    return { total, byClient };
+  }
 
   const membership = await prisma.userAgency.findFirst({
     where: { userId },
@@ -126,15 +126,12 @@ async function getTargetKeywordCounts(clientIds: string[]) {
 
   const agency = membership.agency;
   const now = new Date();
-  // Trial expired: (1) billingType "trial" with trial ended, or (2) legacy "free" with trial that ended
-  // Free Account (billingType "free" + trialEndsAt null) = never expired
   const trialExpired =
     agency.trialEndsAt != null &&
     agency.trialEndsAt <= now &&
     (agency.billingType === "trial" || agency.billingType === "free");
   const tierConfig = getTierConfig(agency.subscriptionTier) ?? (agency.billingType === "free" || agency.billingType === "trial" ? getTierConfig("free") : null);
 
-  // Clients accessible by any user in this agency (same logic as dashboard)
   const agencyUserIds = await prisma.userAgency.findMany({
     where: { agencyId: agency.id },
     select: { userId: true },
@@ -146,13 +143,11 @@ async function getTargetKeywordCounts(clientIds: string[]) {
   });
   const clientIds = clients.map((c) => c.id);
 
-  // Included clients (ClientAgencyIncluded) are free - they do not count toward tier dashboard limit
   const includedClientIds = await prisma.clientAgencyIncluded
     .findMany({ where: { agencyId: agency.id }, select: { clientId: true } })
     .then((rows) => new Set(rows.map((r) => r.clientId)));
 
-  // Default agency dashboard (isAgencyOwnDashboard) does not count toward tier limit
-  // Exclude included clients so they are free (do not consume tier slots)
+  // Agency's own dashboard and included clients do not count toward the client dashboard limit
   const dashboardCount = clients.filter(
     (c) => !c.isAgencyOwnDashboard && !includedClientIds.has(c.id)
   ).length;
@@ -183,7 +178,7 @@ async function getTargetKeywordCounts(clientIds: string[]) {
     creditsUsed = reset.used;
     creditsResetsAt = reset.resetsAt;
   }
-  let creditsLimit = tierConfig?.keywordResearchCreditsPerMonth ?? 0;
+  let creditsLimit = tierConfig?.researchCreditsPerMonth ?? 0;
   let effectiveMaxDashboards: number | null = tierConfig?.maxDashboards ?? null;
 
   const addOns = await prisma.agencyAddOn.findMany({
@@ -193,8 +188,11 @@ async function getTargetKeywordCounts(clientIds: string[]) {
   let addOnKeywords = 0;
   for (const a of addOns) {
     if (a.addOnType === "extra_keyword_lookups") {
-      if (a.addOnOption === "100") creditsLimit += 100;
+      if (a.addOnOption === "50") creditsLimit += 50;
+      else if (a.addOnOption === "150") creditsLimit += 150;
       else if (a.addOnOption === "300") creditsLimit += 300;
+      // Legacy options
+      else if (a.addOnOption === "100") creditsLimit += 100;
       else if (a.addOnOption === "500") creditsLimit += 500;
     } else if (a.addOnType === "extra_dashboards") {
       if (effectiveMaxDashboards != null) {
@@ -203,21 +201,16 @@ async function getTargetKeywordCounts(clientIds: string[]) {
         else if (a.addOnOption === "25_slots") effectiveMaxDashboards += 25;
       }
     } else if (a.addOnType === "extra_keywords_tracked") {
-      if (a.addOnOption === "100") addOnKeywords += 100;
+      if (a.addOnOption === "50") addOnKeywords += 50;
+      else if (a.addOnOption === "100") addOnKeywords += 100;
       else if (a.addOnOption === "250") addOnKeywords += 250;
+      // Legacy options
       else if (a.addOnOption === "500") addOnKeywords += 500;
     }
   }
 
-  let effectiveKeywordCap: number | null = null;
-  if (tierConfig) {
-    if (tierConfig.type === "business" && tierConfig.keywordsTotal != null) {
-      effectiveKeywordCap = tierConfig.keywordsTotal + addOnKeywords;
-    } else if (tierConfig.maxDashboards != null && tierConfig.keywordsPerDashboard != null) {
-      const maxD = effectiveMaxDashboards ?? tierConfig.maxDashboards;
-      effectiveKeywordCap = maxD * tierConfig.keywordsPerDashboard + addOnKeywords;
-    }
-  }
+  const baseKeywords = tierConfig?.keywordsTotal ?? 0;
+  const effectiveKeywordCap = baseKeywords + addOnKeywords;
 
   return {
     agencyId: agency.id,
@@ -239,7 +232,8 @@ async function getTargetKeywordCounts(clientIds: string[]) {
 }
 
 /**
- * Check if user can add one more dashboard. Returns { allowed, message }.
+ * Check if user can add one more client dashboard. Returns { allowed, message }.
+ * The free agency dashboard never counts against this limit.
  */
 export function canAddDashboard(ctx: AgencyTierContext): { allowed: boolean; message?: string } {
   if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
@@ -249,64 +243,44 @@ export function canAddDashboard(ctx: AgencyTierContext): { allowed: boolean; mes
   if (ctx.dashboardCount >= max) {
     return {
       allowed: false,
-      message: `Your plan allows up to ${max} dashboard${max === 1 ? "" : "s"}. Upgrade or add an add-on to add more.`,
+      message: `Your plan allows up to ${max} client dashboard${max === 1 ? "" : "s"}. Upgrade or add an add-on to add more.`,
     };
   }
   return { allowed: true };
 }
 
 /**
- * Check if user can add more keywords to a client (agency: per-dashboard limit; business: total limit).
- * Uses Keyword table counts.
+ * Check if user can add more keywords to a client (account-wide limit).
  */
 export function canAddKeywords(
   ctx: AgencyTierContext,
-  clientId: string,
+  _clientId: string,
   addCount: number
 ): { allowed: boolean; message?: string } {
   if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
-  const currentForClient = ctx.keywordsByClient.get(clientId) ?? 0;
   const totalAfter = ctx.totalKeywords + addCount;
   const cap = ctx.effectiveKeywordCap;
-  if (cap != null && totalAfter > cap) {
+  if (cap > 0 && totalAfter > cap) {
     return {
       allowed: false,
-      message: `Your plan allows ${cap} keywords total. You have ${ctx.totalKeywords}. Upgrade or add an add-on to add more.`,
-    };
-  }
-  if (ctx.tierConfig.type === "business") return { allowed: true };
-  const perDashboard = ctx.tierConfig.keywordsPerDashboard ?? 0;
-  const forThisClient = currentForClient + addCount;
-  if (forThisClient > perDashboard) {
-    return {
-      allowed: false,
-      message: `Your plan allows ${perDashboard} keywords per dashboard. This dashboard has ${currentForClient}. Upgrade to add more.`,
+      message: `Your plan allows ${cap} keywords total (account-wide). You have ${ctx.totalKeywords}. Upgrade or add an add-on to track more.`,
     };
   }
   return { allowed: true };
 }
 
 /**
- * Check if user can add more target keywords (same limits as canAddKeywords but using target keyword counts).
+ * Check if user can add more target keywords (account-wide limit).
  */
-export function canAddTargetKeyword(ctx: AgencyTierContext, clientId: string): { allowed: boolean; message?: string } {
+export function canAddTargetKeyword(ctx: AgencyTierContext, _clientId: string): { allowed: boolean; message?: string } {
   if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
-  const currentForClient = ctx.targetKeywordsByClient.get(clientId) ?? 0;
   const cap = ctx.effectiveKeywordCap;
-  if (cap != null && ctx.totalTargetKeywords + 1 > cap) {
+  if (cap > 0 && ctx.totalTargetKeywords + 1 > cap) {
     return {
       allowed: false,
-      message: `Your plan allows ${cap} keywords total. You have ${ctx.totalTargetKeywords}. Upgrade or add an add-on to add more.`,
-    };
-  }
-  if (ctx.tierConfig.type === "business") return { allowed: true };
-  const perDashboard = ctx.tierConfig.keywordsPerDashboard ?? 0;
-  if (currentForClient + 1 > perDashboard) {
-    return {
-      allowed: false,
-      message: `Your plan allows ${perDashboard} keywords per dashboard. This dashboard has ${currentForClient}. Upgrade to add more.`,
+      message: `Your plan allows ${cap} keywords total (account-wide). You have ${ctx.totalTargetKeywords}. Upgrade or add an add-on to track more.`,
     };
   }
   return { allowed: true };
@@ -330,7 +304,8 @@ export function canAddTeamMember(ctx: AgencyTierContext): { allowed: boolean; me
 }
 
 /**
- * Check if user has keyword research credits remaining.
+ * Check if user has research credits remaining (keyword + domain research).
+ * Credits reset on 1st of each month. No rollover.
  */
 export function hasResearchCredits(ctx: AgencyTierContext, need: number = 1): { allowed: boolean; message?: string } {
   if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
@@ -340,15 +315,15 @@ export function hasResearchCredits(ctx: AgencyTierContext, need: number = 1): { 
     return {
       allowed: false,
       message: isFree
-        ? `You have used all ${ctx.creditsLimit} free keyword research credits. Upgrade to a paid plan for more.`
-        : `You have used ${ctx.creditsUsed} of ${ctx.creditsLimit} keyword research credits this month. Upgrade or wait until next month.`,
+        ? `You have used all ${ctx.creditsLimit} free research credits. Upgrade to a paid plan for more.`
+        : `You have used ${ctx.creditsUsed} of ${ctx.creditsLimit} research credits this month. Upgrade or wait until next month.`,
     };
   }
   return { allowed: true };
 }
 
 /**
- * Consume keyword research credits after a successful research call.
+ * Consume research credits after a successful keyword or domain research call.
  * Ensures monthly reset if needed, increments used count, and sets resetAt on first use in the period.
  * For free tier (one-time credits), skip the monthly reset so credits never replenish.
  */

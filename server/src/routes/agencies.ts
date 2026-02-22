@@ -2781,25 +2781,25 @@ export function getAllowedAddOnOptions(tierId: TierId | null): {
   extra_keywords_tracked: string[];
   extra_keyword_lookups: string[];
 } {
-  const keywordsTracked = ['100', '250', '500'];
-  const keywordLookups = ['100', '300', '500'];
+  const keywordsTracked = ['50', '100', '250'];
+  const researchCredits = ['50', '150', '300'];
   if (!tierId) return { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] };
   switch (tierId) {
     case 'free':
       return { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] };
     case 'business_lite':
     case 'business_pro':
-      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
     case 'solo':
-      return { extra_dashboards: ['5_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+      return { extra_dashboards: ['5_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
     case 'starter':
-      return { extra_dashboards: ['5_slots', '10_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+      return { extra_dashboards: ['5_slots', '10_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
     case 'growth':
     case 'pro':
     case 'enterprise':
-      return { extra_dashboards: ['5_slots', '10_slots', '25_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+      return { extra_dashboards: ['5_slots', '10_slots', '25_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
     default:
-      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: keywordLookups };
+      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
   }
 }
 
@@ -2815,14 +2815,14 @@ const ADDON_OPTIONS: Record<string, Record<string, { displayName: string; detail
     '25_slots': { displayName: 'Extra Client Dashboards (+25)', details: '+25 client dashboards', priceCents: 39900, billingInterval: 'monthly' },
   },
   extra_keywords_tracked: {
+    '50': { displayName: 'Extra Keywords Tracked (+50)', details: '+50 keywords tracked account-wide', priceCents: 2900, billingInterval: 'monthly' },
     '100': { displayName: 'Extra Keywords Tracked (+100)', details: '+100 keywords tracked account-wide', priceCents: 4900, billingInterval: 'monthly' },
-    '250': { displayName: 'Extra Keywords Tracked (+250)', details: '+250 keywords tracked account-wide', priceCents: 9900, billingInterval: 'monthly' },
-    '500': { displayName: 'Extra Keywords Tracked (+500)', details: '+500 keywords tracked account-wide', priceCents: 17900, billingInterval: 'monthly' },
+    '250': { displayName: 'Extra Keywords Tracked (+250)', details: '+250 keywords tracked account-wide', priceCents: 8900, billingInterval: 'monthly' },
   },
   extra_keyword_lookups: {
-    '100': { displayName: 'Extra Keyword Research Lookups (+100/mo)', details: '+100 keyword lookups per month', priceCents: 4900, billingInterval: 'monthly' },
-    '300': { displayName: 'Extra Keyword Research Lookups (+300/mo)', details: '+300 keyword lookups per month', priceCents: 12900, billingInterval: 'monthly' },
-    '500': { displayName: 'Extra Keyword Research Lookups (+500/mo)', details: '+500 keyword lookups per month', priceCents: 19900, billingInterval: 'monthly' },
+    '50': { displayName: 'Extra Research Credits (+50/mo)', details: '+50 research credits per month', priceCents: 2900, billingInterval: 'monthly' },
+    '150': { displayName: 'Extra Research Credits (+150/mo)', details: '+150 research credits per month', priceCents: 6900, billingInterval: 'monthly' },
+    '300': { displayName: 'Extra Research Credits (+300/mo)', details: '+300 research credits per month', priceCents: 11900, billingInterval: 'monthly' },
   },
 };
 
