@@ -10891,7 +10891,7 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
     const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
     let tierLimit: number = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
-    const keywordLimit = tierCtx.effectiveKeywordCap || tierCtx.tierConfig?.keywordsTotal || 500;
+    const keywordLimit = tierCtx.effectiveKeywordCap;
     let researchLimit = tierCtx.creditsLimit;
     let monthlySpendDollars = tierCtx.tierConfig?.priceMonthlyUsd ?? 0;
     if (agencyIds.length > 0) {
@@ -11020,7 +11020,7 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     // Use tierCtx limits (plan + add-ons from getAgencyTierContext) so Subscription page matches rest of app
     let tierLimit: number = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
-    const keywordLimit = tierCtx.effectiveKeywordCap || tierCtx.tierConfig?.keywordsTotal || 500;
+    const keywordLimit = tierCtx.effectiveKeywordCap;
     const researchLimit = tierCtx.creditsLimit;
     let teamMemberLimit = tierCtx.tierConfig?.maxTeamUsers ?? 10;
     if (teamMemberLimit === null) teamMemberLimit = 999999;

@@ -728,7 +728,7 @@ const SubscriptionPage = () => {
                     </p>
                   </div>
                   <a
-                    href="https://calendly.com/designmemarketing"
+                    href="https://links.yourseodashboard.com/widget/booking/auRus7uzX9SW4C6mJncd"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-gradient-to-r from-gray-800 to-gray-900 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:from-gray-900 hover:to-black hover:shadow-md"

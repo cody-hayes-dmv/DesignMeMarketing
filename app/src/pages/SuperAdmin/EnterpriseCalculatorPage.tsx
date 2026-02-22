@@ -17,7 +17,7 @@ const COST_PER_RANK_CHECK = 0.0006;
 const AI_INTELLIGENCE_FLAT = 125;
 const COST_PER_RESEARCH_CREDIT = 0.02;
 
-const ENTERPRISE_DEMO_LINK = "https://calendly.com/designmemarketing";
+const ENTERPRISE_DEMO_LINK = "https://links.yourseodashboard.com/widget/booking/auRus7uzX9SW4C6mJncd";
 
 const fmt = (n: number) =>
   n >= 1000

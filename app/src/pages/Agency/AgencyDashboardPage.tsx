@@ -811,7 +811,7 @@ const AgencyDashboardPage = () => {
                   <li className="flex items-center gap-1"><Check className="h-3.5 w-3.5 text-gray-400" /> Dedicated support</li>
                 </ul>
                 <a
-                  href="https://calendly.com/designmemarketing"
+                  href="https://links.yourseodashboard.com/widget/booking/auRus7uzX9SW4C6mJncd"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-gray-800 to-gray-900 px-8 py-3 text-sm font-bold text-white shadow-md transition-all hover:from-gray-900 hover:to-black hover:shadow-lg"
