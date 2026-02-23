@@ -305,8 +305,12 @@ const ShareDashboardPage: React.FC = () => {
       pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
 
       // ───── Section-based content pages ─────
-      // Pre-calculate section heights in mm
-      const sectionHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
+      // Pre-calculate section heights in mm, cap oversized sections to fit one page
+      const sectionNaturalHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
+      const sectionHeights = sectionNaturalHeights.map((h) => Math.min(h, usableHeight));
+      const sectionScales = sectionNaturalHeights.map((h) =>
+        h > usableHeight ? usableHeight / h : 1
+      );
 
       // First pass: figure out how many content pages we'll need
       const pageAssignments: { pageIdx: number; cursorY: number; sectionIdx: number }[] = [];
@@ -335,10 +339,13 @@ const ShareDashboardPage: React.FC = () => {
           currentPageRendered = assignment.pageIdx;
         }
 
-        const cvs = sectionCanvases[assignment.sectionIdx];
-        const h = sectionHeights[assignment.sectionIdx];
-        const imgData = cvs.toDataURL("image/png");
-        pdf.addImage(imgData, "PNG", marginX, contentMarginTop + assignment.cursorY, usableWidth, h);
+        const idx = assignment.sectionIdx;
+        const scale = sectionScales[idx];
+        const imgW = usableWidth * scale;
+        const imgH = sectionHeights[idx];
+        const imgX = marginX + (usableWidth - imgW) / 2;
+        const imgData = sectionCanvases[idx].toDataURL("image/png");
+        pdf.addImage(imgData, "PNG", imgX, contentMarginTop + assignment.cursorY, imgW, imgH);
       }
 
       // Draw footers on all content pages

@@ -9964,61 +9964,189 @@ const ClientDashboardPage: React.FC = () => {
                    }
                    const element = modalDashboardContentRef.current;
                    const previousOverflow = document.body.style.overflow;
-                   
-                   // Find the scrollable container
+
                    const scrollableContainer = element.closest('.overflow-y-auto') as HTMLElement;
                    const originalScrollTop = scrollableContainer?.scrollTop || 0;
-                   
+
                    try {
                      setExportingPdf(true);
                      document.body.style.overflow = "hidden";
-                     
-                     // Scroll to top to capture all content
+
                      if (scrollableContainer) {
                        scrollableContainer.scrollTop = 0;
-                       // Wait for scroll to complete
-                       await new Promise(resolve => setTimeout(resolve, 200));
+                       await new Promise(resolve => setTimeout(resolve, 300));
                      }
-                     
-                     const canvas = await html2canvas(element, {
-                       scale: 2,
-                       useCORS: true,
-                       logging: false,
-                       backgroundColor: "#FFFFFF",
-                       width: element.scrollWidth,
-                       height: element.scrollHeight,
-                       scrollX: 0,
-                       scrollY: 0,
-                     });
-                     
-                     const imgData = canvas.toDataURL("image/png", 1.0);
+
+                     const sections = Array.from(element.children).filter(
+                       (el) => el instanceof HTMLElement && el.offsetHeight > 0
+                     ) as HTMLElement[];
+                     if (sections.length === 0) {
+                       toast.error("No sections found to export.");
+                       setExportingPdf(false);
+                       return;
+                     }
+
+                     const ignoreFilter = (el: Element) => el.getAttribute?.("data-pdf-hide") === "true";
+                     const sectionCanvases: HTMLCanvasElement[] = [];
+                     for (const sec of sections) {
+                       const cvs = await html2canvas(sec, {
+                         scale: 2,
+                         useCORS: true,
+                         scrollY: -window.scrollY,
+                         scrollX: -window.scrollX,
+                         backgroundColor: "#FFFFFF",
+                         ignoreElements: ignoreFilter,
+                       });
+                       sectionCanvases.push(cvs);
+                     }
+
                      const pdf = new jsPDF("p", "mm", "a4");
                      const pageWidth = pdf.internal.pageSize.getWidth();
                      const pageHeight = pdf.internal.pageSize.getHeight();
-                     const headerHeightMm = 14;
-                     const contentHeightMm = pageHeight - headerHeightMm;
-                     let imgWidth = pageWidth;
-                     let imgHeight = (canvas.height * pageWidth) / canvas.width;
-                     let x = 0;
-                     if (imgHeight > contentHeightMm) {
-                       const scale = contentHeightMm / imgHeight;
-                       imgWidth = pageWidth * scale;
-                       imgHeight = contentHeightMm;
-                       x = (pageWidth - imgWidth) / 2;
+
+                     const websiteName = client?.name || client?.domain || "Report";
+                     const domain = client?.domain || "";
+                     const generatedDate = format(new Date(), "MMMM d, yyyy");
+                     const periodLabel = selectedReport?.name || (serverReport?.period
+                       ? String(serverReport.period).charAt(0).toUpperCase() + String(serverReport.period).slice(1) + " Report"
+                       : "SEO Report");
+
+                     const marginX = 12;
+                     const headerH = 16;
+                     const footerH = 10;
+                     const contentMarginTop = headerH + 3;
+                     const contentMarginBottom = footerH + 2;
+                     const usableWidth = pageWidth - marginX * 2;
+                     const usableHeight = pageHeight - contentMarginTop - contentMarginBottom;
+                     const sectionGap = 4;
+
+                     const drawHeader = () => {
+                       pdf.setFillColor(15, 23, 42);
+                       pdf.rect(0, 0, pageWidth, headerH, "F");
+                       pdf.setFillColor(59, 130, 246);
+                       pdf.rect(0, headerH, pageWidth, 0.8, "F");
+                       pdf.setFont("helvetica", "bold");
+                       pdf.setFontSize(11);
+                       pdf.setTextColor(255, 255, 255);
+                       pdf.text(websiteName, marginX, 7);
+                       if (domain) {
+                         pdf.setFont("helvetica", "normal");
+                         pdf.setFontSize(8);
+                         pdf.setTextColor(148, 163, 184);
+                         pdf.text(domain, marginX, 12);
+                       }
+                       pdf.setFont("helvetica", "normal");
+                       pdf.setFontSize(8);
+                       pdf.setTextColor(148, 163, 184);
+                       pdf.text(periodLabel, pageWidth - marginX, 7, { align: "right" });
+                       pdf.text(generatedDate, pageWidth - marginX, 12, { align: "right" });
+                     };
+
+                     const drawFooter = (pageNum: number, totalPages: number) => {
+                       const footerY = pageHeight - footerH / 2;
+                       pdf.setDrawColor(226, 232, 240);
+                       pdf.setLineWidth(0.3);
+                       pdf.line(marginX, pageHeight - footerH, pageWidth - marginX, pageHeight - footerH);
+                       pdf.setFont("helvetica", "normal");
+                       pdf.setFontSize(8);
+                       pdf.setTextColor(100, 116, 139);
+                       pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: "center" });
+                       pdf.setFontSize(7);
+                       pdf.setTextColor(148, 163, 184);
+                       pdf.text(`Generated ${generatedDate}`, marginX, footerY);
+                       pdf.text("Confidential", pageWidth - marginX, footerY, { align: "right" });
+                     };
+
+                     // Cover page
+                     pdf.setFillColor(15, 23, 42);
+                     pdf.rect(0, 0, pageWidth, pageHeight, "F");
+                     pdf.setFillColor(59, 130, 246);
+                     pdf.rect(0, 0, pageWidth, 3, "F");
+                     pdf.setFont("helvetica", "normal");
+                     pdf.setFontSize(11);
+                     pdf.setTextColor(148, 163, 184);
+                     const labelY = pageHeight * 0.32;
+                     pdf.text("SEO ANALYTICS REPORT", pageWidth / 2, labelY, { align: "center" });
+                     const lineW = 50;
+                     pdf.setDrawColor(59, 130, 246);
+                     pdf.setLineWidth(0.6);
+                     pdf.line(pageWidth / 2 - lineW / 2, labelY + 4, pageWidth / 2 + lineW / 2, labelY + 4);
+                     pdf.setFont("helvetica", "bold");
+                     pdf.setFontSize(28);
+                     pdf.setTextColor(255, 255, 255);
+                     pdf.text(websiteName, pageWidth / 2, labelY + 18, { align: "center" });
+                     if (domain) {
+                       pdf.setFont("helvetica", "normal");
+                       pdf.setFontSize(12);
+                       pdf.setTextColor(148, 163, 184);
+                       pdf.text(domain, pageWidth / 2, labelY + 28, { align: "center" });
                      }
-                     const reportTitle = selectedReport?.name || client?.name || client?.domain || "Report";
-                     pdf.setFontSize(16);
-                     pdf.setTextColor(30, 30, 30);
-                     pdf.text(reportTitle, pageWidth / 2, headerHeightMm / 2 + 4, { align: "center" });
-                     pdf.addImage(imgData, "PNG", x, headerHeightMm, imgWidth, imgHeight);
-                     const sanitizedName = selectedReport?.name 
-                       ? selectedReport.name.replace(/[^a-z0-9]/gi, "-").toLowerCase() 
+                     pdf.setFont("helvetica", "normal");
+                     pdf.setFontSize(10);
+                     pdf.setTextColor(100, 116, 139);
+                     pdf.text(`${periodLabel}  ·  ${generatedDate}`, pageWidth / 2, labelY + 42, { align: "center" });
+                     pdf.setFillColor(59, 130, 246);
+                     pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
+
+                     // Section-based content pages
+                     // Calculate natural height, then cap oversized sections to fit one page
+                     const sectionNaturalHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
+                     const sectionHeights = sectionNaturalHeights.map((h) => Math.min(h, usableHeight));
+                     const sectionScales = sectionNaturalHeights.map((h) =>
+                       h > usableHeight ? usableHeight / h : 1
+                     );
+
+                     const pageAssignments: { pageIdx: number; cursorY: number; sectionIdx: number }[] = [];
+                     let curPage = 0;
+                     let cursorY = 0;
+                     for (let i = 0; i < sectionCanvases.length; i++) {
+                       const h = sectionHeights[i];
+                       const fitsOnCurrentPage = cursorY === 0 || cursorY + sectionGap + h <= usableHeight;
+                       if (!fitsOnCurrentPage) {
+                         curPage++;
+                         cursorY = 0;
+                       }
+                       const yPos = cursorY === 0 ? 0 : cursorY + sectionGap;
+                       pageAssignments.push({ pageIdx: curPage, cursorY: yPos, sectionIdx: i });
+                       cursorY = yPos + h;
+                     }
+                     const totalContentPages = curPage + 1;
+                     const totalPages = 1 + totalContentPages;
+
+                     let currentPageRendered = -1;
+                     for (const assignment of pageAssignments) {
+                       if (assignment.pageIdx !== currentPageRendered) {
+                         pdf.addPage();
+                         drawHeader();
+                         currentPageRendered = assignment.pageIdx;
+                       }
+                       const idx = assignment.sectionIdx;
+                       const scale = sectionScales[idx];
+                       const imgW = usableWidth * scale;
+                       const imgH = sectionHeights[idx];
+                       const imgX = marginX + (usableWidth - imgW) / 2;
+                       const sectionImgData = sectionCanvases[idx].toDataURL("image/png");
+                       pdf.addImage(sectionImgData, "PNG", imgX, contentMarginTop + assignment.cursorY, imgW, imgH);
+                     }
+
+                     for (let p = 0; p < totalContentPages; p++) {
+                       pdf.setPage(p + 2);
+                       drawFooter(p + 2, totalPages);
+                     }
+
+                     pdf.setPage(1);
+                     pdf.setFont("helvetica", "normal");
+                     pdf.setFontSize(7);
+                     pdf.setTextColor(100, 116, 139);
+                     pdf.text(`Page 1 of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
+
+                     const sanitizedName = client?.name
+                       ? client.name.replace(/[^a-z0-9]/gi, "-").toLowerCase()
                        : "report";
-                     const fileName = `${sanitizedName}-${format(new Date(), "yyyyMMdd")}.pdf`;
+                     const fileName = `${sanitizedName}-report-${format(new Date(), "yyyyMMdd")}.pdf`;
                      pdf.save(fileName);
                      toast.success("Report exported successfully!");
-                     
-                     // Restore scroll position
+
                      if (scrollableContainer) {
                        scrollableContainer.scrollTop = originalScrollTop;
                      }

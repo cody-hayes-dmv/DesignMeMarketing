@@ -1153,10 +1153,14 @@ const ClientsPage = () => {
                 {filteredClients.map((client, index) => (
                   <tr key={client.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
-                      <div className="flex items-center gap-2 font-semibold text-gray-900">
+                      <button
+                        type="button"
+                        onClick={() => handleViewReportClick(client)}
+                        className="flex items-center gap-2 font-semibold text-gray-900 hover:text-primary-600 transition-colors cursor-pointer"
+                      >
                         <Building2 className="h-4 w-4 text-primary-500 shrink-0" />
                         {client.name}
-                      </div>
+                      </button>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
                       <a
@@ -1362,7 +1366,10 @@ const ClientsPage = () => {
                       <Globe className="h-6 w-6" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="font-semibold text-gray-900 truncate">
+                      <h3
+                        className="font-semibold text-gray-900 truncate hover:text-primary-600 transition-colors cursor-pointer"
+                        onClick={() => handleViewReportClick(client)}
+                      >
                         {client.name}
                       </h3>
                       <a
