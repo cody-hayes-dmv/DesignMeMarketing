@@ -3106,11 +3106,32 @@ router.delete('/:agencyId', authenticateToken, async (req, res) => {
       });
     }
 
-    // Delete agency. Database CASCADE removes all UserAgency rows for this agency,
-    // so the agency is removed from Team (members' agency lists) in the database.
+    // Collect AGENCY-role users who belong only to this agency (no other memberships)
+    const agencyUserIdsToDelete: string[] = [];
+    for (const m of agency.members) {
+      if (m.user.role === 'AGENCY') {
+        const otherMemberships = await prisma.userAgency.count({
+          where: { userId: m.userId, agencyId: { not: agencyId } },
+        });
+        if (otherMemberships === 0) {
+          agencyUserIdsToDelete.push(m.userId);
+        }
+      }
+    }
+
     await prisma.agency.delete({
       where: { id: agencyId },
     });
+
+    // Clean up orphaned AGENCY-role users who had no other agency
+    if (agencyUserIdsToDelete.length > 0) {
+      await prisma.$transaction([
+        prisma.task.updateMany({ where: { assigneeId: { in: agencyUserIdsToDelete } }, data: { assigneeId: null } }),
+        prisma.task.updateMany({ where: { createdById: { in: agencyUserIdsToDelete } }, data: { createdById: null } }),
+        prisma.token.deleteMany({ where: { userId: { in: agencyUserIdsToDelete } } }),
+        prisma.user.deleteMany({ where: { id: { in: agencyUserIdsToDelete } } }),
+      ]);
+    }
 
     res.json({ message: 'Agency deleted successfully' });
   } catch (error: any) {

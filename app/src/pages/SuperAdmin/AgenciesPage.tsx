@@ -314,11 +314,13 @@ const AgenciesPage = () => {
     }, [dispatch]);
 
     const handledEnterpriseCreate = useRef(false);
+    const [isEnterpriseFromCalculator, setIsEnterpriseFromCalculator] = useState(false);
     useEffect(() => {
         if (handledEnterpriseCreate.current) return;
         const params = new URLSearchParams(window.location.search);
         if (params.get("create") !== "1") return;
         handledEnterpriseCreate.current = true;
+        setIsEnterpriseFromCalculator(true);
         const tier = params.get("tier") || "";
         const customPricing = params.get("customPricing") || "";
         const dashboards = params.get("dashboards") || "";
@@ -465,6 +467,7 @@ const AgenciesPage = () => {
             }) as any).unwrap();
             setCreateForm(initialCreateForm);
             setShowCreateModal(false);
+            setIsEnterpriseFromCalculator(false);
             sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
             toast.success("Agency created. Set-password email sent to contact.");
             dispatch(fetchAgencies() as any);
@@ -1465,7 +1468,7 @@ const AgenciesPage = () => {
                                     <p className="text-sm text-white/90">Add a new agency and primary contact</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={() => { setShowCreateModal(false); setCreateModalStep(1); }} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
+                            <button type="button" onClick={() => { setShowCreateModal(false); setCreateModalStep(1); setIsEnterpriseFromCalculator(false); }} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors">
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
@@ -1700,7 +1703,7 @@ const AgenciesPage = () => {
                                             <>
                                                 <div>
                                                     <label className="block text-sm font-medium text-gray-700 mb-1">Custom pricing</label>
-                                                    <input type="number" step="0.01" min={0} value={createForm.customPricing} onChange={(e) => setCreateForm({ ...createForm, customPricing: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="0.00" />
+                                                    <input type="number" step="0.01" min={0} value={createForm.customPricing} onChange={(e) => setCreateForm({ ...createForm, customPricing: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 ${isEnterpriseFromCalculator ? "bg-gray-100 cursor-not-allowed" : ""}`} placeholder="0.00" readOnly={isEnterpriseFromCalculator} />
                                                 </div>
                                                 {createForm.tier === "enterprise" && (
                                                     <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 space-y-3">
@@ -1708,19 +1711,19 @@ const AgenciesPage = () => {
                                                         <div className="grid grid-cols-2 gap-3">
                                                             <div>
                                                                 <label className="block text-xs font-medium text-gray-600 mb-1">Client Dashboards</label>
-                                                                <input type="number" min={1} value={createForm.enterpriseMaxDashboards} onChange={(e) => setCreateForm({ ...createForm, enterpriseMaxDashboards: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="Unlimited" />
+                                                                <input type="number" min={1} value={createForm.enterpriseMaxDashboards} onChange={(e) => setCreateForm({ ...createForm, enterpriseMaxDashboards: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 ${isEnterpriseFromCalculator ? "bg-gray-100 cursor-not-allowed" : ""}`} placeholder="Unlimited" readOnly={isEnterpriseFromCalculator} />
                                                             </div>
                                                             <div>
                                                                 <label className="block text-xs font-medium text-gray-600 mb-1">Tracked Keywords (account-wide)</label>
-                                                                <input type="number" min={1} value={createForm.enterpriseKeywordsTotal} onChange={(e) => setCreateForm({ ...createForm, enterpriseKeywordsTotal: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="5000" />
+                                                                <input type="number" min={1} value={createForm.enterpriseKeywordsTotal} onChange={(e) => setCreateForm({ ...createForm, enterpriseKeywordsTotal: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 ${isEnterpriseFromCalculator ? "bg-gray-100 cursor-not-allowed" : ""}`} placeholder="5000" readOnly={isEnterpriseFromCalculator} />
                                                             </div>
                                                             <div>
                                                                 <label className="block text-xs font-medium text-gray-600 mb-1">Research Credits / Month</label>
-                                                                <input type="number" min={0} value={createForm.enterpriseCreditsPerMonth} onChange={(e) => setCreateForm({ ...createForm, enterpriseCreditsPerMonth: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="3000" />
+                                                                <input type="number" min={0} value={createForm.enterpriseCreditsPerMonth} onChange={(e) => setCreateForm({ ...createForm, enterpriseCreditsPerMonth: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 ${isEnterpriseFromCalculator ? "bg-gray-100 cursor-not-allowed" : ""}`} placeholder="3000" readOnly={isEnterpriseFromCalculator} />
                                                             </div>
                                                             <div>
                                                                 <label className="block text-xs font-medium text-gray-600 mb-1">Team Users</label>
-                                                                <input type="number" min={1} value={createForm.enterpriseMaxTeamUsers} onChange={(e) => setCreateForm({ ...createForm, enterpriseMaxTeamUsers: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="Unlimited" />
+                                                                <input type="number" min={1} value={createForm.enterpriseMaxTeamUsers} onChange={(e) => setCreateForm({ ...createForm, enterpriseMaxTeamUsers: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 ${isEnterpriseFromCalculator ? "bg-gray-100 cursor-not-allowed" : ""}`} placeholder="Unlimited" readOnly={isEnterpriseFromCalculator} />
                                                             </div>
                                                         </div>
                                                         <div className="rounded-md bg-violet-100/50 px-3 py-2 text-xs text-violet-700">

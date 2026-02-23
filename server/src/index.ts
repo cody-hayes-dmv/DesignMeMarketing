@@ -192,6 +192,12 @@ server.on("listening", async () => {
     processRecurringTaskRules().catch(console.error);
   }, 60 * 1000);
   console.log("Recurring task scheduler started (runs every minute)");
+
+  // DataForSEO spending capture: persist today's spend every 6 hours
+  const { captureDataForSeoDailySpend } = await import("./routes/financial.js");
+  setTimeout(() => captureDataForSeoDailySpend().catch(console.error), 10 * 1000);
+  setInterval(() => captureDataForSeoDailySpend().catch(console.error), 6 * 60 * 60 * 1000);
+  console.log("DataForSEO spending capture started (runs every 6 hours)");
 });
 
 server.on("error", (err: any) => {

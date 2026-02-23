@@ -8,6 +8,7 @@ import {
   CATEGORY_LABELS,
   type MrrCategory,
 } from "../lib/stripe.js";
+import { prisma } from "../lib/prisma.js";
 
 const router = express.Router();
 
@@ -358,6 +359,7 @@ type DataForSeoUsageResponse = {
   message?: string;
   balance?: number;
   totalDeposited?: number;
+  estimatedDaysToGo?: number;
   backlinksSubscriptionExpiry?: string | null;
   llmMentionsSubscriptionExpiry?: string | null;
   dailyExpenses: DataForSeoDailyExpense[];
@@ -490,7 +492,7 @@ router.get(
         tasks?: Array<{
           status_code?: number;
           result?: Array<{
-            money?: { total?: number; balance?: number; statistics?: { day?: unknown } };
+            money?: { total?: number; balance?: number; statistics?: { day?: unknown; minute?: unknown } };
             backlinks_subscription_expiry_date?: string | null;
             llm_mentions_subscription_expiry_date?: string | null;
           }>;
@@ -521,26 +523,81 @@ router.get(
       const dayBlock = statistics?.day;
       const minuteBlock = statistics?.minute;
 
-      let dailyExpenses: DataForSeoDailyExpense[] = [];
+      // Log raw structure keys for debugging
+      if (statistics) {
+        const keys = Object.keys(statistics);
+        console.log("[dataforseo] money.statistics keys:", keys);
+        if (dayBlock && typeof dayBlock === "object") {
+          const dayKeys = Object.keys(dayBlock as Record<string, unknown>);
+          console.log("[dataforseo] money.statistics.day top-level keys:", dayKeys.slice(0, 20));
+        }
+      }
+
+      let todayExpenses: DataForSeoDailyExpense[] = [];
       if (dayBlock !== undefined && dayBlock !== null) {
-        dailyExpenses = parseMoneyStatisticsDay(dayBlock);
+        todayExpenses = parseMoneyStatisticsDay(dayBlock);
       }
-      if (dailyExpenses.length === 0 && minuteBlock !== undefined && minuteBlock !== null && typeof minuteBlock === "object") {
-        dailyExpenses = aggregateMinuteToDaily(minuteBlock);
+      // Also try minute block to aggregate into daily (may span multiple days)
+      if (minuteBlock !== undefined && minuteBlock !== null && typeof minuteBlock === "object") {
+        const minuteDaily = aggregateMinuteToDaily(minuteBlock);
+        // Merge minute-derived data for dates not already in todayExpenses
+        const existingDates = new Set(todayExpenses.map(e => e.date));
+        for (const md of minuteDaily) {
+          if (!existingDates.has(md.date)) {
+            todayExpenses.push(md);
+          }
+        }
       }
+
+      // Persist today's spending in DB for historical tracking
+      for (const expense of todayExpenses) {
+        if (expense.total > 0) {
+          try {
+            await prisma.dataForSeoDailySpend.upsert({
+              where: { date: expense.date },
+              create: { date: expense.date, total: expense.total, byApi: JSON.stringify(expense.byApi) },
+              update: { total: expense.total, byApi: JSON.stringify(expense.byApi) },
+            });
+          } catch { /* ignore duplicate / race */ }
+        }
+      }
+
+      // Load all historical data from DB
+      const storedRows = await prisma.dataForSeoDailySpend.findMany({ orderBy: { date: 'asc' } });
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayDateSet = new Set(todayExpenses.map(e => e.date));
+
+      const historicalExpenses: DataForSeoDailyExpense[] = storedRows
+        .filter(r => !todayDateSet.has(r.date))
+        .map(r => ({
+          date: r.date,
+          total: r.total,
+          byApi: r.byApi ? JSON.parse(r.byApi) : {},
+        }));
+
+      const allExpenses = [...historicalExpenses, ...todayExpenses].sort((a, b) => a.date.localeCompare(b.date));
 
       const balanceRaw = money?.balance;
       const totalRaw = money?.total;
       const balance = typeof balanceRaw === "number" && !Number.isNaN(balanceRaw) ? balanceRaw : typeof balanceRaw === "string" ? Number(balanceRaw) : undefined;
       const totalDeposited = typeof totalRaw === "number" && !Number.isNaN(totalRaw) ? totalRaw : typeof totalRaw === "string" ? Number(totalRaw) : undefined;
 
+      // Estimate days remaining based on average daily spend over last 30 days
+      let estimatedDaysToGo: number | undefined;
+      if (typeof balance === "number" && balance > 0 && allExpenses.length > 0) {
+        const last30 = allExpenses.slice(-30);
+        const avgDaily = last30.reduce((s, e) => s + e.total, 0) / last30.length;
+        estimatedDaysToGo = avgDaily > 0 ? Math.round(balance / avgDaily) : undefined;
+      }
+
       const payload: DataForSeoUsageResponse = {
         configured: true,
         balance: typeof balance === "number" && !Number.isNaN(balance) ? balance : undefined,
         totalDeposited: typeof totalDeposited === "number" && !Number.isNaN(totalDeposited) ? totalDeposited : undefined,
+        estimatedDaysToGo,
         backlinksSubscriptionExpiry: (resultObj.backlinks_subscription_expiry_date as string | null) ?? null,
         llmMentionsSubscriptionExpiry: (resultObj.llm_mentions_subscription_expiry_date as string | null) ?? null,
-        dailyExpenses: dailyExpenses.sort((a, b) => a.date.localeCompare(b.date)),
+        dailyExpenses: allExpenses,
       };
 
       res.json(payload);
@@ -554,5 +611,61 @@ router.get(
     }
   }
 );
+
+/**
+ * Cron-callable: fetch today's DataForSEO spending and persist it.
+ * Safe to call multiple times per day (upserts by date).
+ */
+export async function captureDataForSeoDailySpend(): Promise<void> {
+  const base64Auth = process.env.DATAFORSEO_BASE64;
+  if (!base64Auth) return;
+
+  try {
+    const response = await fetch("https://api.dataforseo.com/v3/appendix/user_data", {
+      method: "GET",
+      headers: { Authorization: `Basic ${base64Auth}`, "Content-Type": "application/json" },
+    });
+    const data = (await response.json()) as {
+      status_code?: number;
+      tasks?: Array<{ status_code?: number; result?: Array<Record<string, unknown>> }>;
+    };
+    if (data.status_code !== 20000 || !data.tasks?.length || data.tasks[0].status_code !== 20000) return;
+
+    const rawResult = data.tasks[0].result;
+    const result = Array.isArray(rawResult) ? rawResult[0] : null;
+    if (!result) return;
+
+    const money = result.money as Record<string, unknown> | undefined;
+    const statistics = money?.statistics as Record<string, unknown> | undefined;
+    const dayBlock = statistics?.day;
+    const minuteBlock = statistics?.minute;
+
+    let expenses: DataForSeoDailyExpense[] = [];
+    if (dayBlock) expenses = parseMoneyStatisticsDay(dayBlock);
+    if (minuteBlock && typeof minuteBlock === "object") {
+      const minuteDaily = aggregateMinuteToDaily(minuteBlock);
+      const existingDates = new Set(expenses.map(e => e.date));
+      for (const md of minuteDaily) {
+        if (!existingDates.has(md.date)) expenses.push(md);
+      }
+    }
+
+    for (const expense of expenses) {
+      if (expense.total > 0) {
+        try {
+          await prisma.dataForSeoDailySpend.upsert({
+            where: { date: expense.date },
+            create: { date: expense.date, total: expense.total, byApi: JSON.stringify(expense.byApi) },
+            update: { total: expense.total, byApi: JSON.stringify(expense.byApi) },
+          });
+        } catch { /* ignore */ }
+      }
+    }
+
+    console.log(`[dataforseo-cron] Captured spending for ${expenses.length} day(s)`);
+  } catch (err: any) {
+    console.error("[dataforseo-cron] Error:", err?.message || err);
+  }
+}
 
 export default router;

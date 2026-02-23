@@ -760,6 +760,16 @@ model AiCommand {
   @@map("ai_commands")
 }
 
+model DataForSeoDailySpend {
+  id    String @id @default(cuid())
+  date  String @unique @db.VarChar(10)
+  total Float
+  byApi String? @db.LongText
+
+  @@index([date])
+  @@map("dataforseo_daily_spend")
+}
+
 enum Role {
   SUPER_ADMIN
   ADMIN
