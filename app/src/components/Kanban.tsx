@@ -4,7 +4,7 @@ import {
     Droppable,
     Draggable,
     DropResult,
-} from "react-beautiful-dnd";
+} from "@hello-pangea/dnd";
 
 import { Task, Column, KanbanBoardType } from "@/utils/types"
 

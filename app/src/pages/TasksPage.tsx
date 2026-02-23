@@ -71,6 +71,7 @@ const TasksPage = () => {
       priority?: string | null;
       estimatedHours?: number | null;
       assigneeId?: string | null;
+      assignee?: { id: string; name: string | null; email: string } | null;
       clientId?: string | null;
       frequency: string;
       nextRunAt: string;
@@ -307,15 +308,16 @@ const TasksPage = () => {
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
 
+    const canViewRecurring = canCreate || isClientUser;
     const fetchRecurringRules = () => {
-        if (!canCreate) return;
+        if (!canViewRecurring) return;
         api.get("/tasks/recurring")
             .then((res) => setRecurringRules(Array.isArray(res.data) ? res.data : []))
             .catch(() => setRecurringRules([]));
     };
     useEffect(() => {
-        if (canCreate) fetchRecurringRules();
-    }, [canCreate]);
+        if (canViewRecurring) fetchRecurringRules();
+    }, [canViewRecurring]);
     useEffect(() => {
         if (recurringRulesOpen && canCreate && clients.length === 0) {
             dispatch(fetchClients() as any);
@@ -616,7 +618,7 @@ const TasksPage = () => {
             </div>
 
             {/* Recurring tasks - above task list */}
-            {canCreate && (
+            {canViewRecurring && (
                 <div className="bg-white rounded-xl border border-gray-200 mb-8 overflow-hidden">
                     <button
                         type="button"
@@ -628,7 +630,9 @@ const TasksPage = () => {
                     </button>
                     {recurringRulesOpen && (
                         <div className="border-t border-gray-200 overflow-x-auto">
-                            {recurringRules.length === 0 ? (
+                            {recurringRules.length === 0 ? (isClientUser ? (
+                                <div className="px-6 py-8 text-sm text-gray-500">No recurring tasks yet.</div>
+                            ) :
                                 <div className="px-6 py-8 text-sm text-gray-500">No recurring tasks yet. Use “Add Recurring Task” above to create one.</div>
                             ) : (
                                 <table className="w-full">
@@ -636,11 +640,11 @@ const TasksPage = () => {
                                         <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Task</th>
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Recurrence</th>
-                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Client</th>
+                                            {!isClientUser && <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Client</th>}
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Assignee</th>
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Due Date</th>
-                                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
+                                            {!isClientUser && <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -653,6 +657,7 @@ const TasksPage = () => {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{frequencyLabel(r.frequency)}</td>
+                                                {!isClientUser && (
                                                 <td className="px-6 py-4">
                                                     {r.clientId ? (
                                                         <div className="flex flex-col">
@@ -666,13 +671,14 @@ const TasksPage = () => {
                                                         <span className="text-sm text-gray-400">No client</span>
                                                     )}
                                                 </td>
+                                                )}
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <span className={`px-2 py-1 text-xs font-bold rounded-full ${r.isActive ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
                                                         {r.isActive ? "Active" : "Stopped"}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    {r.assigneeId ? (assignableUsers.find((u) => u.id === r.assigneeId)?.name ?? assignableUsers.find((u) => u.id === r.assigneeId)?.email ?? "—") : "Unassigned"}
+                                                    {r.assignee ? (r.assignee.name ?? r.assignee.email) : r.assigneeId ? (assignableUsers.find((u) => u.id === r.assigneeId)?.name ?? assignableUsers.find((u) => u.id === r.assigneeId)?.email ?? "—") : "Unassigned"}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                     <div className="flex items-center">
@@ -680,7 +686,9 @@ const TasksPage = () => {
                                                         {format(new Date(r.nextRunAt), "MMM dd, yyyy")}
                                                     </div>
                                                 </td>
+                                                {!isClientUser && (
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                    {(user?.role === "SUPER_ADMIN" || (r as any).createdBy?.id === user?.id) ? (
                                                     <div className="flex items-center gap-1">
                                                         {r.isActive ? (
                                                             <button type="button" onClick={() => handleStopRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Stop recurrence">
@@ -698,7 +706,11 @@ const TasksPage = () => {
                                                             <Trash2 className="h-4 w-4" />
                                                         </button>
                                                     </div>
+                                                    ) : (
+                                                        <span className="text-xs text-gray-400">—</span>
+                                                    )}
                                                 </td>
+                                                )}
                                             </tr>
                                         ))}
                                     </tbody>
@@ -972,7 +984,7 @@ const TasksPage = () => {
                                                 >
                                                     <Edit className="h-4 w-4" />
                                                 </button>
-                                                {!isClientUser && (
+                                                {canCreate && (user?.role === "SUPER_ADMIN" || task.createdBy?.id === user?.id) && (
                                                 <button
                                                     className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                                     onClick={() => handleDeleteTask(task.id)}

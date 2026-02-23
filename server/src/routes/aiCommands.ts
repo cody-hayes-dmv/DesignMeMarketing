@@ -12,7 +12,15 @@ function requireSuperAdmin(req: Request, res: Response, next: () => void) {
   next();
 }
 
-router.get("/", authenticateToken, requireSuperAdmin, async (_req: Request, res: Response) => {
+function requireReader(req: Request, res: Response, next: () => void) {
+  const role = (req as any).user?.role;
+  if (role !== "SUPER_ADMIN" && role !== "ADMIN" && role !== "SPECIALIST") {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  next();
+}
+
+router.get("/", authenticateToken, requireReader, async (_req: Request, res: Response) => {
   try {
     const commands = await prisma.aiCommand.findMany({ orderBy: { sortOrder: "asc" } });
     res.json(commands);

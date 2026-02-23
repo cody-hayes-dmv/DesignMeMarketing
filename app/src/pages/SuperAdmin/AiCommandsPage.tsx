@@ -38,7 +38,7 @@ const TOOLBAR_ACTIONS = [
   { icon: Minus, label: "Divider", prefix: "\n---\n", suffix: "" },
 ] as const;
 
-const AiCommandsPage = ({ embedded }: { embedded?: boolean }) => {
+const AiCommandsPage = ({ embedded, readOnly }: { embedded?: boolean; readOnly?: boolean }) => {
   const [commands, setCommands] = useState<AiCommand[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -226,14 +226,14 @@ const AiCommandsPage = ({ embedded }: { embedded?: boolean }) => {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">AI Commands</h3>
-            <p className="mt-0.5 text-sm text-gray-500">Save and organize your AI prompts and commands</p>
+            <p className="mt-0.5 text-sm text-gray-500">{readOnly ? "AI prompts and commands shared by your agency" : "Save and organize your AI prompts and commands"}</p>
           </div>
-          {addCommandButton}
+          {!readOnly && addCommandButton}
         </div>
       )}
 
       {/* New Command Form */}
-      {showNewForm && (
+      {showNewForm && !readOnly && (
         <div className="mb-8 rounded-2xl border-2 border-dashed border-violet-300 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">New Command</h2>
@@ -295,14 +295,16 @@ const AiCommandsPage = ({ embedded }: { embedded?: boolean }) => {
         <div className="rounded-2xl border-2 border-dashed border-gray-300 bg-white/60 py-16 text-center">
           <Sparkles className="mx-auto h-12 w-12 text-gray-300" />
           <h3 className="mt-4 text-lg font-semibold text-gray-700">No commands yet</h3>
-          <p className="mt-1 text-sm text-gray-500">Create your first AI command to get started.</p>
-          <button
-            type="button"
-            onClick={() => setShowNewForm(true)}
-            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
-          >
-            <Plus className="h-4 w-4" /> Add Your First Command
-          </button>
+          <p className="mt-1 text-sm text-gray-500">{readOnly ? "No AI commands have been shared yet." : "Create your first AI command to get started."}</p>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => setShowNewForm(true)}
+              className="mt-5 inline-flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
+            >
+              <Plus className="h-4 w-4" /> Add Your First Command
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -326,7 +328,7 @@ const AiCommandsPage = ({ embedded }: { embedded?: boolean }) => {
                       setExpandedId(null);
                     } else {
                       setExpandedId(cmd.id);
-                      if (!draft) startEditing(cmd);
+                      if (!draft && !readOnly) startEditing(cmd);
                     }
                   }}
                 >
@@ -364,13 +366,15 @@ const AiCommandsPage = ({ embedded }: { embedded?: boolean }) => {
                       {copiedId === cmd.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                       {copiedId === cmd.id ? "Copied!" : "Copy"}
                     </button>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(cmd); }}
-                      className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(cmd); }}
+                        className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                     {isExpanded ? (
                       <ChevronUp className="h-5 w-5 text-gray-400" />
                     ) : (
@@ -382,7 +386,7 @@ const AiCommandsPage = ({ embedded }: { embedded?: boolean }) => {
                 {/* Expanded content */}
                 {isExpanded && (
                   <div className={`border-t ${accent.border} px-6 py-5 ${accent.bg} rounded-b-2xl`}>
-                    {isEditing ? (
+                    {isEditing && !readOnly ? (
                       <div className="space-y-4">
                         <div>
                           {renderToolbar(

@@ -657,6 +657,7 @@ const ClientDashboardPage: React.FC = () => {
 
   useEffect(() => {
     if (!workLogModalOpen && !workLogRecurringRulesOpen) return;
+    if (user?.role === "USER") return;
     let cancelled = false;
     const q = assignableSearch.trim();
     setAssignableLoading(true);
@@ -672,7 +673,7 @@ const ClientDashboardPage: React.FC = () => {
         if (!cancelled) setAssignableLoading(false);
       });
     return () => { cancelled = true; };
-  }, [workLogModalOpen, workLogRecurringRulesOpen, assignableSearch]);
+  }, [workLogModalOpen, workLogRecurringRulesOpen, assignableSearch, user?.role]);
 
   useEffect(() => {
     if (!assignToOpen) return;
@@ -1251,6 +1252,9 @@ const ClientDashboardPage: React.FC = () => {
       }
     }
   };
+
+  const selectedWorkLogTask = workLogTasks.find((t) => t.id === selectedWorkLogTaskId);
+  const canEditSelectedWorkLog = user?.role === "SUPER_ADMIN" || selectedWorkLogTask?.createdBy?.id === user?.id;
 
   const handleWorkLogFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -6213,7 +6217,7 @@ const ClientDashboardPage: React.FC = () => {
                           </p>
                         </div>
                       </div>
-                      {!reportOnly && (
+                      {!reportOnly && !clientPortalMode && (
                         <div className="flex items-center gap-3 flex-shrink-0">
                           <button
                             type="button"
@@ -6440,7 +6444,7 @@ const ClientDashboardPage: React.FC = () => {
                                         >
                                           View
                                         </button>
-                                        {!reportOnly && (
+                                        {!reportOnly && !clientPortalMode && (
                                           <button
                                             type="button"
                                             className="px-2.5 py-1 rounded-lg text-red-600 hover:bg-red-50 font-medium inline-flex items-center gap-1"
@@ -6529,7 +6533,7 @@ const ClientDashboardPage: React.FC = () => {
                           </p>
                         </div>
                       </div>
-                      {!reportOnly && (
+                      {!reportOnly && !clientPortalMode && (
                         <div className="relative flex-shrink-0" ref={workLogAddMenuRef}>
                           <button
                             type="button"
@@ -6605,7 +6609,7 @@ const ClientDashboardPage: React.FC = () => {
                                     <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Next due</th>
                                     <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
                                     <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Assignee</th>
-                                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
+                                    {!clientPortalMode && <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>}
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -6630,27 +6634,33 @@ const ClientDashboardPage: React.FC = () => {
                                         </span>
                                       </td>
                                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {r.assigneeId ? (assignableUsers.find((u) => u.id === r.assigneeId)?.name ?? assignableUsers.find((u) => u.id === r.assigneeId)?.email ?? "—") : "Unassigned"}
+                                        {(r as any).assignee ? ((r as any).assignee.name ?? (r as any).assignee.email) : r.assigneeId ? (assignableUsers.find((u) => u.id === r.assigneeId)?.name ?? assignableUsers.find((u) => u.id === r.assigneeId)?.email ?? "—") : "Unassigned"}
                                       </td>
-                                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                        <div className="flex items-center gap-1">
-                                          {r.isActive ? (
-                                            <button type="button" onClick={() => handleWorkLogStopRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Stop recurrence">
-                                              <StopCircle className="h-4 w-4" />
+                                      {!clientPortalMode && (
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                          {(user?.role === "SUPER_ADMIN" || (r as any).createdBy?.id === user?.id) ? (
+                                          <div className="flex items-center gap-1">
+                                            {r.isActive ? (
+                                              <button type="button" onClick={() => handleWorkLogStopRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Stop recurrence">
+                                                <StopCircle className="h-4 w-4" />
+                                              </button>
+                                            ) : (
+                                              <button type="button" onClick={() => handleWorkLogResumeRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Resume">
+                                                <Play className="h-4 w-4" />
+                                              </button>
+                                            )}
+                                            <button type="button" onClick={() => { setEditingWorkLogRecurringRule(r); setShowRecurringTaskModal(true); }} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Edit">
+                                              <Edit className="h-4 w-4" />
                                             </button>
+                                            <button type="button" onClick={() => handleWorkLogRemoveRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Remove">
+                                              <Trash2 className="h-4 w-4" />
+                                            </button>
+                                          </div>
                                           ) : (
-                                            <button type="button" onClick={() => handleWorkLogResumeRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Resume">
-                                              <Play className="h-4 w-4" />
-                                            </button>
+                                            <span className="text-xs text-gray-400">—</span>
                                           )}
-                                          <button type="button" onClick={() => { setEditingWorkLogRecurringRule(r); setShowRecurringTaskModal(true); }} className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors" title="Edit">
-                                            <Edit className="h-4 w-4" />
-                                          </button>
-                                          <button type="button" onClick={() => handleWorkLogRemoveRecurrence(r.id)} className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Remove">
-                                            <Trash2 className="h-4 w-4" />
-                                          </button>
-                                        </div>
-                                      </td>
+                                        </td>
+                                      )}
                                     </tr>
                                   ))}
                                 </tbody>
@@ -6759,7 +6769,7 @@ const ClientDashboardPage: React.FC = () => {
                                       >
                                         <Eye className="h-4 w-4" />
                                       </button>
-                                      {!reportOnly && (
+                                      {!reportOnly && !clientPortalMode && (user?.role === "SUPER_ADMIN" || task.createdBy?.id === user?.id) && (
                                         <>
                                           <button
                                             type="button"
@@ -7099,7 +7109,7 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
 
 <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
-                  {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
+                  {!reportOnly && !clientPortalMode && workLogModalMode !== "create" && selectedWorkLogTaskId && canEditSelectedWorkLog && (
                     <button
                       type="button"
                       onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
@@ -7115,7 +7125,7 @@ const ClientDashboardPage: React.FC = () => {
                   >
                     Close
                   </button>
-                  {workLogModalMode !== "view" && (
+                  {workLogModalMode !== "view" && canEditSelectedWorkLog && (
                     <button
                       type="button"
                       onClick={handleSaveWorkLog}
@@ -8961,7 +8971,7 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
 
                 <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
-                  {!reportOnly && workLogModalMode !== "create" && selectedWorkLogTaskId && (
+                  {!reportOnly && !clientPortalMode && workLogModalMode !== "create" && selectedWorkLogTaskId && canEditSelectedWorkLog && (
                     <button
                       type="button"
                       onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
@@ -8977,7 +8987,7 @@ const ClientDashboardPage: React.FC = () => {
                   >
                     Close
                   </button>
-                  {workLogModalMode !== "view" && (
+                  {workLogModalMode !== "view" && canEditSelectedWorkLog && (
                     <button
                       type="button"
                       onClick={handleSaveWorkLog}

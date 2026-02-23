@@ -125,6 +125,15 @@ async function canStaffAccessClient(user: { userId: string; role: string }, clie
         }
     }
 
+    // Client portal users: check if they have an active ClientUser membership for this client
+    if (user.role === 'USER') {
+        const clientUser = await prisma.clientUser.findFirst({
+            where: { clientId, userId: user.userId, status: 'ACTIVE' },
+            select: { id: true },
+        });
+        return { client, hasAccess: !!clientUser };
+    }
+
     return { client, hasAccess: false };
 }
 

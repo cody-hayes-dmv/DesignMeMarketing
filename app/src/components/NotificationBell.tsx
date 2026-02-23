@@ -37,10 +37,10 @@ const NotificationBell: React.FC = () => {
   const fetchNotifications = async () => {
     setLoading(true);
     try {
-      const res = await api.get<NotificationsResponse>(notificationsUrl);
+      const res = await api.get<NotificationsResponse>(notificationsUrl, { _silent: true } as any);
       setData(res.data);
     } catch {
-      setData({ unreadCount: 0, items: [] });
+      // Silently ignore - polling will retry in 5s
     } finally {
       setLoading(false);
     }

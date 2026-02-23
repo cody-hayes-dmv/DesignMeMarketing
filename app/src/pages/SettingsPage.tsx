@@ -81,7 +81,7 @@ const SettingsPage = () => {
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
     { id: "enterprise-calculator", label: "Enterprise Calculator", icon: Calculator, roles: ["SUPER_ADMIN"] },
-    { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN", "ADMIN"] },
+    { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
@@ -692,7 +692,7 @@ const SettingsPage = () => {
         return <EnterpriseCalculatorPage embedded />;
 
       case "ai-commands":
-        return <AiCommandsPage embedded />;
+        return <AiCommandsPage embedded readOnly={user?.role === "SPECIALIST"} />;
 
       case "notifications":
         return (

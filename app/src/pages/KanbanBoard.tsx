@@ -1,5 +1,5 @@
 import React from "react";
-import { DragDropContext, Droppable, Draggable, DropResult } from "react-beautiful-dnd";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { Task } from "@/utils/types";
 import { truncateText } from "@/utils";
 import { Calendar, User } from "lucide-react";

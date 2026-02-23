@@ -30,6 +30,13 @@ export function getUploadFileUrl(url: string | undefined): string {
 // Track recent errors to prevent duplicate toasts
 const recentErrors = new Map<string, number>();
 const ERROR_DEBOUNCE_MS = 2000; // Show same error max once per 2 seconds
+const NETWORK_ERROR_DEBOUNCE_MS = 30000;
+const NETWORK_ERROR_KEY = "__network_unreachable__";
+
+// Deferred network-error toast: waits a few seconds before showing so that
+// transient server restarts don't flash an alarming toast.
+let pendingNetworkToast: ReturnType<typeof setTimeout> | null = null;
+const NETWORK_TOAST_DELAY_MS = 4000;
 
 // Create axios instance with base configuration
 const api = axios.create({
@@ -60,7 +67,15 @@ api.interceptors.request.use(
 
 // Response interceptor for error handling
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    // A successful response means the server is reachable — cancel any pending
+    // "Cannot reach the server" toast so transient restarts don't alarm the user.
+    if (pendingNetworkToast) {
+      clearTimeout(pendingNetworkToast);
+      pendingNetworkToast = null;
+    }
+    return res;
+  },
   (error) => {
     const status = error.response?.status;
     const url = error.config?.url ?? "";
@@ -76,10 +91,13 @@ api.interceptors.response.use(
     const now = Date.now();
     const lastShown = recentErrors.get(errorKey);
     
+    // Allow callers to suppress global error toasts (e.g. background polling)
+    const silent = error.config?._silent === true;
+
     // Don't show toast for auth errors (handled by login/register pages)
     // Don't show for agency register (modal / RegisterPage handle it to avoid duplicate toasts)
     // Don't show global toasts for share endpoints (share page handles its own UX)
-    if (!isAuth && !isAgencyRegister && !isShare) {
+    if (!isAuth && !isAgencyRegister && !isShare && !silent) {
       // Only show toast if we haven't shown this exact error recently
       if (!lastShown || now - lastShown > ERROR_DEBOUNCE_MS) {
         recentErrors.set(errorKey, now);
@@ -95,12 +113,18 @@ api.interceptors.response.use(
         }
         
         if (!error.response) {
-          // Network error or timeout (e.g. server not running, wrong API URL, or slow response)
           const isTimeout = error.code === "ECONNABORTED";
           if (isTimeout) {
             toast.error("Request timed out. The server may be slow—try again.");
-          } else {
-            toast.error("Cannot reach the server. Check that the backend is running and VITE_API_URL is correct.");
+          } else if (!pendingNetworkToast) {
+            const lastNetwork = recentErrors.get(NETWORK_ERROR_KEY);
+            if (!lastNetwork || now - lastNetwork > NETWORK_ERROR_DEBOUNCE_MS) {
+              pendingNetworkToast = setTimeout(() => {
+                pendingNetworkToast = null;
+                recentErrors.set(NETWORK_ERROR_KEY, Date.now());
+                toast.error("Cannot reach the server. Check that the backend is running and VITE_API_URL is correct.");
+              }, NETWORK_TOAST_DELAY_MS);
+            }
           }
         } else if (status === 401) {
           localStorage.removeItem("token");

@@ -79,6 +79,9 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     );
     const { user } = useSelector((state: RootState) => state.auth);
     const isSpecialistView = user?.role === "SPECIALIST";
+    const isClientUser = user?.role === "USER";
+    const isNotOwner = (user?.role === "ADMIN" || user?.role === "AGENCY") && Number(mode) === 1 && task?.createdBy?.id !== user?.id;
+    const formReadOnly = isSpecialistView || isClientUser || isNotOwner;
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
     const [assignableLoading, setAssignableLoading] = useState(false);
     const [assignableSearch, setAssignableSearch] = useState("");
@@ -116,14 +119,14 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const [showRevisionInput, setShowRevisionInput] = useState(false);
 
     useEffect(() => {
-        if (open && clients.length === 0) {
+        if (open && clients.length === 0 && user?.role !== "USER" && user?.role !== "SPECIALIST") {
             dispatch(fetchClients() as any);
         }
-    }, [open, clients.length, dispatch]);
+    }, [open, clients.length, dispatch, user?.role]);
 
     // Fetch assignable users (Super Admin, Admin, Specialist) when modal is open
     useEffect(() => {
-        if (!open) return;
+        if (!open || user?.role === "USER" || user?.role === "SPECIALIST") return;
         let cancelled = false;
         setAssignableLoading(true);
         const q = assignableSearch.trim();
@@ -310,7 +313,6 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     }, [open, mode, task]);
 
     const canComment = Boolean(user);
-    const isClientUser = user?.role === "USER";
     const canApprove = isClientUser && task?.status === "NEEDS_APPROVAL";
     const availableCommentTypes: ActivityType[] = isClientUser
         ? ["COMMENT", "QUESTION"]
@@ -445,9 +447,10 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         </button>
                     </div>
 
-                    {/* Body */}
+                    {/* Body + Footer wrapped in form */}
+                    <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
                     <div className="flex-1 overflow-y-auto px-5 py-4 bg-gray-50/50">
-                        <form onSubmit={handleSubmit} className="space-y-5">
+                        <div className="space-y-5">
                     <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
                         <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -459,8 +462,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             type="text"
                             value={form.title}
                             onChange={(e) => setForm({ ...form, title: e.target.value })}
-                            disabled={isSpecialistView}
-                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                            disabled={formReadOnly}
+                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             required
                         />
                     </div>
@@ -470,8 +473,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         <textarea
                             value={form.description}
                             onChange={(e) => setForm({ ...form, description: e.target.value })}
-                            disabled={isSpecialistView}
-                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                            disabled={formReadOnly}
+                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             rows={3}
                         />
                     </div>
@@ -483,8 +486,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 type="text"
                                 value={form.category}
                                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                                disabled={isSpecialistView}
-                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                                disabled={formReadOnly}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 placeholder="e.g. On-Page SEO, Link Building"
                             />
                         </div>
@@ -494,7 +497,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <select
                                 value={form.status}
                                 onChange={(e) => setForm({ ...form, status: e.target.value as TaskStatus })}
-                                className="border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                disabled={isClientUser}
+                                className={`border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isClientUser ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             >
                                 <option value="TODO">TODO</option>
                                 <option value="IN_PROGRESS">IN_PROGRESS</option>
@@ -517,8 +521,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 selected={form.dueDate}
                                 onChange={(date) => date && setForm({ ...form, dueDate: date })}
                                 minDate={new Date()}
-                                disabled={isSpecialistView}
-                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                                disabled={formReadOnly}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 placeholderText="Select date"
                             />
                         </div>
@@ -530,7 +534,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                     type="text"
                                     value={form.assigneeId ? assigneeDisplay : assignableSearch}
                                     onChange={(e) => {
-                                        if (isSpecialistView) return;
+                                        if (formReadOnly) return;
                                         setAssignableSearch(e.target.value);
                                         setAssignToOpen(true);
                                         if (form.assigneeId && e.target.value !== assigneeDisplay) {
@@ -538,12 +542,12 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                             setAssigneeDisplay("");
                                         }
                                     }}
-                                    onFocus={() => !isSpecialistView && setAssignToOpen(true)}
-                                    disabled={isSpecialistView}
+                                    onFocus={() => !formReadOnly && setAssignToOpen(true)}
+                                    disabled={formReadOnly}
                                     placeholder="Search by name or email"
-                                    className={`flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                                    className={`flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 />
-                                {form.assigneeId && !isSpecialistView && (
+                                {form.assigneeId && !formReadOnly && (
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -558,7 +562,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                     </button>
                                 )}
                             </div>
-                            {assignToOpen && !isSpecialistView && (
+                            {assignToOpen && !formReadOnly && (
                                 <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
                                     {assignableLoading ? (
                                         <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
@@ -598,8 +602,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         <select
                             value={form.clientId}
                             onChange={(e) => setForm({ ...form, clientId: e.target.value })}
-                            disabled={isSpecialistView}
-                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                            disabled={formReadOnly}
+                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         >
                             <option value="">No client</option>
                             {sortedClients.map((client) => (
@@ -616,8 +620,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <select
                                 value={form.priority}
                                 onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                                disabled={isSpecialistView}
-                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                                disabled={formReadOnly}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             >
                                 <option value="">None</option>
                                 <option value="high">High</option>
@@ -631,8 +635,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 type="number"
                                 value={form.estimatedHours}
                                 onChange={(e) => setForm({ ...form, estimatedHours: e.target.value })}
-                                disabled={isSpecialistView}
-                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isSpecialistView ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                                disabled={formReadOnly}
+                                className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent ${formReadOnly ? "bg-gray-100 cursor-not-allowed" : ""}`}
                                 placeholder="(optional)"
                                 min="0"
                             />
@@ -647,7 +651,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         </h3>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Proof / Attachments</label>
-                        {!isSpecialistView && (
+                        {!formReadOnly && (
                             <>
                                 <input
                                     id="task-proof-file-input"
@@ -723,15 +727,15 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                                     href={getUploadFileUrl(item.value)}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    download={isSpecialistView ? (item.name || "attachment") : undefined}
+                                                    download={formReadOnly ? (item.name || "attachment") : undefined}
                                                     className="text-xs text-primary-600 hover:text-primary-800 truncate block inline-flex items-center gap-1"
                                                 >
-                                                    {isSpecialistView && <Download className="h-3.5 w-3.5 flex-shrink-0" />}
+                                                    {formReadOnly && <Download className="h-3.5 w-3.5 flex-shrink-0" />}
                                                     {item.name || item.value}
                                                 </a>
                                             </div>
                                         </div>
-                                        {!isSpecialistView && (
+                                        {!formReadOnly && (
                                             <button
                                                 type="button"
                                                 onClick={() => handleRemoveProof(index)}
@@ -958,26 +962,30 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         )}
                     </div>
 
-                        {/* Footer */}
-                        <div className="sticky bottom-0 bg-gray-100/80 pt-4 pb-1 -mx-5 -mb-4 px-5 py-4 rounded-b-2xl">
-                            <div className="flex flex-col sm:flex-row gap-3">
-                                <button
-                                    type="button"
-                                    onClick={handleCancel}
-                                    className="w-full sm:flex-1 border border-gray-300 bg-white text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-50 font-medium transition-colors"
-                                >
-                                    Cancel
-                                </button>
+                        </div>
+                    </div>
+
+                    {/* Footer - outside scroll */}
+                    <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-4 rounded-b-2xl">
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <button
+                                type="button"
+                                onClick={handleCancel}
+                                className={`${isClientUser || isNotOwner ? "w-full" : "w-full sm:flex-1"} border border-gray-300 bg-white text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-50 font-medium transition-colors`}
+                            >
+                                {isClientUser || isNotOwner ? "Close" : "Cancel"}
+                            </button>
+                            {!isClientUser && !isNotOwner && (
                                 <button
                                     type="submit"
                                     className="w-full sm:flex-1 py-3 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
                                 >
                                     {mode === 0 ? "Create" : "Save"}
                                 </button>
-                            </div>
+                            )}
                         </div>
-                        </form>
                     </div>
+                    </form>
                 </div>
             </div>
 

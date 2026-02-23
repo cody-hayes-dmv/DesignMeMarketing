@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import type { TaskStatus } from "@prisma/client";
+import type { Role, TaskStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../lib/email.js";
 import { authenticateToken, optionalAuthenticateToken } from "../middleware/auth.js";
@@ -112,7 +112,7 @@ const taskInclude = {
       notes: true,
     },
   },
-  createdBy: { select: { id: true, name: true, email: true } },
+  createdBy: { select: { id: true, name: true, email: true, role: true } },
 };
 
 async function sendTaskApprovalRequestEmails(
@@ -474,7 +474,8 @@ router.get("/", authenticateToken, async (req, res) => {
 });
 
 // List users who can be assigned to work log tasks.
-// SUPER_ADMIN / ADMIN: can assign to Super Admins, Admins, Specialists (system-wide).
+// SUPER_ADMIN: can assign to Super Admins, Admins, Specialists (system-wide).
+// ADMIN: can assign ONLY to Admins and Specialists (system-wide).
 // AGENCY: can assign ONLY to users in their own agency (same team).
 router.get("/assignable-users", authenticateToken, async (req, res) => {
   try {
@@ -519,10 +520,13 @@ router.get("/assignable-users", authenticateToken, async (req, res) => {
       return res.json(users);
     }
 
-    // SUPER_ADMIN and ADMIN: system-wide assignable users (Super Admins, Admins, Specialists only).
+    // SUPER_ADMIN and ADMIN: system-wide assignable users.
+    // Admins are intentionally blocked from assigning tasks to Super Admins.
+    const rolesForRequester: Role[] =
+      req.user.role === "SUPER_ADMIN" ? ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] : ["ADMIN", "SPECIALIST"];
     const users = await prisma.user.findMany({
       where: {
-        role: { in: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
+        role: { in: rolesForRequester },
         verified: true,
         ...searchFilter,
       },
@@ -599,7 +603,7 @@ router.get("/worklog/:clientId", authenticateToken, async (req, res) => {
         createdAt: true,
         updatedAt: true,
         assignee: { select: { id: true, name: true, email: true } },
-        createdBy: { select: { id: true, name: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true, role: true } },
       },
     });
 
@@ -670,12 +674,42 @@ router.get("/worklog/:clientId/approval-recipients", authenticateToken, async (r
 });
 
 // ---------- Recurring task rules ----------
-// List recurring rules (agency-scoped)
+// List recurring rules (agency-scoped, or client-scoped for USER role)
 router.get("/recurring", authenticateToken, async (req, res) => {
   try {
     if (req.user.role === "SPECIALIST") {
       return res.status(403).json({ message: "Access denied" });
     }
+
+    // Resolve assignee names for a list of rules (assigneeId has no Prisma relation)
+    const enrichWithAssignees = async (rules: any[]) => {
+      const ids = [...new Set(rules.map((r) => r.assigneeId).filter(Boolean))];
+      if (ids.length === 0) return rules;
+      const users = await prisma.user.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true, email: true },
+      });
+      const map = new Map(users.map((u) => [u.id, u]));
+      return rules.map((r) => ({ ...r, assignee: r.assigneeId ? map.get(r.assigneeId) ?? null : null }));
+    };
+
+    if (req.user.role === "USER") {
+      const clientAccess = await prisma.clientUser.findMany({
+        where: { userId: req.user.userId, status: "ACTIVE" },
+        select: { clientId: true },
+      });
+      const clientIds = clientAccess.map((ca) => ca.clientId);
+      if (clientIds.length === 0) return res.json([]);
+      const rules = await prisma.recurringTaskRule.findMany({
+        where: { clientId: { in: clientIds } },
+        orderBy: { nextRunAt: "asc" },
+        include: {
+          createdBy: { select: { id: true, name: true, email: true } },
+        },
+      });
+      return res.json(await enrichWithAssignees(rules));
+    }
+
     let agencyIds: string[] = [];
     if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
       const agencies = await prisma.agency.findMany({ select: { id: true } });
@@ -697,7 +731,7 @@ router.get("/recurring", authenticateToken, async (req, res) => {
         createdBy: { select: { id: true, name: true, email: true } },
       },
     });
-    return res.json(rules);
+    return res.json(await enrichWithAssignees(rules));
   } catch (error) {
     console.error("List recurring rules error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -771,6 +805,10 @@ router.put("/recurring/:id", authenticateToken, async (req, res) => {
     }
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
 
+    if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
+      return res.status(403).json({ message: "You can only edit recurring tasks you created." });
+    }
+
     const parsed = updateRecurringTaskSchema.parse(req.body);
     const nextRun = parsed.nextRunAt ?? parsed.firstRunAt ?? rule.nextRunAt;
     const data: Record<string, unknown> = {};
@@ -822,6 +860,9 @@ router.patch("/recurring/:id/stop", authenticateToken, async (req, res) => {
       canAccess = Boolean(membership);
     }
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
+    if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
+      return res.status(403).json({ message: "You can only manage recurring tasks you created." });
+    }
     await prisma.recurringTaskRule.update({
       where: { id },
       data: { isActive: false },
@@ -851,6 +892,9 @@ router.patch("/recurring/:id/resume", authenticateToken, async (req, res) => {
       canAccess = Boolean(membership);
     }
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
+    if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
+      return res.status(403).json({ message: "You can only manage recurring tasks you created." });
+    }
     await prisma.recurringTaskRule.update({
       where: { id },
       data: { isActive: true },
@@ -880,6 +924,9 @@ router.delete("/recurring/:id", authenticateToken, async (req, res) => {
       canAccess = Boolean(membership);
     }
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
+    if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
+      return res.status(403).json({ message: "You can only delete recurring tasks you created." });
+    }
     await prisma.recurringTaskRule.delete({ where: { id } });
     return res.status(204).send();
   } catch (error) {
@@ -1167,6 +1214,11 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
+    // ADMIN/AGENCY can only edit tasks they created
+    if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && task.createdById !== req.user.userId) {
+      return res.status(403).json({ message: "You can only edit tasks you created." });
+    }
+
     // Handle proof field - ensure it's properly formatted
     const updateData: any = { ...updates };
     if (updates.proof !== undefined) {
@@ -1293,6 +1345,11 @@ router.delete("/:id", authenticateToken, async (req, res) => {
     if (!task) return res.status(404).json({ message: "Task not found" });
 
     if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
+
+    // ADMIN/AGENCY can only delete tasks they created
+    if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && task.createdById !== req.user.userId) {
+      return res.status(403).json({ message: "You can only delete tasks you created." });
+    }
 
     await prisma.task.delete({ where: { id } });
     res.status(204).send();

@@ -36,6 +36,12 @@ export interface Task {
     id: string;
     name: string;
   } | null;
+  createdBy?: {
+    id: string;
+    name: string | null;
+    email: string;
+    role?: string;
+  } | null;
 }
 
 interface TaskState {
