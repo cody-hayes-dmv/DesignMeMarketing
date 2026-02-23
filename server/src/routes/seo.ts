@@ -285,6 +285,17 @@ router.get("/super-admin/notifications", authenticateToken, async (req, res) => 
           agencyId: null,
           createdAt: { gte: thirtyDaysAgo },
         },
+        // Production DB may be missing newer optional columns (e.g. userId).
+        // Select only fields needed by this endpoint to avoid querying absent columns.
+        select: {
+          id: true,
+          type: true,
+          title: true,
+          message: true,
+          link: true,
+          read: true,
+          createdAt: true,
+        },
         orderBy: { createdAt: "desc" },
         take: 30,
       }),
