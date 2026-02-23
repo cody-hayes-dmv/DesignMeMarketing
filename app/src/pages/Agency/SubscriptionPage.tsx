@@ -92,7 +92,8 @@ const BUSINESS_PLANS = [
 
 const ALL_PLANS = [...AGENCY_PLANS, ...BUSINESS_PLANS];
 const PLANS = AGENCY_PLANS;
-const ACTIVATE_PLANS = AGENCY_PLANS.filter((p) => p.id !== "enterprise");
+const ACTIVATE_AGENCY_PLANS = AGENCY_PLANS.filter((p) => p.id !== "enterprise");
+const ACTIVATE_PLANS = [...BUSINESS_PLANS, ...ACTIVATE_AGENCY_PLANS];
 
 interface SubscriptionData {
   currentPlan: string;
@@ -201,7 +202,7 @@ const SubscriptionPage = () => {
           }
           await api.post("/agencies/activate-trial-subscription", {
             paymentMethodId,
-            tier: tier as "solo" | "starter" | "growth" | "pro" | "enterprise",
+            tier: tier as "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro",
           });
           sessionStorage.removeItem(ACTIVATION_TIER_KEY);
           window.history.replaceState({}, "", window.location.pathname + window.location.hash || "");
@@ -866,50 +867,109 @@ const SubscriptionPage = () => {
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto p-8 space-y-8">
                   {/* Plan Selector Cards */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-800 mb-4">Select Your Plan</label>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                      {ACTIVATE_PLANS.map((plan) => {
-                        const isSelected = activateTier === plan.id;
-                        return (
-                          <button
-                            key={plan.id}
-                            type="button"
-                            onClick={() => setActivateTier(plan.id)}
-                            className={`relative text-left rounded-xl border-2 p-4 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                              isSelected
-                                ? "border-primary-500 bg-primary-50/70 shadow-md shadow-primary-100"
-                                : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
-                            }`}
-                          >
-                            {isSelected && (
-                              <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 shadow-sm">
-                                <Check className="h-3.5 w-3.5 text-white" />
-                              </span>
-                            )}
-                            <p className={`text-sm font-bold ${isSelected ? "text-primary-700" : "text-gray-900"}`}>
-                              {plan.name}
-                            </p>
-                            <p className="mt-1">
-                              <span className={`text-xl font-bold ${isSelected ? "text-primary-600" : "text-gray-900"}`}>
-                                {plan.priceLabel}
-                              </span>
-                              <span className="text-xs text-gray-500">/mo</span>
-                            </p>
-                            <p className={`mt-1 text-xs font-medium ${isSelected ? "text-primary-600" : "text-gray-500"}`}>
-                              {plan.clientsLabel}
-                            </p>
-                            <ul className="mt-3 space-y-1">
-                              {plan.features.map((f) => (
-                                <li key={f} className="flex items-start gap-1.5 text-[11px] text-gray-500">
-                                  <Check className={`mt-0.5 h-3 w-3 shrink-0 ${isSelected ? "text-primary-500" : "text-gray-400"}`} />
-                                  <span>{f}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </button>
-                        );
-                      })}
+                  <div className="space-y-6">
+                    <label className="block text-sm font-semibold text-gray-800">Select Your Plan</label>
+
+                    {/* Business Plans */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Business Plans</span>
+                        <span className="text-[10px] text-gray-400">Track your own SEO</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {BUSINESS_PLANS.map((plan) => {
+                          const isSelected = activateTier === plan.id;
+                          return (
+                            <button
+                              key={plan.id}
+                              type="button"
+                              onClick={() => setActivateTier(plan.id)}
+                              className={`relative text-left rounded-xl border-2 p-4 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                                isSelected
+                                  ? "border-primary-500 bg-primary-50/70 shadow-md shadow-primary-100"
+                                  : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
+                              }`}
+                            >
+                              {isSelected && (
+                                <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 shadow-sm">
+                                  <Check className="h-3.5 w-3.5 text-white" />
+                                </span>
+                              )}
+                              <p className={`text-sm font-bold ${isSelected ? "text-primary-700" : "text-gray-900"}`}>
+                                {plan.name}
+                              </p>
+                              <p className="mt-1">
+                                <span className={`text-xl font-bold ${isSelected ? "text-primary-600" : "text-gray-900"}`}>
+                                  {plan.priceLabel}
+                                </span>
+                                <span className="text-xs text-gray-500">/mo</span>
+                              </p>
+                              <p className={`mt-1 text-xs font-medium ${isSelected ? "text-primary-600" : "text-gray-500"}`}>
+                                {plan.clientsLabel}
+                              </p>
+                              <ul className="mt-3 space-y-1">
+                                {plan.features.map((f) => (
+                                  <li key={f} className="flex items-start gap-1.5 text-[11px] text-gray-500">
+                                    <Check className={`mt-0.5 h-3 w-3 shrink-0 ${isSelected ? "text-primary-500" : "text-gray-400"}`} />
+                                    <span>{f}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Agency Plans */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Agency Plans</span>
+                        <span className="text-[10px] text-gray-400">White-label + Client Portal</span>
+                      </div>
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        {ACTIVATE_AGENCY_PLANS.map((plan) => {
+                          const isSelected = activateTier === plan.id;
+                          return (
+                            <button
+                              key={plan.id}
+                              type="button"
+                              onClick={() => setActivateTier(plan.id)}
+                              className={`relative text-left rounded-xl border-2 p-4 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                                isSelected
+                                  ? "border-primary-500 bg-primary-50/70 shadow-md shadow-primary-100"
+                                  : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
+                              }`}
+                            >
+                              {isSelected && (
+                                <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 shadow-sm">
+                                  <Check className="h-3.5 w-3.5 text-white" />
+                                </span>
+                              )}
+                              <p className={`text-sm font-bold ${isSelected ? "text-primary-700" : "text-gray-900"}`}>
+                                {plan.name}
+                              </p>
+                              <p className="mt-1">
+                                <span className={`text-xl font-bold ${isSelected ? "text-primary-600" : "text-gray-900"}`}>
+                                  {plan.priceLabel}
+                                </span>
+                                <span className="text-xs text-gray-500">/mo</span>
+                              </p>
+                              <p className={`mt-1 text-xs font-medium ${isSelected ? "text-primary-600" : "text-gray-500"}`}>
+                                {plan.clientsLabel}
+                              </p>
+                              <ul className="mt-3 space-y-1">
+                                {plan.features.map((f) => (
+                                  <li key={f} className="flex items-start gap-1.5 text-[11px] text-gray-500">
+                                    <Check className={`mt-0.5 h-3 w-3 shrink-0 ${isSelected ? "text-primary-500" : "text-gray-400"}`} />
+                                    <span>{f}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 

@@ -2229,7 +2229,7 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
 
 const activateTrialSubscriptionSchema = z.object({
   paymentMethodId: z.string().min(1, 'Payment method is required'),
-  tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise']),
+  tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise', 'business_lite', 'business_pro']),
 });
 
 // Activate subscription for agency on 7-day trial: create Stripe customer, attach card, create subscription, update agency to paid
