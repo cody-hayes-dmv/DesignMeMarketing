@@ -11,6 +11,14 @@ const router = express.Router();
 // Restrict agency users with expired trial
 router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
 
+function isMissingTaskCommentTypeColumn(error: any) {
+  return (
+    error?.code === "P2022" &&
+    typeof error?.meta?.column === "string" &&
+    error.meta.column.includes("task_comments.type")
+  );
+}
+
 const proofItemSchema = z.object({
   type: z.enum(["image", "video", "url"]),
   value: z.string().url(), // URL to the file or external URL
@@ -944,18 +952,43 @@ router.get("/:id/comments", authenticateToken, async (req, res) => {
     if (!task) return res.status(404).json({ message: "Task not found" });
     if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
-    const comments = await prisma.taskComment.findMany({
-      where: { taskId: id },
-      orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        body: true,
-        type: true,
-        createdAt: true,
-        updatedAt: true,
-        author: { select: { id: true, name: true, email: true, role: true } },
-      },
-    });
+    let comments: Array<{
+      id: string;
+      body: string;
+      type: string;
+      createdAt: Date;
+      updatedAt: Date;
+      author: { id: string; name: string | null; email: string; role: string };
+    }> = [];
+    try {
+      comments = await prisma.taskComment.findMany({
+        where: { taskId: id },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          body: true,
+          type: true,
+          createdAt: true,
+          updatedAt: true,
+          author: { select: { id: true, name: true, email: true, role: true } },
+        },
+      });
+    } catch (error: any) {
+      if (!isMissingTaskCommentTypeColumn(error)) throw error;
+      // Backward-compat for production DBs where task_comments.type was not added yet.
+      const fallback = await prisma.taskComment.findMany({
+        where: { taskId: id },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          body: true,
+          createdAt: true,
+          updatedAt: true,
+          author: { select: { id: true, name: true, email: true, role: true } },
+        },
+      });
+      comments = fallback.map((c) => ({ ...c, type: "COMMENT" }));
+    }
 
     return res.json(comments);
   } catch (error) {
@@ -976,17 +1009,40 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
     if (!task) return res.status(404).json({ message: "Task not found" });
     if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
-    const created = await prisma.taskComment.create({
-      data: { taskId: id, authorId: req.user.userId, body, type: commentType as any },
-      select: {
-        id: true,
-        body: true,
-        type: true,
-        createdAt: true,
-        updatedAt: true,
-        author: { select: { id: true, name: true, email: true, role: true } },
-      },
-    });
+    let created: {
+      id: string;
+      body: string;
+      type: string;
+      createdAt: Date;
+      updatedAt: Date;
+      author: { id: string; name: string | null; email: string; role: string };
+    };
+    try {
+      created = await prisma.taskComment.create({
+        data: { taskId: id, authorId: req.user.userId, body, type: commentType as any },
+        select: {
+          id: true,
+          body: true,
+          type: true,
+          createdAt: true,
+          updatedAt: true,
+          author: { select: { id: true, name: true, email: true, role: true } },
+        },
+      });
+    } catch (error: any) {
+      if (!isMissingTaskCommentTypeColumn(error)) throw error;
+      const fallback = await prisma.taskComment.create({
+        data: { taskId: id, authorId: req.user.userId, body },
+        select: {
+          id: true,
+          body: true,
+          createdAt: true,
+          updatedAt: true,
+          author: { select: { id: true, name: true, email: true, role: true } },
+        },
+      });
+      created = { ...fallback, type: "COMMENT" };
+    }
 
     // Fire-and-forget: create notifications for other participants
     const author = await prisma.user.findUnique({
@@ -1020,7 +1076,11 @@ router.delete("/:id/comments/:commentId", authenticateToken, async (req, res) =>
     if (!task) return res.status(404).json({ message: "Task not found" });
     if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
-    const comment = await prisma.taskComment.findUnique({ where: { id: commentId } });
+    const comment = await prisma.taskComment.findUnique({
+      where: { id: commentId },
+      // Avoid selecting `type` to stay compatible with older DB schemas.
+      select: { id: true, taskId: true, authorId: true },
+    });
     if (!comment || comment.taskId !== id) {
       return res.status(404).json({ message: "Comment not found" });
     }
