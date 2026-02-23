@@ -62,6 +62,36 @@ function getAmountInDollars(amount: number): number {
   return amount / 100;
 }
 
+const ADDON_DISPLAY_NAMES: Record<string, string> = {
+  ADDON_EXTRA_DASHBOARDS_5: "+5 Client Dashboards",
+  ADDON_EXTRA_DASHBOARDS_10: "+10 Client Dashboards",
+  ADDON_EXTRA_DASHBOARDS_25: "+25 Client Dashboards",
+  ADDON_EXTRA_KEYWORDS_50: "+50 Keywords Tracked",
+  ADDON_EXTRA_KEYWORDS_100: "+100 Keywords Tracked",
+  ADDON_EXTRA_KEYWORDS_250: "+250 Keywords Tracked",
+  ADDON_EXTRA_KEYWORD_LOOKUPS_50: "+50 Research Credits",
+  ADDON_EXTRA_KEYWORD_LOOKUPS_100: "+100 Research Credits",
+  ADDON_EXTRA_KEYWORD_LOOKUPS_150: "+150 Research Credits",
+  ADDON_EXTRA_KEYWORD_LOOKUPS_300: "+300 Research Credits",
+  ADDON_EXTRA_CREDITS_50: "+50 Research Credits",
+  ADDON_EXTRA_CREDITS_150: "+150 Research Credits",
+  ADDON_EXTRA_CREDITS_300: "+300 Research Credits",
+  ADDON_EXTRA_KEYWORD_50: "+50 Keywords Tracked",
+  ADDON_EXTRA_KEYWORD_100: "+100 Keywords Tracked",
+  ADDON_EXTRA_KEYWORD_250: "+250 Keywords Tracked",
+  MANAGED_FOUNDATION: "SEO Essentials + Automation",
+  MANAGED_GROWTH: "Growth & Automation",
+  MANAGED_AUTHORITY_BUILDER: "Authority Builder",
+  MANAGED_MARKET_DOMINATION: "Market Domination",
+  MANAGED_DOMINATION: "Market Domination",
+  MANAGED_CUSTOM: "Custom Managed Service",
+};
+
+function friendlyProductName(rawName: string): string {
+  const upper = rawName.toUpperCase().replace(/\s+/g, "_");
+  return ADDON_DISPLAY_NAMES[upper] || ADDON_DISPLAY_NAMES[rawName] || rawName;
+}
+
 function normalizeToMonthly(amount: number, interval: "day" | "week" | "month" | "year"): number {
   switch (interval) {
     case "day":
@@ -144,7 +174,7 @@ router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (r
           customerId,
           customerEmail,
           mrr: monthlyAmount,
-          productName,
+          productName: friendlyProductName(productName),
         });
         }
       }

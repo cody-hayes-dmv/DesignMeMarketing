@@ -506,6 +506,17 @@ router.post('/register-free-trial', async (req, res) => {
       console.warn('Agency register-free-trial: verification email failed', emailErr?.message);
     }
 
+    // Notify super admins
+    await prisma.notification.create({
+      data: {
+        agencyId: null,
+        type: 'new_signup',
+        title: 'New agency sign-up',
+        message: `${agencyName} signed up for a free trial.`,
+        link: '/agency/agencies',
+      },
+    }).catch((e) => console.warn('Create signup notification failed:', e?.message));
+
     res.status(201).json({
       message: 'Please check your email to verify your account. After verification, you can sign in and use the Free tier for 7 days.',
     });
@@ -854,6 +865,17 @@ router.post('/register', async (req, res) => {
     } catch (emailErr: any) {
       console.warn('Agency register: verification email failed', emailErr?.message);
     }
+
+    // Notify super admins
+    await prisma.notification.create({
+      data: {
+        agencyId: null,
+        type: 'new_signup',
+        title: 'New agency sign-up',
+        message: `${name} signed up with a paid account.`,
+        link: '/agency/agencies',
+      },
+    }).catch((e) => console.warn('Create signup notification failed:', e?.message));
 
     res.status(201).json({
       message: 'Agency account created. Please check your email to verify your account.',
@@ -1280,11 +1302,45 @@ router.get('/me/notifications', authenticateToken, async (req, res) => {
         message: n.message,
         link: n.link ?? '',
         createdAt: n.createdAt.toISOString(),
+        read: n.read,
       })),
     });
   } catch (err: any) {
     console.error('Agency notifications error:', err);
     res.status(500).json({ message: err?.message || 'Failed to load notifications' });
+  }
+});
+
+// Mark agency notifications as read
+router.post('/me/notifications/mark-read', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    if (user.role === 'SUPER_ADMIN') {
+      return res.json({ success: true });
+    }
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId },
+      select: { agencyId: true },
+    });
+    if (!membership) {
+      return res.json({ success: true });
+    }
+    const { ids } = req.body;
+    if (Array.isArray(ids) && ids.length > 0) {
+      await prisma.notification.updateMany({
+        where: { id: { in: ids }, agencyId: membership.agencyId },
+        data: { read: true },
+      });
+    } else {
+      await prisma.notification.updateMany({
+        where: { agencyId: membership.agencyId, read: false },
+        data: { read: true },
+      });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Mark agency notifications read error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to mark notifications as read' });
   }
 });
 
@@ -2069,8 +2125,44 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     if (basePlan.priceId === targetPriceId) {
       return res.status(400).json({ message: 'You are already on this plan.' });
     }
+    const oldTier = await prisma.agency.findUnique({ where: { id: agency.id }, select: { subscriptionTier: true } });
+    const oldTierName = getTierConfig(oldTier?.subscriptionTier)?.name ?? oldTier?.subscriptionTier ?? 'Free';
+    const oldPrice = getTierConfig(oldTier?.subscriptionTier)?.priceMonthlyUsd ?? 0;
+
     await stripe.subscriptionItems.update(basePlan.itemId, { price: targetPriceId });
     await syncAgencyTierFromStripe(agency.id);
+
+    const updatedAgency = await prisma.agency.findUnique({ where: { id: agency.id }, select: { name: true, subscriptionTier: true } });
+    const newTierName = getTierConfig(targetPlan)?.name ?? targetPlan;
+    const newPrice = getTierConfig(targetPlan)?.priceMonthlyUsd ?? 0;
+    const isUpgrade = newPrice > oldPrice;
+
+    // Notify the agency
+    await prisma.notification.create({
+      data: {
+        agencyId: agency.id,
+        type: isUpgrade ? 'plan_upgrade' : 'plan_downgrade',
+        title: isUpgrade ? 'Plan upgraded' : 'Plan changed',
+        message: isUpgrade
+          ? `Your subscription has been upgraded to ${newTierName}.`
+          : `Your subscription has been changed to ${newTierName}.`,
+        link: '/agency/subscription',
+      },
+    }).catch((e) => console.warn('Create plan change notification failed:', e?.message));
+
+    // Notify super admins
+    await prisma.notification.create({
+      data: {
+        agencyId: null,
+        type: isUpgrade ? 'plan_upgrade' : 'plan_downgrade',
+        title: isUpgrade ? 'Agency upgraded' : 'Agency downgraded',
+        message: isUpgrade
+          ? `${updatedAgency?.name ?? 'An agency'} upgraded from ${oldTierName} to ${newTierName}.`
+          : `${updatedAgency?.name ?? 'An agency'} downgraded from ${oldTierName} to ${newTierName}.`,
+        link: '/agency/agencies',
+      },
+    }).catch((e) => console.warn('Create SA plan change notification failed:', e?.message));
+
     return res.json({ success: true, message: 'Plan updated. Your subscription will reflect the change shortly.' });
   } catch (err: any) {
     console.error('Change plan error:', err);
@@ -2323,6 +2415,17 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
 
     await syncAgencyTierFromStripe(agency.id);
     console.log('[agencies] Trial activated for agency', agency.id, 'tier=', tier);
+
+    const tierName = getTierConfig(tier as TierId)?.name ?? tier;
+    await prisma.notification.create({
+      data: {
+        agencyId: null,
+        type: 'subscription_activated',
+        title: 'Subscription activated',
+        message: `${agency.name} activated the ${tierName} plan.`,
+        link: '/agency/agencies',
+      },
+    }).catch((e) => console.warn('Create activation notification failed:', e?.message));
 
     res.json({
       success: true,

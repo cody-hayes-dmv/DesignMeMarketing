@@ -260,14 +260,17 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
   }
 });
 
-// Super Admin in-app notifications (pending requests, new signups) for bell dropdown
+// Super Admin in-app notifications (pending requests, new signups, plan changes, cancellations) for bell dropdown
 router.get("/super-admin/notifications", authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const [pendingServices, recentAgencies] = await Promise.all([
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const [pendingServices, persistedNotifications] = await Promise.all([
       prisma.managedService.findMany({
         where: { status: "PENDING" },
         include: {
@@ -277,15 +280,15 @@ router.get("/super-admin/notifications", authenticateToken, async (req, res) => 
         orderBy: { startDate: "desc" },
         take: 10,
       }),
-      prisma.agency.findMany({
+      prisma.notification.findMany({
+        where: {
+          agencyId: null,
+          createdAt: { gte: thirtyDaysAgo },
+        },
         orderBy: { createdAt: "desc" },
-        take: 5,
-        select: { id: true, name: true, createdAt: true },
+        take: 30,
       }),
     ]);
-
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const items: Array<{
       id: string;
@@ -294,6 +297,7 @@ router.get("/super-admin/notifications", authenticateToken, async (req, res) => 
       message: string;
       link: string;
       createdAt: string;
+      read: boolean;
     }> = [];
 
     for (const ms of pendingServices) {
@@ -304,32 +308,60 @@ router.get("/super-admin/notifications", authenticateToken, async (req, res) => 
         message: `${ms.agency.name} – ${ms.client.name} (${ms.packageName})`,
         link: "/superadmin/dashboard",
         createdAt: ms.startDate.toISOString(),
+        read: false,
       });
     }
 
-    for (const agency of recentAgencies) {
-      if (new Date(agency.createdAt) >= sevenDaysAgo) {
-        items.push({
-          id: `agency-${agency.id}`,
-          type: "new_agency_signup",
-          title: "New agency",
-          message: agency.name,
-          link: "/agency/agencies",
-          createdAt: agency.createdAt.toISOString(),
-        });
-      }
+    for (const n of persistedNotifications) {
+      let link = n.link ?? "/agency/agencies";
+      if (link === "/superadmin/agencies") link = "/agency/agencies";
+      items.push({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        link,
+        createdAt: n.createdAt.toISOString(),
+        read: n.read,
+      });
     }
 
     items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    const unreadCount = pendingServices.length;
+
+    const unreadCount = pendingServices.length + persistedNotifications.filter((n) => !n.read).length;
 
     return res.json({
       unreadCount,
-      items: items.slice(0, 15),
+      items: items.slice(0, 30),
     });
   } catch (err: any) {
     console.error("Super admin notifications error:", err);
     res.status(500).json({ message: err?.message || "Failed to load notifications" });
+  }
+});
+
+// Mark super admin notifications as read
+router.post("/super-admin/notifications/mark-read", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { ids } = req.body;
+    if (Array.isArray(ids) && ids.length > 0) {
+      await prisma.notification.updateMany({
+        where: { id: { in: ids }, agencyId: null },
+        data: { read: true },
+      });
+    } else {
+      await prisma.notification.updateMany({
+        where: { agencyId: null, read: false },
+        data: { read: true },
+      });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("Mark super admin notifications read error:", err);
+    res.status(500).json({ message: err?.message || "Failed to mark notifications as read" });
   }
 });
 

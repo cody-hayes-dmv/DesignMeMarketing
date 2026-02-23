@@ -70,10 +70,34 @@ router.post("/", async (req, res) => {
     }
 
     if (event.type === "customer.subscription.deleted") {
+      const oldTierName = getTierConfig(agency.subscriptionTier)?.name ?? agency.subscriptionTier ?? "Unknown";
       await prisma.agency.update({
         where: { id: agency.id },
         data: { subscriptionTier: null, stripeSubscriptionId: null },
       });
+
+      // Notify the agency
+      await prisma.notification.create({
+        data: {
+          agencyId: agency.id,
+          type: "subscription_canceled",
+          title: "Subscription canceled",
+          message: "Your subscription has been canceled. Your account will revert to the free tier.",
+          link: "/agency/subscription",
+        },
+      }).catch((e) => console.warn("[Stripe webhook] Create cancellation notification failed:", e?.message));
+
+      // Notify super admins
+      await prisma.notification.create({
+        data: {
+          agencyId: null,
+          type: "subscription_canceled",
+          title: "Subscription canceled",
+          message: `${agency.name} canceled their ${oldTierName} subscription.`,
+          link: "/agency/agencies",
+        },
+      }).catch((e) => console.warn("[Stripe webhook] Create SA cancellation notification failed:", e?.message));
+
       return res.status(200).json({ received: true });
     }
 
@@ -94,18 +118,44 @@ router.post("/", async (req, res) => {
         });
         if (event.type === "customer.subscription.updated" && oldTier !== normalized) {
           const tierName = getTierConfig(normalized)?.name ?? normalized ?? "your plan";
+          const oldTierName = getTierConfig(oldTier)?.name ?? oldTier ?? "Free";
           const isUpgrade = tierLevel(normalized) > tierLevel(oldTier);
-          await prisma.notification.create({
-            data: {
+
+          // Skip if the change-plan endpoint already created a notification in the last 60s
+          const recentNotif = await prisma.notification.findFirst({
+            where: {
               agencyId: agency.id,
-              type: isUpgrade ? "plan_upgrade" : "plan_downgrade",
-              title: isUpgrade ? "Plan upgraded" : "Plan changed",
-              message: isUpgrade
-                ? `Your subscription has been upgraded to ${tierName}.`
-                : `Your subscription has been changed to ${tierName}.`,
-              link: "/agency/subscription",
+              type: { in: ["plan_upgrade", "plan_downgrade"] },
+              createdAt: { gte: new Date(Date.now() - 60_000) },
             },
-          }).catch((e) => console.warn("[Stripe webhook] Create plan change notification failed:", e?.message));
+          });
+          if (!recentNotif) {
+            // Notify the agency
+            await prisma.notification.create({
+              data: {
+                agencyId: agency.id,
+                type: isUpgrade ? "plan_upgrade" : "plan_downgrade",
+                title: isUpgrade ? "Plan upgraded" : "Plan changed",
+                message: isUpgrade
+                  ? `Your subscription has been upgraded to ${tierName}.`
+                  : `Your subscription has been changed to ${tierName}.`,
+                link: "/agency/subscription",
+              },
+            }).catch((e) => console.warn("[Stripe webhook] Create plan change notification failed:", e?.message));
+
+            // Notify super admins
+            await prisma.notification.create({
+              data: {
+                agencyId: null,
+                type: isUpgrade ? "plan_upgrade" : "plan_downgrade",
+                title: isUpgrade ? "Agency upgraded" : "Agency downgraded",
+                message: isUpgrade
+                  ? `${agency.name} upgraded from ${oldTierName} to ${tierName}.`
+                  : `${agency.name} downgraded from ${oldTierName} to ${tierName}.`,
+                link: "/agency/agencies",
+              },
+            }).catch((e) => console.warn("[Stripe webhook] Create SA plan change notification failed:", e?.message));
+          }
         }
       } else {
         await prisma.agency.update({
