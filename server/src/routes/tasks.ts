@@ -216,9 +216,114 @@ async function sendTaskCompletedEmails(
   }
 }
 
+const taskCommentTypeEnum = z.enum(["COMMENT", "QUESTION", "APPROVAL_REQUEST", "APPROVAL", "REVISION_REQUEST"]);
+
 const commentBodySchema = z.object({
   body: z.string().min(1).max(5000),
+  type: taskCommentTypeEnum.optional(),
 });
+
+async function createTaskActivityNotifications(
+  task: { id: string; title: string; clientId?: string | null; agencyId?: string | null },
+  authorId: string,
+  authorName: string,
+  commentType: string,
+  body: string
+): Promise<void> {
+  const recipientUserIds = new Set<string>();
+
+  const typeLabels: Record<string, string> = {
+    COMMENT: "commented on",
+    QUESTION: "asked a question on",
+    APPROVAL_REQUEST: "requested approval for",
+    APPROVAL: "approved",
+    REVISION_REQUEST: "requested revisions on",
+  };
+  const action = typeLabels[commentType] || "commented on";
+  const notifTitle = `${authorName} ${action} "${task.title}"`;
+  const notifMessage = body.length > 120 ? body.slice(0, 120) + "…" : body;
+
+  // Gather agency members if task belongs to an agency
+  if (task.agencyId) {
+    const members = await prisma.userAgency.findMany({
+      where: { agencyId: task.agencyId },
+      select: { userId: true },
+    });
+    members.forEach((m) => recipientUserIds.add(m.userId));
+  }
+
+  // Gather client users if task belongs to a client
+  if (task.clientId) {
+    const clientUsers = await prisma.clientUser.findMany({
+      where: { clientId: task.clientId, status: "ACTIVE" },
+      select: { userId: true },
+    });
+    clientUsers.forEach((cu) => recipientUserIds.add(cu.userId));
+  }
+
+  // Don't notify the author themselves
+  recipientUserIds.delete(authorId);
+
+  if (recipientUserIds.size === 0) return;
+
+  // Look up roles so we can set correct link paths
+  const recipientUsers = await prisma.user.findMany({
+    where: { id: { in: [...recipientUserIds] } },
+    select: { id: true, role: true },
+  });
+  const roleMap = new Map(recipientUsers.map((u) => [u.id, u.role]));
+
+  const notifData = [...recipientUserIds].map((uid) => {
+    const role = roleMap.get(uid);
+    const basePath = role === "USER" ? "/client/tasks" : role === "SPECIALIST" ? "/specialist/tasks" : "/agency/tasks";
+    return {
+      userId: uid,
+      agencyId: task.agencyId ?? null,
+      type: "task_activity",
+      title: notifTitle,
+      message: notifMessage,
+      link: `${basePath}?taskId=${task.id}`,
+    };
+  });
+
+  await prisma.notification.createMany({ data: notifData }).catch((e) =>
+    console.warn("[Task] Activity notifications failed", e?.message)
+  );
+
+  // Send email for high-priority types (questions, approval requests, revisions)
+  if (["QUESTION", "APPROVAL_REQUEST", "REVISION_REQUEST"].includes(commentType)) {
+    const recipients = await prisma.user.findMany({
+      where: { id: { in: [...recipientUserIds] } },
+      select: { email: true, role: true },
+    });
+
+    // For QUESTION / APPROVAL_REQUEST from agency → email client users
+    // For REVISION_REQUEST from client → email agency members
+    const emailTargets = recipients.filter((r) => {
+      if (commentType === "REVISION_REQUEST") return r.role !== "USER";
+      return r.role === "USER";
+    });
+
+    const subject =
+      commentType === "QUESTION"
+        ? `Question on task: ${task.title}`
+        : commentType === "APPROVAL_REQUEST"
+        ? `Approval needed: ${task.title}`
+        : `Revisions requested: ${task.title}`;
+
+    const html = `<p><strong>${authorName}</strong> ${action} the task "<strong>${task.title}</strong>":</p>
+<blockquote style="border-left:3px solid #6366f1;padding-left:12px;color:#555;">${body}</blockquote>
+<p>Please review in the dashboard.</p>`;
+
+    for (const u of emailTargets) {
+      if (u.email) {
+        sendEmail({ to: u.email, subject, html }).catch((e) =>
+          console.warn("[Task] Activity email failed", u.email, e?.message)
+        );
+      }
+    }
+  }
+}
 
 /** Advance nextRunAt by one interval based on frequency and day settings */
 function addRecurrenceInterval(from: Date, frequency: string, dayOfWeek: number | null, dayOfMonth: number | null): Date {
@@ -307,6 +412,25 @@ router.get("/", authenticateToken, async (req, res) => {
         where: {
           assigneeId: req.user.userId,
           ...(clientIdParam ? { clientId: clientIdParam } : {}),
+        },
+        include: taskInclude,
+        orderBy: { createdAt: "desc" },
+      });
+      return res.json(tasks);
+    }
+
+    // Client portal users: only tasks for clients they have access to
+    if (req.user.role === "USER") {
+      const clientAccess = await prisma.clientUser.findMany({
+        where: { userId: req.user.userId, status: "ACTIVE" },
+        select: { clientId: true },
+      });
+      const clientIds = clientAccess.map((ca) => ca.clientId);
+      if (clientIds.length === 0) return res.json([]);
+
+      const tasks = await prisma.task.findMany({
+        where: {
+          clientId: { in: clientIdParam ? [clientIdParam].filter((id) => clientIds.includes(id)) : clientIds },
         },
         include: taskInclude,
         orderBy: { createdAt: "desc" },
@@ -779,9 +903,10 @@ router.get("/:id/comments", authenticateToken, async (req, res) => {
       select: {
         id: true,
         body: true,
+        type: true,
         createdAt: true,
         updatedAt: true,
-        author: { select: { id: true, name: true, email: true } },
+        author: { select: { id: true, name: true, email: true, role: true } },
       },
     });
 
@@ -796,27 +921,38 @@ router.get("/:id/comments", authenticateToken, async (req, res) => {
 // IMPORTANT: Must be before "/:id"
 router.post("/:id/comments", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "USER") {
-      return res.status(403).json({ message: "Access denied" });
-    }
-
     const { id } = req.params;
-    const { body } = commentBodySchema.parse(req.body);
+    const { body, type } = commentBodySchema.parse(req.body);
+    const commentType = type ?? "COMMENT";
 
     const task = await getTaskForAccess(id);
     if (!task) return res.status(404).json({ message: "Task not found" });
     if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
 
     const created = await prisma.taskComment.create({
-      data: { taskId: id, authorId: req.user.userId, body },
+      data: { taskId: id, authorId: req.user.userId, body, type: commentType as any },
       select: {
         id: true,
         body: true,
+        type: true,
         createdAt: true,
         updatedAt: true,
-        author: { select: { id: true, name: true, email: true } },
+        author: { select: { id: true, name: true, email: true, role: true } },
       },
     });
+
+    // Fire-and-forget: create notifications for other participants
+    const author = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true, email: true },
+    });
+    createTaskActivityNotifications(
+      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId },
+      req.user.userId,
+      author?.name || author?.email || "Someone",
+      commentType,
+      body
+    ).catch((e) => console.warn("[Task] Activity notification error", e?.message));
 
     return res.status(201).json(created);
   } catch (error: any) {
@@ -832,10 +968,6 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
 // IMPORTANT: Must be before "/:id"
 router.delete("/:id/comments/:commentId", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "USER") {
-      return res.status(403).json({ message: "Access denied" });
-    }
-
     const { id, commentId } = req.params;
     const task = await getTaskForAccess(id);
     if (!task) return res.status(404).json({ message: "Task not found" });
@@ -860,6 +992,37 @@ router.delete("/:id/comments/:commentId", authenticateToken, async (req, res) =>
   }
 });
 
+
+// Get unread activity count for tasks (used for badge display)
+// IMPORTANT: Must be before "/:id"
+router.get("/unread-counts", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const unread = await prisma.notification.findMany({
+      where: {
+        userId,
+        read: false,
+        type: "task_activity",
+      },
+      select: { link: true },
+    });
+
+    const counts: Record<string, number> = {};
+    for (const n of unread) {
+      if (!n.link) continue;
+      const match = n.link.match(/taskId=([a-zA-Z0-9_-]+)/);
+      if (match) {
+        counts[match[1]] = (counts[match[1]] || 0) + 1;
+      }
+    }
+
+    return res.json(counts);
+  } catch (error) {
+    console.error("Unread counts error:", error);
+    return res.status(500).json({ message: "Failed to fetch unread counts" });
+  }
+});
 
 // Get single task
 router.get("/:id", authenticateToken, async (req, res) => {
@@ -1198,6 +1361,128 @@ router.post("/bulk", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Invalid data", errors: error.errors });
     }
     res.status(500).json({ message: "Failed to create tasks" });
+  }
+});
+
+// Approve a task (client portal action)
+router.post("/:id/approve", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comment } = z.object({ comment: z.string().max(5000).optional() }).parse(req.body);
+
+    const task = await getTaskForAccess(id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
+
+    if (task.status !== "NEEDS_APPROVAL") {
+      return res.status(400).json({ message: "Task is not awaiting approval" });
+    }
+
+    // Move task to DONE
+    const updated = await prisma.task.update({
+      where: { id },
+      data: { status: "DONE" },
+      include: taskInclude,
+    });
+
+    // Create auto-generated activity entry
+    const author = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true, email: true },
+    });
+    const authorName = author?.name || author?.email || "Someone";
+    const approvalBody = comment
+      ? `Approved with note: ${comment}`
+      : "Approved this task.";
+
+    await prisma.taskComment.create({
+      data: {
+        taskId: id,
+        authorId: req.user.userId,
+        body: approvalBody,
+        type: "APPROVAL",
+      },
+    });
+
+    // Fire notifications
+    createTaskActivityNotifications(
+      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId },
+      req.user.userId,
+      authorName,
+      "APPROVAL",
+      approvalBody
+    ).catch((e) => console.warn("[Task] Approval notification error", e?.message));
+
+    // Also send task-completed emails
+    sendTaskCompletedEmails(
+      { ...updated, approvalNotifyUserIds: updated.approvalNotifyUserIds ?? undefined },
+      updated.approvalNotifyUserIds,
+      req.user.userId
+    ).catch((e) => console.warn("[Task] Completion emails failed", e?.message));
+
+    return res.json(updated);
+  } catch (error: any) {
+    console.error("Approve task error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid data", errors: error.errors });
+    }
+    return res.status(500).json({ message: "Failed to approve task" });
+  }
+});
+
+// Request revisions on a task (client portal action)
+router.post("/:id/request-revisions", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comment } = z.object({ comment: z.string().min(1).max(5000) }).parse(req.body);
+
+    const task = await getTaskForAccess(id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canAccessTask(req.user, task)) return res.status(403).json({ message: "Access denied" });
+
+    if (task.status !== "NEEDS_APPROVAL") {
+      return res.status(400).json({ message: "Task is not awaiting approval" });
+    }
+
+    // Move task back to IN_PROGRESS
+    const updated = await prisma.task.update({
+      where: { id },
+      data: { status: "IN_PROGRESS" },
+      include: taskInclude,
+    });
+
+    // Create revision-request activity entry
+    const author = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true, email: true },
+    });
+    const authorName = author?.name || author?.email || "Someone";
+
+    await prisma.taskComment.create({
+      data: {
+        taskId: id,
+        authorId: req.user.userId,
+        body: comment,
+        type: "REVISION_REQUEST",
+      },
+    });
+
+    // Fire notifications
+    createTaskActivityNotifications(
+      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId },
+      req.user.userId,
+      authorName,
+      "REVISION_REQUEST",
+      comment
+    ).catch((e) => console.warn("[Task] Revision request notification error", e?.message));
+
+    return res.json(updated);
+  } catch (error: any) {
+    console.error("Request revisions error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid data", errors: error.errors });
+    }
+    return res.status(500).json({ message: "Failed to request revisions" });
   }
 });
 

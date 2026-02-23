@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import DatePicker from "react-datepicker";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2, Download, CheckSquare } from "lucide-react";
+import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2, Download, CheckSquare, MessageSquare, HelpCircle, CheckCircle2, RotateCcw, ThumbsUp } from "lucide-react";
 import api, { getUploadFileUrl } from "@/lib/api";
 import { fetchClients, Client } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
@@ -18,12 +18,53 @@ interface TaskModalProps {
     task?: Task;
 }
 
+type ActivityType = "COMMENT" | "QUESTION" | "APPROVAL_REQUEST" | "APPROVAL" | "REVISION_REQUEST";
+
 type TaskComment = {
     id: string;
     body: string;
+    type: ActivityType;
     createdAt: string;
     updatedAt: string;
-    author: { id: string; name: string | null; email: string };
+    author: { id: string; name: string | null; email: string; role?: string };
+};
+
+const activityConfig: Record<ActivityType, { icon: React.ReactNode; label: string; color: string; bgColor: string; borderColor: string }> = {
+    COMMENT: {
+        icon: <MessageSquare className="h-4 w-4" />,
+        label: "Comment",
+        color: "text-gray-600",
+        bgColor: "bg-gray-50",
+        borderColor: "border-gray-200",
+    },
+    QUESTION: {
+        icon: <HelpCircle className="h-4 w-4" />,
+        label: "Question",
+        color: "text-amber-600",
+        bgColor: "bg-amber-50",
+        borderColor: "border-amber-200",
+    },
+    APPROVAL_REQUEST: {
+        icon: <ThumbsUp className="h-4 w-4" />,
+        label: "Approval Request",
+        color: "text-blue-600",
+        bgColor: "bg-blue-50",
+        borderColor: "border-blue-200",
+    },
+    APPROVAL: {
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        label: "Approved",
+        color: "text-green-600",
+        bgColor: "bg-green-50",
+        borderColor: "border-green-200",
+    },
+    REVISION_REQUEST: {
+        icon: <RotateCcw className="h-4 w-4" />,
+        label: "Revisions Requested",
+        color: "text-rose-600",
+        bgColor: "bg-rose-50",
+        borderColor: "border-rose-200",
+    },
 };
 
 const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task }) => {
@@ -68,6 +109,11 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         isOpen: false,
         commentId: null,
     });
+    const [commentType, setCommentType] = useState<ActivityType>("COMMENT");
+    const [approving, setApproving] = useState(false);
+    const [requestingRevisions, setRequestingRevisions] = useState(false);
+    const [revisionComment, setRevisionComment] = useState("");
+    const [showRevisionInput, setShowRevisionInput] = useState(false);
 
     useEffect(() => {
         if (open && clients.length === 0) {
@@ -257,10 +303,18 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             }
             setUrlInput("");
             setUrlType("url");
+            setCommentType("COMMENT");
+            setShowRevisionInput(false);
+            setRevisionComment("");
         }
     }, [open, mode, task]);
 
-    const canComment = Boolean(user) && user?.role !== "USER";
+    const canComment = Boolean(user);
+    const isClientUser = user?.role === "USER";
+    const canApprove = isClientUser && task?.status === "NEEDS_APPROVAL";
+    const availableCommentTypes: ActivityType[] = isClientUser
+        ? ["COMMENT", "QUESTION"]
+        : ["COMMENT", "QUESTION", "APPROVAL_REQUEST"];
 
     const fetchComments = async (taskId: string) => {
         try {
@@ -295,16 +349,57 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         if (!body) return;
         try {
             setPostingComment(true);
-            const res = await api.post(`/tasks/${task.id}/comments`, { body }, { timeout: 30000 });
+            const res = await api.post(`/tasks/${task.id}/comments`, { body, type: commentType }, { timeout: 30000 });
             const created = res.data as TaskComment;
             setComments((prev) => [...prev, created]);
             setNewComment("");
+            setCommentType("COMMENT");
             setCommentsError(null);
         } catch (e: any) {
             console.error("Failed to post comment", e);
             toast.error(e?.response?.data?.message || "Failed to post comment");
         } finally {
             setPostingComment(false);
+        }
+    };
+
+    const handleApprove = async () => {
+        if (!task?.id) return;
+        try {
+            setApproving(true);
+            await api.post(`/tasks/${task.id}/approve`, {}, { timeout: 30000 });
+            toast.success("Task approved!");
+            dispatch(fetchTasks() as any);
+            // Refresh comments to show the approval entry
+            void fetchComments(task.id);
+        } catch (e: any) {
+            console.error("Failed to approve task", e);
+            toast.error(e?.response?.data?.message || "Failed to approve task");
+        } finally {
+            setApproving(false);
+        }
+    };
+
+    const handleRequestRevisions = async () => {
+        if (!task?.id) return;
+        const body = revisionComment.trim();
+        if (!body) {
+            toast.error("Please describe the revisions needed");
+            return;
+        }
+        try {
+            setRequestingRevisions(true);
+            await api.post(`/tasks/${task.id}/request-revisions`, { comment: body }, { timeout: 30000 });
+            toast.success("Revision request sent!");
+            setRevisionComment("");
+            setShowRevisionInput(false);
+            dispatch(fetchTasks() as any);
+            void fetchComments(task.id);
+        } catch (e: any) {
+            console.error("Failed to request revisions", e);
+            toast.error(e?.response?.data?.message || "Failed to request revisions");
+        } finally {
+            setRequestingRevisions(false);
         }
     };
 
@@ -654,12 +749,73 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         )}
                     </div>
                     </section>
-                    {/* Comments Section */}
+                    {/* Approval Actions (client portal) */}
+                    {canApprove && mode === 1 && task?.id && (
+                        <section className="rounded-xl border-l-4 border-green-500 bg-green-50/50 p-4 sm:p-5">
+                            <h3 className="text-sm font-semibold text-green-900 mb-3 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                Approval Required
+                            </h3>
+                            <p className="text-sm text-gray-600 mb-4">This task is waiting for your approval. Please review and take action.</p>
+                            {!showRevisionInput ? (
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleApprove()}
+                                        disabled={approving}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
+                                    >
+                                        {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                                        Approve
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowRevisionInput(true)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors font-medium"
+                                    >
+                                        <RotateCcw className="h-4 w-4" />
+                                        Request Revisions
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <textarea
+                                        value={revisionComment}
+                                        onChange={(e) => setRevisionComment(e.target.value)}
+                                        className="w-full px-3 py-2 border border-rose-300 rounded-lg text-sm focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                        rows={3}
+                                        placeholder="Describe what needs to be changed..."
+                                        autoFocus
+                                    />
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleRequestRevisions()}
+                                            disabled={requestingRevisions || revisionComment.trim().length === 0}
+                                            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors font-medium disabled:opacity-50"
+                                        >
+                                            {requestingRevisions ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                            Send Revision Request
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setShowRevisionInput(false); setRevisionComment(""); }}
+                                            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </section>
+                    )}
+
+                    {/* Activity Feed */}
                     <div className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
                         <div className="flex items-center justify-between mb-3">
                             <h3 className="text-sm font-semibold text-teal-900 flex items-center gap-2">
                                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-                                Comments
+                                Activity
                             </h3>
                             {mode === 1 && task?.id && (
                                 <button
@@ -673,21 +829,24 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                         </div>
 
                         {mode !== 1 || !task?.id ? (
-                            <p className="mt-2 text-sm text-gray-500">Save the task to start a comment thread.</p>
+                            <p className="mt-2 text-sm text-gray-500">Save the task to start the activity feed.</p>
                         ) : (
-                            <div className="mt-3 rounded-lg border border-gray-200">
-                                <div className="max-h-64 overflow-y-auto p-3 space-y-3">
+                            <div className="mt-3 rounded-lg border border-gray-200 bg-white">
+                                <div className="max-h-80 overflow-y-auto p-3 space-y-3">
                                     {commentsLoading ? (
-                                        <p className="text-sm text-gray-500">Loading comments...</p>
+                                        <p className="text-sm text-gray-500">Loading activity...</p>
                                     ) : commentsError ? (
                                         <p className="text-sm text-rose-600">{commentsError}</p>
                                     ) : comments.length === 0 ? (
-                                        <p className="text-sm text-gray-500">No comments yet.</p>
+                                        <p className="text-sm text-gray-500">No activity yet. Start the conversation below.</p>
                                     ) : (
                                         comments.map((c) => {
+                                            const config = activityConfig[c.type] || activityConfig.COMMENT;
                                             const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
                                             const isAuthor = user?.id && c.author?.id === user.id;
                                             const canDelete = canComment && (isAdmin || isAuthor);
+                                            const isSystemEntry = c.type === "APPROVAL" || c.type === "REVISION_REQUEST";
+                                            const authorRole = c.author?.role === "USER" ? "Client" : c.author?.role === "SPECIALIST" ? "Team" : "Agency";
                                             const when = (() => {
                                                 try {
                                                     return new Date(c.createdAt).toLocaleString();
@@ -696,29 +855,46 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                                 }
                                             })();
                                             return (
-                                                <div key={c.id} className="flex gap-3">
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <div className="min-w-0">
-                                                                <p className="text-sm font-medium text-gray-900 truncate">
-                                                                    {c.author?.name || c.author?.email || "Unknown"}
-                                                                </p>
-                                                                <p className="text-xs text-gray-500">{when}</p>
+                                                <div key={c.id} className={`rounded-lg border p-3 ${config.borderColor} ${config.bgColor}`}>
+                                                    <div className="flex items-start gap-3">
+                                                        <span className={`mt-0.5 shrink-0 ${config.color}`}>{config.icon}</span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                                                        {c.author?.name || c.author?.email || "Unknown"}
+                                                                    </p>
+                                                                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                                                                        c.author?.role === "USER"
+                                                                            ? "bg-violet-100 text-violet-700"
+                                                                            : "bg-blue-100 text-blue-700"
+                                                                    }`}>
+                                                                        {authorRole}
+                                                                    </span>
+                                                                    {c.type !== "COMMENT" && (
+                                                                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${config.color} ${config.bgColor} border ${config.borderColor}`}>
+                                                                            {config.label}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-1 shrink-0">
+                                                                    <p className="text-xs text-gray-500">{when}</p>
+                                                                    {canDelete && !isSystemEntry && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => requestDeleteComment(c.id)}
+                                                                            className="p-1 text-red-400 hover:text-red-600"
+                                                                            title="Delete"
+                                                                        >
+                                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
                                                             </div>
-                                                            {canDelete && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => requestDeleteComment(c.id)}
-                                                                    className="p-1 text-red-600 hover:text-red-800"
-                                                                    title="Delete comment"
-                                                                >
-                                                                    <Trash2 className="h-4 w-4" />
-                                                                </button>
-                                                            )}
+                                                            <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
+                                                                {c.body}
+                                                            </p>
                                                         </div>
-                                                        <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
-                                                            {c.body}
-                                                        </p>
                                                     </div>
                                                 </div>
                                             );
@@ -728,25 +904,53 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
 
                                 <div className="border-t border-gray-200 p-3">
                                     {!canComment ? (
-                                        <p className="text-sm text-gray-500">Comments are not available for this role.</p>
+                                        <p className="text-sm text-gray-500">Sign in to participate in the conversation.</p>
                                     ) : (
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                            <textarea
-                                                value={newComment}
-                                                onChange={(e) => setNewComment(e.target.value)}
-                                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                                rows={2}
-                                                placeholder="Write a comment..."
-                                            />
-                                            <button
-                                                type="button"
-                                                disabled={postingComment || newComment.trim().length === 0}
-                                                onClick={() => void handlePostComment()}
-                                                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
-                                            >
-                                                <Send className="h-4 w-4" />
-                                                Post
-                                            </button>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-2">
+                                                {availableCommentTypes.map((t) => {
+                                                    const cfg = activityConfig[t];
+                                                    return (
+                                                        <button
+                                                            key={t}
+                                                            type="button"
+                                                            onClick={() => setCommentType(t)}
+                                                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                                                                commentType === t
+                                                                    ? `${cfg.color} ${cfg.bgColor} ${cfg.borderColor}`
+                                                                    : "text-gray-500 bg-white border-gray-200 hover:bg-gray-50"
+                                                            }`}
+                                                        >
+                                                            {cfg.icon}
+                                                            {cfg.label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="flex flex-col sm:flex-row gap-2">
+                                                <textarea
+                                                    value={newComment}
+                                                    onChange={(e) => setNewComment(e.target.value)}
+                                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                                    rows={2}
+                                                    placeholder={
+                                                        commentType === "QUESTION"
+                                                            ? "Ask a question..."
+                                                            : commentType === "APPROVAL_REQUEST"
+                                                            ? "Request approval (describe what needs review)..."
+                                                            : "Write a comment..."
+                                                    }
+                                                />
+                                                <button
+                                                    type="button"
+                                                    disabled={postingComment || newComment.trim().length === 0}
+                                                    onClick={() => void handlePostComment()}
+                                                    className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                                                >
+                                                    <Send className="h-4 w-4" />
+                                                    Post
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
                                 </div>

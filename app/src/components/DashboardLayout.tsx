@@ -5,7 +5,7 @@ import { RootState } from "@/store";
 import Sidebar from "./Sidebar";
 import NotificationBell from "./NotificationBell";
 import api from "@/lib/api";
-import { CreditCard, AlertTriangle } from "lucide-react";
+import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare } from "lucide-react";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -86,9 +86,45 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     return "Dashboard";
   };
 
-  // Client portal: no sidebar/header chrome.
+  // Client portal: minimal nav bar with notification bell
   if (isClientPortal || user?.role === "USER") {
-    return <div className="min-h-screen bg-gray-50">{children}</div>;
+    const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
+    const clientNavItems = [
+      { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/report", label: "Dashboard", icon: LayoutDashboard },
+      { path: "/client/tasks", label: "Tasks", icon: CheckSquare },
+    ];
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4 sticky top-0 z-40">
+          <div className="flex items-center gap-6">
+            <span className="text-lg font-bold bg-gradient-to-r from-violet-600 to-blue-600 bg-clip-text text-transparent">
+              Client Portal
+            </span>
+            <nav className="flex items-center gap-1">
+              {clientNavItems.map((item) => {
+                const isActive = location.pathname.startsWith(item.path.split("?")[0]);
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? "bg-violet-50 text-violet-700"
+                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                    }`}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+          <NotificationBell />
+        </div>
+        <div className="flex-1">{children}</div>
+      </div>
+    );
   }
 
   const trialExpired = isAgencyRoute && agencyMe?.trialExpired === true;

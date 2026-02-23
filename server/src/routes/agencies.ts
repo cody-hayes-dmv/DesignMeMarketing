@@ -1280,17 +1280,22 @@ router.get('/me/notifications', authenticateToken, async (req, res) => {
     if (user.role === 'SUPER_ADMIN') {
       return res.json({ unreadCount: 0, items: [] });
     }
+
+    // Build OR conditions: user-targeted notifications + agency-scoped ones
+    const orConditions: any[] = [{ userId: user.userId }];
+
     const membership = await prisma.userAgency.findFirst({
       where: { userId: user.userId },
       select: { agencyId: true },
     });
-    if (!membership) {
-      return res.json({ unreadCount: 0, items: [] });
+    if (membership) {
+      orConditions.push({ agencyId: membership.agencyId, userId: null });
     }
+
     const notifications = await prisma.notification.findMany({
-      where: { agencyId: membership.agencyId },
+      where: { OR: orConditions },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: 30,
     });
     const unreadCount = notifications.filter((n) => !n.read).length;
     return res.json({
@@ -1318,22 +1323,25 @@ router.post('/me/notifications/mark-read', authenticateToken, async (req, res) =
     if (user.role === 'SUPER_ADMIN') {
       return res.json({ success: true });
     }
+
+    const orConditions: any[] = [{ userId: user.userId }];
     const membership = await prisma.userAgency.findFirst({
       where: { userId: user.userId },
       select: { agencyId: true },
     });
-    if (!membership) {
-      return res.json({ success: true });
+    if (membership) {
+      orConditions.push({ agencyId: membership.agencyId, userId: null });
     }
+
     const { ids } = req.body;
     if (Array.isArray(ids) && ids.length > 0) {
       await prisma.notification.updateMany({
-        where: { id: { in: ids }, agencyId: membership.agencyId },
+        where: { id: { in: ids }, OR: orConditions },
         data: { read: true },
       });
     } else {
       await prisma.notification.updateMany({
-        where: { agencyId: membership.agencyId, read: false },
+        where: { OR: orConditions, read: false },
         data: { read: true },
       });
     }

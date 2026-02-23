@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
-import { Bell, Loader2, AlertCircle, Building2, CreditCard, TrendingUp, TrendingDown, CheckCircle2, UserPlus, XCircle, Zap, CheckCheck } from "lucide-react";
+import { Bell, Loader2, AlertCircle, Building2, CreditCard, TrendingUp, TrendingDown, CheckCircle2, UserPlus, XCircle, Zap, CheckCheck, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import api from "@/lib/api";
 import { RootState } from "@/store";
@@ -106,6 +106,8 @@ const NotificationBell: React.FC = () => {
     switch (type) {
       case "task_completed":
         return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+      case "task_activity":
+        return <MessageSquare className="h-4 w-4 text-violet-500" />;
       case "managed_service_request":
         return <AlertCircle className="h-4 w-4 text-amber-500" />;
       case "managed_service_approved":

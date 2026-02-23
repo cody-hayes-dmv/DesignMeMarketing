@@ -91,7 +91,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   const [editPositionValue, setEditPositionValue] = useState<string>("");
   const [starredKeywordIds, setStarredKeywordIds] = useState<Set<string>>(new Set());
   const [activeTypeTab, setActiveTypeTab] = useState<"money" | "topical">("money");
-  const initialRefreshDoneRef = useRef<Record<string, boolean>>({});
+  const abortRef = useRef<AbortController | null>(null);
 
   const starredStorageKey = useMemo(() => {
     // Persist per-user, per-client
@@ -120,39 +120,28 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
 
   const fetchKeywords = useCallback(async () => {
     if (!clientId) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       setLoading(true);
       setError(null);
       const res = shareToken
-        ? await api.get(`/seo/share/${encodeURIComponent(shareToken)}/target-keywords`)
-        : await api.get(`/seo/target-keywords/${clientId}`);
+        ? await api.get(`/seo/share/${encodeURIComponent(shareToken)}/target-keywords`, { signal: controller.signal })
+        : await api.get(`/seo/target-keywords/${clientId}`, { signal: controller.signal });
       const list: TargetKeyword[] = res.data || [];
       setKeywords(list);
-      // On initial load, run refresh once (for ADMIN/SUPER_ADMIN) so GOOGLE/GOOGLE URL get populated (only when enableRefresh)
-      if (
-        enableRefresh &&
-        !shareToken &&
-        clientId &&
-        (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") &&
-        list.length > 0 &&
-        !initialRefreshDoneRef.current[clientId]
-      ) {
-        initialRefreshDoneRef.current[clientId] = true;
-        api
-          .post(`/seo/target-keywords/${clientId}/refresh`, {}, { timeout: 120000 })
-          .then(() => fetchKeywords())
-          .catch((err: any) => {
-            console.warn("Initial target keywords refresh failed:", err?.response?.data?.message || err);
-          });
-      }
     } catch (error: any) {
+      if (error?.code === "ERR_CANCELED") return;
       console.error("Failed to load target keywords", error);
       const errorMsg = error?.response?.data?.message || "Unable to load target keywords";
       setError(errorMsg);
     } finally {
       setLoading(false);
     }
-  }, [clientId, shareToken, user?.role]);
+  }, [clientId, shareToken]);
 
   const persistStarredIds = useCallback(
     (next: Set<string>) => {
@@ -205,6 +194,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   useEffect(() => {
     if (!clientId) return;
     fetchKeywords();
+    return () => { abortRef.current?.abort(); };
   }, [clientId, fetchKeywords]);
 
   const handleRefresh = useCallback(async () => {

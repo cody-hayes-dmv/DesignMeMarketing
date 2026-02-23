@@ -29,7 +29,8 @@ import {
     Image as ImageIcon,
     Video as VideoIcon,
     Link as LinkIcon,
-    ExternalLink
+    ExternalLink,
+    MessageSquare,
 } from "lucide-react";
 
 import "react-datepicker/dist/react-datepicker.css";
@@ -83,6 +84,7 @@ const TasksPage = () => {
     const [assignSelectedOpen, setAssignSelectedOpen] = useState(false);
     const [assignSelectedSpecialistId, setAssignSelectedSpecialistId] = useState<string>("");
     const [bulkAssigning, setBulkAssigning] = useState(false);
+    const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
     const { tasks } = useSelector((state: RootState) => state.task);
     const { user } = useSelector((state: RootState) => state.auth);
     const { clients } = useSelector((state: RootState) => state.client);
@@ -92,8 +94,34 @@ const TasksPage = () => {
         if (clientId) setFilterClientId(clientId);
     }, [searchParams]);
 
-    // Only non-specialists can create and bulk-assign
-    const canCreate = (user?.role as ROLE | undefined) !== "SPECIALIST";
+    // Auto-open task modal from notification link (?taskId=xxx)
+    useEffect(() => {
+        const taskId = searchParams.get("taskId");
+        if (taskId && tasks.length > 0) {
+            const found = tasks.find((t) => t.id === taskId);
+            if (found) {
+                setSelectedTask(found);
+                setMode(1);
+                setOpen(true);
+            }
+        }
+    }, [searchParams, tasks]);
+
+    // Fetch unread activity counts per task
+    const fetchUnreadCounts = () => {
+        api.get("/tasks/unread-counts")
+            .then((res) => setUnreadCounts(res.data || {}))
+            .catch(() => setUnreadCounts({}));
+    };
+    useEffect(() => {
+        fetchUnreadCounts();
+        const interval = setInterval(fetchUnreadCounts, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Only agency/admin/super-admin can create, bulk-assign, and manage tasks
+    const isClientUser = user?.role === "USER";
+    const canCreate = !isClientUser && (user?.role as ROLE | undefined) !== "SPECIALIST";
     const canFilterByClient = (user?.role as ROLE | undefined) !== "USER";
 
     const assigneeRoleLabel = (role: string | undefined) => {
@@ -793,7 +821,15 @@ const TasksPage = () => {
                                         )}
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col">
-                                                <div className="text-sm font-medium text-gray-900">{task.title}</div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm font-medium text-gray-900">{task.title}</span>
+                                                    {(unreadCounts[task.id] ?? 0) > 0 && (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-bold">
+                                                            <MessageSquare className="h-3 w-3" />
+                                                            {unreadCounts[task.id]}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <div className="text-xs text-gray-500">{task.category ?? "No category"}</div>
                                                 {task.description && (
                                                     <div className="text-xs text-gray-400 mt-1 truncate max-w-xs">
@@ -932,10 +968,11 @@ const TasksPage = () => {
                                                 <button
                                                     className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                                                     onClick={() => handleEditClick(task)}
-                                                    title="Edit task"
+                                                    title={isClientUser ? "View task" : "Edit task"}
                                                 >
                                                     <Edit className="h-4 w-4" />
                                                 </button>
+                                                {!isClientUser && (
                                                 <button
                                                     className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                                                     onClick={() => handleDeleteTask(task.id)}
@@ -943,6 +980,7 @@ const TasksPage = () => {
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -964,7 +1002,7 @@ const TasksPage = () => {
                 mode={mode}
                 title={mode === 0 ? "Create Task" : "Edit Task"}
                 open={open}
-                setOpen={setOpen}
+                setOpen={(v) => { setOpen(v); if (!v) fetchUnreadCounts(); }}
                 task={selectedTask ?? undefined}
             />
 

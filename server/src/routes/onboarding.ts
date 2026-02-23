@@ -206,6 +206,7 @@ router.post("/templates", authenticateToken, async (req, res) => {
             category: task.category,
             priority: task.priority,
             estimatedHours: task.estimatedHours,
+            dueDate: task.dueDate ? new Date(task.dueDate) : null,
             order: index + 1
           }))
         }
@@ -264,13 +265,14 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
         description,
         isDefault: isDefault || false,
         tasks: {
-          deleteMany: {}, // Delete existing tasks
+          deleteMany: {},
           create: tasks.map((task: any, index: number) => ({
             title: task.title,
             description: task.description,
             category: task.category,
             priority: task.priority,
             estimatedHours: task.estimatedHours,
+            dueDate: task.dueDate ? new Date(task.dueDate) : null,
             order: index + 1
           }))
         }

@@ -1155,7 +1155,7 @@ const ClientsPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
                       <button
                         type="button"
-                        onClick={() => handleViewReportClick(client)}
+                        onClick={() => handleViewClick(client)}
                         className="flex items-center gap-2 font-semibold text-gray-900 hover:text-primary-600 transition-colors cursor-pointer"
                       >
                         <Building2 className="h-4 w-4 text-primary-500 shrink-0" />
@@ -1368,7 +1368,7 @@ const ClientsPage = () => {
                     <div className="min-w-0">
                       <h3
                         className="font-semibold text-gray-900 truncate hover:text-primary-600 transition-colors cursor-pointer"
-                        onClick={() => handleViewReportClick(client)}
+                        onClick={() => handleViewClick(client)}
                       >
                         {client.name}
                       </h3>

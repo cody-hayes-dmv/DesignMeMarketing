@@ -1,7 +1,7 @@
 import { prisma } from './prisma.js';
 import { sendEmail } from './email.js';
 import PDFDocument from 'pdfkit';
-import jwt from "jsonwebtoken";
+import crypto from "crypto";
 
 type ReportTargetKeywordRow = {
   id: string;
@@ -137,17 +137,26 @@ export async function getReportTargetKeywords(clientId: string): Promise<ReportT
   });
 }
 
-export function buildShareDashboardUrl(clientId: string): string | null {
+export async function buildShareDashboardUrl(clientId: string): Promise<string | null> {
   const frontendUrlRaw = process.env.FRONTEND_URL || "";
   const frontendUrl = frontendUrlRaw.replace(/\/+$/, "");
   if (!frontendUrl) return null;
 
-  const secret = process.env.JWT_SECRET || "change_me_secret";
-  const token = jwt.sign(
-    { type: "client_share", clientId, issuedBy: "report_scheduler" },
-    secret
-    // No expiresIn = permanent token
-  );
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { dashboardShareToken: true },
+  });
+  if (!client) return null;
+
+  let token = client.dashboardShareToken;
+  if (!token) {
+    token = crypto.randomBytes(32).toString("hex");
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { dashboardShareToken: token },
+    });
+  }
+
   return `${frontendUrl}/share/${encodeURIComponent(token)}`;
 }
 
@@ -1045,17 +1054,13 @@ export async function processScheduledReports(): Promise<void> {
         if (recipients && recipients.length > 0) {
           console.log(`[Report Scheduler] Sending emails to: ${recipients.join(", ")}`);
           
-          const shareUrl = (() => {
-            try {
-              return buildShareDashboardUrl(schedule.clientId);
-            } catch (err: any) {
-              console.warn(
-                `[Report Scheduler] Failed to build share URL for client ${schedule.clientId}:`,
-                err?.message || err
-              );
-              return null;
-            }
-          })();
+          const shareUrl = await buildShareDashboardUrl(schedule.clientId).catch((err: any) => {
+            console.warn(
+              `[Report Scheduler] Failed to build share URL for client ${schedule.clientId}:`,
+              err?.message || err
+            );
+            return null;
+          });
 
           const targetKeywords = await getReportTargetKeywords(schedule.clientId).catch((err) => {
             console.warn(

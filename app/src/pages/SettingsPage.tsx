@@ -59,7 +59,7 @@ const SettingsPage = () => {
   const [notificationSaving, setNotificationSaving] = useState(false);
 
   // Templates (onboarding)
-  type TemplateTask = { id?: string; title: string; description: string | null; category: string | null; priority: string | null; estimatedHours: number | null; order: number };
+  type TemplateTask = { id?: string; title: string; description: string | null; category: string | null; priority: string | null; estimatedHours: number | null; dueDate: string | null; order: number };
   type ManageableTemplate = {
     id: string;
     name: string;
@@ -74,7 +74,7 @@ const SettingsPage = () => {
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [templateModalMode, setTemplateModalMode] = useState<"create" | "edit">("create");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [templateForm, setTemplateForm] = useState({ name: "", description: "", isDefault: false, agencyId: "" as string | null, tasks: [] as Array<{ title: string; description: string; category: string; priority: string; estimatedHours: string }> });
+  const [templateForm, setTemplateForm] = useState({ name: "", description: "", isDefault: false, agencyId: "" as string | null, tasks: [] as Array<{ title: string; description: string; category: string; priority: string; estimatedHours: string; dueDate: string }> });
   const [templateSaveLoading, setTemplateSaveLoading] = useState(false);
   const [agenciesList, setAgenciesList] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -283,6 +283,7 @@ const SettingsPage = () => {
         category: task.category ?? "",
         priority: task.priority ?? "",
         estimatedHours: task.estimatedHours != null ? String(task.estimatedHours) : "",
+        dueDate: task.dueDate ? task.dueDate.slice(0, 10) : "",
       })),
     });
     setTemplateModalOpen(true);
@@ -291,7 +292,7 @@ const SettingsPage = () => {
   const addTemplateTask = () => {
     setTemplateForm((f) => ({
       ...f,
-      tasks: [...f.tasks, { title: "", description: "", category: "", priority: "", estimatedHours: "" }],
+      tasks: [...f.tasks, { title: "", description: "", category: "", priority: "", estimatedHours: "", dueDate: "" }],
     }));
   };
 
@@ -320,6 +321,7 @@ const SettingsPage = () => {
         category: t.category.trim() || null,
         priority: t.priority.trim() || null,
         estimatedHours: t.estimatedHours.trim() ? parseFloat(t.estimatedHours) : null,
+        dueDate: t.dueDate.trim() || null,
         order: i + 1,
       }));
     setTemplateSaveLoading(true);
@@ -989,6 +991,13 @@ const SettingsPage = () => {
                                 className="border border-gray-300 rounded px-2 py-1.5 text-sm w-20"
                               />
                             </div>
+                            <input
+                              type="date"
+                              value={task.dueDate}
+                              onChange={(e) => updateTemplateTask(index, "dueDate", e.target.value)}
+                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+                              title="Due date"
+                            />
                           </div>
                           <button type="button" onClick={() => removeTemplateTask(index)} className="text-red-600 hover:text-red-800 p-1 flex-shrink-0 mt-1" title="Remove task">
                             <Trash2 className="h-4 w-4" />

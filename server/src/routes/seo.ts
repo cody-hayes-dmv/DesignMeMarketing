@@ -8554,13 +8554,7 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
       buildShareDashboardUrl,
     } = await import("../lib/reportScheduler.js");
 
-    const shareUrl = (() => {
-      try {
-        return buildShareDashboardUrl(report.clientId);
-      } catch {
-        return null;
-      }
-    })();
+    const shareUrl = await buildShareDashboardUrl(report.clientId).catch(() => null);
     const targetKeywords = await getReportTargetKeywords(report.clientId).catch(() => []);
 
     const emailHtml = generateReportEmailHTML(report, report.client, { targetKeywords, shareUrl });
