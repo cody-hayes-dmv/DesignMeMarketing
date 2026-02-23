@@ -27,6 +27,7 @@ const SuperAdminDashboard = () => {
   const navigate = useNavigate();
   const { agencies, loading: agenciesLoading } = useSelector((state: RootState) => state.agency);
   const { clients, loading: clientsLoading } = useSelector((state: RootState) => state.client);
+  const { user } = useSelector((state: RootState) => state.auth);
   const [pendingManagedServices, setPendingManagedServices] = useState<PendingManagedService[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -494,7 +495,8 @@ const SuperAdminDashboard = () => {
           </div>
         </div>
 
-        {/* Financial Overview */}
+        {/* Financial Overview (Super Admin only) */}
+        {user?.role === "SUPER_ADMIN" && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-emerald-500">
           <div className="p-6 border-b border-gray-200 bg-emerald-50/30 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Financial Overview</h2>
@@ -578,6 +580,7 @@ const SuperAdminDashboard = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* Recent Agencies and Clients */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

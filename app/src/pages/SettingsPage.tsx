@@ -81,16 +81,16 @@ const SettingsPage = () => {
   const tabs = [
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
     { id: "enterprise-calculator", label: "Enterprise Calculator", icon: Calculator, roles: ["SUPER_ADMIN"] },
-    { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN"] },
+    { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN", "ADMIN"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
     { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
   ];
 
-  // Fetch agency data on mount if user has agency access
+  // Fetch agency data on mount if user is an agency member
   useEffect(() => {
-    if (user && (user.role === "AGENCY" || user.role === "ADMIN" || user.role === "SUPER_ADMIN")) {
+    if (user && user.role === "AGENCY") {
       fetchAgencyData();
     }
   }, [user]);
@@ -139,7 +139,7 @@ const SettingsPage = () => {
 
   // Fetch agencies for super admin when opening template create modal
   useEffect(() => {
-    if (templateModalOpen && templateModalMode === "create" && user?.role === "SUPER_ADMIN") {
+    if (templateModalOpen && templateModalMode === "create" && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN")) {
       api.get("/agencies").then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
         setAgenciesList(list.map((a: any) => ({ id: a.id, name: a.name || a.subdomain || a.id })));
@@ -263,7 +263,7 @@ const SettingsPage = () => {
       name: "",
       description: "",
       isDefault: false,
-      agencyId: user?.role === "SUPER_ADMIN" ? null : undefined as any,
+      agencyId: (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") ? null : undefined as any,
       tasks: [],
     });
     setTemplateModalOpen(true);
@@ -331,7 +331,7 @@ const SettingsPage = () => {
           isDefault: templateForm.isDefault,
           tasks: tasksPayload,
         };
-        if (user?.role === "SUPER_ADMIN" && templateForm.agencyId !== undefined) {
+        if ((user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && templateForm.agencyId !== undefined) {
           body.agencyId = templateForm.agencyId === "" ? null : templateForm.agencyId;
         }
         await api.post("/onboarding/templates", body);
@@ -638,7 +638,7 @@ const SettingsPage = () => {
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tasks</th>
-                      {user?.role === "SUPER_ADMIN" && (
+                      {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
                       )}
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -654,7 +654,7 @@ const SettingsPage = () => {
                           )}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">{t.tasks?.length ?? 0} tasks</td>
-                        {user?.role === "SUPER_ADMIN" && (
+                        {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
                           <td className="px-4 py-3 text-sm text-gray-600">
                             {t.agencyId == null ? "Global" : t.agency?.name ?? t.agencyId}
                           </td>
@@ -912,7 +912,7 @@ const SettingsPage = () => {
                       />
                       <label htmlFor="template-default" className="text-sm text-gray-700">Set as default template</label>
                     </div>
-                    {user?.role === "SUPER_ADMIN" && templateModalMode === "create" && (
+                    {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && templateModalMode === "create" && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Scope</label>
                         <select

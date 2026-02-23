@@ -262,13 +262,13 @@ const ClientsPage = () => {
 
   useEffect(() => {
     dispatch(fetchClients() as any);
-    if (user?.role === "SUPER_ADMIN") {
+    if (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") {
       dispatch(fetchAgencies() as any);
     }
   }, [dispatch, user?.role]);
 
   useEffect(() => {
-    if (user?.role === "AGENCY" || user?.role === "ADMIN") {
+    if (user?.role === "AGENCY") {
       api.get("/agencies/me").then((r) => setAgencyMe(r.data)).catch(() => setAgencyMe(null));
       api.get("/seo/agency/subscription").then((r) => {
         const u = r.data?.usage?.clientDashboards;

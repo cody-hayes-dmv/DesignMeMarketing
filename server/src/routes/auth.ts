@@ -595,7 +595,7 @@ router.get("/specialists", authenticateToken, async (req, res) => {
     }
 
     let rawSpecialists: { id: string; name: string | null; email: string; specialties: string | null }[];
-    if (user.role === "SUPER_ADMIN") {
+    if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
       rawSpecialists = await prisma.user.findMany({
         where: { role: "SPECIALIST" },
         select: { id: true, name: true, email: true, specialties: true }

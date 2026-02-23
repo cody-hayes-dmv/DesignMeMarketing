@@ -106,10 +106,10 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get included agencies for a client (for Assign modal - Super Admin only). Must be before /:agencyId
+// Get included agencies for a client (for Assign modal). Must be before /:agencyId
 router.get('/included-for-client/:clientId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
     }
     const { clientId } = req.params;
@@ -305,6 +305,10 @@ const createAgencySchema = z.object({
   tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise', 'business_lite', 'business_pro']).optional(),
   customPricing: z.coerce.number().optional().nullable(),
   internalNotes: z.string().optional(),
+  enterpriseMaxDashboards: z.coerce.number().int().min(1).optional().nullable(),
+  enterpriseKeywordsTotal: z.coerce.number().int().min(1).optional().nullable(),
+  enterpriseCreditsPerMonth: z.coerce.number().int().min(0).optional().nullable(),
+  enterpriseMaxTeamUsers: z.coerce.number().int().min(1).optional().nullable(),
   referralSource: z.string().optional(),
   referralSourceOther: z.string().optional(),
   primaryGoals: z.array(z.string()).optional(),
@@ -568,7 +572,7 @@ router.post('/setup-intent-for-activation', authenticateToken, async (req, res) 
 // Super Admin only. No customer yet; payment method will be attached to the new agency's Stripe customer on create.
 router.post('/setup-intent', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
     }
     const stripe = getStripe();
@@ -589,7 +593,7 @@ router.post('/setup-intent', authenticateToken, async (req, res) => {
 // After Stripe redirect (e.g. 3DS), retrieve SetupIntent and return payment_method so frontend can complete agency creation
 router.post('/setup-intent/retrieve', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
     }
     const { setupIntentId } = req.body;
@@ -869,7 +873,7 @@ router.post('/register', async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     console.log('[agencies] POST / – create agency attempt');
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can create agencies directly.' });
     }
 
@@ -1067,6 +1071,10 @@ router.post('/', authenticateToken, async (req, res) => {
         subscriptionTier: (billingOption === 'no_charge' || billingOption === 'free_account') ? 'free' : (tier || null),
         customPricing: customPricing ?? null,
         internalNotes: internalNotes || null,
+        enterpriseMaxDashboards: body.enterpriseMaxDashboards ?? null,
+        enterpriseKeywordsTotal: body.enterpriseKeywordsTotal ?? null,
+        enterpriseCreditsPerMonth: body.enterpriseCreditsPerMonth ?? null,
+        enterpriseMaxTeamUsers: body.enterpriseMaxTeamUsers ?? null,
         onboardingData,
         trialEndsAt,
       },
@@ -1368,7 +1376,7 @@ router.get('/managed-services', authenticateToken, async (req, res) => {
     if (!membership && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
       return res.json([]);
     }
-    const pendingOnly = req.query.pendingOnly === 'true' && user.role === 'SUPER_ADMIN';
+    const pendingOnly = req.query.pendingOnly === 'true' && (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN');
     const agencyId = membership?.agencyId;
 
     if (pendingOnly) {
@@ -1469,10 +1477,10 @@ router.get('/add-ons', authenticateToken, async (req, res) => {
   }
 });
 
-// Get single agency (Super Admin only) - full details for edit form
+// Get single agency - full details for edit form
 router.get('/:agencyId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
     }
     const { agencyId } = req.params;
@@ -1503,6 +1511,10 @@ router.get('/:agencyId', authenticateToken, async (req, res) => {
       subscriptionTier: agency.subscriptionTier ?? null,
       customPricing: agency.customPricing ? Number(agency.customPricing) : null,
       internalNotes: agency.internalNotes,
+      enterpriseMaxDashboards: agency.enterpriseMaxDashboards,
+      enterpriseKeywordsTotal: agency.enterpriseKeywordsTotal,
+      enterpriseCreditsPerMonth: agency.enterpriseCreditsPerMonth,
+      enterpriseMaxTeamUsers: agency.enterpriseMaxTeamUsers,
       createdAt: agency.createdAt,
       hasStripeCustomer: !!agency.stripeCustomerId,
     });
@@ -1533,6 +1545,10 @@ const updateAgencySuperAdminSchema = z.object({
   subscriptionTier: z.string().optional().nullable(),
   customPricing: z.coerce.number().optional().nullable(),
   internalNotes: z.string().optional().nullable(),
+  enterpriseMaxDashboards: z.coerce.number().int().min(1).optional().nullable(),
+  enterpriseKeywordsTotal: z.coerce.number().int().min(1).optional().nullable(),
+  enterpriseCreditsPerMonth: z.coerce.number().int().min(0).optional().nullable(),
+  enterpriseMaxTeamUsers: z.coerce.number().int().min(1).optional().nullable(),
   paymentMethodId: z.string().optional(), // required when billingType is paid or custom and agency has no Stripe customer
 }).refine((data) => {
   const w = data.website;
@@ -1547,7 +1563,7 @@ const updateAgencySuperAdminSchema = z.object({
 
 router.put('/:agencyId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
     }
     const { agencyId } = req.params;
@@ -1667,6 +1683,10 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
     if (updateData.subscriptionTier !== undefined && payload.billingType !== 'trial') payload.subscriptionTier = updateData.subscriptionTier;
     if (updateData.customPricing !== undefined) payload.customPricing = updateData.customPricing;
     if (updateData.internalNotes !== undefined) payload.internalNotes = updateData.internalNotes;
+    if (updateData.enterpriseMaxDashboards !== undefined) payload.enterpriseMaxDashboards = updateData.enterpriseMaxDashboards;
+    if (updateData.enterpriseKeywordsTotal !== undefined) payload.enterpriseKeywordsTotal = updateData.enterpriseKeywordsTotal;
+    if (updateData.enterpriseCreditsPerMonth !== undefined) payload.enterpriseCreditsPerMonth = updateData.enterpriseCreditsPerMonth;
+    if (updateData.enterpriseMaxTeamUsers !== undefined) payload.enterpriseMaxTeamUsers = updateData.enterpriseMaxTeamUsers;
 
     const updated = await prisma.agency.update({
       where: { id: agencyId },
@@ -1723,6 +1743,10 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
       subscriptionTier: updated.subscriptionTier,
       customPricing: updated.customPricing ? Number(updated.customPricing) : null,
       internalNotes: updated.internalNotes,
+      enterpriseMaxDashboards: updated.enterpriseMaxDashboards,
+      enterpriseKeywordsTotal: updated.enterpriseKeywordsTotal,
+      enterpriseCreditsPerMonth: updated.enterpriseCreditsPerMonth,
+      enterpriseMaxTeamUsers: updated.enterpriseMaxTeamUsers,
       createdAt: updated.createdAt,
     });
   } catch (error: any) {
@@ -2520,10 +2544,10 @@ router.post('/managed-services', authenticateToken, async (req, res) => {
   }
 });
 
-// Managed Services: approve (SUPER_ADMIN only). Sets client ACTIVE, starts billing, notifies agency.
+// Managed Services: approve. Sets client ACTIVE, starts billing, notifies agency.
 router.patch('/managed-services/:id/approve', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can approve managed services.' });
     }
     const { id } = req.params;
@@ -2628,10 +2652,10 @@ router.patch('/managed-services/:id/approve', authenticateToken, async (req, res
   }
 });
 
-// Managed Services: reject (SUPER_ADMIN only). Client becomes Dashboard Only, agency notified.
+// Managed Services: reject. Client becomes Dashboard Only, agency notified.
 router.patch('/managed-services/:id/reject', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can reject managed services.' });
     }
     const { id } = req.params;
@@ -3046,10 +3070,10 @@ router.get('/:agencyId/clients', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete agency (Super Admin only)
+// Delete agency
 router.delete('/:agencyId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can delete agencies.' });
     }
 
@@ -3095,10 +3119,10 @@ router.delete('/:agencyId', authenticateToken, async (req, res) => {
   }
 });
 
-// Assign client to agency (Super Admin only)
+// Assign client to agency
 router.post('/:agencyId/assign-client/:clientId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can assign clients to agencies.' });
     }
 
@@ -3201,10 +3225,10 @@ router.post('/:agencyId/assign-client/:clientId', authenticateToken, async (req,
   }
 });
 
-// Remove client from agency (Super Admin only)
+// Remove client from agency
 router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can remove clients from agencies.' });
     }
 
@@ -3316,10 +3340,10 @@ router.post('/:agencyId/remove-client/:clientId', authenticateToken, async (req,
   }
 });
 
-// Include client for agency (Super Admin only) - client appears in agency's Included tab
+// Include client for agency - client appears in agency's Included tab
 router.post('/:agencyId/include-client/:clientId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can include clients for agencies.' });
     }
     const { agencyId, clientId } = req.params;
@@ -3345,10 +3369,10 @@ router.post('/:agencyId/include-client/:clientId', authenticateToken, async (req
   }
 });
 
-// Uninclude client from agency (Super Admin only)
+// Uninclude client from agency
 router.post('/:agencyId/uninclude-client/:clientId', authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied. Only Super Admin can uninclude clients from agencies.' });
     }
     const { agencyId, clientId } = req.params;

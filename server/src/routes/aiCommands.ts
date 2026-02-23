@@ -5,7 +5,8 @@ import { authenticateToken } from "../middleware/auth.js";
 const router = Router();
 
 function requireSuperAdmin(req: Request, res: Response, next: () => void) {
-  if ((req as any).user?.role !== "SUPER_ADMIN") {
+  const role = (req as any).user?.role;
+  if (role !== "SUPER_ADMIN" && role !== "ADMIN") {
     return res.status(403).json({ error: "Forbidden" });
   }
   next();

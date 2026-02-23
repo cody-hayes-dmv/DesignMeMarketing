@@ -42,14 +42,24 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean; trialExpired?: boolean } | null>(null);
   const [hasIncludedClients, setHasIncludedClients] = useState(false);
-  const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "AGENCY";
+  const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY";
 
-  useEffect(() => {
-    if (user?.role === "AGENCY" || user?.role === "ADMIN") {
+  const refetchAgencyMe = () => {
+    if (user?.role === "AGENCY") {
       api.get("/agencies/me").then((r) => setAgencyMe(r.data)).catch(() => setAgencyMe(null));
     } else {
       setAgencyMe(null);
     }
+  };
+
+  useEffect(() => {
+    refetchAgencyMe();
+  }, [user?.role]);
+
+  useEffect(() => {
+    const handler = () => refetchAgencyMe();
+    window.addEventListener("subscription-changed", handler);
+    return () => window.removeEventListener("subscription-changed", handler);
   }, [user?.role]);
 
   const refetchHasIncluded = () => {
@@ -112,14 +122,14 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       label: "Dashboard",
       path: "/agency/dashboard",
       hasSubMenu: false,
-      roles: ["AGENCY", "ADMIN"],
+      roles: ["AGENCY"],
     },
     {
       icon: Home,
       label: "Dashboard",
       path: "/superadmin/dashboard",
       hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
+      roles: ["ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: DollarSign,
@@ -189,21 +199,21 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       label: "Managed Services",
       path: "/agency/managed-services",
       hasSubMenu: false,
-      roles: ["AGENCY", "ADMIN"],
+      roles: ["AGENCY"],
     },
     {
       icon: Package,
       label: "Add-Ons",
       path: "/agency/add-ons",
       hasSubMenu: false,
-      roles: ["AGENCY", "ADMIN"],
+      roles: ["AGENCY"],
     },
     {
       icon: CreditCard,
       label: "Subscription",
       path: "/agency/subscription",
       hasSubMenu: false,
-      roles: ["AGENCY", "ADMIN"],
+      roles: ["AGENCY"],
     },
     {
       icon: UserPlus,

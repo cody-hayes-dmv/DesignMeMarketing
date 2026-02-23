@@ -88,7 +88,7 @@ function App() {
   // ADMIN and SUPER_ADMIN can access agency dashboard as well
   const dashboardUrls = {
     SUPER_ADMIN: "/superadmin/dashboard",
-    ADMIN: "/agency/dashboard",
+    ADMIN: "/superadmin/dashboard",
     // Restore previous agency portal landing
     AGENCY: "/agency/dashboard",
     // Restore previous specialist portal landing
@@ -301,7 +301,7 @@ function App() {
             </div>
           ) : !user || !user.verified ? (
             <Navigate to="/login" replace />
-          ) : user.role !== "SUPER_ADMIN" ? (
+          ) : !["SUPER_ADMIN", "ADMIN"].includes(user.role) ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
             <DashboardLayout>
@@ -324,7 +324,7 @@ function App() {
             </div>
           ) : !user || !user.verified ? (
             <Navigate to="/login" replace />
-          ) : user.role !== "SUPER_ADMIN" ? (
+          ) : !["SUPER_ADMIN", "ADMIN"].includes(user.role) ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
             <DashboardLayout>

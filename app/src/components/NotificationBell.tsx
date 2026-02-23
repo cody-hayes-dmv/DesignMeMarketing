@@ -28,8 +28,8 @@ const NotificationBell: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  const notificationsUrl = isSuperAdmin ? "/seo/super-admin/notifications" : "/agencies/me/notifications";
+  const isSuperOrAdmin = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
+  const notificationsUrl = isSuperOrAdmin ? "/seo/super-admin/notifications" : "/agencies/me/notifications";
 
   const fetchNotifications = async () => {
     setLoading(true);

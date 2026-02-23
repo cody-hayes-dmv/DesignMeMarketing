@@ -20,9 +20,9 @@ const requireFinancialAccess = (req: express.Request, res: express.Response, nex
   next();
 };
 
-// Require SUPER_ADMIN only (for DataForSEO account usage / credentials)
+// Require SUPER_ADMIN or ADMIN (for DataForSEO account usage / credentials)
 const requireSuperAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (req.user?.role !== "SUPER_ADMIN") {
+  if (req.user?.role !== "SUPER_ADMIN" && req.user?.role !== "ADMIN") {
     return res.status(403).json({ message: "Access denied. Super Admin only." });
   }
   next();

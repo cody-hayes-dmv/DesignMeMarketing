@@ -64,6 +64,11 @@ model Agency {
   internalNotes         String?              @db.Text
   // 14-day free trial for new sign-ups (null = no trial or already converted)
   trialEndsAt           DateTime?            @db.DateTime
+  // Enterprise custom limits (override tier defaults when set; null = use tier defaults)
+  enterpriseMaxDashboards   Int?
+  enterpriseKeywordsTotal   Int?
+  enterpriseCreditsPerMonth Int?
+  enterpriseMaxTeamUsers    Int?
   // Keyword research credits (reset monthly)
   keywordResearchCreditsUsed    Int            @default(0)
   keywordResearchCreditsResetAt DateTime?      @db.DateTime

@@ -222,7 +222,7 @@ const AgencyDashboardPage = () => {
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
             </select>
-            {user?.role === "SUPER_ADMIN" && (
+            {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
               <button
                 type="button"
                 onClick={handleRefresh}

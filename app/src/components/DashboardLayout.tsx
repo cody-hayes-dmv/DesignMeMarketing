@@ -28,12 +28,22 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const isClientPortal = location.pathname.startsWith("/client/");
   const isAgencyRoute = location.pathname.startsWith("/agency/");
 
-  useEffect(() => {
-    if (isAgencyRoute && (user?.role === "AGENCY" || user?.role === "ADMIN")) {
+  const refetchAgencyMe = () => {
+    if (isAgencyRoute && user?.role === "AGENCY") {
       api.get("/agencies/me").then((r) => setAgencyMe(r.data)).catch(() => setAgencyMe(null));
     } else {
       setAgencyMe(null);
     }
+  };
+
+  useEffect(() => {
+    refetchAgencyMe();
+  }, [isAgencyRoute, user?.role]);
+
+  useEffect(() => {
+    const handler = () => refetchAgencyMe();
+    window.addEventListener("subscription-changed", handler);
+    return () => window.removeEventListener("subscription-changed", handler);
   }, [isAgencyRoute, user?.role]);
 
   // Get page title based on current route
@@ -85,16 +95,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const onSubscriptionPage = location.pathname === "/agency/subscription";
   const isTrialBilling = agencyMe?.billingType === "trial";
   const trialDaysLeft = agencyMe?.trialDaysLeft ?? 0;
-  const trialActiveRequireTier = isAgencyRoute && isTrialBilling && trialDaysLeft > 0 && !trialExpired;
+  const trialActive = isAgencyRoute && isTrialBilling && trialDaysLeft > 0 && !trialExpired;
 
   // Restrict access when trial expired: only Subscription page is allowed
   if (trialExpired && !onSubscriptionPage) {
     return <Navigate to="/agency/subscription" replace />;
-  }
-
-  // Require tier selection before trial expiration (No Charge during 7 days trial): redirect to Subscription until they choose a plan
-  if (trialActiveRequireTier && !onSubscriptionPage) {
-    return <Navigate to="/agency/subscription?require_tier=1" replace />;
   }
 
   return (
@@ -125,12 +130,21 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             </Link>
           </div>
         )}
-        {trialActiveRequireTier && onSubscriptionPage && (
+        {trialActive && (
           <div className="bg-primary-50 border-b border-primary-200 px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
             <p className="text-sm font-medium text-primary-800 flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 flex-shrink-0" />
-              You have <strong>{trialDaysLeft} days</strong> left in your free trial. Select a paid plan before it ends to keep your account active.
+              You have <strong>{trialDaysLeft} day{trialDaysLeft !== 1 ? "s" : ""}</strong> left in your free trial. Select a paid plan before it ends to keep your account active.
             </p>
+            {!onSubscriptionPage && (
+              <Link
+                to="/agency/subscription"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 shrink-0"
+              >
+                <CreditCard className="h-4 w-4" />
+                Choose a Plan
+              </Link>
+            )}
           </div>
         )}
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">

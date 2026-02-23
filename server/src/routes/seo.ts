@@ -226,10 +226,10 @@ async function getGoogleAdsLocationsCached(): Promise<DataForSEOGoogleAdsLocatio
   return googleAdsLocationsLoadPromise;
 }
 
-// Super Admin dashboard metrics (SUPER_ADMIN only)
+// Super Admin dashboard metrics (SUPER_ADMIN and ADMIN)
 router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== "SUPER_ADMIN") {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied" });
     }
     const now = new Date();
@@ -263,7 +263,7 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
 // Super Admin in-app notifications (pending requests, new signups) for bell dropdown
 router.get("/super-admin/notifications", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== "SUPER_ADMIN") {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied" });
     }
 
@@ -3456,8 +3456,8 @@ router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
 // Refresh keyword data from DataForSEO (SUPER_ADMIN only)
 router.post("/keywords/:clientId/:keywordId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN") {
+    // Only SUPER_ADMIN or ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
     }
 
@@ -3754,8 +3754,8 @@ router.delete("/keywords/:clientId/:keywordId", authenticateToken, async (req, r
 // Refresh dashboard data from DataForSEO (SUPER_ADMIN only)
 router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN") {
+    // Only SUPER_ADMIN or ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
     }
 
@@ -4013,8 +4013,8 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
 // Refresh top pages from DataForSEO (SUPER_ADMIN only)
 router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN") {
+    // Only SUPER_ADMIN or ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
     }
 
@@ -4133,8 +4133,8 @@ router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) 
 // Refresh backlinks from DataForSEO (SUPER_ADMIN only)
 router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN") {
+    // Only SUPER_ADMIN or ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
     }
 
@@ -4158,8 +4158,8 @@ router.post("/agency/dashboard/refresh", authenticateToken, async (req, res) => 
     return res.status(403).json({ message: "Trial ended. Contact support to add a paid plan to continue." });
   }
   try {
-    // Only SUPER_ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN") {
+    // Only SUPER_ADMIN or ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
     }
 
@@ -4702,7 +4702,7 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
     }
 
     // Tier-based AI refresh throttle (when force=true)
-    if (force && req.user.role !== "SUPER_ADMIN") {
+    if (force && req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       const agency = await prisma.agency.findFirst({
         where: { id: { in: userAgencyIds } },
         select: { subscriptionTier: true },
@@ -5081,7 +5081,7 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
         if (fresh) return latest;
         return await refreshSerpCache();
       });
-    } else if (!cacheFresh && req.user.role === "SUPER_ADMIN") {
+    } else if (!cacheFresh && (req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN")) {
       // Queue a background refresh (deduped) so the next load gets fresh data,
       // but keep this request fast (prevents frontend timeouts).
       serpRefreshQueued = true;
@@ -9589,8 +9589,8 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
 // Fetches 12 months of data: total keywords per month + position breakdown (1-3, 4-10, 11-20, 21-30, 31-50, 51+) from Historical Rank Overview API only.
 router.post("/ranked-keywords/:clientId/history/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN") {
+    // Only SUPER_ADMIN or ADMIN can refresh data
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
     }
 
@@ -11510,7 +11510,7 @@ router.post("/target-keywords/:clientId/refresh", authenticateToken, async (req,
 
     // Non-super-admin refresh: update rankings for existing tracked target keywords via SERP (limited).
     // This avoids relying on the expensive Keywords-for-site endpoint and fixes "no ranking data" issues.
-    if (req.user.role !== "SUPER_ADMIN") {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
       // Only allow users who can already view the client's dashboard (agency/admin ownership model)
       const userMemberships = await prisma.userAgency.findMany({
         where: { userId: req.user.userId },

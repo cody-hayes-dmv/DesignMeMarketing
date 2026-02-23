@@ -73,6 +73,10 @@ export const createAgency = createAsyncThunk(
     tier,
     customPricing,
     internalNotes,
+    enterpriseMaxDashboards,
+    enterpriseKeywordsTotal,
+    enterpriseCreditsPerMonth,
+    enterpriseMaxTeamUsers,
     referralSource,
     referralSourceOther,
     primaryGoals,
@@ -99,6 +103,10 @@ export const createAgency = createAsyncThunk(
     tier?: "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro";
     customPricing?: number | null;
     internalNotes?: string;
+    enterpriseMaxDashboards?: number;
+    enterpriseKeywordsTotal?: number;
+    enterpriseCreditsPerMonth?: number;
+    enterpriseMaxTeamUsers?: number;
     referralSource?: string;
     referralSourceOther?: string;
     primaryGoals?: string[];
@@ -127,6 +135,10 @@ export const createAgency = createAsyncThunk(
         tier,
         customPricing,
         internalNotes,
+        enterpriseMaxDashboards,
+        enterpriseKeywordsTotal,
+        enterpriseCreditsPerMonth,
+        enterpriseMaxTeamUsers,
         referralSource,
         referralSourceOther,
         primaryGoals,

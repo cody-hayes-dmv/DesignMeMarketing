@@ -246,7 +246,7 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
     }
 
     // Check permissions
-    if (user.role !== "SUPER_ADMIN") {
+    if (user.role !== "SUPER_ADMIN" && user.role !== "ADMIN") {
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId }
       });
@@ -310,7 +310,7 @@ router.delete("/templates/:id", authenticateToken, async (req, res) => {
     }
 
     // Check permissions
-    if (user.role !== "SUPER_ADMIN") {
+    if (user.role !== "SUPER_ADMIN" && user.role !== "ADMIN") {
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId }
       });

@@ -30,6 +30,8 @@ export interface AgencyTierContext {
   effectiveMaxDashboards: number | null;
   /** Total keyword cap (base tier keywordsTotal + extra keywords tracked add-ons). Account-wide. */
   effectiveKeywordCap: number;
+  /** Enterprise override for max team users (null = use tier default). */
+  effectiveMaxTeamUsers: number | null;
 }
 
 const now = () => new Date();
@@ -72,6 +74,7 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
     creditsResetsAt: null,
     effectiveMaxDashboards: null,
     effectiveKeywordCap: 0,
+    effectiveMaxTeamUsers: null,
   };
 
   if (role === "SUPER_ADMIN" || role === "ADMIN") {
@@ -85,6 +88,7 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
       creditsResetsAt: null,
       effectiveMaxDashboards: null,
       effectiveKeywordCap: 999999,
+      effectiveMaxTeamUsers: null,
     };
   }
 
@@ -115,6 +119,10 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
           trialEndsAt: true,
           keywordResearchCreditsUsed: true,
           keywordResearchCreditsResetAt: true,
+          enterpriseMaxDashboards: true,
+          enterpriseKeywordsTotal: true,
+          enterpriseCreditsPerMonth: true,
+          enterpriseMaxTeamUsers: true,
         },
       },
     },
@@ -178,8 +186,9 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
     creditsUsed = reset.used;
     creditsResetsAt = reset.resetsAt;
   }
-  let creditsLimit = tierConfig?.researchCreditsPerMonth ?? 0;
-  let effectiveMaxDashboards: number | null = tierConfig?.maxDashboards ?? null;
+  const ent = agency as { enterpriseMaxDashboards?: number | null; enterpriseKeywordsTotal?: number | null; enterpriseCreditsPerMonth?: number | null; enterpriseMaxTeamUsers?: number | null };
+  let creditsLimit = ent.enterpriseCreditsPerMonth ?? tierConfig?.researchCreditsPerMonth ?? 0;
+  let effectiveMaxDashboards: number | null = ent.enterpriseMaxDashboards ?? tierConfig?.maxDashboards ?? null;
 
   const addOns = await prisma.agencyAddOn.findMany({
     where: { agencyId: agency.id },
@@ -209,7 +218,7 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
     }
   }
 
-  const baseKeywords = tierConfig?.keywordsTotal ?? 0;
+  const baseKeywords = ent.enterpriseKeywordsTotal ?? tierConfig?.keywordsTotal ?? 0;
   const effectiveKeywordCap = baseKeywords + addOnKeywords;
 
   return {
@@ -228,6 +237,7 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
     creditsResetsAt,
     effectiveMaxDashboards,
     effectiveKeywordCap,
+    effectiveMaxTeamUsers: ent.enterpriseMaxTeamUsers ?? tierConfig?.maxTeamUsers ?? null,
   };
 }
 
@@ -292,7 +302,7 @@ export function canAddTargetKeyword(ctx: AgencyTierContext, _clientId: string): 
 export function canAddTeamMember(ctx: AgencyTierContext): { allowed: boolean; message?: string } {
   if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
-  const max = ctx.tierConfig.maxTeamUsers;
+  const max = ctx.effectiveMaxTeamUsers;
   if (max === null) return { allowed: true };
   if (ctx.teamMemberCount >= max) {
     return {

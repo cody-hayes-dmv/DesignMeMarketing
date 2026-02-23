@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useRef, useImperativeHandle, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, updateAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
 import { updateClient, deleteClient, archiveClient, restoreClient } from "@/store/slices/clientSlice";
-import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, ChevronLeft, Archive, RotateCcw, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle, FileText, Copy, ExternalLink } from "lucide-react";
+import { Plus, Users, X, Eye, Building2 as BuildingIcon, Share2, Edit, Trash2, ChevronDown, ChevronRight, ChevronLeft, Archive, RotateCcw, UserMinus, ArrowUp, ArrowDown, Search, AlertCircle, FileText, Copy, ExternalLink, Calendar, Clock } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
@@ -82,6 +82,7 @@ interface AgencyClient {
   industry: string | null;
   status: string;
   canceledEndDate?: string | null;
+  scheduledArchiveAt?: string | null;
   createdAt: string;
   keywords: number;
   avgPosition: number | null;
@@ -119,9 +120,11 @@ const AgenciesPage = () => {
     const [openStatusId, setOpenStatusId] = useState("");
     const [showShareModal, setShowShareModal] = useState(false);
     const [shareLink, setShareLink] = useState("");
-    const [archiveConfirm, setArchiveConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
+    const [archiveConfirm, setArchiveConfirm] = useState<{ isOpen: boolean; clientId: string | null; mode: "choose" | "now" | "schedule"; scheduledDate: string }>({
         isOpen: false,
         clientId: null,
+        mode: "choose",
+        scheduledDate: "",
     });
     const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState<{ isOpen: boolean; clientId: string | null }>({
         isOpen: false,
@@ -175,6 +178,10 @@ const AgenciesPage = () => {
         primaryGoals: [] as string[],
         primaryGoalsOther: "",
         currentTools: "",
+        enterpriseMaxDashboards: "" as string | number,
+        enterpriseKeywordsTotal: "" as string | number,
+        enterpriseCreditsPerMonth: "" as string | number,
+        enterpriseMaxTeamUsers: "" as string | number,
     };
     const [createForm, setCreateForm] = useState(initialCreateForm);
     const initialEditForm = {
@@ -278,6 +285,10 @@ const AgenciesPage = () => {
                         tier: f.tier || undefined,
                         customPricing: f.billingOption === "manual_invoice" && f.customPricing !== "" ? Number(f.customPricing) : undefined,
                         internalNotes: f.internalNotes || undefined,
+                        enterpriseMaxDashboards: f.enterpriseMaxDashboards !== "" && f.enterpriseMaxDashboards != null ? Number(f.enterpriseMaxDashboards) : undefined,
+                        enterpriseKeywordsTotal: f.enterpriseKeywordsTotal !== "" && f.enterpriseKeywordsTotal != null ? Number(f.enterpriseKeywordsTotal) : undefined,
+                        enterpriseCreditsPerMonth: f.enterpriseCreditsPerMonth !== "" && f.enterpriseCreditsPerMonth != null ? Number(f.enterpriseCreditsPerMonth) : undefined,
+                        enterpriseMaxTeamUsers: f.enterpriseMaxTeamUsers !== "" && f.enterpriseMaxTeamUsers != null ? Number(f.enterpriseMaxTeamUsers) : undefined,
                         referralSource: f.referralSource || undefined,
                         referralSourceOther: f.referralSource === "referral" ? f.referralSourceOther : undefined,
                         primaryGoals: (f.primaryGoals?.length ? f.primaryGoals : undefined) as string[] | undefined,
@@ -301,6 +312,36 @@ const AgenciesPage = () => {
                 toast.error(msg);
             });
     }, [dispatch]);
+
+    const handledEnterpriseCreate = useRef(false);
+    useEffect(() => {
+        if (handledEnterpriseCreate.current) return;
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("create") !== "1") return;
+        handledEnterpriseCreate.current = true;
+        const tier = params.get("tier") || "";
+        const customPricing = params.get("customPricing") || "";
+        const dashboards = params.get("dashboards") || "";
+        const keywords = params.get("keywords") || "";
+        const credits = params.get("credits") || "";
+        const teamUsers = params.get("teamUsers") || "";
+        setCreateForm((prev) => ({
+            ...prev,
+            billingOption: "manual_invoice" as const,
+            tier: (tier || "") as typeof prev.tier,
+            customPricing: customPricing ? Number(customPricing) : "",
+            enterpriseMaxDashboards: dashboards ? Number(dashboards) : "",
+            enterpriseKeywordsTotal: keywords ? Number(keywords) : "",
+            enterpriseCreditsPerMonth: credits ? Number(credits) : "",
+            enterpriseMaxTeamUsers: teamUsers ? Number(teamUsers) : "",
+            internalNotes: tier === "enterprise"
+                ? `Enterprise config: ${dashboards} dashboards, ${keywords} keywords, ${credits} credits/mo, ${teamUsers} team users`
+                : "",
+        }));
+        setShowCreateModal(true);
+        setCreateModalStep(4);
+        window.history.replaceState({}, "", window.location.pathname);
+    }, []);
 
     useEffect(() => {
         const needsCard = createForm.billingOption === "charge" || createForm.billingOption === "manual_invoice";
@@ -412,6 +453,10 @@ const AgenciesPage = () => {
                 tier: (createForm.billingOption === "no_charge" || createForm.billingOption === "free_account") ? undefined : (createForm.tier || undefined),
                 customPricing: createForm.billingOption === "manual_invoice" && createForm.customPricing !== "" ? Number(createForm.customPricing) : undefined,
                 internalNotes: createForm.internalNotes || undefined,
+                enterpriseMaxDashboards: createForm.enterpriseMaxDashboards !== "" ? Number(createForm.enterpriseMaxDashboards) : undefined,
+                enterpriseKeywordsTotal: createForm.enterpriseKeywordsTotal !== "" ? Number(createForm.enterpriseKeywordsTotal) : undefined,
+                enterpriseCreditsPerMonth: createForm.enterpriseCreditsPerMonth !== "" ? Number(createForm.enterpriseCreditsPerMonth) : undefined,
+                enterpriseMaxTeamUsers: createForm.enterpriseMaxTeamUsers !== "" ? Number(createForm.enterpriseMaxTeamUsers) : undefined,
                 referralSource: createForm.referralSource || undefined,
                 referralSourceOther: createForm.referralSource === "referral" ? createForm.referralSourceOther : undefined,
                 primaryGoals: createForm.primaryGoals.length ? createForm.primaryGoals : undefined,
@@ -831,21 +876,31 @@ const AgenciesPage = () => {
     };
 
     const handleArchiveClient = (id: string) => {
-        setArchiveConfirm({ isOpen: true, clientId: id });
+        setArchiveConfirm({ isOpen: true, clientId: id, mode: "choose", scheduledDate: "" });
     };
 
-    const confirmArchiveClient = async () => {
+    const confirmArchiveClient = async (mode: "now" | "schedule" = "now") => {
         if (!archiveConfirm.clientId) return;
         try {
-            await dispatch(archiveClient({ id: archiveConfirm.clientId }) as any);
-            toast.success("Client archived successfully!");
-            setArchiveConfirm({ isOpen: false, clientId: null });
+            const payload: { id: string; scheduledDate?: string } = { id: archiveConfirm.clientId };
+            if (mode === "schedule" && archiveConfirm.scheduledDate) {
+                payload.scheduledDate = archiveConfirm.scheduledDate;
+            }
+            const result = await dispatch(archiveClient(payload) as any);
+            if (result?.error) throw new Error(result.error.message || "Failed to archive client");
+            if (mode === "schedule" && archiveConfirm.scheduledDate) {
+                const d = new Date(archiveConfirm.scheduledDate);
+                toast.success(`Client scheduled to archive on ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`);
+            } else {
+                toast.success("Client archived successfully!");
+            }
             if (selectedAgencyId) handleViewClients(selectedAgencyId, selectedAgencyName);
             if (expandedAgencyId) await refreshAgencyClientsCache(expandedAgencyId);
         } catch (error: any) {
             console.error("Failed to archive client:", error);
             toast.error(error?.message || "Failed to archive client");
-            setArchiveConfirm({ isOpen: false, clientId: null });
+        } finally {
+            setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" });
         }
     };
 
@@ -879,6 +934,20 @@ const AgenciesPage = () => {
             toast.error(error?.message || "Failed to restore client");
         }
     };
+
+    const handleCancelScheduledArchive = async (id: string) => {
+        try {
+            await api.patch(`/clients/${id}/cancel-scheduled-archive`);
+            toast.success("Scheduled archive canceled");
+            if (selectedAgencyId) handleViewClients(selectedAgencyId, selectedAgencyName);
+            if (expandedAgencyId) await refreshAgencyClientsCache(expandedAgencyId);
+        } catch (error: any) {
+            console.error("Failed to cancel scheduled archive:", error);
+            toast.error(error?.response?.data?.message || "Failed to cancel scheduled archive");
+        }
+    };
+
+    const isArchivedStatus = (status: string) => status === "ARCHIVED" || status === "REJECTED";
 
     const handleSort = (field: "agency" | "subdomain" | "clients") => {
         if (sortField === field) {
@@ -1220,6 +1289,12 @@ const AgenciesPage = () => {
                                                                                             {format(new Date(client.canceledEndDate), "MMM d, yyyy")}
                                                                                         </span>
                                                                                     )}
+                                                                                    {client.scheduledArchiveAt && !isArchivedStatus(client.status) && (
+                                                                                        <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700" title={`Scheduled to archive on ${format(new Date(client.scheduledArchiveAt), "MMM d, yyyy")}`}>
+                                                                                            <Clock className="h-2.5 w-2.5" />
+                                                                                            {format(new Date(client.scheduledArchiveAt), "MMM d")}
+                                                                                        </span>
+                                                                                    )}
                                                                                     {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
                                                                                         <div
                                                                                             data-status-dropdown-menu
@@ -1322,7 +1397,7 @@ const AgenciesPage = () => {
                                                                                     >
                                                                                         <UserMinus className="h-4 w-4" />
                                                                                     </button>
-                                                                                    {client.status === "ARCHIVED" || client.status === "REJECTED" ? (
+                                                                                    {isArchivedStatus(client.status) ? (
                                                                                         <>
                                                                                             <button
                                                                                                 className="p-1 text-gray-400 hover:text-green-600 transition-colors"
@@ -1339,6 +1414,14 @@ const AgenciesPage = () => {
                                                                                                 <Trash2 className="h-4 w-4" />
                                                                                             </button>
                                                                                         </>
+                                                                                    ) : client.scheduledArchiveAt ? (
+                                                                                        <button
+                                                                                            className="p-1 text-amber-500 hover:text-amber-700 transition-colors"
+                                                                                            onClick={(e) => { e.stopPropagation(); handleCancelScheduledArchive(client.id); }}
+                                                                                            title={`Scheduled to archive on ${format(new Date(client.scheduledArchiveAt), "MMM d, yyyy")} — click to cancel`}
+                                                                                        >
+                                                                                            <Clock className="h-4 w-4" />
+                                                                                        </button>
                                                                                     ) : (
                                                                                         <button
                                                                                             className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
@@ -1538,8 +1621,7 @@ const AgenciesPage = () => {
                                 </section>
                                 </>
                                 )}
-                                {createModalStep === 4 && (
-                                <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5">
+                                <section className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-4 sm:p-5" style={{ display: createModalStep === 4 ? undefined : 'none' }}>
                                     <h3 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
                                         BILLING & SUBSCRIPTION
@@ -1620,6 +1702,32 @@ const AgenciesPage = () => {
                                                     <label className="block text-sm font-medium text-gray-700 mb-1">Custom pricing</label>
                                                     <input type="number" step="0.01" min={0} value={createForm.customPricing} onChange={(e) => setCreateForm({ ...createForm, customPricing: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="0.00" />
                                                 </div>
+                                                {createForm.tier === "enterprise" && (
+                                                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 space-y-3">
+                                                        <p className="text-xs font-semibold uppercase tracking-wider text-violet-600">Enterprise Account Limits</p>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Client Dashboards</label>
+                                                                <input type="number" min={1} value={createForm.enterpriseMaxDashboards} onChange={(e) => setCreateForm({ ...createForm, enterpriseMaxDashboards: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="Unlimited" />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Tracked Keywords (account-wide)</label>
+                                                                <input type="number" min={1} value={createForm.enterpriseKeywordsTotal} onChange={(e) => setCreateForm({ ...createForm, enterpriseKeywordsTotal: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="5000" />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Research Credits / Month</label>
+                                                                <input type="number" min={0} value={createForm.enterpriseCreditsPerMonth} onChange={(e) => setCreateForm({ ...createForm, enterpriseCreditsPerMonth: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="3000" />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Team Users</label>
+                                                                <input type="number" min={1} value={createForm.enterpriseMaxTeamUsers} onChange={(e) => setCreateForm({ ...createForm, enterpriseMaxTeamUsers: e.target.value === "" ? "" : Number(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-violet-500" placeholder="Unlimited" />
+                                                            </div>
+                                                        </div>
+                                                        <div className="rounded-md bg-violet-100/50 px-3 py-2 text-xs text-violet-700">
+                                                            Rank updates every 6 hours (4x daily) · Daily AI Intelligence updates
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 <div>
                                                     <label className="block text-sm font-medium text-gray-700 mb-1">Internal notes</label>
                                                     <textarea value={createForm.internalNotes} onChange={(e) => setCreateForm({ ...createForm, internalNotes: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Notes for internal use" />
@@ -1628,7 +1736,6 @@ const AgenciesPage = () => {
                                         )}
                                     </div>
                                 </section>
-                                )}
                                 {createModalStep === 5 && (
                                 <>
                                 <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
@@ -2263,6 +2370,12 @@ const AgenciesPage = () => {
                                                                 {format(new Date(client.canceledEndDate), "MMM d, yyyy")}
                                                             </span>
                                                         )}
+                                                        {client.scheduledArchiveAt && !isArchivedStatus(client.status) && (
+                                                            <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700" title={`Scheduled to archive on ${format(new Date(client.scheduledArchiveAt), "MMM d, yyyy")}`}>
+                                                                <Clock className="h-2.5 w-2.5" />
+                                                                {format(new Date(client.scheduledArchiveAt), "MMM d")}
+                                                            </span>
+                                                        )}
                                                         {openStatusId === client.id && statusButtonRefs.current[client.id] && createPortal(
                                                             <div 
                                                                 data-status-dropdown-menu
@@ -2356,7 +2469,7 @@ const AgenciesPage = () => {
                                                         >
                                                             <UserMinus className="h-4 w-4" />
                                                         </button>
-                                                        {client.status === "ARCHIVED" || client.status === "REJECTED" ? (
+                                                        {isArchivedStatus(client.status) ? (
                                                             <>
                                                                 <button
                                                                     className="p-1 text-gray-400 hover:text-green-600 transition-colors"
@@ -2373,6 +2486,14 @@ const AgenciesPage = () => {
                                                                     <Trash2 className="h-4 w-4" />
                                                                 </button>
                                                             </>
+                                                        ) : client.scheduledArchiveAt ? (
+                                                            <button
+                                                                className="p-1 text-amber-500 hover:text-amber-700 transition-colors"
+                                                                onClick={() => handleCancelScheduledArchive(client.id)}
+                                                                title={`Scheduled to archive on ${format(new Date(client.scheduledArchiveAt), "MMM d, yyyy")} — click to cancel`}
+                                                            >
+                                                                <Clock className="h-4 w-4" />
+                                                            </button>
                                                         ) : (
                                                             <button
                                                                 className="p-1 text-gray-400 hover:text-amber-600 transition-colors"
@@ -2455,17 +2576,97 @@ const AgenciesPage = () => {
                 </div>
             )}
 
-            {/* Archive Confirmation Dialog */}
+            {/* Archive Dialog with Now / Schedule options */}
             {archiveConfirm.isOpen && (
-                <ConfirmDialog
-                    isOpen={archiveConfirm.isOpen}
-                    onClose={() => setArchiveConfirm({ isOpen: false, clientId: null })}
-                    onConfirm={confirmArchiveClient}
-                    title="Archive Client"
-                    message="This client will be moved to the archive. All data fetching and billing will stop. You can restore it later."
-                    confirmText="Archive"
-                    variant="danger"
-                />
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div className="fixed inset-0 bg-black/50" onClick={() => setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" })} />
+                    <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+                        <button
+                            onClick={() => setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" })}
+                            className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30">
+                                <Archive className="w-5 h-5 text-red-600 dark:text-red-400" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Archive Client</h3>
+                        </div>
+
+                        {archiveConfirm.mode === "choose" && (
+                            <>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-5">
+                                    This client will be moved to the archive. All data fetching and billing will stop. You can restore it later from the Archived tab.
+                                </p>
+                                <div className="flex flex-col gap-3">
+                                    <button
+                                        onClick={() => confirmArchiveClient("now")}
+                                        className="flex items-center gap-3 w-full px-4 py-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors text-left"
+                                    >
+                                        <Archive className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+                                        <div>
+                                            <div className="font-medium text-red-700 dark:text-red-300">Archive Now</div>
+                                            <div className="text-xs text-red-500 dark:text-red-400/70">Immediately archive this client</div>
+                                        </div>
+                                    </button>
+                                    <button
+                                        onClick={() => setArchiveConfirm(prev => ({ ...prev, mode: "schedule" }))}
+                                        className="flex items-center gap-3 w-full px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                                    >
+                                        <Calendar className="w-5 h-5 text-gray-600 dark:text-gray-400 flex-shrink-0" />
+                                        <div>
+                                            <div className="font-medium text-gray-700 dark:text-gray-200">Schedule Archive Date</div>
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">Set a future date to automatically archive</div>
+                                        </div>
+                                    </button>
+                                </div>
+                                <div className="flex justify-end mt-4">
+                                    <button
+                                        onClick={() => setArchiveConfirm({ isOpen: false, clientId: null, mode: "choose", scheduledDate: "" })}
+                                        className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </>
+                        )}
+
+                        {archiveConfirm.mode === "schedule" && (
+                            <>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                                    Choose a date to automatically archive this client. The client will remain active until that date.
+                                </p>
+                                <div className="mb-5">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Archive Date</label>
+                                    <input
+                                        type="date"
+                                        value={archiveConfirm.scheduledDate}
+                                        min={format(new Date(Date.now() + 86400000), "yyyy-MM-dd")}
+                                        onChange={(e) => setArchiveConfirm(prev => ({ ...prev, scheduledDate: e.target.value }))}
+                                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    />
+                                </div>
+                                <div className="flex justify-between">
+                                    <button
+                                        onClick={() => setArchiveConfirm(prev => ({ ...prev, mode: "choose", scheduledDate: "" }))}
+                                        className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                    >
+                                        Back
+                                    </button>
+                                    <button
+                                        onClick={() => confirmArchiveClient("schedule")}
+                                        disabled={!archiveConfirm.scheduledDate}
+                                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        Schedule Archive
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
             )}
 
             {/* Permanent Delete Confirmation Dialog */}
