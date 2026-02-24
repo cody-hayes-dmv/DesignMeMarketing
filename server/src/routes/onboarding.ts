@@ -80,11 +80,53 @@ async function ensureDefaultTemplateForAgency(agencyId: string) {
   });
 }
 
-const includeTasks = { tasks: { orderBy: { order: "asc" as const } } };
+const taskSelectWithDueDays = {
+  id: true,
+  title: true,
+  description: true,
+  category: true,
+  priority: true,
+  estimatedHours: true,
+  dueDate: true,
+  dueDaysAfterStart: true,
+  order: true,
+};
+
+const taskSelectWithoutDueDays = {
+  id: true,
+  title: true,
+  description: true,
+  category: true,
+  priority: true,
+  estimatedHours: true,
+  dueDate: true,
+  order: true,
+};
+
+const includeTasksWithDueDays = {
+  tasks: { orderBy: { order: "asc" as const }, select: taskSelectWithDueDays },
+};
+
+const includeTasksWithoutDueDays = {
+  tasks: { orderBy: { order: "asc" as const }, select: taskSelectWithoutDueDays },
+};
 
 function isUnknownDueDaysAfterStartArg(error: any): boolean {
   const msg = String(error?.message || "");
   return msg.includes("Unknown argument `dueDaysAfterStart`");
+}
+
+function isMissingDueDaysAfterStartColumn(error: any): boolean {
+  const msg = String(error?.message || "");
+  const col = String(error?.meta?.column || "");
+  return (
+    (error?.code === "P2022" && col.includes("onboarding_tasks.due_days_after_start")) ||
+    msg.includes("due_days_after_start")
+  );
+}
+
+function canFallbackDueDaysAfterStart(error: any): boolean {
+  return isUnknownDueDaysAfterStartArg(error) || isMissingDueDaysAfterStartColumn(error);
 }
 
 // Get onboarding templates. Client-based: agency/admin see only global template(s). Super admin sees all.
@@ -95,9 +137,17 @@ router.get("/templates", authenticateToken, async (req, res) => {
     await ensureDefaultGlobalTemplate();
 
     if (user.role === "SUPER_ADMIN") {
-      const templates = await prisma.onboardingTemplate.findMany({
-        include: includeTasks,
-      });
+      let templates;
+      try {
+        templates = await prisma.onboardingTemplate.findMany({
+          include: includeTasksWithDueDays,
+        });
+      } catch (error: any) {
+        if (!canFallbackDueDaysAfterStart(error)) throw error;
+        templates = await prisma.onboardingTemplate.findMany({
+          include: includeTasksWithoutDueDays,
+        });
+      }
       return res.json(templates);
     }
 
@@ -107,12 +157,22 @@ router.get("/templates", authenticateToken, async (req, res) => {
         where: { userId: user.userId },
       });
       const agencyId = userAgency?.agencyId ?? undefined;
-      const templates = await prisma.onboardingTemplate.findMany({
-        where: agencyId
-          ? { OR: [{ agencyId: null }, { agencyId }] }
-          : { agencyId: null },
-        include: includeTasks,
-      });
+      const where = agencyId
+        ? { OR: [{ agencyId: null }, { agencyId }] }
+        : { agencyId: null };
+      let templates;
+      try {
+        templates = await prisma.onboardingTemplate.findMany({
+          where,
+          include: includeTasksWithDueDays,
+        });
+      } catch (error: any) {
+        if (!canFallbackDueDaysAfterStart(error)) throw error;
+        templates = await prisma.onboardingTemplate.findMany({
+          where,
+          include: includeTasksWithoutDueDays,
+        });
+      }
       return res.json(templates);
     }
 
@@ -130,9 +190,17 @@ router.get("/templates/manageable", authenticateToken, async (req, res) => {
     const user = req.user;
 
     if (user.role === "SUPER_ADMIN") {
-      const templates = await prisma.onboardingTemplate.findMany({
-        include: { ...includeTasks, agency: { select: { id: true, name: true } } },
-      });
+      let templates;
+      try {
+        templates = await prisma.onboardingTemplate.findMany({
+          include: { ...includeTasksWithDueDays, agency: { select: { id: true, name: true } } },
+        });
+      } catch (error: any) {
+        if (!canFallbackDueDaysAfterStart(error)) throw error;
+        templates = await prisma.onboardingTemplate.findMany({
+          include: { ...includeTasksWithoutDueDays, agency: { select: { id: true, name: true } } },
+        });
+      }
       return res.json(templates);
     }
 
@@ -143,10 +211,19 @@ router.get("/templates/manageable", authenticateToken, async (req, res) => {
       if (!userAgency) {
         return res.json([]);
       }
-      const templates = await prisma.onboardingTemplate.findMany({
-        where: { agencyId: userAgency.agencyId },
-        include: includeTasks,
-      });
+      let templates;
+      try {
+        templates = await prisma.onboardingTemplate.findMany({
+          where: { agencyId: userAgency.agencyId },
+          include: includeTasksWithDueDays,
+        });
+      } catch (error: any) {
+        if (!canFallbackDueDaysAfterStart(error)) throw error;
+        templates = await prisma.onboardingTemplate.findMany({
+          where: { agencyId: userAgency.agencyId },
+          include: includeTasksWithoutDueDays,
+        });
+      }
       return res.json(templates);
     }
 
@@ -222,15 +299,11 @@ router.post("/templates", authenticateToken, async (req, res) => {
             }))
           }
         },
-        include: {
-          tasks: {
-            orderBy: { order: "asc" }
-          }
-        }
+        include: includeTasksWithDueDays
       });
     } catch (error: any) {
-      if (!isUnknownDueDaysAfterStartArg(error)) throw error;
-      // Backward compatibility when Prisma client is not regenerated yet.
+      if (!canFallbackDueDaysAfterStart(error)) throw error;
+      // Backward compatibility when Prisma client/database is not synced yet.
       template = await prisma.onboardingTemplate.create({
         data: {
           name,
@@ -249,11 +322,7 @@ router.post("/templates", authenticateToken, async (req, res) => {
             }))
           }
         },
-        include: {
-          tasks: {
-            orderBy: { order: "asc" }
-          }
-        }
+        include: includeTasksWithoutDueDays
       });
     }
 
@@ -322,15 +391,11 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
             }))
           }
         },
-        include: {
-          tasks: {
-            orderBy: { order: "asc" }
-          }
-        }
+        include: includeTasksWithDueDays
       });
     } catch (error: any) {
-      if (!isUnknownDueDaysAfterStartArg(error)) throw error;
-      // Backward compatibility when Prisma client is not regenerated yet.
+      if (!canFallbackDueDaysAfterStart(error)) throw error;
+      // Backward compatibility when Prisma client/database is not synced yet.
       template = await prisma.onboardingTemplate.update({
         where: { id },
         data: {
@@ -350,11 +415,7 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
             }))
           }
         },
-        include: {
-          tasks: {
-            orderBy: { order: "asc" }
-          }
-        }
+        include: includeTasksWithoutDueDays
       });
     }
 
