@@ -1352,15 +1352,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       </div>
                     ))}
                   </div>
-                  <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+                  <div className="px-4 py-3 border-t border-gray-100">
                     <p className="text-xs text-gray-600">View {overview.client?.domain ?? "this domain"} key topics</p>
-                    <button
-                      type="button"
-                      onClick={() => onGetTopics?.(overview.client?.domain ?? "")}
-                      className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 shadow-sm"
-                    >
-                      Get topics
-                    </button>
                   </div>
                 </div>
               </div>
@@ -1395,11 +1388,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                  <div className="px-4 py-3 border-t border-gray-100">
-                    <button type="button" onClick={() => setIntentModalOpen(true)} className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 shadow-sm">
-                      View details
-                    </button>
                   </div>
                 </div>
                 <div className="rounded-lg border border-gray-200 border-l-4 border-l-indigo-500 overflow-hidden bg-indigo-50/40">

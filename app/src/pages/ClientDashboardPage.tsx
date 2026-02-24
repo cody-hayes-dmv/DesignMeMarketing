@@ -285,11 +285,14 @@ const ClientDashboardPage: React.FC = () => {
   const { user } = useSelector((state: RootState) => state.auth);
   const isClientPortal = location.pathname.startsWith("/client/");
   const clientPortalMode = isClientPortal && user?.role === "USER";
+  const navState = location.state as { reportOnly?: boolean; includedReadOnly?: boolean } | null;
   // When in client portal, we show only the Dashboard view for the invited client.
-  const reportOnly = Boolean((location.state as any)?.reportOnly);
+  const reportOnly = Boolean(navState?.reportOnly);
+  const includedReadOnlyFromState = Boolean(navState?.includedReadOnly);
   // Client portal: list of accessible clients (for the client switcher)
   const [clientPortalClients, setClientPortalClients] = useState<Array<{ id: string; name: string }>>([]);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
+  const [includedClientIds, setIncludedClientIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   type ClientDashboardTopTab = "dashboard" | "report" | "users" | "keywords" | "integration";
   type ClientDashboardSection = "seo" | "ai-intelligence" | "ppc" | "backlinks" | "worklog";
@@ -310,6 +313,10 @@ const ClientDashboardPage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<ClientDashboardTopTab>(initialNav.tab);
   const [dashboardSection, setDashboardSection] = useState<ClientDashboardSection>(initialNav.section);
+  const includedClientReadOnly =
+    user?.role === "AGENCY" &&
+    (includedReadOnlyFromState || (!!clientId && includedClientIds.includes(clientId)));
+  const canModifyClientSettings = !includedClientReadOnly;
 
   // Client portal guard: if a client user hits a clientId they don't have access to,
   // redirect them to their first allowed client dashboard (or login).
@@ -340,6 +347,31 @@ const ClientDashboardPage: React.FC = () => {
     };
     void run();
   }, [clientPortalMode]);
+
+  useEffect(() => {
+    if (user?.role !== "AGENCY") {
+      setIncludedClientIds([]);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await api.get("/agencies/included-clients");
+        if (cancelled) return;
+        const rows = Array.isArray(res.data) ? res.data : [];
+        const ids = rows
+          .map((row: any) => String(row?.clientId ?? row?.client?.id ?? ""))
+          .filter((id: string) => id.length > 0);
+        setIncludedClientIds(ids);
+      } catch {
+        if (!cancelled) setIncludedClientIds([]);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role]);
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
@@ -2347,7 +2379,7 @@ const ClientDashboardPage: React.FC = () => {
   }, [activeTab, dashboardSection, fetchBacklinksList]);
 
   const openAddBacklink = useCallback(() => {
-    if (reportOnly) return;
+    if (reportOnly || includedClientReadOnly) return;
     const defaultTarget = (() => {
       const domain = (client?.domain || "").trim();
       if (!domain) return "";
@@ -2356,7 +2388,7 @@ const ClientDashboardPage: React.FC = () => {
     })();
     setAddBacklinkForm({ sourceUrl: "", targetUrl: defaultTarget, anchorText: "", domainRating: "", isFollow: true });
     setAddBacklinkModalOpen(true);
-  }, [client?.domain, reportOnly]);
+  }, [client?.domain, reportOnly, includedClientReadOnly]);
 
   const submitAddBacklink = useCallback(async () => {
     if (!clientId) return;
@@ -2766,13 +2798,14 @@ const ClientDashboardPage: React.FC = () => {
   }, [serverReport, clientId]);
 
   const handleCreateReportClick = useCallback(() => {
+    if (includedClientReadOnly) return;
     if (!clientId) {
       toast.error("Client ID is missing");
       return;
     }
     // Open the client-specific report creation modal
     setShowClientReportModal(true);
-  }, [clientId]);
+  }, [clientId, includedClientReadOnly]);
 
   // When Create Report modal opens, initialize Recipients and Email Subject from existing schedule or previous input (only on open, not when serverReport updates)
   const prevShowClientReportModal = useRef(false);
@@ -2947,6 +2980,7 @@ const ClientDashboardPage: React.FC = () => {
   }, [clientId, viewReportModalOpen]);
 
   const handleSendReport = useCallback(async () => {
+    if (includedClientReadOnly) return;
     if (!singleReportForClient) {
       toast.error("No report to send for this client");
       return;
@@ -2971,9 +3005,10 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setSendingReport(false);
     }
-  }, [singleReportForClient, loadReport]);
+  }, [singleReportForClient, loadReport, includedClientReadOnly]);
 
   const handleDeleteReport = useCallback(async () => {
+    if (includedClientReadOnly) return;
     if (!singleReportForClient) {
       toast.error("No report to delete for this client");
       return;
@@ -2983,7 +3018,7 @@ const ClientDashboardPage: React.FC = () => {
       reportId: singleReportForClient.id,
       label: singleReportForClient.name,
     });
-  }, [singleReportForClient]);
+  }, [singleReportForClient, includedClientReadOnly]);
 
   const confirmDeleteReport = useCallback(async () => {
     if (!reportDeleteConfirm.reportId) {
@@ -3625,6 +3660,7 @@ const ClientDashboardPage: React.FC = () => {
   const dashboardRightPanelScrollRef = useRef<HTMLDivElement | null>(null);
 
   const handleInviteUserClick = useCallback(() => {
+    if (includedClientReadOnly) return;
     setInviteClientUsersModalOpen(true);
     setInviteClientUsersRows((prev) => {
       // Initialize with one blank row (preselect current client if available)
@@ -3638,7 +3674,7 @@ const ClientDashboardPage: React.FC = () => {
       ];
     });
     setInviteClientUsersViaEmail(true);
-  }, [clientId]);
+  }, [clientId, includedClientReadOnly]);
 
   useEffect(() => {
     const run = async () => {
@@ -4343,8 +4379,9 @@ const ClientDashboardPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleCreateReportClick}
-                  className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
-                  title="Create report"
+                  disabled={!canModifyClientSettings}
+                  className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  title={canModifyClientSettings ? "Create report" : "Included clients are view-only"}
                 >
                   Create Report
                 </button>
@@ -4356,8 +4393,9 @@ const ClientDashboardPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleInviteUserClick}
-                  className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
-                  title="Invite user"
+                  disabled={!canModifyClientSettings}
+                  className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  title={canModifyClientSettings ? "Invite user" : "Included clients are view-only"}
                 >
                   Invite User
                 </button>
@@ -6236,7 +6274,8 @@ const ClientDashboardPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setImportBacklinksModalOpen(true)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                            disabled={!canModifyClientSettings}
+                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <Upload className="h-4 w-4" />
                             <span>Import Backlink</span>
@@ -6244,7 +6283,8 @@ const ClientDashboardPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={openAddBacklink}
-                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
+                            disabled={!canModifyClientSettings}
+                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <Plus className="h-4 w-4" />
                             <span>Add Backlink</span>
@@ -6552,8 +6592,9 @@ const ClientDashboardPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setWorkLogAddMenuOpen((o) => !o)}
-                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
-                            title="Add entry"
+                            disabled={!canModifyClientSettings}
+                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            title={canModifyClientSettings ? "Add entry" : "Included clients are view-only"}
                           >
                             <Plus className="h-4 w-4" />
                             <span>Add Entry</span>
@@ -7198,7 +7239,7 @@ const ClientDashboardPage: React.FC = () => {
               )}
 
               {/* Add Backlink Modal */}
-              {!reportOnly &&
+              {!reportOnly && !includedClientReadOnly &&
                 addBacklinkModalOpen &&
                 createPortal(
                   <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -7293,7 +7334,7 @@ const ClientDashboardPage: React.FC = () => {
                 )}
 
               {/* Import Backlinks Modal */}
-              {!reportOnly &&
+              {!reportOnly && !includedClientReadOnly &&
                 importBacklinksModalOpen &&
                 createPortal(
                   <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -7614,7 +7655,7 @@ const ClientDashboardPage: React.FC = () => {
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900">Keywords</h2>
                   </div>
-                  <ClientKeywordsManager clientId={clientId} />
+                  <ClientKeywordsManager clientId={clientId} readOnly={includedClientReadOnly} />
                 </div>
               )}
               {!reportOnly && activeTab === "integration" && (
@@ -7721,9 +7762,12 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                       <button
                         type="button"
-                        className="p-2 rounded-full hover:bg-gray-100 text-gray-500"
-                        title="More"
-                        onClick={() => toast("More actions coming soon.")}
+                        disabled={includedClientReadOnly}
+                        className="p-2 rounded-full hover:bg-gray-100 text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={includedClientReadOnly ? "Included clients are view-only" : "More"}
+                        onClick={() => {
+                          if (!includedClientReadOnly) toast("More actions coming soon.");
+                        }}
                       >
                         <MoreVertical className="h-5 w-5" />
                       </button>
@@ -7802,7 +7846,7 @@ const ClientDashboardPage: React.FC = () => {
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap text-sm text-violet-800/90">{lastLogin}</td>
                                   <td className="px-6 py-4 whitespace-nowrap text-right">
-                                    {u.role === "CLIENT" ? (
+                                    {u.role === "CLIENT" && !includedClientReadOnly ? (
                                       <div className="relative inline-block">
                                         <button
                                           type="button"
@@ -7846,7 +7890,8 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {clientUserMoreMenu &&
+                  {!includedClientReadOnly &&
+                    clientUserMoreMenu &&
                     typeof window !== "undefined" &&
                     createPortal(
                       (() => {
@@ -8549,16 +8594,17 @@ const ClientDashboardPage: React.FC = () => {
                                   </button>
                                   <button
                                     onClick={handleSendReport}
-                                    disabled={sendingReport}
+                                    disabled={sendingReport || !canModifyClientSettings}
                                     className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                    title="Send report via email"
+                                    title={canModifyClientSettings ? "Send report via email" : "Included clients are view-only"}
                                   >
                                     <Send className="h-4 w-4" />
                                   </button>
                                   <button
                                     onClick={handleDeleteReport}
-                                    className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
-                                    title="Delete report"
+                                    disabled={!canModifyClientSettings}
+                                    className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                    title={canModifyClientSettings ? "Delete report" : "Included clients are view-only"}
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -9035,7 +9081,7 @@ const ClientDashboardPage: React.FC = () => {
           )}
 
       {/* Add Backlink Modal */}
-      {!reportOnly &&
+      {!reportOnly && !includedClientReadOnly &&
         addBacklinkModalOpen &&
         createPortal(
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -9130,7 +9176,7 @@ const ClientDashboardPage: React.FC = () => {
         )}
 
       {/* Import Backlinks Modal */}
-      {!reportOnly &&
+      {!reportOnly && !includedClientReadOnly &&
         importBacklinksModalOpen &&
         createPortal(
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">

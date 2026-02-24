@@ -282,8 +282,13 @@ router.get("/super-admin/notifications", authenticateToken, async (req, res) => 
       }),
       prisma.notification.findMany({
         where: {
-          agencyId: null,
           createdAt: { gte: thirtyDaysAgo },
+          OR: [
+            // Global platform notifications intended for all super admins.
+            { agencyId: null, userId: null },
+            // User-targeted notifications (e.g. task activity) for the signed-in admin only.
+            { userId: req.user.userId },
+          ],
         },
         // Production DB may be missing newer optional columns (e.g. userId).
         // Select only fields needed by this endpoint to avoid querying absent columns.
@@ -360,12 +365,24 @@ router.post("/super-admin/notifications/mark-read", authenticateToken, async (re
     const { ids } = req.body;
     if (Array.isArray(ids) && ids.length > 0) {
       await prisma.notification.updateMany({
-        where: { id: { in: ids }, agencyId: null },
+        where: {
+          id: { in: ids },
+          OR: [
+            { agencyId: null, userId: null },
+            { userId: req.user.userId },
+          ],
+        },
         data: { read: true },
       });
     } else {
       await prisma.notification.updateMany({
-        where: { agencyId: null, read: false },
+        where: {
+          read: false,
+          OR: [
+            { agencyId: null, userId: null },
+            { userId: req.user.userId },
+          ],
+        },
         data: { read: true },
       });
     }

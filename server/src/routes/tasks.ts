@@ -231,8 +231,32 @@ const commentBodySchema = z.object({
   type: taskCommentTypeEnum.optional(),
 });
 
+export function selectTaskActivityRecipientIds(params: {
+  authorRole: Role | null | undefined;
+  authorId: string;
+  assigneeId?: string | null;
+  internalUserIds: Iterable<string>;
+  clientUserIds: Iterable<string>;
+}): string[] {
+  const { authorRole, authorId, assigneeId, internalUserIds, clientUserIds } = params;
+  const recipients = new Set<string>();
+  const isAuthorTaskAssignee = Boolean(assigneeId) && assigneeId === authorId;
+
+  // Client author -> notify internal side.
+  // Task assignee author -> notify internal owner side (super admin / agency members).
+  // Other internal author -> notify client side.
+  if (authorRole === "USER" || isAuthorTaskAssignee) {
+    for (const id of internalUserIds) recipients.add(id);
+  } else {
+    for (const id of clientUserIds) recipients.add(id);
+  }
+
+  recipients.delete(authorId);
+  return [...recipients];
+}
+
 async function createTaskActivityNotifications(
-  task: { id: string; title: string; clientId?: string | null; agencyId?: string | null },
+  task: { id: string; title: string; clientId?: string | null; agencyId?: string | null; assigneeId?: string | null },
   authorId: string,
   authorName: string,
   commentType: string,
@@ -251,26 +275,61 @@ async function createTaskActivityNotifications(
   const notifTitle = `${authorName} ${action} "${task.title}"`;
   const notifMessage = body.length > 120 ? body.slice(0, 120) + "…" : body;
 
-  // Gather agency members if task belongs to an agency
-  if (task.agencyId) {
-    const members = await prisma.userAgency.findMany({
-      where: { agencyId: task.agencyId },
-      select: { userId: true },
+  const author = await prisma.user.findUnique({
+    where: { id: authorId },
+    select: { role: true },
+  });
+  const authorRole = author?.role;
+
+  // Always include super admins on internal-side notifications.
+  const superAdmins = await prisma.user.findMany({
+    where: { role: "SUPER_ADMIN" },
+    select: { id: true },
+  });
+  const internalUserIds = new Set(superAdmins.map((u) => u.id));
+
+  // Resolve agency ownership: client ownership wins, then fallback to task agency.
+  let agencyScopeId: string | null = task.agencyId ?? null;
+  if (task.clientId) {
+    const client = await prisma.client.findUnique({
+      where: { id: task.clientId },
+      select: { belongsToAgencyId: true },
     });
-    members.forEach((m) => recipientUserIds.add(m.userId));
+    if (client) {
+      agencyScopeId = client.belongsToAgencyId ?? null;
+    }
   }
 
-  // Gather client users if task belongs to a client
+  // If task is agency-owned, include that agency's members too.
+  if (agencyScopeId) {
+    const members = await prisma.userAgency.findMany({
+      where: { agencyId: agencyScopeId },
+      select: { userId: true },
+    });
+    members.forEach((m) => internalUserIds.add(m.userId));
+  }
+  if (task.assigneeId) {
+    internalUserIds.add(task.assigneeId);
+  }
+
+  // Client-side recipients
+  const clientUserIds = new Set<string>();
   if (task.clientId) {
     const clientUsers = await prisma.clientUser.findMany({
       where: { clientId: task.clientId, status: "ACTIVE" },
       select: { userId: true },
     });
-    clientUsers.forEach((cu) => recipientUserIds.add(cu.userId));
+    clientUsers.forEach((cu) => clientUserIds.add(cu.userId));
   }
 
-  // Don't notify the author themselves
-  recipientUserIds.delete(authorId);
+  const selectedRecipientIds = selectTaskActivityRecipientIds({
+    authorRole,
+    authorId,
+    assigneeId: task.assigneeId,
+    internalUserIds,
+    clientUserIds,
+  });
+  selectedRecipientIds.forEach((id) => recipientUserIds.add(id));
 
   if (recipientUserIds.size === 0) return;
 
@@ -286,7 +345,7 @@ async function createTaskActivityNotifications(
     const basePath = role === "USER" ? "/client/tasks" : role === "SPECIALIST" ? "/specialist/tasks" : "/agency/tasks";
     return {
       userId: uid,
-      agencyId: task.agencyId ?? null,
+      agencyId: agencyScopeId ?? null,
       type: "task_activity",
       title: notifTitle,
       message: notifMessage,
@@ -305,10 +364,9 @@ async function createTaskActivityNotifications(
       select: { email: true, role: true },
     });
 
-    // For QUESTION / APPROVAL_REQUEST from agency → email client users
-    // For REVISION_REQUEST from client → email agency members
+    // Mirror the same directional routing as in-app notifications.
     const emailTargets = recipients.filter((r) => {
-      if (commentType === "REVISION_REQUEST") return r.role !== "USER";
+      if (authorRole === "USER") return r.role !== "USER";
       return r.role === "USER";
     });
 
@@ -329,6 +387,53 @@ async function createTaskActivityNotifications(
           console.warn("[Task] Activity email failed", u.email, e?.message)
         );
       }
+    }
+  }
+}
+
+async function notifyClientUsersTaskNeedsApproval(
+  task: { id: string; title: string; clientId?: string | null },
+  requestedByName: string,
+  requestedByUserId: string
+): Promise<void> {
+  if (!task.clientId) return;
+
+  const recipients = await prisma.clientUser.findMany({
+    where: { clientId: task.clientId, status: "ACTIVE" },
+    select: {
+      userId: true,
+      user: { select: { email: true } },
+    },
+  });
+
+  const recipientUserIds = recipients
+    .map((r) => r.userId)
+    .filter((userId) => userId !== requestedByUserId);
+
+  if (recipientUserIds.length > 0) {
+    await prisma.notification
+      .createMany({
+        data: recipientUserIds.map((userId) => ({
+          userId,
+          type: "task_activity",
+          title: `${requestedByName} requested approval for "${task.title}"`,
+          message: "This task is awaiting your approval.",
+          link: `/client/tasks?taskId=${task.id}`,
+        })),
+      })
+      .catch((e) => console.warn("[Task] Client approval notifications failed", e?.message));
+  }
+
+  const subject = `Approval needed: ${task.title}`;
+  const html = `<p><strong>${requestedByName}</strong> requested your approval for:</p>
+<p><strong>${task.title}</strong></p>
+<p>Please review this task in the client dashboard.</p>`;
+  for (const r of recipients) {
+    if (r.userId === requestedByUserId) continue;
+    if (r.user.email) {
+      sendEmail({ to: r.user.email, subject, html }).catch((e) =>
+        console.warn("[Task] Client approval email failed", r.user.email, e?.message)
+      );
     }
   }
 }
@@ -1050,7 +1155,7 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
       select: { name: true, email: true },
     });
     createTaskActivityNotifications(
-      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId },
+      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId, assigneeId: task.assigneeId },
       req.user.userId,
       author?.name || author?.email || "Someone",
       commentType,
@@ -1232,16 +1337,25 @@ router.post("/", authenticateToken, async (req, res) => {
       include: taskInclude,
     });
 
+    const actor = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true, email: true },
+    });
+    const actorName = actor?.name || actor?.email || "A user";
+
     if (task.status === "NEEDS_APPROVAL" && (parsed.approvalNotifyUserIds?.length ?? 0) > 0) {
-      const createdBy = await prisma.user.findUnique({
-        where: { id: req.user.userId },
-        select: { name: true, email: true },
-      });
       sendTaskApprovalRequestEmails(
         parsed.approvalNotifyUserIds!,
         { id: task.id, title: task.title, client: task.client ?? undefined },
-        createdBy?.name || createdBy?.email || "A user"
+        actorName
       ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
+    }
+    if (task.status === "NEEDS_APPROVAL") {
+      notifyClientUsersTaskNeedsApproval(
+        { id: task.id, title: task.title, clientId: task.clientId },
+        actorName,
+        req.user.userId
+      ).catch((e) => console.warn("[Task] Client NEEDS_APPROVAL notifications failed", e?.message));
     }
 
     res.status(201).json(task);
@@ -1297,16 +1411,25 @@ router.put("/:id", authenticateToken, async (req, res) => {
       include: taskInclude,
     });
 
+    const actor = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true, email: true },
+    });
+    const actorName = actor?.name || actor?.email || "A user";
+
     if (updatedTask.status === "NEEDS_APPROVAL" && (updates.approvalNotifyUserIds?.length ?? 0) > 0) {
-      const createdBy = await prisma.user.findUnique({
-        where: { id: updatedTask.createdById ?? "" },
-        select: { name: true, email: true },
-      });
       sendTaskApprovalRequestEmails(
         updates.approvalNotifyUserIds!,
         { id: updatedTask.id, title: updatedTask.title, client: updatedTask.client ?? undefined },
-        createdBy?.name || createdBy?.email || "A user"
+        actorName
       ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
+    }
+    if (updatedTask.status === "NEEDS_APPROVAL") {
+      notifyClientUsersTaskNeedsApproval(
+        { id: updatedTask.id, title: updatedTask.title, clientId: updatedTask.clientId },
+        actorName,
+        req.user.userId
+      ).catch((e) => console.warn("[Task] Client NEEDS_APPROVAL notifications failed", e?.message));
     }
     if (updatedTask.status === "DONE") {
       sendTaskCompletedEmails(
@@ -1363,16 +1486,25 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
       include: taskInclude,
     });
 
+    const actor = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true, email: true },
+    });
+    const actorName = actor?.name || actor?.email || "A user";
+
     if (updated.status === "NEEDS_APPROVAL" && (body.approvalNotifyUserIds?.length ?? 0) > 0) {
-      const createdBy = await prisma.user.findUnique({
-        where: { id: updated.createdById ?? "" },
-        select: { name: true, email: true },
-      });
       sendTaskApprovalRequestEmails(
         body.approvalNotifyUserIds!,
         { id: updated.id, title: updated.title, client: updated.client ?? undefined },
-        createdBy?.name || createdBy?.email || "A user"
+        actorName
       ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
+    }
+    if (updated.status === "NEEDS_APPROVAL") {
+      notifyClientUsersTaskNeedsApproval(
+        { id: updated.id, title: updated.title, clientId: updated.clientId },
+        actorName,
+        req.user.userId
+      ).catch((e) => console.warn("[Task] Client NEEDS_APPROVAL notifications failed", e?.message));
     }
     if (updated.status === "DONE") {
       sendTaskCompletedEmails(
@@ -1523,7 +1655,7 @@ router.post("/:id/approve", authenticateToken, async (req, res) => {
 
     // Fire notifications
     createTaskActivityNotifications(
-      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId },
+      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId, assigneeId: task.assigneeId },
       req.user.userId,
       authorName,
       "APPROVAL",
@@ -1586,7 +1718,7 @@ router.post("/:id/request-revisions", authenticateToken, async (req, res) => {
 
     // Fire notifications
     createTaskActivityNotifications(
-      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId },
+      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId, assigneeId: task.assigneeId },
       req.user.userId,
       authorName,
       "REVISION_REQUEST",

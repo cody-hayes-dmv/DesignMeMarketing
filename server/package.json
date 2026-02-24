@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "test:tasks-notifications": "node --import tsx --test src/routes/tasks.notification-routing.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",

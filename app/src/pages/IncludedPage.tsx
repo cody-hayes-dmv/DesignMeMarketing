@@ -120,11 +120,15 @@ const IncludedPage = () => {
     });
 
   const handleViewClient = (row: InclusionRow) => {
-    navigate(`/agency/clients/${row.clientId}`, { state: { client: row.client } });
+    navigate(`/agency/clients/${row.clientId}`, {
+      state: { client: row.client, includedReadOnly: user?.role === "AGENCY" },
+    });
   };
 
   const handleViewReportClick = (row: InclusionRow) => {
-    navigate(`/agency/clients/${row.clientId}`, { state: { client: row.client, tab: "report" } });
+    navigate(`/agency/clients/${row.clientId}`, {
+      state: { client: row.client, tab: "report", includedReadOnly: user?.role === "AGENCY" },
+    });
   };
 
   const handleShareClick = async (row: InclusionRow) => {

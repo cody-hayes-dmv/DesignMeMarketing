@@ -57,6 +57,7 @@ interface ClientKeywordsManagerProps {
   onClientChange?: (clientId: string) => void;
   trackSearchTerm?: string;
   onTrackSearchTermChange?: (value: string) => void;
+  readOnly?: boolean;
 }
 
 const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
@@ -67,6 +68,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
   onClientChange,
   trackSearchTerm: externalTrackSearchTerm,
   onTrackSearchTermChange,
+  readOnly = false,
 }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [newKeywordValue, setNewKeywordValue] = useState("");
@@ -99,6 +101,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
   const setTrackSearchTerm = onTrackSearchTermChange || setTrackSearchTermInternal;
 
   const effectiveClientId = clientId || selectedClientId || "";
+  const canModifyKeywords = !readOnly;
   const tabKeywords = trackedKeywords.filter((k) => (k.type || "money") === activeKeywordTab);
   const filteredKeywords = trackSearchTerm
     ? tabKeywords.filter((k) => k.keyword.toLowerCase().includes(trackSearchTerm.toLowerCase()))
@@ -163,6 +166,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
 
   const handleAddTrackedKeyword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canModifyKeywords) return;
     if (!effectiveClientId) return;
     const trimmed = newKeywordValue.trim();
     if (!trimmed) {
@@ -408,6 +412,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                 onChange={(e) => setNewKeywordValue(e.target.value)}
                 placeholder="e.g. best running shoes — or paste many (comma or new line separated)"
                 rows={3}
+                disabled={!canModifyKeywords}
                 className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200 resize-y"
               />
             </div>
@@ -428,6 +433,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                   value="money"
                   checked={newKeywordType === "money"}
                   onChange={() => setNewKeywordType("money")}
+                  disabled={!canModifyKeywords}
                   className="sr-only"
                 />
                 <DollarSign className="h-4 w-4" />
@@ -446,6 +452,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                   value="topical"
                   checked={newKeywordType === "topical"}
                   onChange={() => setNewKeywordType("topical")}
+                  disabled={!canModifyKeywords}
                   className="sr-only"
                 />
                 <BookOpen className="h-4 w-4" />
@@ -466,9 +473,10 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                 onBlur={() => trackLocationQuery && setTrackLocationQuery(formatLocationName(trackLocationQuery))}
                 onFocus={() => setTrackLocationOpen(true)}
                 placeholder="Search location"
+                disabled={!canModifyKeywords}
                 className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200"
               />
-              {trackLocationOpen && (
+              {trackLocationOpen && canModifyKeywords && (
                 <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
                   <div className="max-h-64 overflow-y-auto">
                     {trackLocationLoading ? (
@@ -500,7 +508,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
             </div>
             <button
               type="submit"
-              disabled={addingKeyword}
+              disabled={addingKeyword || !canModifyKeywords}
               className="inline-flex items-center justify-center rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60 w-full sm:w-auto"
             >
               {addingKeyword ? (
@@ -618,7 +626,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                         <button
                           type="button"
                           onClick={() => handleDeleteTrackedKeyword(keyword.id, keyword.keyword)}
-                          disabled={!!deletingKeywordIds[keyword.id]}
+                          disabled={!!deletingKeywordIds[keyword.id] || !canModifyKeywords}
                           className="inline-flex items-center justify-center rounded-lg p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
                           title="Delete"
                         >
