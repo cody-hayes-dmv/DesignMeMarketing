@@ -40,6 +40,7 @@ import { format } from "date-fns";
 import { useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import { buildClientCopyText } from "@/lib/clientAccountForm";
 import ConfirmDialog from "../components/ConfirmDialog";
 import AssignClientToAgencyModal from "../components/AssignClientToAgencyModal";
 
@@ -2060,41 +2061,9 @@ const ClientsPage = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const industry = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther : clientForm.businessNiche;
-                    const lines = [
-                      "--- BUSINESS INFORMATION ---",
-                      `Business Name: ${clientForm.name || ""}`,
-                      `Business Niche: ${industry || ""}`,
-                      `Business Description: ${clientForm.businessDescription || ""}`,
-                      `Primary Domain: ${clientForm.domain || ""}`,
-                      "",
-                      "--- LOCATION INFORMATION ---",
-                      `Business Address: ${clientForm.businessAddress || ""}`,
-                      `Primary Location City: ${clientForm.primaryLocationCity || ""}`,
-                      `Primary Location State: ${clientForm.primaryLocationState || ""}`,
-                      `Service Radius: ${clientForm.serviceRadius || ""}`,
-                      `Areas Served: ${clientForm.serviceAreasServed || ""}`,
-                      "",
-                      "--- CONTACT INFORMATION ---",
-                      `Phone Number: ${clientForm.phoneNumber || ""}`,
-                      `Email: ${clientForm.emailAddress || ""}`,
-                      "",
-                      "--- WEBSITE LOGIN INFO ---",
-                      `Website Login URL: ${clientForm.loginUrl || ""}`,
-                      `Website Username: ${clientForm.loginUsername || ""}`,
-                      `Website Password: ${clientForm.loginPassword ? "••••••••" : ""}`,
-                      "",
-                      "--- CAMPAIGN TYPE ---",
-                      `Campaign Type: ${clientForm.campaignType || ""}`,
-                      "",
-                      "--- GOOGLE BUSINESS PROFILE ---",
-                      `Google Business Profile Category: ${clientForm.gbpPrimaryCategory || ""}`,
-                      `Secondary GBP Categories: ${clientForm.gbpSecondaryCategories || ""}`,
-                    ];
-                    if (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") {
-                      lines.push("", "--- STATUS ---", `Status: ${clientForm.clientStatus || ""}`);
-                    }
-                    const text = lines.join("\n");
+                    const text = buildClientCopyText(clientForm, {
+                      showStatus: user?.role === "SUPER_ADMIN" || user?.role === "ADMIN",
+                    });
                     navigator.clipboard.writeText(text).then(
                       () => toast.success("Copied to clipboard"),
                       () => toast.error("Failed to copy")

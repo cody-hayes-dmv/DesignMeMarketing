@@ -9,6 +9,7 @@ import {
   BUSINESS_NICHE_OPTIONS,
   US_STATES,
   SERVICE_RADIUS_OPTIONS,
+  buildClientCopyText,
 } from "@/lib/clientAccountForm";
 
 const inputClass = "w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent";
@@ -41,43 +42,7 @@ export default function ClientAccountFormModal({
   if (!open) return null;
 
   const copyAllToClipboard = () => {
-    const industry = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
-    const cityState = [form.primaryLocationCity, form.primaryLocationState].filter(Boolean).join(", ");
-    const serviceRadiusAreas = [form.serviceRadius, form.serviceAreasServed].filter(Boolean).join(" | ");
-    const gbpCategories = [form.gbpPrimaryCategory, form.gbpSecondaryCategories].filter(Boolean).join(" | ");
-    const gbpServices = [form.primaryServicesList, form.secondaryServicesList, form.servicesMarkedPrimary]
-      .filter(Boolean)
-      .join(" | ");
-    const coordinates = [form.latitude, form.longitude].filter(Boolean).join(", ");
-    const lines = [
-      `Business Name: ${form.name || ""}`,
-      `Business Niche: ${industry || ""}`,
-      `Business Description: ${form.businessDescription || ""}`,
-      `Primary Domain: ${form.domain || ""}`,
-      `Business Address: ${form.businessAddress || ""}`,
-      `Primary Location (City, State): ${cityState || ""}`,
-      `Service Radius / Areas Served: ${serviceRadiusAreas || ""}`,
-      `Phone Number: ${form.phoneNumber || ""}`,
-      `Email: ${form.emailAddress || ""}`,
-      "",
-      "",
-      `CAMPAIGN TYPE: (Local or National) ${form.campaignType || ""}`,
-      "",
-      `GBP CATEGORIES: ${gbpCategories || ""}`,
-      "",
-      `GBP SERVICES: ${gbpServices || ""}`,
-      "",
-      `Target number of keywords for this campaign- ${form.targetKeywordCount || form.totalKeywordsToTarget || ""}`,
-      "",
-      `Keywords: ${form.keywords || ""}`,
-      "",
-      "Longitude and Latitude",
-      `Enter Coordinates: ${coordinates || ""}`,
-    ];
-    if (showStatus) {
-      lines.push("", "--- STATUS ---", `Status: ${form.clientStatus || ""}`);
-    }
-    const text = lines.join("\n");
+    const text = buildClientCopyText(form, { showStatus });
     navigator.clipboard.writeText(text).then(
       () => toast.success("Copied to clipboard"),
       () => toast.error("Failed to copy")
