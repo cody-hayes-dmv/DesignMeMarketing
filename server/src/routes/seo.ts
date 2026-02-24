@@ -1846,6 +1846,9 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       hasActiveSchedule: report.schedule?.isActive || false,
       scheduleRecipients: scheduleRecipientsParsed,
       scheduleEmailSubject: report.schedule?.emailSubject || null,
+      campaignWinsEnabled: Boolean((client as any).campaignWinsEnabled),
+      campaignWinsEmails: parseRecipientsField((client as any).campaignWinsEmails),
+      campaignWinsLastSent: (client as any).campaignWinsLastSent ?? null,
     });
   } catch (error) {
     console.error("Fetch SEO reports error:", error);
@@ -8235,6 +8238,156 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
   } catch (error: any) {
     console.error("Create report schedule error:", error);
     res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Get Campaign Wins settings for a client
+router.get("/reports/:clientId/campaign-wins", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: { select: { agencyId: true } }
+          }
+        }
+      }
+    });
+    if (!client) return res.status(404).json({ message: "Client not found" });
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAgencyAccess) return res.status(403).json({ message: "Access denied" });
+
+    const parseRecipientsField = (value: unknown): string[] => {
+      if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+      if (value == null) return [];
+      const raw = String(value).trim();
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+        }
+      } catch {
+        // ignore
+      }
+      if (raw.includes(",")) return raw.split(",").map((s) => s.trim()).filter(Boolean);
+      return [raw];
+    };
+
+    return res.json({
+      enabled: Boolean((client as any).campaignWinsEnabled),
+      recipients: parseRecipientsField((client as any).campaignWinsEmails),
+      lastSent: (client as any).campaignWinsLastSent ?? null,
+    });
+  } catch (error: any) {
+    console.error("Get campaign wins settings error:", error);
+    return res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Create or update Campaign Wins settings
+router.post("/reports/:clientId/campaign-wins", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const body = z.object({
+      enabled: z.boolean().default(true),
+      recipients: z.array(z.string().email()).optional().default([]),
+    }).parse(req.body);
+    if (body.enabled && body.recipients.length === 0) {
+      return res.status(400).json({ message: "At least one recipient email is required" });
+    }
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: { select: { agencyId: true } }
+          }
+        }
+      }
+    });
+    if (!client) return res.status(404).json({ message: "Client not found" });
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAgencyAccess) return res.status(403).json({ message: "Access denied" });
+
+    const updated = await prisma.client.update({
+      where: { id: clientId },
+      data: {
+        campaignWinsEnabled: body.enabled,
+        campaignWinsEmails: body.enabled ? JSON.stringify(body.recipients) : null,
+      } as any,
+    });
+
+    return res.json({
+      message: "Campaign Wins settings saved successfully",
+      settings: {
+        enabled: Boolean((updated as any).campaignWinsEnabled),
+        recipients: body.recipients,
+        lastSent: (updated as any).campaignWinsLastSent ?? null,
+      }
+    });
+  } catch (error: any) {
+    console.error("Save campaign wins settings error:", error);
+    return res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Disable Campaign Wins settings
+router.delete("/reports/:clientId/campaign-wins", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: { select: { agencyId: true } }
+          }
+        }
+      }
+    });
+    if (!client) return res.status(404).json({ message: "Client not found" });
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true }
+    });
+    const userAgencyIds = userMemberships.map(m => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAgencyAccess) return res.status(403).json({ message: "Access denied" });
+
+    await prisma.client.update({
+      where: { id: clientId },
+      data: {
+        campaignWinsEnabled: false,
+        campaignWinsEmails: null,
+      } as any,
+    });
+    return res.json({ message: "Campaign Wins disabled successfully" });
+  } catch (error: any) {
+    console.error("Delete campaign wins settings error:", error);
+    return res.status(500).json({ message: error.message || "Internal server error" });
   }
 });
 

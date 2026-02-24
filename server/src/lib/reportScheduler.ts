@@ -978,6 +978,483 @@ export async function refreshAllGA4Data(): Promise<void> {
   }
 }
 
+function startOfWeekMonday(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay(); // 0 (Sun) ... 6 (Sat)
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function slugifyForThreshold(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+}
+
+function parseRecipientEmails(value: unknown): string[] {
+  const arr = toStringArray(value);
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return arr.map((s) => s.trim()).filter((s) => emailRegex.test(s));
+}
+
+type CampaignWinPriority =
+  | "KEYWORD_WIN"
+  | "TRAFFIC_MILESTONE"
+  | "WORK_COMPLETED"
+  | "AI_VISIBILITY"
+  | "REVIEW_ACTIVITY";
+
+const campaignWinPriorityOrder: CampaignWinPriority[] = [
+  "KEYWORD_WIN",
+  "TRAFFIC_MILESTONE",
+  "WORK_COMPLETED",
+  "AI_VISIBILITY",
+  "REVIEW_ACTIVITY",
+];
+
+function cooldownDaysForEventType(eventType: CampaignWinPriority): number | null {
+  if (eventType === "TRAFFIC_MILESTONE") return 60;
+  if (eventType === "WORK_COMPLETED" || eventType === "REVIEW_ACTIVITY") return null;
+  return 30;
+}
+
+function campaignWinsEmailHtml(params: {
+  clientName: string;
+  clientFirstName: string;
+  eventDetails: string[];
+  dashboardUrl: string | null;
+}): string {
+  const dashboardLine = params.dashboardUrl
+    ? `<a href="${escapeHtml(params.dashboardUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(params.dashboardUrl)}</a>`
+    : "Dashboard link unavailable right now.";
+  const lines = params.eventDetails.map((line) => `<p style="margin: 0 0 10px 0;">${escapeHtml(line)}</p>`).join("");
+  const agencyName = process.env.AGENCY_NAME || "Design ME Marketing";
+  return `
+    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
+      <p>Hi ${escapeHtml(params.clientFirstName || "there")},</p>
+      <p>We have some great news from your SEO campaign this week.</p>
+      ${lines}
+      <p>You can log in to your dashboard anytime to see the full picture.</p>
+      <p>${dashboardLine}</p>
+      <p>Talk soon,<br/>${escapeHtml(agencyName)}</p>
+    </div>
+  `;
+}
+
+async function upsertCampaignWinEvent(input: {
+  clientId: string;
+  eventType: CampaignWinPriority;
+  thresholdKey: string;
+  eventDetail: string;
+  triggeredAt?: Date;
+}): Promise<void> {
+  const now = input.triggeredAt || new Date();
+  const existing = await prisma.campaignWinEvent.findUnique({
+    where: {
+      clientId_thresholdKey: {
+        clientId: input.clientId,
+        thresholdKey: input.thresholdKey,
+      },
+    },
+  });
+
+  if (!existing) {
+    await prisma.campaignWinEvent.create({
+      data: {
+        clientId: input.clientId,
+        eventType: input.eventType as any,
+        thresholdKey: input.thresholdKey,
+        eventDetail: input.eventDetail,
+        triggeredAt: now,
+      },
+    });
+    return;
+  }
+
+  if (existing.cooldownUntil && existing.cooldownUntil > now) {
+    return;
+  }
+
+  // Re-arm event after cooldown window if eligible.
+  if (existing.notifiedAt) {
+    if (input.eventType === "WORK_COMPLETED" || input.eventType === "REVIEW_ACTIVITY") {
+      return;
+    }
+    await prisma.campaignWinEvent.update({
+      where: { id: existing.id },
+      data: {
+        eventType: input.eventType as any,
+        eventDetail: input.eventDetail,
+        triggeredAt: now,
+        notifiedAt: null,
+      },
+    });
+    return;
+  }
+
+  await prisma.campaignWinEvent.update({
+    where: { id: existing.id },
+    data: {
+      eventType: input.eventType as any,
+      eventDetail: input.eventDetail,
+    },
+  });
+}
+
+async function detectKeywordWins(clientId: string): Promise<void> {
+  const now = new Date();
+  const keywords = await prisma.keyword.findMany({
+    where: { clientId },
+    select: { id: true, keyword: true, currentPosition: true, previousPosition: true },
+    take: 1000,
+  });
+
+  for (const kw of keywords) {
+    const pos = typeof kw.currentPosition === "number" ? kw.currentPosition : null;
+    if (!pos || pos > 10) continue;
+
+    const level = pos === 1 ? "position1" : pos <= 3 ? "top3" : "page1";
+    const thresholdKey = `keyword_${kw.id}_${level}`;
+    const eventDetail =
+      pos === 1
+        ? `"${kw.keyword}" is holding the #1 position on Google.`
+        : pos <= 3
+        ? `"${kw.keyword}" is ranking in the top 3 Google results.`
+        : `"${kw.keyword}" is holding page 1 visibility on Google.`;
+
+    const existing = await prisma.campaignWinEvent.findUnique({
+      where: { clientId_thresholdKey: { clientId, thresholdKey } },
+      select: { id: true, notifiedAt: true, cooldownUntil: true, triggeredAt: true },
+    });
+
+    if (!existing) {
+      await prisma.campaignWinEvent.create({
+        data: {
+          clientId,
+          eventType: "KEYWORD_WIN",
+          thresholdKey,
+          eventDetail,
+          triggeredAt: now,
+        },
+      });
+      continue;
+    }
+
+    if (existing.cooldownUntil && existing.cooldownUntil > now) continue;
+
+    // Re-arm approximation: require a meaningful return move before refiring.
+    if (existing.notifiedAt) {
+      const droppedAndReturned = (kw.previousPosition ?? 999) > 10;
+      if (!droppedAndReturned) continue;
+      await prisma.campaignWinEvent.update({
+        where: { id: existing.id },
+        data: {
+          eventType: "KEYWORD_WIN",
+          eventDetail,
+          triggeredAt: now,
+          notifiedAt: null,
+        },
+      });
+      continue;
+    }
+
+    await prisma.campaignWinEvent.update({
+      where: { id: existing.id },
+      data: { eventDetail },
+    });
+  }
+}
+
+async function detectTrafficMilestones(clientId: string): Promise<void> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { ga4RefreshToken: true, ga4PropertyId: true, ga4ConnectedAt: true },
+  });
+  if (!client?.ga4RefreshToken || !client.ga4PropertyId || !client.ga4ConnectedAt) return;
+
+  const { fetchGA4TrafficData } = await import("./ga4.js");
+  const now = new Date();
+  const currentEnd = new Date(now);
+  const currentStart = new Date(now);
+  currentStart.setDate(currentStart.getDate() - 30);
+  const prevEnd = new Date(currentStart);
+  const prevStart = new Date(currentStart);
+  prevStart.setDate(prevStart.getDate() - 30);
+
+  const [current, previous] = await Promise.all([
+    fetchGA4TrafficData(clientId, currentStart, currentEnd).catch(() => null),
+    fetchGA4TrafficData(clientId, prevStart, prevEnd).catch(() => null),
+  ]);
+
+  const currentSessions = Number(current?.organicSessions ?? 0);
+  const previousSessions = Number(previous?.organicSessions ?? 0);
+  if (!(currentSessions > 0 && previousSessions > 0)) return;
+
+  const pctIncrease = ((currentSessions - previousSessions) / previousSessions) * 100;
+  const tiers = [50, 30, 15];
+  for (const tier of tiers) {
+    if (pctIncrease < tier) continue;
+    const thresholdKey = `traffic_${clientId}_${tier}pct`;
+    const detail = `Organic traffic is up ${Math.round(pctIncrease)}% vs the previous 30-day period.`;
+    await upsertCampaignWinEvent({
+      clientId,
+      eventType: "TRAFFIC_MILESTONE",
+      thresholdKey,
+      eventDetail: detail,
+    });
+  }
+}
+
+async function detectWorkCompleted(clientId: string): Promise<void> {
+  const now = new Date();
+  const weekStart = startOfWeekMonday(now);
+  const count = await prisma.task.count({
+    where: {
+      clientId,
+      status: "DONE",
+      updatedAt: { gte: weekStart },
+    },
+  });
+  if (count <= 0) return;
+
+  const key = `work_${clientId}_${weekStart.toISOString().slice(0, 10)}`;
+  const detail =
+    count === 1
+      ? "Your team completed 1 task this week."
+      : `Your team completed ${count} tasks this week.`;
+  await upsertCampaignWinEvent({
+    clientId,
+    eventType: "WORK_COMPLETED",
+    thresholdKey: key,
+    eventDetail: detail,
+  });
+}
+
+async function detectAiVisibility(clientId: string): Promise<void> {
+  const now = new Date();
+  const recentSince = new Date(now);
+  recentSince.setDate(recentSince.getDate() - 7);
+  const recentMentions = await prisma.aiMention.findMany({
+    where: {
+      clientId,
+      dateRecorded: { gte: recentSince },
+      mentions: { gt: 0 },
+    },
+    select: { query: true, platform: true, dateRecorded: true },
+    orderBy: { dateRecorded: "desc" },
+    take: 300,
+  });
+
+  const seen = new Set<string>();
+  for (const mention of recentMentions) {
+    const query = String(mention.query || "").trim();
+    const platform = String(mention.platform || "").trim().toLowerCase();
+    if (!query || !platform) continue;
+    const dedupeKey = `${query.toLowerCase()}::${platform}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const previous = await prisma.aiMention.findFirst({
+      where: {
+        clientId,
+        query,
+        platform,
+        dateRecorded: { lt: mention.dateRecorded },
+      },
+      orderBy: { dateRecorded: "desc" },
+      select: { dateRecorded: true },
+    });
+
+    const canTrigger =
+      !previous ||
+      (mention.dateRecorded.getTime() - previous.dateRecorded.getTime()) / (1000 * 60 * 60 * 24) >= 30;
+    if (!canTrigger) continue;
+
+    const thresholdKey = `ai_${clientId}_${slugifyForThreshold(query)}_${slugifyForThreshold(platform)}`;
+    const detail = `Your brand appeared in ${platform.replace(/_/g, " ")} AI results for "${query}".`;
+    await upsertCampaignWinEvent({
+      clientId,
+      eventType: "AI_VISIBILITY",
+      thresholdKey,
+      eventDetail: detail,
+    });
+  }
+}
+
+async function detectReviewOrLeadActivity(clientId: string): Promise<void> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { managedServiceStatus: true },
+  });
+  if (client?.managedServiceStatus !== "active") return;
+
+  const now = new Date();
+  const weekStart = startOfWeekMonday(now);
+  const reviewLeadCount = await prisma.notification.count({
+    where: {
+      createdAt: { gte: weekStart },
+      OR: [
+        { type: { contains: "review" } },
+        { type: { contains: "lead" } },
+        { type: { contains: "pipeline" } },
+      ],
+      message: { contains: clientId },
+    },
+  });
+
+  if (reviewLeadCount <= 0) return;
+
+  const key = `reviews_${clientId}_${weekStart.toISOString().slice(0, 10)}`;
+  const detail =
+    reviewLeadCount === 1
+      ? "New review or lead activity was detected this week."
+      : `${reviewLeadCount} new review/lead activity updates were detected this week.`;
+  await upsertCampaignWinEvent({
+    clientId,
+    eventType: "REVIEW_ACTIVITY",
+    thresholdKey: key,
+    eventDetail: detail,
+  });
+}
+
+function sortCampaignWinEvents<T extends { eventType: string }>(events: T[]): T[] {
+  return [...events].sort((a, b) => {
+    const ai = campaignWinPriorityOrder.indexOf(a.eventType as CampaignWinPriority);
+    const bi = campaignWinPriorityOrder.indexOf(b.eventType as CampaignWinPriority);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+}
+
+async function processCampaignWinsForClient(client: {
+  id: string;
+  name: string;
+  campaignWinsEmails: string | null;
+  campaignWinsEnabled: boolean;
+  campaignWinsLastSent: Date | null;
+  user: { name: string | null } | null;
+}): Promise<void> {
+  if (!client.campaignWinsEnabled) return;
+  const recipients = parseRecipientEmails(client.campaignWinsEmails);
+  if (recipients.length === 0) return;
+
+  await detectKeywordWins(client.id);
+  await detectTrafficMilestones(client.id);
+  await detectWorkCompleted(client.id);
+  await detectAiVisibility(client.id);
+  await detectReviewOrLeadActivity(client.id);
+
+  const now = new Date();
+  const weekStart = startOfWeekMonday(now);
+
+  // Frequency cap safety check: never more than 2 sends per client/week.
+  const recentNotifications = await prisma.campaignWinEvent.findMany({
+    where: {
+      clientId: client.id,
+      notifiedAt: { gte: weekStart },
+    },
+    select: { notifiedAt: true },
+  });
+  const sendStamps = new Set(
+    recentNotifications
+      .map((e) => e.notifiedAt?.toISOString())
+      .filter((v): v is string => Boolean(v))
+  );
+  if (sendStamps.size >= 2) return;
+
+  const pendingEvents = await prisma.campaignWinEvent.findMany({
+    where: {
+      clientId: client.id,
+      notifiedAt: null,
+      OR: [{ cooldownUntil: null }, { cooldownUntil: { lte: now } }],
+    },
+    orderBy: { triggeredAt: "asc" },
+  });
+  if (pendingEvents.length === 0) return;
+
+  const minKeywordHoldDate = new Date(now);
+  minKeywordHoldDate.setDate(minKeywordHoldDate.getDate() - 7);
+  const queue = sortCampaignWinEvents(
+    pendingEvents.filter((event) => {
+      if (event.eventType !== "KEYWORD_WIN") return true;
+      return event.triggeredAt <= minKeywordHoldDate;
+    })
+  ).slice(0, 3);
+  if (queue.length === 0) return;
+
+  const shareUrl = await buildShareDashboardUrl(client.id).catch(() => null);
+  const clientFirstName = String(client.user?.name || "").trim().split(/\s+/)[0] || "there";
+  const subject = `Campaign Update — ${client.name}`;
+  const html = campaignWinsEmailHtml({
+    clientName: client.name,
+    clientFirstName,
+    eventDetails: queue.map((e) => e.eventDetail),
+    dashboardUrl: shareUrl,
+  });
+
+  await Promise.all(
+    recipients.map((to) =>
+      sendEmail({
+        to,
+        subject,
+        html,
+      })
+    )
+  );
+
+  for (const event of queue) {
+    const cooldownDays = cooldownDaysForEventType(event.eventType as CampaignWinPriority);
+    const cooldownUntil =
+      cooldownDays == null
+        ? null
+        : new Date(now.getTime() + cooldownDays * 24 * 60 * 60 * 1000);
+    await prisma.campaignWinEvent.update({
+      where: { id: event.id },
+      data: {
+        notifiedAt: now,
+        cooldownUntil,
+      },
+    });
+  }
+
+  await prisma.client.update({
+    where: { id: client.id },
+    data: { campaignWinsLastSent: now },
+  });
+}
+
+export async function processCampaignWinsReports(): Promise<void> {
+  try {
+    const clients = await prisma.client.findMany({
+      where: {
+        campaignWinsEnabled: true,
+        status: { notIn: ["ARCHIVED", "SUSPENDED", "REJECTED"] },
+      },
+      select: {
+        id: true,
+        name: true,
+        campaignWinsEnabled: true,
+        campaignWinsEmails: true,
+        campaignWinsLastSent: true,
+        user: { select: { name: true } },
+      },
+    });
+
+    for (const client of clients) {
+      try {
+        await processCampaignWinsForClient(client);
+      } catch (error: any) {
+        console.error(`[Campaign Wins] Failed for client ${client.id}:`, error?.message || error);
+      }
+    }
+  } catch (error: any) {
+    console.error("[Campaign Wins] Scheduler failed:", error?.message || error);
+  }
+}
+
 /**
  * Process scheduled reports - called by cron job
  */

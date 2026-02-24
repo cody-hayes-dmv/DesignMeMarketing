@@ -591,7 +591,7 @@ const ClientDashboardPage: React.FC = () => {
   const [showViewClientModal, setShowViewClientModal] = useState(false);
   const [viewClientForm, setViewClientForm] = useState(EMPTY_CLIENT_FORM);
   const [viewClientSaving, setViewClientSaving] = useState(false);
-  const [clientReportFrequency, setClientReportFrequency] = useState<"weekly" | "biweekly" | "monthly">("monthly");
+  const [clientReportFrequency, setClientReportFrequency] = useState<"weekly" | "biweekly" | "monthly" | "campaign_wins">("monthly");
   const [clientReportDayOfWeek, setClientReportDayOfWeek] = useState(1); // Monday
   const [clientReportDayOfMonth, setClientReportDayOfMonth] = useState(1);
   const [clientReportTimeOfDay, setClientReportTimeOfDay] = useState("09:00");
@@ -2786,9 +2786,15 @@ const ClientDashboardPage: React.FC = () => {
     const fromReport = Array.isArray(serverReport?.recipients) && serverReport.recipients.length > 0
       ? serverReport.recipients.join(", ")
       : "";
-    setModalRecipients(fromSchedule || fromReport || clientReportRecipients || "");
+    const fromCampaign = Array.isArray(serverReport?.campaignWinsEmails) && serverReport.campaignWinsEmails.length > 0
+      ? serverReport.campaignWinsEmails.join(", ")
+      : "";
+    setModalRecipients(fromSchedule || fromReport || fromCampaign || clientReportRecipients || "");
+    if (serverReport?.campaignWinsEnabled) {
+      setClientReportFrequency("campaign_wins");
+    }
     setModalEmailSubject(serverReport?.scheduleEmailSubject ?? clientReportEmailSubject ?? "");
-  }, [showClientReportModal, serverReport?.scheduleRecipients, serverReport?.recipients, serverReport?.scheduleEmailSubject, clientReportRecipients, clientReportEmailSubject]);
+  }, [showClientReportModal, serverReport?.scheduleRecipients, serverReport?.recipients, serverReport?.scheduleEmailSubject, serverReport?.campaignWinsEmails, serverReport?.campaignWinsEnabled, clientReportRecipients, clientReportEmailSubject]);
 
   const handleSubmitClientReport = useCallback(async () => {
     if (!clientId) {
@@ -2817,23 +2823,31 @@ const ClientDashboardPage: React.FC = () => {
       setClientReportSubmitting(true);
       setReportError(null);
 
-      // 1) Create or update schedule for this client
-      await api.post(`/seo/reports/${clientId}/schedule`, {
-        frequency: clientReportFrequency,
-        dayOfWeek: clientReportFrequency !== "monthly" ? clientReportDayOfWeek : undefined,
-        dayOfMonth: clientReportFrequency === "monthly" ? clientReportDayOfMonth : undefined,
-        timeOfDay: clientReportTimeOfDay,
-        recipients: recipientsList,
-        emailSubject: modalEmailSubject || undefined,
-        isActive: true,
-      }, { timeout: 15000 });
+      if (clientReportFrequency === "campaign_wins") {
+        await api.post(`/seo/reports/${clientId}/campaign-wins`, {
+          enabled: true,
+          recipients: recipientsList,
+        }, { timeout: 15000 });
+        toast.success("Campaign Wins report enabled successfully");
+      } else {
+        // 1) Create or update schedule for this client
+        await api.post(`/seo/reports/${clientId}/schedule`, {
+          frequency: clientReportFrequency,
+          dayOfWeek: clientReportFrequency !== "monthly" ? clientReportDayOfWeek : undefined,
+          dayOfMonth: clientReportFrequency === "monthly" ? clientReportDayOfMonth : undefined,
+          timeOfDay: clientReportTimeOfDay,
+          recipients: recipientsList,
+          emailSubject: modalEmailSubject || undefined,
+          isActive: true,
+        }, { timeout: 15000 });
 
-      // 2) Generate initial report immediately (GA4 + DataForSEO can take 30–60s)
-      await api.post(`/seo/reports/${clientId}/generate`, {
-        period: clientReportFrequency,
-      }, { timeout: 90000 });
+        // 2) Generate initial report immediately (GA4 + DataForSEO can take 30–60s)
+        await api.post(`/seo/reports/${clientId}/generate`, {
+          period: clientReportFrequency,
+        }, { timeout: 90000 });
 
-      toast.success("Report created and schedule saved successfully");
+        toast.success("Report created and schedule saved successfully");
+      }
 
       // Sync parent state so next open shows saved values
       setClientReportRecipients(modalRecipients);
@@ -8564,7 +8578,7 @@ const ClientDashboardPage: React.FC = () => {
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col border-2 border-primary-200 shadow-xl">
                 <div className="flex-shrink-0 flex justify-between items-center px-6 py-4 bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
-                  <h2 className="text-xl font-bold text-primary-900">Create Report & Schedule</h2>
+                  <h2 className="text-xl font-bold text-primary-900">Create Report</h2>
                   <button
                     onClick={() => setShowClientReportModal(false)}
                     className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-100 transition-colors"
@@ -8574,23 +8588,33 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
                   <p className="text-sm text-primary-700/90">
-                    Configure how often this client's report should be generated and who should receive it.
+                    Configure report type and recipients.
                   </p>
                   <div>
-                    <label className="block text-sm font-semibold text-emerald-800 mb-2">Frequency</label>
+                    <label className="block text-sm font-semibold text-emerald-800 mb-2">Report Type</label>
                     <select
                       value={clientReportFrequency}
                       onChange={(e) =>
-                        setClientReportFrequency(e.target.value as "weekly" | "biweekly" | "monthly")
+                        setClientReportFrequency(e.target.value as "weekly" | "biweekly" | "monthly" | "campaign_wins")
                       }
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 transition-shadow"
                     >
                       <option value="weekly">Weekly</option>
                       <option value="biweekly">Biweekly</option>
                       <option value="monthly">Monthly</option>
+                      <option value="campaign_wins">Campaign Wins Report</option>
                     </select>
                   </div>
-                  {clientReportFrequency !== "monthly" ? (
+                  {clientReportFrequency === "campaign_wins" && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                      <p className="font-semibold mb-1">Campaign Wins Report</p>
+                      <p>
+                        Campaign Wins reports are sent automatically when meaningful milestones are reached — new page 1 rankings, traffic growth, work completed, and more.
+                        We&apos;ll never send the same win twice, and nothing goes out if there&apos;s nothing to celebrate.
+                      </p>
+                    </div>
+                  )}
+                  {clientReportFrequency !== "campaign_wins" && clientReportFrequency !== "monthly" ? (
                     <div>
                       <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Week</label>
                       <select
@@ -8607,7 +8631,7 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </select>
                     </div>
-                  ) : (
+                  ) : clientReportFrequency !== "campaign_wins" ? (
                     <div>
                       <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Month</label>
                       <input
@@ -8619,7 +8643,8 @@ const ClientDashboardPage: React.FC = () => {
                         className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-400 transition-shadow"
                       />
                     </div>
-                  )}
+                  ) : null}
+                  {clientReportFrequency !== "campaign_wins" && (
                   <div>
                     <label className="block text-sm font-semibold text-violet-800 mb-2">Time of Day</label>
                     <input
@@ -8629,6 +8654,7 @@ const ClientDashboardPage: React.FC = () => {
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 transition-shadow"
                     />
                   </div>
+                  )}
                   <div>
                     <label className="block text-sm font-semibold text-primary-800 mb-2">
                       Recipients (comma-separated emails)
@@ -8641,6 +8667,7 @@ const ClientDashboardPage: React.FC = () => {
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 transition-shadow"
                     />
                   </div>
+                  {clientReportFrequency !== "campaign_wins" && (
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">Email Subject (optional)</label>
                     <input
@@ -8651,6 +8678,7 @@ const ClientDashboardPage: React.FC = () => {
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 transition-shadow"
                     />
                   </div>
+                  )}
                   <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-6">
                     <button
                       type="button"
@@ -8665,7 +8693,11 @@ const ClientDashboardPage: React.FC = () => {
                       onClick={handleSubmitClientReport}
                       className="px-5 py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors shadow-sm"
                     >
-                      {clientReportSubmitting ? "Saving..." : "Create Report"}
+                      {clientReportSubmitting
+                        ? "Saving..."
+                        : clientReportFrequency === "campaign_wins"
+                        ? "Save Campaign Wins"
+                        : "Create Report"}
                     </button>
                   </div>
                 </div>

@@ -16,6 +16,8 @@ import {
   Trash2,
   X,
   GripVertical,
+  ChevronUp,
+  ChevronDown,
   Calculator,
   Sparkles,
 } from "lucide-react";
@@ -59,7 +61,17 @@ const SettingsPage = () => {
   const [notificationSaving, setNotificationSaving] = useState(false);
 
   // Templates (onboarding)
-  type TemplateTask = { id?: string; title: string; description: string | null; category: string | null; priority: string | null; estimatedHours: number | null; dueDate: string | null; order: number };
+  type TemplateTask = {
+    id?: string;
+    title: string;
+    description: string | null;
+    category: string | null;
+    priority: string | null;
+    estimatedHours: number | null;
+    dueDate: string | null;
+    dueDaysAfterStart?: number | null;
+    order: number;
+  };
   type ManageableTemplate = {
     id: string;
     name: string;
@@ -74,7 +86,21 @@ const SettingsPage = () => {
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [templateModalMode, setTemplateModalMode] = useState<"create" | "edit">("create");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [templateForm, setTemplateForm] = useState({ name: "", description: "", isDefault: false, agencyId: "" as string | null, tasks: [] as Array<{ title: string; description: string; category: string; priority: string; estimatedHours: string; dueDate: string }> });
+  const [templateForm, setTemplateForm] = useState({
+    name: "",
+    description: "",
+    isDefault: false,
+    agencyId: "" as string | null,
+    tasks: [] as Array<{
+      title: string;
+      description: string;
+      category: string;
+      priority: string;
+      estimatedHours: string;
+      dueDate: string;
+      dueDaysAfterStart: string;
+    }>
+  });
   const [templateSaveLoading, setTemplateSaveLoading] = useState(false);
   const [agenciesList, setAgenciesList] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -284,6 +310,10 @@ const SettingsPage = () => {
         priority: task.priority ?? "",
         estimatedHours: task.estimatedHours != null ? String(task.estimatedHours) : "",
         dueDate: task.dueDate ? task.dueDate.slice(0, 10) : "",
+        dueDaysAfterStart:
+          (task as any).dueDaysAfterStart !== null && (task as any).dueDaysAfterStart !== undefined
+            ? String((task as any).dueDaysAfterStart)
+            : "",
       })),
     });
     setTemplateModalOpen(true);
@@ -292,8 +322,19 @@ const SettingsPage = () => {
   const addTemplateTask = () => {
     setTemplateForm((f) => ({
       ...f,
-      tasks: [...f.tasks, { title: "", description: "", category: "", priority: "", estimatedHours: "", dueDate: "" }],
+      tasks: [...f.tasks, { title: "", description: "", category: "", priority: "", estimatedHours: "", dueDate: "", dueDaysAfterStart: "" }],
     }));
+  };
+
+  const moveTemplateTask = (index: number, direction: "up" | "down") => {
+    setTemplateForm((f) => {
+      const next = [...f.tasks];
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= next.length) return f;
+      const [item] = next.splice(index, 1);
+      next.splice(target, 0, item);
+      return { ...f, tasks: next };
+    });
   };
 
   const updateTemplateTask = (index: number, field: string, value: string) => {
@@ -321,7 +362,8 @@ const SettingsPage = () => {
         category: t.category.trim() || null,
         priority: t.priority.trim() || null,
         estimatedHours: t.estimatedHours.trim() ? parseFloat(t.estimatedHours) : null,
-        dueDate: t.dueDate.trim() || null,
+        dueDate: t.dueDaysAfterStart.trim() ? null : (t.dueDate.trim() || null),
+        dueDaysAfterStart: t.dueDaysAfterStart.trim() ? Math.max(0, parseInt(t.dueDaysAfterStart, 10) || 0) : null,
         order: i + 1,
       }));
     setTemplateSaveLoading(true);
@@ -941,6 +983,9 @@ const SettingsPage = () => {
                       <Plus className="h-4 w-4" /> Add task
                     </button>
                   </div>
+                  <p className="text-xs text-gray-600 mb-2">
+                    Tasks are created in this exact sequence. Use arrows to reorder.
+                  </p>
                   <div className="space-y-2 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-2">
                     {templateForm.tasks.length === 0 ? (
                       <p className="text-sm text-gray-500 py-4 text-center">No tasks. Click &quot;Add task&quot; to add one.</p>
@@ -992,12 +1037,34 @@ const SettingsPage = () => {
                               />
                             </div>
                             <input
-                              type="date"
-                              value={task.dueDate}
-                              onChange={(e) => updateTemplateTask(index, "dueDate", e.target.value)}
+                              type="number"
+                              min={0}
+                              value={task.dueDaysAfterStart}
+                              onChange={(e) => updateTemplateTask(index, "dueDaysAfterStart", e.target.value)}
+                              placeholder="Due in days after start (e.g. 7)"
                               className="border border-gray-300 rounded px-2 py-1.5 text-sm"
-                              title="Due date"
+                              title="Days after onboarding start date"
                             />
+                          </div>
+                          <div className="flex flex-col gap-1 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => moveTemplateTask(index, "up")}
+                              className="text-gray-600 hover:text-gray-900 p-0.5 disabled:opacity-30"
+                              disabled={index === 0}
+                              title="Move up"
+                            >
+                              <ChevronUp className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveTemplateTask(index, "down")}
+                              className="text-gray-600 hover:text-gray-900 p-0.5 disabled:opacity-30"
+                              disabled={index === templateForm.tasks.length - 1}
+                              title="Move down"
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
                           </div>
                           <button type="button" onClick={() => removeTemplateTask(index)} className="text-red-600 hover:text-red-800 p-1 flex-shrink-0 mt-1" title="Remove task">
                             <Trash2 className="h-4 w-4" />

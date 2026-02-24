@@ -19,6 +19,7 @@ interface OnboardingTask {
   priority: string | null;
   estimatedHours: number | null;
   dueDate: string | null;
+  dueDaysAfterStart?: number | null;
   order: number;
 }
 
@@ -76,6 +77,13 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
     // Parse as local date to avoid timezone shifts.
     const [y, m, d] = value.split("-").map((p) => Number(p));
     return new Date(y, (m || 1) - 1, d || 1);
+  };
+
+  const addDaysToLocalDate = (base: Date, days: number): Date => {
+    const d = new Date(base);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + days);
+    return d;
   };
 
   const getDeliverablesStartMonth = (start: Date) => {
@@ -183,13 +191,18 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
 
     try {
       const tasks = selectedTemplate.tasks.map((templateTask) => ({
+        dueDate:
+          templateTask.dueDaysAfterStart != null
+            ? formatYYYYMMDD(addDaysToLocalDate(onboardingStartDate, Math.max(0, Number(templateTask.dueDaysAfterStart))))
+            : templateTask.dueDate
+            ? templateTask.dueDate.slice(0, 10)
+            : null,
         title: templateTask.title,
         description: templateTask.description ?? undefined,
         category: templateTask.category ?? undefined,
         status: "TODO" as const,
         clientId: selectedClient,
         assigneeId: selectedSpecialist || null,
-        dueDate: templateTask.dueDate ? templateTask.dueDate.slice(0, 10) : null,
         estimatedHours: templateTask.estimatedHours ?? undefined,
         priority: templateTask.priority ?? undefined,
       }));
@@ -445,7 +458,11 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
                                 {task.category}
                               </span>
                             )}
-                            {task.dueDate ? (
+                            {task.dueDaysAfterStart != null ? (
+                              <span className="px-2 py-1 bg-primary-100 text-primary-700 rounded">
+                                Due: {task.dueDaysAfterStart} day{task.dueDaysAfterStart === 1 ? "" : "s"} after start
+                              </span>
+                            ) : task.dueDate ? (
                               <span className="px-2 py-1 bg-primary-100 text-primary-700 rounded">
                                 Due: {task.dueDate.slice(0, 10)}
                               </span>

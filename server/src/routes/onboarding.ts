@@ -82,6 +82,11 @@ async function ensureDefaultTemplateForAgency(agencyId: string) {
 
 const includeTasks = { tasks: { orderBy: { order: "asc" as const } } };
 
+function isUnknownDueDaysAfterStartArg(error: any): boolean {
+  const msg = String(error?.message || "");
+  return msg.includes("Unknown argument `dueDaysAfterStart`");
+}
+
 // Get onboarding templates. Client-based: agency/admin see only global template(s). Super admin sees all.
 router.get("/templates", authenticateToken, async (req, res) => {
   try {
@@ -193,30 +198,64 @@ router.post("/templates", authenticateToken, async (req, res) => {
       agencyId = userAgency.agencyId;
     }
 
-    const template = await prisma.onboardingTemplate.create({
-      data: {
-        name,
-        description,
-        isDefault: isDefault || false,
-        agencyId,
-        tasks: {
-          create: tasks.map((task: any, index: number) => ({
-            title: task.title,
-            description: task.description,
-            category: task.category,
-            priority: task.priority,
-            estimatedHours: task.estimatedHours,
-            dueDate: task.dueDate ? new Date(task.dueDate) : null,
-            order: index + 1
-          }))
+    let template;
+    try {
+      template = await prisma.onboardingTemplate.create({
+        data: {
+          name,
+          description,
+          isDefault: isDefault || false,
+          agencyId,
+          tasks: {
+            create: tasks.map((task: any, index: number) => ({
+              title: task.title,
+              description: task.description,
+              category: task.category,
+              priority: task.priority,
+              estimatedHours: task.estimatedHours,
+              dueDate: task.dueDate ? new Date(task.dueDate) : null,
+              dueDaysAfterStart:
+                task.dueDaysAfterStart === null || task.dueDaysAfterStart === undefined || task.dueDaysAfterStart === ""
+                  ? null
+                  : Math.max(0, Number(task.dueDaysAfterStart)),
+              order: index + 1
+            }))
+          }
+        },
+        include: {
+          tasks: {
+            orderBy: { order: "asc" }
+          }
         }
-      },
-      include: {
-        tasks: {
-          orderBy: { order: "asc" }
+      });
+    } catch (error: any) {
+      if (!isUnknownDueDaysAfterStartArg(error)) throw error;
+      // Backward compatibility when Prisma client is not regenerated yet.
+      template = await prisma.onboardingTemplate.create({
+        data: {
+          name,
+          description,
+          isDefault: isDefault || false,
+          agencyId,
+          tasks: {
+            create: tasks.map((task: any, index: number) => ({
+              title: task.title,
+              description: task.description,
+              category: task.category,
+              priority: task.priority,
+              estimatedHours: task.estimatedHours,
+              dueDate: task.dueDate ? new Date(task.dueDate) : null,
+              order: index + 1
+            }))
+          }
+        },
+        include: {
+          tasks: {
+            orderBy: { order: "asc" }
+          }
         }
-      }
-    });
+      });
+    }
 
     res.status(201).json(template);
   } catch (error) {
@@ -258,31 +297,66 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
     }
 
     // Update template
-    const template = await prisma.onboardingTemplate.update({
-      where: { id },
-      data: {
-        name,
-        description,
-        isDefault: isDefault || false,
-        tasks: {
-          deleteMany: {},
-          create: tasks.map((task: any, index: number) => ({
-            title: task.title,
-            description: task.description,
-            category: task.category,
-            priority: task.priority,
-            estimatedHours: task.estimatedHours,
-            dueDate: task.dueDate ? new Date(task.dueDate) : null,
-            order: index + 1
-          }))
+    let template;
+    try {
+      template = await prisma.onboardingTemplate.update({
+        where: { id },
+        data: {
+          name,
+          description,
+          isDefault: isDefault || false,
+          tasks: {
+            deleteMany: {},
+            create: tasks.map((task: any, index: number) => ({
+              title: task.title,
+              description: task.description,
+              category: task.category,
+              priority: task.priority,
+              estimatedHours: task.estimatedHours,
+              dueDate: task.dueDate ? new Date(task.dueDate) : null,
+              dueDaysAfterStart:
+                task.dueDaysAfterStart === null || task.dueDaysAfterStart === undefined || task.dueDaysAfterStart === ""
+                  ? null
+                  : Math.max(0, Number(task.dueDaysAfterStart)),
+              order: index + 1
+            }))
+          }
+        },
+        include: {
+          tasks: {
+            orderBy: { order: "asc" }
+          }
         }
-      },
-      include: {
-        tasks: {
-          orderBy: { order: "asc" }
+      });
+    } catch (error: any) {
+      if (!isUnknownDueDaysAfterStartArg(error)) throw error;
+      // Backward compatibility when Prisma client is not regenerated yet.
+      template = await prisma.onboardingTemplate.update({
+        where: { id },
+        data: {
+          name,
+          description,
+          isDefault: isDefault || false,
+          tasks: {
+            deleteMany: {},
+            create: tasks.map((task: any, index: number) => ({
+              title: task.title,
+              description: task.description,
+              category: task.category,
+              priority: task.priority,
+              estimatedHours: task.estimatedHours,
+              dueDate: task.dueDate ? new Date(task.dueDate) : null,
+              order: index + 1
+            }))
+          }
+        },
+        include: {
+          tasks: {
+            orderBy: { order: "asc" }
+          }
         }
-      }
-    });
+      });
+    }
 
     res.json(template);
   } catch (error) {

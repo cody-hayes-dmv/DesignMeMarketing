@@ -62,6 +62,12 @@ interface ReportSchedule {
   clientId: string;
 }
 
+interface CampaignWinsSettings {
+  enabled: boolean;
+  recipients: string[];
+  lastSent?: string | null;
+}
+
 const getStatusBadge = (status: ReportStatus) => {
   const styles: Record<ReportStatus, string> = {
     Sent: "bg-green-100 text-green-800",
@@ -86,6 +92,8 @@ const ReportsPage: React.FC = () => {
   const [selectedReportForSend, setSelectedReportForSend] = useState<Report | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<ReportSchedule[]>([]);
+  const [campaignWinsByClient, setCampaignWinsByClient] = useState<Record<string, CampaignWinsSettings>>({});
+  const [campaignWinsDrafts, setCampaignWinsDrafts] = useState<Record<string, { enabled: boolean; recipients: string }>>({});
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [filterClientId, setFilterClientId] = useState<string>("all");
   const [cardFilter, setCardFilter] = useState<"total" | "active" | "sent" | "scheduled" | "draft">("active");
@@ -111,6 +119,7 @@ const ReportsPage: React.FC = () => {
     if (clients.length > 0) {
       fetchReports();
       fetchSchedules();
+      fetchCampaignWinsSettings();
     }
   }, [clients]);
 
@@ -191,6 +200,39 @@ const ReportsPage: React.FC = () => {
       toast.error("Failed to fetch reports");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCampaignWinsSettings = async () => {
+    try {
+      const responses = await Promise.all(
+        clients.map((client) =>
+          api.get(`/seo/reports/${client.id}/campaign-wins`).catch(() => ({ data: null }))
+        )
+      );
+      const next: Record<string, CampaignWinsSettings> = {};
+      responses.forEach((response, index) => {
+        const clientId = clients[index]?.id;
+        if (!clientId || !response?.data) return;
+        next[clientId] = {
+          enabled: Boolean(response.data.enabled),
+          recipients: Array.isArray(response.data.recipients) ? response.data.recipients : [],
+          lastSent: response.data.lastSent || null,
+        };
+      });
+      setCampaignWinsByClient(next);
+      setCampaignWinsDrafts((prev) => {
+        const merged: Record<string, { enabled: boolean; recipients: string }> = { ...prev };
+        Object.entries(next).forEach(([clientId, settings]) => {
+          merged[clientId] = {
+            enabled: settings.enabled,
+            recipients: settings.recipients.join(", "),
+          };
+        });
+        return merged;
+      });
+    } catch (error) {
+      console.error("Failed to fetch campaign wins settings:", error);
     }
   };
 
@@ -329,6 +371,35 @@ const ReportsPage: React.FC = () => {
       fetchReports();
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to delete schedule");
+    }
+  };
+
+  const handleSaveCampaignWins = async (clientId: string, recipientsCsv: string, enabled: boolean) => {
+    const recipients = recipientsCsv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (enabled && recipients.length === 0) {
+      toast.error("Please enter at least one recipient email");
+      return;
+    }
+    try {
+      await api.post(`/seo/reports/${clientId}/campaign-wins`, { enabled, recipients });
+      toast.success("Campaign Wins settings saved");
+      fetchCampaignWinsSettings();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to save Campaign Wins settings");
+    }
+  };
+
+  const handleDeleteCampaignWins = async (clientId: string) => {
+    if (!confirm("Disable Campaign Wins report for this client?")) return;
+    try {
+      await api.delete(`/seo/reports/${clientId}/campaign-wins`);
+      toast.success("Campaign Wins disabled");
+      fetchCampaignWinsSettings();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to disable Campaign Wins");
     }
   };
 
@@ -851,6 +922,89 @@ const ReportsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <div className="bg-white rounded-xl border border-gray-200 mt-8">
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">Campaign Wins Report</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Automatically sends positive milestone updates only. No manual send.
+          </p>
+        </div>
+        <div className="p-6 space-y-4">
+          {clients.map((client) => {
+            const settings = campaignWinsByClient[client.id] || { enabled: false, recipients: [], lastSent: null };
+            const draft = campaignWinsDrafts[client.id] || { enabled: settings.enabled, recipients: settings.recipients.join(", ") };
+            return (
+              <div key={client.id} className="rounded-lg border border-gray-200 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                  <p className="font-medium text-gray-900">{client.name}</p>
+                  <span className={`px-2 py-1 text-xs rounded-full ${draft.enabled ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-700"}`}>
+                    {draft.enabled ? "Active" : "Inactive"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                  <label className="text-sm">
+                    <span className="block text-gray-700 mb-1">Status</span>
+                    <select
+                      value={draft.enabled ? "active" : "inactive"}
+                      onChange={(e) =>
+                        setCampaignWinsDrafts((prev) => ({
+                          ...prev,
+                          [client.id]: {
+                            enabled: e.target.value === "active",
+                            recipients: draft.recipients,
+                          },
+                        }))
+                      }
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </label>
+                  <label className="text-sm md:col-span-2">
+                    <span className="block text-gray-700 mb-1">Recipient emails</span>
+                    <input
+                      value={draft.recipients}
+                      onChange={(e) =>
+                        setCampaignWinsDrafts((prev) => ({
+                          ...prev,
+                          [client.id]: {
+                            enabled: draft.enabled,
+                            recipients: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="email1@example.com, email2@example.com"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </label>
+                  <div className="text-sm text-gray-600">
+                    <div>Last sent</div>
+                    <div className="font-medium text-gray-900">
+                      {settings.lastSent ? new Date(settings.lastSent).toLocaleString() : "Not sent yet"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-3">
+                  <button
+                    onClick={() => handleDeleteCampaignWins(client.id)}
+                    className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                  <button
+                    onClick={() => handleSaveCampaignWins(client.id, draft.recipients, draft.enabled)}
+                    className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };
@@ -862,7 +1016,7 @@ const ScheduleReportModal: React.FC<{
   onSuccess: () => void;
 }> = ({ clients, onClose, onSuccess }) => {
   const [clientId, setClientId] = useState("");
-  const [frequency, setFrequency] = useState<"weekly" | "biweekly" | "monthly">("weekly");
+  const [reportType, setReportType] = useState<"weekly" | "biweekly" | "monthly" | "campaign_wins">("weekly");
   const [dayOfWeek, setDayOfWeek] = useState(1); // Monday
   const [dayOfMonth, setDayOfMonth] = useState(1);
   const [timeOfDay, setTimeOfDay] = useState("09:00");
@@ -885,16 +1039,24 @@ const ScheduleReportModal: React.FC<{
 
     setLoading(true);
     try {
-      await api.post(`/seo/reports/${clientId}/schedule`, {
-        frequency,
-        dayOfWeek: frequency !== "monthly" ? dayOfWeek : undefined,
-        dayOfMonth: frequency === "monthly" ? dayOfMonth : undefined,
-        timeOfDay,
-        recipients: recipientsList,
-        emailSubject: emailSubject || undefined,
-        isActive: true,
-      });
-      toast.success("Report schedule created successfully!");
+      if (reportType === "campaign_wins") {
+        await api.post(`/seo/reports/${clientId}/campaign-wins`, {
+          enabled: true,
+          recipients: recipientsList,
+        });
+        toast.success("Campaign Wins report enabled successfully!");
+      } else {
+        await api.post(`/seo/reports/${clientId}/schedule`, {
+          frequency: reportType,
+          dayOfWeek: reportType !== "monthly" ? dayOfWeek : undefined,
+          dayOfMonth: reportType === "monthly" ? dayOfMonth : undefined,
+          timeOfDay,
+          recipients: recipientsList,
+          emailSubject: emailSubject || undefined,
+          isActive: true,
+        });
+        toast.success("Report schedule created successfully!");
+      }
       onSuccess();
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to create schedule");
@@ -953,19 +1115,31 @@ const ScheduleReportModal: React.FC<{
               </h3>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Report Type</label>
                   <select
-                    value={frequency}
-                    onChange={(e) => setFrequency(e.target.value as "weekly" | "biweekly" | "monthly")}
+                    value={reportType}
+                    onChange={(e) => setReportType(e.target.value as "weekly" | "biweekly" | "monthly" | "campaign_wins")}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     required
                   >
                     <option value="weekly">Weekly</option>
                     <option value="biweekly">Biweekly</option>
                     <option value="monthly">Monthly</option>
+                    <option value="campaign_wins">Campaign Wins Report</option>
                   </select>
                 </div>
-                {frequency !== "monthly" ? (
+                {reportType === "campaign_wins" && (
+                  <div className="rounded-lg bg-white border border-emerald-200 p-3 text-sm text-emerald-800">
+                    <p className="font-semibold mb-1">Campaign Wins Report</p>
+                    <p>
+                      Campaign Wins reports are sent automatically when meaningful milestones are reached — new page 1 rankings,
+                      traffic growth, work completed, and more. We&apos;ll never send the same win twice, and nothing goes out if there&apos;s nothing to celebrate.
+                    </p>
+                  </div>
+                )}
+                {reportType !== "campaign_wins" && (
+                  <>
+                {reportType !== "monthly" ? (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Day of Week</label>
                     <select
@@ -1005,6 +1179,8 @@ const ScheduleReportModal: React.FC<{
                     required
                   />
                 </div>
+                  </>
+                )}
               </div>
             </div>
             <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
@@ -1026,6 +1202,7 @@ const ScheduleReportModal: React.FC<{
                     required
                   />
                 </div>
+                {reportType !== "campaign_wins" && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Email Subject (optional)</label>
                   <input
@@ -1036,6 +1213,7 @@ const ScheduleReportModal: React.FC<{
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
+                )}
               </div>
             </div>
           </div>

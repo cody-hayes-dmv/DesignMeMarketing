@@ -112,7 +112,7 @@ server.on("listening", async () => {
   console.log(`Server running on port ${PORT}`);
 
   // Start report scheduler cron job (runs every hour)
-  const { processScheduledReports, refreshAllGA4Data } = await import("./lib/reportScheduler.js");
+  const { processScheduledReports, refreshAllGA4Data, processCampaignWinsReports } = await import("./lib/reportScheduler.js");
   const { autoSyncBacklinksForStaleClients, autoRefreshSeoDataForDueClients } = await import("./routes/seo.js");
   const { archiveCanceledClientsPastEndDate, archiveScheduledClients } = await import("./lib/clientStatusWorkflow.js");
   const { processRecurringTaskRules } = await import("./routes/tasks.js");
@@ -132,6 +132,13 @@ server.on("listening", async () => {
 
   console.log("Report scheduler started (runs every hour)");
   console.log("GA4 auto-refresh scheduler started (runs Monday mornings)");
+
+  // Campaign Wins: run once on startup, then daily.
+  processCampaignWinsReports().catch(console.error);
+  setInterval(() => {
+    processCampaignWinsReports().catch(console.error);
+  }, 24 * 60 * 60 * 1000);
+  console.log("Campaign wins scheduler started (runs daily)");
 
   // Client status: archive CANCELED clients when canceledEndDate has passed, and scheduled archives (run daily)
   archiveCanceledClientsPastEndDate().catch(console.error);

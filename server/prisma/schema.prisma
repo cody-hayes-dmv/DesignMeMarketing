@@ -242,6 +242,9 @@ model Client {
   belongsToAgencyId     String?
   isAgencyOwnDashboard   Boolean                  @default(false)
   dashboardShareToken    String?                  @unique @db.VarChar(64) // Permanent token for shared dashboard link (fixed URL, never expires)
+  campaignWinsEnabled    Boolean                  @default(false) @map("campaign_wins_enabled")
+  campaignWinsEmails     String?                  @db.LongText @map("campaign_wins_emails")
+  campaignWinsLastSent   DateTime?                @db.DateTime @map("campaign_wins_last_sent")
   aiSearchSerpCache     AiSearchSerpCache?
   backlinkTimeseries    BacklinkTimeseries[]
   backlinks             Backlink[]
@@ -265,11 +268,29 @@ model Client {
   clientUsers           ClientUser[]
   managedServices       ManagedService[]
   agencyInclusions      ClientAgencyIncluded[]
+  campaignWinEvents     CampaignWinEvent[]
 
   @@index([name, domain])
   @@index([userId], map: "clients_userId_fkey")
   @@index([belongsToAgencyId])
   @@map("clients")
+}
+
+model CampaignWinEvent {
+  id            String               @id @default(cuid())
+  clientId      String               @map("client_id")
+  eventType     CampaignWinEventType @map("event_type")
+  eventDetail   String               @db.Text @map("event_detail")
+  thresholdKey  String               @db.VarChar(255) @map("threshold_key")
+  triggeredAt   DateTime             @default(now()) @map("triggered_at")
+  notifiedAt    DateTime?            @db.DateTime @map("notified_at")
+  cooldownUntil DateTime?            @db.DateTime @map("cooldown_until")
+  client        Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, thresholdKey])
+  @@index([clientId, notifiedAt])
+  @@index([clientId, cooldownUntil])
+  @@map("campaign_win_events")
 }
 
 model ClientAgencyIncluded {
@@ -546,6 +567,7 @@ model OnboardingTask {
   priority       String?
   estimatedHours Int?
   dueDate        DateTime?
+  dueDaysAfterStart Int?            @map("due_days_after_start")
   order          Int                @default(0)
   templateId     String
   template       OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -837,6 +859,14 @@ enum BillingType {
   free
   trial
   custom
+}
+
+enum CampaignWinEventType {
+  KEYWORD_WIN
+  TRAFFIC_MILESTONE
+  WORK_COMPLETED
+  AI_VISIBILITY
+  REVIEW_ACTIVITY
 }
 
 enum TokenType {

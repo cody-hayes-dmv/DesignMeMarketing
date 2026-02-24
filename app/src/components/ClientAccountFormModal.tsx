@@ -42,35 +42,37 @@ export default function ClientAccountFormModal({
 
   const copyAllToClipboard = () => {
     const industry = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
+    const cityState = [form.primaryLocationCity, form.primaryLocationState].filter(Boolean).join(", ");
+    const serviceRadiusAreas = [form.serviceRadius, form.serviceAreasServed].filter(Boolean).join(" | ");
+    const gbpCategories = [form.gbpPrimaryCategory, form.gbpSecondaryCategories].filter(Boolean).join(" | ");
+    const gbpServices = [form.primaryServicesList, form.secondaryServicesList, form.servicesMarkedPrimary]
+      .filter(Boolean)
+      .join(" | ");
+    const coordinates = [form.latitude, form.longitude].filter(Boolean).join(", ");
     const lines = [
-      "--- BUSINESS INFORMATION ---",
       `Business Name: ${form.name || ""}`,
       `Business Niche: ${industry || ""}`,
       `Business Description: ${form.businessDescription || ""}`,
       `Primary Domain: ${form.domain || ""}`,
-      "",
-      "--- LOCATION INFORMATION ---",
       `Business Address: ${form.businessAddress || ""}`,
-      `Primary Location City: ${form.primaryLocationCity || ""}`,
-      `Primary Location State: ${form.primaryLocationState || ""}`,
-      `Service Radius: ${form.serviceRadius || ""}`,
-      `Areas Served: ${form.serviceAreasServed || ""}`,
-      "",
-      "--- CONTACT INFORMATION ---",
+      `Primary Location (City, State): ${cityState || ""}`,
+      `Service Radius / Areas Served: ${serviceRadiusAreas || ""}`,
       `Phone Number: ${form.phoneNumber || ""}`,
       `Email: ${form.emailAddress || ""}`,
       "",
-      "--- WEBSITE LOGIN INFO ---",
-      `Website Login URL: ${form.loginUrl || ""}`,
-      `Website Username: ${form.loginUsername || ""}`,
-      `Website Password: ${form.loginPassword ? "••••••••" : ""}`,
       "",
-      "--- CAMPAIGN TYPE ---",
-      `Campaign Type: ${form.campaignType || ""}`,
+      `CAMPAIGN TYPE: (Local or National) ${form.campaignType || ""}`,
       "",
-      "--- GOOGLE BUSINESS PROFILE ---",
-      `Google Business Profile Category: ${form.gbpPrimaryCategory || ""}`,
-      `Secondary GBP Categories: ${form.gbpSecondaryCategories || ""}`,
+      `GBP CATEGORIES: ${gbpCategories || ""}`,
+      "",
+      `GBP SERVICES: ${gbpServices || ""}`,
+      "",
+      `Target number of keywords for this campaign- ${form.targetKeywordCount || form.totalKeywordsToTarget || ""}`,
+      "",
+      `Keywords: ${form.keywords || ""}`,
+      "",
+      "Longitude and Latitude",
+      `Enter Coordinates: ${coordinates || ""}`,
     ];
     if (showStatus) {
       lines.push("", "--- STATUS ---", `Status: ${form.clientStatus || ""}`);
