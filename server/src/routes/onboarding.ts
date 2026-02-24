@@ -112,6 +112,17 @@ const taskSelectWithoutDueDays = {
   order: true,
 };
 
+const taskSelectDueDaysOnly = {
+  id: true,
+  title: true,
+  description: true,
+  category: true,
+  priority: true,
+  estimatedHours: true,
+  dueDaysAfterStart: true,
+  order: true,
+};
+
 const taskSelectLegacy = {
   id: true,
   title: true,
@@ -130,6 +141,10 @@ const includeTasksWithoutDueDays = {
   tasks: { orderBy: { order: "asc" as const }, select: taskSelectWithoutDueDays },
 };
 
+const includeTasksDueDaysOnly = {
+  tasks: { orderBy: { order: "asc" as const }, select: taskSelectDueDaysOnly },
+};
+
 const includeTasksLegacy = {
   tasks: { orderBy: { order: "asc" as const }, select: taskSelectLegacy },
 };
@@ -146,7 +161,10 @@ function isMissingDueDaysAfterStartColumn(error: any): boolean {
   const msg = String(error?.message || "");
   const col = String(error?.meta?.column || "");
   return (
-    (error?.code === "P2022" && col.includes("onboarding_tasks.due_days_after_start")) ||
+    (error?.code === "P2022" &&
+      (col.includes("onboarding_tasks.due_days_after_start") ||
+        col.includes("due_days_after_start") ||
+        col === "dueDaysAfterStart")) ||
     msg.includes("due_days_after_start")
   );
 }
@@ -155,10 +173,23 @@ function isMissingDueDateColumn(error: any): boolean {
   const msg = String(error?.message || "");
   const col = String(error?.meta?.column || "");
   return (
-    (error?.code === "P2022" && col.includes("onboarding_tasks.dueDate")) ||
-    (error?.code === "P2022" && col.includes("onboarding_tasks.due_date")) ||
+    (error?.code === "P2022" &&
+      (col.includes("onboarding_tasks.dueDate") ||
+        col.includes("onboarding_tasks.due_date") ||
+        col.includes("dueDate") ||
+        col.includes("due_date"))) ||
     msg.includes("onboarding_tasks.dueDate") ||
-    msg.includes("onboarding_tasks.due_date")
+    msg.includes("onboarding_tasks.due_date") ||
+    msg.includes("The column `dueDate` does not exist") ||
+    msg.includes("The column `due_date` does not exist")
+  );
+}
+
+function isUnknownDueDateArg(error: any): boolean {
+  const msg = String(error?.message || "");
+  return (
+    msg.includes("Unknown argument `dueDate`") ||
+    msg.includes("Unknown field `dueDate`")
   );
 }
 
@@ -167,7 +198,7 @@ function canFallbackDueDaysAfterStart(error: any): boolean {
 }
 
 function canFallbackTaskColumns(error: any): boolean {
-  return canFallbackDueDaysAfterStart(error) || isMissingDueDateColumn(error);
+  return canFallbackDueDaysAfterStart(error) || isMissingDueDateColumn(error) || isUnknownDueDateArg(error);
 }
 
 async function findTemplatesWithTaskFallback(opts: {
@@ -185,14 +216,22 @@ async function findTemplatesWithTaskFallback(opts: {
     try {
       return await prisma.onboardingTemplate.findMany({
         ...(opts.where ? { where: opts.where } : {}),
-        include: { ...includeTasksWithoutDueDays, ...agencyInclude },
+        include: { ...includeTasksDueDaysOnly, ...agencyInclude },
       });
     } catch (error2: any) {
       if (!canFallbackTaskColumns(error2)) throw error2;
-      return prisma.onboardingTemplate.findMany({
-        ...(opts.where ? { where: opts.where } : {}),
-        include: { ...includeTasksLegacy, ...agencyInclude },
-      });
+      try {
+        return await prisma.onboardingTemplate.findMany({
+          ...(opts.where ? { where: opts.where } : {}),
+          include: { ...includeTasksWithoutDueDays, ...agencyInclude },
+        });
+      } catch (error3: any) {
+        if (!canFallbackTaskColumns(error3)) throw error3;
+        return prisma.onboardingTemplate.findMany({
+          ...(opts.where ? { where: opts.where } : {}),
+          include: { ...includeTasksLegacy, ...agencyInclude },
+        });
+      }
     }
   }
 }
@@ -279,6 +318,7 @@ router.post("/templates", authenticateToken, async (req, res) => {
     }
 
     const { name, description, isDefault, tasks, agencyId: bodyAgencyId } = req.body;
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
 
     let agencyId: string | null;
     if (user.role === "SUPER_ADMIN") {
@@ -319,7 +359,7 @@ router.post("/templates", authenticateToken, async (req, res) => {
           isDefault: isDefault || false,
           agencyId,
           tasks: {
-            create: tasks.map((task: any, index: number) => ({
+            create: safeTasks.map((task: any, index: number) => ({
               title: task.title,
               description: task.description,
               category: task.category,
@@ -347,40 +387,67 @@ router.post("/templates", authenticateToken, async (req, res) => {
             isDefault: isDefault || false,
             agencyId,
             tasks: {
-              create: tasks.map((task: any, index: number) => ({
+              create: safeTasks.map((task: any, index: number) => ({
                 title: task.title,
                 description: task.description,
                 category: task.category,
                 priority: task.priority,
                 estimatedHours: task.estimatedHours,
-                dueDate: task.dueDate ? new Date(task.dueDate) : null,
+                dueDaysAfterStart:
+                  task.dueDaysAfterStart === null || task.dueDaysAfterStart === undefined || task.dueDaysAfterStart === ""
+                    ? null
+                    : Math.max(0, Number(task.dueDaysAfterStart)),
                 order: index + 1
               }))
             }
           },
-          include: includeTasksWithoutDueDays
+          include: includeTasksDueDaysOnly
         });
       } catch (error2: any) {
         if (!canFallbackTaskColumns(error2)) throw error2;
-        template = await prisma.onboardingTemplate.create({
-          data: {
-            name,
-            description,
-            isDefault: isDefault || false,
-            agencyId,
-            tasks: {
-              create: tasks.map((task: any, index: number) => ({
-                title: task.title,
-                description: task.description,
-                category: task.category,
-                priority: task.priority,
-                estimatedHours: task.estimatedHours,
-                order: index + 1
-              }))
-            }
-          },
-          include: includeTasksLegacy
-        });
+        try {
+          template = await prisma.onboardingTemplate.create({
+            data: {
+              name,
+              description,
+              isDefault: isDefault || false,
+              agencyId,
+              tasks: {
+                create: safeTasks.map((task: any, index: number) => ({
+                  title: task.title,
+                  description: task.description,
+                  category: task.category,
+                  priority: task.priority,
+                  estimatedHours: task.estimatedHours,
+                  dueDate: task.dueDate ? new Date(task.dueDate) : null,
+                  order: index + 1
+                }))
+              }
+            },
+            include: includeTasksWithoutDueDays
+          });
+        } catch (error3: any) {
+          if (!canFallbackTaskColumns(error3)) throw error3;
+          template = await prisma.onboardingTemplate.create({
+            data: {
+              name,
+              description,
+              isDefault: isDefault || false,
+              agencyId,
+              tasks: {
+                create: safeTasks.map((task: any, index: number) => ({
+                  title: task.title,
+                  description: task.description,
+                  category: task.category,
+                  priority: task.priority,
+                  estimatedHours: task.estimatedHours,
+                  order: index + 1
+                }))
+              }
+            },
+            include: includeTasksLegacy
+          });
+        }
       }
     }
 
@@ -397,6 +464,7 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
     const user = req.user;
     const { id } = req.params;
     const { name, description, isDefault, tasks } = req.body;
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
 
     if (user.role !== "AGENCY" && user.role !== "ADMIN" && user.role !== "SUPER_ADMIN") {
       return res.status(403).json({ message: "Access denied" });
@@ -434,7 +502,7 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
           isDefault: isDefault || false,
           tasks: {
             deleteMany: {},
-            create: tasks.map((task: any, index: number) => ({
+            create: safeTasks.map((task: any, index: number) => ({
               title: task.title,
               description: task.description,
               category: task.category,
@@ -463,41 +531,69 @@ router.put("/templates/:id", authenticateToken, async (req, res) => {
             isDefault: isDefault || false,
             tasks: {
               deleteMany: {},
-              create: tasks.map((task: any, index: number) => ({
+              create: safeTasks.map((task: any, index: number) => ({
                 title: task.title,
                 description: task.description,
                 category: task.category,
                 priority: task.priority,
                 estimatedHours: task.estimatedHours,
-                dueDate: task.dueDate ? new Date(task.dueDate) : null,
+                dueDaysAfterStart:
+                  task.dueDaysAfterStart === null || task.dueDaysAfterStart === undefined || task.dueDaysAfterStart === ""
+                    ? null
+                    : Math.max(0, Number(task.dueDaysAfterStart)),
                 order: index + 1
               }))
             }
           },
-          include: includeTasksWithoutDueDays
+          include: includeTasksDueDaysOnly
         });
       } catch (error2: any) {
         if (!canFallbackTaskColumns(error2)) throw error2;
-        template = await prisma.onboardingTemplate.update({
-          where: { id },
-          data: {
-            name,
-            description,
-            isDefault: isDefault || false,
-            tasks: {
-              deleteMany: {},
-              create: tasks.map((task: any, index: number) => ({
-                title: task.title,
-                description: task.description,
-                category: task.category,
-                priority: task.priority,
-                estimatedHours: task.estimatedHours,
-                order: index + 1
-              }))
-            }
-          },
-          include: includeTasksLegacy
-        });
+        try {
+          template = await prisma.onboardingTemplate.update({
+            where: { id },
+            data: {
+              name,
+              description,
+              isDefault: isDefault || false,
+              tasks: {
+                deleteMany: {},
+                create: safeTasks.map((task: any, index: number) => ({
+                  title: task.title,
+                  description: task.description,
+                  category: task.category,
+                  priority: task.priority,
+                  estimatedHours: task.estimatedHours,
+                  dueDate: task.dueDate ? new Date(task.dueDate) : null,
+                  order: index + 1
+                }))
+              }
+            },
+            include: includeTasksWithoutDueDays
+          });
+        } catch (error3: any) {
+          if (!canFallbackTaskColumns(error3)) throw error3;
+          template = await prisma.onboardingTemplate.update({
+            where: { id },
+            data: {
+              name,
+              description,
+              isDefault: isDefault || false,
+              tasks: {
+                deleteMany: {},
+                create: safeTasks.map((task: any, index: number) => ({
+                  title: task.title,
+                  description: task.description,
+                  category: task.category,
+                  priority: task.priority,
+                  estimatedHours: task.estimatedHours,
+                  order: index + 1
+                }))
+              }
+            },
+            include: includeTasksLegacy
+          });
+        }
       }
     }
 

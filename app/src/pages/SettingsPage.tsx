@@ -994,57 +994,75 @@ const SettingsPage = () => {
                         <div key={index} className="flex gap-2 items-start p-2 bg-gray-50 rounded-lg border border-gray-200">
                           <span className="text-gray-400 mt-2 flex-shrink-0" title="Order"><GripVertical className="h-4 w-4" /></span>
                           <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
-                            <input
-                              type="text"
-                              value={task.title}
-                              onChange={(e) => updateTemplateTask(index, "title", e.target.value)}
-                              placeholder="Task title"
-                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
-                            />
-                            <input
-                              type="text"
-                              value={task.description}
-                              onChange={(e) => updateTemplateTask(index, "description", e.target.value)}
-                              placeholder="Description (optional)"
-                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
-                            />
-                            <input
-                              type="text"
-                              value={task.category}
-                              onChange={(e) => updateTemplateTask(index, "category", e.target.value)}
-                              placeholder="Category (e.g. Onboarding)"
-                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
-                            />
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Task title</label>
+                              <input
+                                type="text"
+                                value={task.title}
+                                onChange={(e) => updateTemplateTask(index, "title", e.target.value)}
+                                placeholder="Task title"
+                                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
+                              <input
+                                type="text"
+                                value={task.description}
+                                onChange={(e) => updateTemplateTask(index, "description", e.target.value)}
+                                placeholder="Description (optional)"
+                                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Category</label>
+                              <input
+                                type="text"
+                                value={task.category}
+                                onChange={(e) => updateTemplateTask(index, "category", e.target.value)}
+                                placeholder="Category (e.g. Onboarding)"
+                                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
+                              />
+                            </div>
                             <div className="flex gap-2">
-                              <select
-                                value={task.priority}
-                                onChange={(e) => updateTemplateTask(index, "priority", e.target.value)}
-                                className="border border-gray-300 rounded px-2 py-1.5 text-sm flex-1"
-                              >
-                                <option value="">Priority</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                              </select>
+                              <div className="flex-1">
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
+                                <select
+                                  value={task.priority}
+                                  onChange={(e) => updateTemplateTask(index, "priority", e.target.value)}
+                                  className="border border-gray-300 rounded px-2 py-1.5 text-sm flex-1 w-full"
+                                >
+                                  <option value="">Priority</option>
+                                  <option value="low">Low</option>
+                                  <option value="medium">Medium</option>
+                                  <option value="high">High</option>
+                                </select>
+                              </div>
+                              <div className="w-20">
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Hrs</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={0.5}
+                                  value={task.estimatedHours}
+                                  onChange={(e) => updateTemplateTask(index, "estimatedHours", e.target.value)}
+                                  placeholder="Hrs"
+                                  className="border border-gray-300 rounded px-2 py-1.5 text-sm w-20"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Due how many days after start date?</label>
                               <input
                                 type="number"
                                 min={0}
-                                step={0.5}
-                                value={task.estimatedHours}
-                                onChange={(e) => updateTemplateTask(index, "estimatedHours", e.target.value)}
-                                placeholder="Hrs"
-                                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-20"
+                                value={task.dueDaysAfterStart}
+                                onChange={(e) => updateTemplateTask(index, "dueDaysAfterStart", e.target.value)}
+                                placeholder="e.g. 7"
+                                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
+                                title="Days after onboarding start date"
                               />
                             </div>
-                            <input
-                              type="number"
-                              min={0}
-                              value={task.dueDaysAfterStart}
-                              onChange={(e) => updateTemplateTask(index, "dueDaysAfterStart", e.target.value)}
-                              placeholder="Due in days after start (e.g. 7)"
-                              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
-                              title="Days after onboarding start date"
-                            />
                           </div>
                           <div className="flex flex-col gap-1 mt-1">
                             <button
