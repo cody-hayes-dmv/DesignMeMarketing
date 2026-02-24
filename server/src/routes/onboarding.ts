@@ -37,24 +37,33 @@ const DEFAULT_ONBOARDING_TASKS = [
 async function ensureDefaultGlobalTemplate() {
   const existing = await prisma.onboardingTemplate.findFirst({ where: { agencyId: null } });
   if (existing) return;
-  await prisma.onboardingTemplate.create({
-    data: {
-      name: "Standard SEO Onboarding",
-      description: "Default template for new SEO clients",
-      isDefault: true,
-      agencyId: null,
-      tasks: {
-        create: DEFAULT_ONBOARDING_TASKS.map((t) => ({
-          title: t.title,
-          description: t.description,
-          category: t.category,
-          priority: t.priority,
-          estimatedHours: t.estimatedHours,
-          order: t.order,
-        })),
+  try {
+    await prisma.onboardingTemplate.create({
+      data: {
+        name: "Standard SEO Onboarding",
+        description: "Default template for new SEO clients",
+        isDefault: true,
+        agencyId: null,
+        tasks: {
+          create: DEFAULT_ONBOARDING_TASKS.map((t) => ({
+            title: t.title,
+            description: t.description,
+            category: t.category,
+            priority: t.priority,
+            estimatedHours: t.estimatedHours,
+            order: t.order,
+          })),
+        },
       },
-    },
-  });
+    });
+  } catch (error: any) {
+    // Backward compatibility: older DBs may require non-null agencyId for onboarding_templates.
+    // In that case, ensure each agency has its own default template instead of failing the endpoint.
+    const agencies = await prisma.agency.findMany({ select: { id: true } });
+    for (const a of agencies) {
+      await ensureDefaultTemplateForAgency(a.id);
+    }
+  }
 }
 
 async function ensureDefaultTemplateForAgency(agencyId: string) {
@@ -113,7 +122,10 @@ const includeTasksWithoutDueDays = {
 
 function isUnknownDueDaysAfterStartArg(error: any): boolean {
   const msg = String(error?.message || "");
-  return msg.includes("Unknown argument `dueDaysAfterStart`");
+  return (
+    msg.includes("Unknown argument `dueDaysAfterStart`") ||
+    msg.includes("Unknown field `dueDaysAfterStart`")
+  );
 }
 
 function isMissingDueDaysAfterStartColumn(error: any): boolean {
@@ -148,6 +160,15 @@ router.get("/templates", authenticateToken, async (req, res) => {
           include: includeTasksWithoutDueDays,
         });
       }
+      if ((templates?.length ?? 0) === 0) {
+        const firstAgency = await prisma.agency.findFirst({ select: { id: true } });
+        if (firstAgency?.id) {
+          await ensureDefaultTemplateForAgency(firstAgency.id);
+          templates = await prisma.onboardingTemplate.findMany({
+            include: includeTasksWithoutDueDays,
+          });
+        }
+      }
       return res.json(templates);
     }
 
@@ -170,6 +191,13 @@ router.get("/templates", authenticateToken, async (req, res) => {
         if (!canFallbackDueDaysAfterStart(error)) throw error;
         templates = await prisma.onboardingTemplate.findMany({
           where,
+          include: includeTasksWithoutDueDays,
+        });
+      }
+      if ((templates?.length ?? 0) === 0 && agencyId) {
+        await ensureDefaultTemplateForAgency(agencyId);
+        templates = await prisma.onboardingTemplate.findMany({
+          where: { OR: [{ agencyId: null }, { agencyId }] },
           include: includeTasksWithoutDueDays,
         });
       }
