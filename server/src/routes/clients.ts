@@ -509,7 +509,8 @@ router.put('/users/:userId/access', authenticateToken, async (req, res) => {
             await prisma.clientUser.upsert({
                 where: { clientId_userId: { clientId, userId } },
                 update: {
-                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    status: 'PENDING',
+                    acceptedAt: null,
                     invitedById: req.user.userId,
                     invitedAt: new Date(),
                 },
@@ -517,7 +518,7 @@ router.put('/users/:userId/access', authenticateToken, async (req, res) => {
                     clientId,
                     userId,
                     clientRole: 'CLIENT',
-                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    status: 'PENDING',
                     invitedById: req.user.userId,
                     invitedAt: new Date(),
                 },
@@ -695,6 +696,17 @@ router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => 
                     }),
                 },
             });
+
+        // Re-invite should require re-acceptance before access is active.
+        await prisma.clientUser.update({
+            where: { clientId_userId: { clientId, userId } },
+            data: {
+                status: 'PENDING',
+                acceptedAt: null,
+                invitedById: req.user.userId,
+                invitedAt: new Date(),
+            },
+        });
 
             const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
             await sendEmail({
@@ -938,7 +950,8 @@ router.post('/users/invite', authenticateToken, async (req, res) => {
                     where: { clientId_userId: { clientId, userId: user.id } },
                     update: {
                         clientRole,
-                        status: user.verified ? 'ACTIVE' : 'PENDING',
+                        status: 'PENDING',
+                        acceptedAt: null,
                         invitedById: req.user.userId,
                         invitedAt: new Date(),
                     },
@@ -946,7 +959,7 @@ router.post('/users/invite', authenticateToken, async (req, res) => {
                         clientId,
                         userId: user.id,
                         clientRole,
-                        status: user.verified ? 'ACTIVE' : 'PENDING',
+                        status: 'PENDING',
                         invitedById: req.user.userId,
                         invitedAt: new Date(),
                     },
@@ -1052,7 +1065,8 @@ router.post('/:id/users/invite', authenticateToken, async (req, res) => {
                 where: { clientId_userId: { clientId, userId: user.id } },
                 update: {
                     clientRole,
-                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    status: 'PENDING',
+                    acceptedAt: null,
                     invitedById: req.user.userId,
                     invitedAt: new Date(),
                 },
@@ -1060,7 +1074,7 @@ router.post('/:id/users/invite', authenticateToken, async (req, res) => {
                     clientId,
                     userId: user.id,
                     clientRole,
-                    status: user.verified ? 'ACTIVE' : 'PENDING',
+                    status: 'PENDING',
                     invitedById: req.user.userId,
                     invitedAt: new Date(),
                 },

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { checkAuth } from "@/store/slices/authSlice";
+import type { RootState } from "@/store";
 import toast from "react-hot-toast";
 
 type InviteInfo =
@@ -30,6 +31,7 @@ function useQueryParam(name: string): string {
 const InvitePage = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useSelector((state: RootState) => state.auth);
   const token = useQueryParam("token").trim();
 
   const [loading, setLoading] = useState(true);
@@ -40,11 +42,34 @@ const InvitePage = () => {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const getAuthedRedirectPath = () => {
+    if (!user) return "/login";
+    if (user.role === "USER") {
+      const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
+      return firstClientId ? `/client/dashboard/${encodeURIComponent(firstClientId)}` : "/login";
+    }
+    if (user.role === "SPECIALIST") return "/specialist/dashboard";
+    if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") return "/superadmin/dashboard";
+    return "/agency/dashboard";
+  };
+
   useEffect(() => {
     const run = async () => {
       try {
         setLoading(true);
         setError(null);
+        // If already authenticated (e.g. invite just accepted), don't re-validate used invite token.
+        if (user?.verified) {
+          navigate(getAuthedRedirectPath(), { replace: true });
+          return;
+        }
+
+        // Wait for auth bootstrap if a session token exists to avoid transient invite lookups.
+        const hasSessionToken = Boolean(localStorage.getItem("token"));
+        if (hasSessionToken && authLoading) {
+          return;
+        }
+
         if (!token) {
           setInvite(null);
           setError("Missing invite token.");
@@ -60,7 +85,7 @@ const InvitePage = () => {
       }
     };
     void run();
-  }, [token]);
+  }, [token, user?.verified, authLoading, navigate]);
 
   const handleAccept = async () => {
     if (!token) return;
