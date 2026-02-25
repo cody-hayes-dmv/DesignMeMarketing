@@ -105,7 +105,7 @@ function App() {
     { path: "/agency/clients", component: ClientsPage },
     { path: "/agency/vendasta", component: VendastaPage },
     { path: "/agency/included", component: IncludedPage },
-    { path: "/agency/keywords", component: KeywordsPage },
+    { path: "/agnecy/research", component: KeywordsPage },
     { path: "/agency/rankings", component: RankingsPage },
     { path: "/agency/reports", component: ReportsPage },
     { path: "/agency/managed-services", component: ManagedServicesPage },

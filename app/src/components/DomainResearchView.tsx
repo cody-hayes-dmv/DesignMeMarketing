@@ -232,6 +232,7 @@ const AI_SEARCH_MONTHS_LIMIT: Record<"1M" | "6M" | "1Y" | "2Y" | "All", number> 
   "2Y": 24,
   All: 999,
 };
+const AI_SEARCH_PDF_TABLE_ROW_LIMIT = 5;
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const FULL_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -432,6 +433,16 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               node.style.maxHeight = "220px";
               node.style.overflowX = "auto";
               node.style.overflowY = "scroll";
+            });
+            const limitedTables = doc.querySelectorAll("[data-pdf-limit-rows]") as NodeListOf<HTMLElement>;
+            limitedTables.forEach((container) => {
+              const limitAttr = Number(container.getAttribute("data-pdf-limit-rows"));
+              const limit = Number.isFinite(limitAttr) && limitAttr > 0 ? Math.floor(limitAttr) : AI_SEARCH_PDF_TABLE_ROW_LIMIT;
+              const bodyRows = Array.from(container.querySelectorAll("tbody tr"));
+              bodyRows.slice(limit).forEach((row) => row.remove());
+              // Keep the PDF snapshot clean after trimming rows.
+              container.style.maxHeight = "none";
+              container.style.overflowY = "visible";
             });
           },
         });
@@ -1068,6 +1079,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   <h4 className="text-sm font-medium text-gray-700 mb-3">Distribution by Country</h4>
                   <div
                     data-pdf-scrollable="true"
+                    data-pdf-limit-rows={AI_SEARCH_PDF_TABLE_ROW_LIMIT}
                     className={`overflow-x-auto rounded-lg border border-gray-200 ${(1 + (aiSearch?.distributionByCountry ?? []).length) > 4 ? "max-h-56 overflow-y-auto" : ""}`}
                   >
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -1117,6 +1129,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   </div>
                   <div
                     data-pdf-scrollable="true"
+                    data-pdf-limit-rows={AI_SEARCH_PDF_TABLE_ROW_LIMIT}
                     className={`overflow-x-auto rounded-lg border border-gray-200 ${(aiSearch?.topCitedSources ?? []).length > 4 ? "max-h-56 overflow-y-auto" : ""}`}
                   >
                     <table className="min-w-full divide-y divide-gray-200 text-sm">

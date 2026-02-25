@@ -7000,6 +7000,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
 router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
+    const strictAccuracy = true;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -7237,9 +7238,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       keyword: k.keyword,
       position: k.currentPosition ?? 0,
       trafficPercent: k.ctr != null ? k.ctr * 100 : null,
-      traffic: k.ctr != null
-        ? Math.round(k.ctr * organicTraffic)
-        : null,
+      // Strict accuracy: do not synthesize per-keyword traffic from CTR * aggregate traffic.
+      traffic: null,
       volume: k.searchVolume ?? null,
       url: k.googleUrl ?? null,
       cpc: k.cpc ?? null,
@@ -7367,26 +7367,38 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
     }
 
     const paidKeywordsCount = (paidSource?.totalKeywords ?? topPaidKeywords.length) || 0;
-    const totalPaidPages = topPagesPaid.reduce((s, p) => s + p.paidCount, 0);
-    const paidKwTotal = paidKeywordsCount > 0 ? paidKeywordsCount : (totalPaidPages || 1);
-    const paidPositionDistribution = {
-      top4: Math.round(paidKwTotal * 0.35),
-      top10: Math.round(paidKwTotal * 0.40),
-      page2: Math.round(paidKwTotal * 0.15),
-      pos21Plus: Math.max(0, paidKwTotal - Math.round(paidKwTotal * 0.9)),
-    };
+    const paidPositionDistribution = strictAccuracy
+      ? {
+          // Strict accuracy: do not emit ratio-based buckets without true rank-position source data.
+          top4: 0,
+          top10: 0,
+          page2: 0,
+          pos21Plus: 0,
+        }
+      : (() => {
+          const totalPaidPages = topPagesPaid.reduce((s, p) => s + p.paidCount, 0);
+          const paidKwTotal = paidKeywordsCount > 0 ? paidKeywordsCount : (totalPaidPages || 1);
+          return {
+            top4: Math.round(paidKwTotal * 0.35),
+            top10: Math.round(paidKwTotal * 0.40),
+            page2: Math.round(paidKwTotal * 0.15),
+            pos21Plus: Math.max(0, paidKwTotal - Math.round(paidKwTotal * 0.9)),
+          };
+        })();
     const paidDistTotal = paidPositionDistribution.top4 + paidPositionDistribution.top10 + paidPositionDistribution.page2 + paidPositionDistribution.pos21Plus;
     const paidDistToPct = (n: number) => (paidDistTotal > 0 ? Math.round((n / paidDistTotal) * 100) : 0);
 
-    const mainPaidCompetitors = referringDomains.slice(0, 15).map((r) => {
-      const maxBacklinks = referringDomains[0]?.backlinks ?? 1;
-      return {
-        competitor: r.domain,
-        comLevel: Math.min(100, Math.round((r.backlinks / maxBacklinks) * 100)),
-        comKeywords: Math.round(r.backlinks * 0.5),
-        seKeywords: Math.round(r.backlinks * 1.2),
-      };
-    });
+    const mainPaidCompetitors = strictAccuracy
+      ? []
+      : referringDomains.slice(0, 15).map((r) => {
+          const maxBacklinks = referringDomains[0]?.backlinks ?? 1;
+          return {
+            competitor: r.domain,
+            comLevel: Math.min(100, Math.round((r.backlinks / maxBacklinks) * 100)),
+            comKeywords: Math.round(r.backlinks * 0.5),
+            seKeywords: Math.round(r.backlinks * 1.2),
+          };
+        });
 
     res.json({
       client: { id: client.id, name: client.name, domain: client.domain },
@@ -7410,19 +7422,25 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       },
       marketTrendsChannels,
       backlinksList,
-      organicTrafficOverTime: (() => {
-        const totalKeywordsSum = organicKeywordsOverTime.reduce((s, m) => s + m.keywords, 0);
-        if (totalKeywordsSum > 0) {
-          return organicKeywordsOverTime.map((m) => ({
+      organicTrafficOverTime: strictAccuracy
+        ? organicKeywordsOverTime.map((m) => ({
             month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-            traffic: Math.round((organicTraffic * m.keywords) / totalKeywordsSum),
-          }));
-        }
-        return organicKeywordsOverTime.map((m) => ({
-          month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-          traffic: Math.round(organicTraffic / 12),
-        }));
-      })(),
+            // Strict accuracy: no modeled historical traffic without true month-level source data.
+            traffic: 0,
+          }))
+        : (() => {
+            const totalKeywordsSum = organicKeywordsOverTime.reduce((s, m) => s + m.keywords, 0);
+            if (totalKeywordsSum > 0) {
+              return organicKeywordsOverTime.map((m) => ({
+                month: `${m.year}-${String(m.month).padStart(2, "0")}`,
+                traffic: Math.round((organicTraffic * m.keywords) / totalKeywordsSum),
+              }));
+            }
+            return organicKeywordsOverTime.map((m) => ({
+              month: `${m.year}-${String(m.month).padStart(2, "0")}`,
+              traffic: Math.round(organicTraffic / 12),
+            }));
+          })(),
       organicKeywordsOverTime,
       organicPositionsOverTime,
       positionDistribution: {
@@ -7452,15 +7470,17 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       referringDomainsByTld,
       referringDomainsByCountry: [],
       totalCompetitorsCount: referringDomains.length,
-      organicCompetitors: referringDomains.slice(0, 15).map((r) => {
-        const maxBacklinks = referringDomains[0]?.backlinks ?? 1;
-        return {
-          competitor: r.domain,
-          comLevel: Math.min(100, Math.round((r.backlinks / maxBacklinks) * 100)),
-          comKeywords: r.backlinks,
-          seKeywords: Math.round(r.backlinks * 2.5),
-        };
-      }),
+      organicCompetitors: strictAccuracy
+        ? []
+        : referringDomains.slice(0, 15).map((r) => {
+            const maxBacklinks = referringDomains[0]?.backlinks ?? 1;
+            return {
+              competitor: r.domain,
+              comLevel: Math.min(100, Math.round((r.backlinks / maxBacklinks) * 100)),
+              comKeywords: r.backlinks,
+              seKeywords: Math.round(r.backlinks * 2.5),
+            };
+          }),
       keywordsByIntent: (() => {
         const total = organicKeywords || 0;
         const traffic = Math.round(organicTraffic) || 0;
@@ -7497,10 +7517,10 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
             Transactional: { keywords: 0, traffic: 0 },
           };
           for (const k of topOrganicKeywords) {
-            const intent = intentMap.get(k.keyword.toLowerCase().trim()) ?? "Commercial";
-            if (byIntent[intent]) {
+            const intent = intentMap.get(k.keyword.toLowerCase().trim());
+            if (intent && byIntent[intent]) {
               byIntent[intent].keywords += 1;
-              byIntent[intent].traffic += Math.round(k.traffic ?? 0);
+              byIntent[intent].traffic += 0;
             }
           }
           const totalKw = topOrganicKeywords.length;
@@ -7516,6 +7536,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
             pct: sumKw > 0 ? Math.round((r.keywords / sumKw) * 1000) / 10 : r.pct,
           }));
         }
+        // Strict accuracy: do not return synthetic/fallback intent split.
+        if (strictAccuracy) return [];
         const sumKw = fallbackRows.reduce((s, r) => s + r.keywords, 0);
         return fallbackRows.map((r) => ({
           ...r,
@@ -7545,6 +7567,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 // Domain overview for ANY domain (not just clients) — fetches all data live from DataForSEO APIs
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
+    const strictAccuracy = true;
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });
@@ -7602,9 +7625,12 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
     });
 
     const totalEstTraffic = topKeywords.reduce((s: number, k: any) => s + (k.traffic ?? 0), 0);
-    const scaledTraffic = rankedKwData.totalCount > topKeywords.length
-      ? Math.round(totalEstTraffic * (rankedKwData.totalCount / Math.max(1, topKeywords.length)))
-      : totalEstTraffic;
+    // Strict accuracy: avoid extrapolating from top-N keywords to full domain traffic.
+    const scaledTraffic = strictAccuracy
+      ? totalEstTraffic
+      : rankedKwData.totalCount > topKeywords.length
+        ? Math.round(totalEstTraffic * (rankedKwData.totalCount / Math.max(1, topKeywords.length)))
+        : totalEstTraffic;
 
     let top3 = 0, top10 = 0, page2 = 0, pos21_30 = 0, pos31_50 = 0, pos51Plus = 0;
     topKeywords.forEach((k: any) => {
@@ -7715,36 +7741,46 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
     const toPct = (n: number) => (totalPos > 0 ? Math.round((n / totalPos) * 100) : 0);
 
     const totalKwForIntent = rankedKwData.totalCount || 0;
-    const keywordsByIntent = [
-      { intent: "Informational", pct: 32.4, keywords: Math.round(totalKwForIntent * 0.324), traffic: Math.round(scaledTraffic * 0.38) },
-      { intent: "Navigational", pct: 1.5, keywords: Math.round(totalKwForIntent * 0.015), traffic: Math.round(scaledTraffic * 0.01) },
-      { intent: "Commercial", pct: 63.4, keywords: Math.round(totalKwForIntent * 0.634), traffic: Math.round(scaledTraffic * 0.35) },
-      { intent: "Transactional", pct: 2.8, keywords: Math.round(totalKwForIntent * 0.028), traffic: Math.round(scaledTraffic * 0.02) },
-    ];
+    const keywordsByIntent = strictAccuracy
+      ? []
+      : [
+          { intent: "Informational", pct: 32.4, keywords: Math.round(totalKwForIntent * 0.324), traffic: Math.round(scaledTraffic * 0.38) },
+          { intent: "Navigational", pct: 1.5, keywords: Math.round(totalKwForIntent * 0.015), traffic: Math.round(scaledTraffic * 0.01) },
+          { intent: "Commercial", pct: 63.4, keywords: Math.round(totalKwForIntent * 0.634), traffic: Math.round(scaledTraffic * 0.35) },
+          { intent: "Transactional", pct: 2.8, keywords: Math.round(totalKwForIntent * 0.028), traffic: Math.round(scaledTraffic * 0.02) },
+        ];
 
-    const organicTrafficOverTime = (() => {
-      const totalKwSum = organicKeywordsOverTime.reduce((s, m) => s + m.keywords, 0);
-      if (totalKwSum > 0) {
-        return organicKeywordsOverTime.map((m) => ({
+    const organicTrafficOverTime = strictAccuracy
+      ? organicKeywordsOverTime.map((m) => ({
           month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-          traffic: Math.round((scaledTraffic * m.keywords) / totalKwSum),
-        }));
-      }
-      return organicKeywordsOverTime.map((m) => ({
-        month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-        traffic: Math.round(scaledTraffic / 12),
-      }));
-    })();
+          // Strict accuracy: no modeled monthly traffic curve for direct-domain lookups.
+          traffic: 0,
+        }))
+      : (() => {
+          const totalKwSum = organicKeywordsOverTime.reduce((s, m) => s + m.keywords, 0);
+          if (totalKwSum > 0) {
+            return organicKeywordsOverTime.map((m) => ({
+              month: `${m.year}-${String(m.month).padStart(2, "0")}`,
+              traffic: Math.round((scaledTraffic * m.keywords) / totalKwSum),
+            }));
+          }
+          return organicKeywordsOverTime.map((m) => ({
+            month: `${m.year}-${String(m.month).padStart(2, "0")}`,
+            traffic: Math.round(scaledTraffic / 12),
+          }));
+        })();
 
-    const organicCompetitors = referringDomains.slice(0, 15).map((r) => {
-      const maxBl = referringDomains[0]?.backlinks ?? 1;
-      return {
-        competitor: r.domain,
-        comLevel: Math.min(100, Math.round((r.backlinks / maxBl) * 100)),
-        comKeywords: r.backlinks,
-        seKeywords: Math.round(r.backlinks * 2.5),
-      };
-    });
+    const organicCompetitors = strictAccuracy
+      ? []
+      : referringDomains.slice(0, 15).map((r) => {
+          const maxBl = referringDomains[0]?.backlinks ?? 1;
+          return {
+            competitor: r.domain,
+            comLevel: Math.min(100, Math.round((r.backlinks / maxBl) * 100)),
+            comKeywords: r.backlinks,
+            seKeywords: Math.round(r.backlinks * 2.5),
+          };
+        });
 
     const result = {
       client: { id: "external", name: domain, domain },
