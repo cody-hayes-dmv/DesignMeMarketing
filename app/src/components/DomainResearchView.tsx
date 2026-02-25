@@ -1020,7 +1020,9 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               <div className="flex flex-col gap-6">
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-3">Distribution by Country</h4>
-                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <div
+                    className={`overflow-x-auto rounded-lg border border-gray-200 ${(1 + (aiSearch?.distributionByCountry ?? []).length) > 4 ? "max-h-56 overflow-y-auto" : ""}`}
+                  >
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-gray-50">
                         <tr>
@@ -1066,7 +1068,9 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       {citedSourcesLoading ? "Loading…" : "Load cited sources"}
                     </button>
                   </div>
-                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <div
+                    className={`overflow-x-auto rounded-lg border border-gray-200 ${(aiSearch?.topCitedSources ?? []).length > 4 ? "max-h-56 overflow-y-auto" : ""}`}
+                  >
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-gray-50">
                         <tr>
