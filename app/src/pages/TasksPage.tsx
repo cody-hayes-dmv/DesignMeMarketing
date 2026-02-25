@@ -133,8 +133,8 @@ const TasksPage = () => {
 
     useEffect(() => {
         if (!canCreate) return;
-        const isSuperAdmin = user?.role === "SUPER_ADMIN";
-        if (isSuperAdmin) {
+        const isAdminView = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
+        if (isAdminView) {
             api.get("/tasks/assignable-users")
                 .then((res) => setAssignableUsers(res.data || []))
                 .catch(() => setAssignableUsers([]));
