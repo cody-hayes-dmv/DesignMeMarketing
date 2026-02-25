@@ -386,21 +386,30 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       return;
     }
 
-    // For Admin/Super Admin, when there is a single obvious client candidate,
-    // prefer exact client endpoint to avoid direct-domain approximation.
-    if (isAdminPanelUser && filteredClients.length === 1) {
-      setSelectedClientId(filteredClients[0].id);
-      setDirectDomain(null);
-      setSearchQuery("");
-      setSearchOpen(false);
+    // Admin/Super Admin must resolve to a real client record so production
+    // always uses exact client data endpoint instead of direct-domain fallback.
+    if (isAdminPanelUser) {
+      if (filteredClients.length === 1) {
+        setSelectedClientId(filteredClients[0].id);
+        setDirectDomain(null);
+        setSearchQuery("");
+        setSearchOpen(false);
+        return;
+      }
+
+      setSearchOpen(true);
+      if (filteredClients.length > 1) {
+        toast("Multiple possible clients found. Please choose the correct client from the list.");
+      } else {
+        toast("No matching client found. Please choose a client from the list.");
+      }
       return;
     }
 
-    // When there are suggested clients, force explicit selection so overview data
-    // is fetched from the exact client endpoint rather than direct-domain fallback.
+    // Agency/non-admin users: keep forcing explicit choice when suggestions exist.
     if (filteredClients.length > 0) {
       setSearchOpen(true);
-      toast(isAdminPanelUser ? "Multiple possible clients found. Please choose the correct client from the list." : "Please choose the correct client from the list.");
+      toast("Please choose the correct client from the list.");
       return;
     }
 

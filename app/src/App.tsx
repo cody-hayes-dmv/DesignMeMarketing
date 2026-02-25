@@ -150,7 +150,7 @@ function App() {
     if (!user) return "/login";
     if (user.role === "SUPER_ADMIN") return "/superadmin/research";
     if (user.role === "ADMIN") return "/admin/research";
-    if (user.role === "AGENCY") return "/agnecy/research";
+    if (user.role === "AGENCY") return "/agency/research";
     return getRedirectUrl();
   };
 
@@ -299,23 +299,6 @@ function App() {
             </div>
           ) : !user || !user.verified ? (
             <Navigate to="/login" replace />
-          ) : (
-            <Navigate to={getResearchUrlByRole()} replace />
-          )
-        }
-      />
-      <Route
-        path="/agnecy/research"
-        element={
-          (token && !user) ? (
-            <div className="min-h-screen flex items-center justify-center">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
-                <p className="text-gray-500">Loading...</p>
-              </div>
-            </div>
-          ) : !user || !user.verified ? (
-            <Navigate to="/login" replace />
           ) : !["AGENCY", "ADMIN", "SUPER_ADMIN"].includes(user.role) ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : user.role === "AGENCY" ? (
@@ -325,6 +308,12 @@ function App() {
           ) : (
             <Navigate to={getResearchUrlByRole()} replace />
           )
+        }
+      />
+      <Route
+        path="/agnecy/research"
+        element={
+          <Navigate to="/agency/research" replace />
         }
       />
       {/* Redirect legacy worker portal paths */}

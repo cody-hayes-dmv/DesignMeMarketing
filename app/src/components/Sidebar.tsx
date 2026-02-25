@@ -176,7 +176,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     {
       icon: Search,
       label: "Research",
-      path: "/agnecy/research",
+      path: "/agency/research",
       hasSubMenu: false,
       roles: ["AGENCY"],
     },

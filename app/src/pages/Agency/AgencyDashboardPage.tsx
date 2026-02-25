@@ -285,7 +285,7 @@ const AgencyDashboardPage = () => {
 
           {/* Card 2 - Total Keywords Tracked (Green/Teal) */}
           <Link
-            to="/agnecy/research"
+            to="/agency/research"
             className="group relative overflow-hidden rounded-2xl border border-teal-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-teal-100/50"
           >
             <div className="absolute right-0 top-0 h-24 w-24 translate-x-6 -translate-y-6 rounded-full bg-gradient-to-br from-teal-400/20 to-secondary-600/20 transition-transform group-hover:scale-150" />
@@ -524,7 +524,7 @@ const AgencyDashboardPage = () => {
                 </ul>
               )}
               <Link
-                to="/agnecy/research"
+                to="/agency/research"
                 className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-secondary-600 hover:text-secondary-700"
               >
                 View All Opportunities <ArrowUpRight className="h-3.5 w-3.5" />
