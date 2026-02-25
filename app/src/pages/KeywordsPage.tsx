@@ -156,11 +156,6 @@ const KeywordsPage: React.FC = () => {
           (a.name || a.domain || "").localeCompare(b.name || b.domain || "", undefined, { sensitivity: "base" })
         );
         setClients(sorted);
-        if (sorted.length > 0) {
-          const first = sorted[0];
-          setAssignClientId(first.id);
-          setAssignClientSearchQuery(first.name || first.domain || "");
-        }
       } catch (error: any) {
         console.error("Failed to fetch clients", error);
         const errorMsg = error?.response?.data?.message || "Unable to load clients";
@@ -446,6 +441,19 @@ const KeywordsPage: React.FC = () => {
 
   const keywordResearchPdfRef = useRef<HTMLDivElement>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const keywordResearchExportReadyRef = useRef({
+    researchLoading: false,
+    keywordDetailLoading: false,
+    serpAnalysisLoading: false,
+  });
+
+  useEffect(() => {
+    keywordResearchExportReadyRef.current = {
+      researchLoading,
+      keywordDetailLoading,
+      serpAnalysisLoading,
+    };
+  }, [researchLoading, keywordDetailLoading, serpAnalysisLoading]);
 
   const handleExportKeywordResearchPdf = useCallback(async () => {
     const element = keywordResearchPdfRef.current;
@@ -454,9 +462,28 @@ const KeywordsPage: React.FC = () => {
 
     try {
       setExportingPdf(true);
+
+      // Wait for keyword research panels to finish loading before capturing PDF.
+      const maxWaitMs = 60000;
+      const pollIntervalMs = 300;
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < maxWaitMs) {
+        const s = keywordResearchExportReadyRef.current;
+        if (!s.researchLoading && !s.keywordDetailLoading && !s.serpAnalysisLoading) break;
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+      const stillLoading = keywordResearchExportReadyRef.current;
+      if (stillLoading.researchLoading || stillLoading.keywordDetailLoading || stillLoading.serpAnalysisLoading) {
+        toast.error("Export timed out. Please wait for loading to finish and try again.");
+        setExportingPdf(false);
+        return;
+      }
+
       document.body.style.overflow = "hidden";
 
-      const sections = Array.from(element.querySelectorAll(".pdf-section")) as HTMLElement[];
+      const sections = Array.from(
+        element.querySelectorAll('.pdf-section:not([data-pdf-hide="true"])')
+      ) as HTMLElement[];
       if (sections.length === 0) {
         toast.error("No sections found to export.");
         setExportingPdf(false);
@@ -679,7 +706,7 @@ const KeywordsPage: React.FC = () => {
             <button
               type="button"
               onClick={handleExportKeywordResearchPdf}
-              disabled={exportingPdf}
+              disabled={exportingPdf || researchLoading || keywordDetailLoading || serpAnalysisLoading}
               className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 shadow-sm"
             >
               {exportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -688,12 +715,13 @@ const KeywordsPage: React.FC = () => {
           </div>
           <form
             onSubmit={handleResearchSubmit}
+            data-pdf-hide="true"
             className="pdf-section bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-primary-500"
           >
             <div className="h-1.5 w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600" aria-hidden />
             <div className="p-8 space-y-6 bg-gradient-to-br from-primary-50/40 via-blue-50/30 to-indigo-50/30">
             {/* PDF export: show values as plain text so content is not clipped */}
-            <div className="hidden pdf-export-metrics-values grid grid-cols-1 lg:grid-cols-5 gap-4 text-sm text-gray-900">
+            <div className="hidden pdf-export-metrics-values grid grid-cols-1 lg:grid-cols-5 gap-4 text-sm text-gray-900" data-pdf-hide="true">
               <div className="lg:col-span-2">
                 <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Seed keyword or phrase</div>
                 <div className="py-1.5 border-b border-gray-200 min-h-[2.25rem]">{researchSeed || "—"}</div>
@@ -711,7 +739,7 @@ const KeywordsPage: React.FC = () => {
                 <div className="py-1.5 border-b border-gray-200 min-h-[2.25rem]">{researchLimit}</div>
               </div>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 keyword-research-form-inputs">
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 keyword-research-form-inputs" data-pdf-hide="true">
               <div className="lg:col-span-2">
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Seed keyword or phrase

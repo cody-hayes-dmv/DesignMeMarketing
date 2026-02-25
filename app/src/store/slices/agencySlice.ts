@@ -82,6 +82,8 @@ export const createAgency = createAsyncThunk(
     primaryGoals,
     primaryGoalsOther,
     currentTools,
+    resetPassword,
+    resetPasswordConfirm,
   }: {
     name: string;
     website?: string;
@@ -112,6 +114,8 @@ export const createAgency = createAsyncThunk(
     primaryGoals?: string[];
     primaryGoalsOther?: string;
     currentTools?: string;
+    resetPassword?: string;
+    resetPasswordConfirm?: string;
   }) => {
     try {
       const response = await api.post("/agencies", {
@@ -144,6 +148,8 @@ export const createAgency = createAsyncThunk(
         primaryGoals,
         primaryGoalsOther,
         currentTools,
+        resetPassword,
+        resetPasswordConfirm,
       });
       return response.data;
     } catch (error: any) {
@@ -182,6 +188,8 @@ export const updateAgency = createAsyncThunk(
       customPricing?: number | null;
       internalNotes?: string | null;
       paymentMethodId?: string;
+      resetPassword?: string;
+      resetPasswordConfirm?: string;
     };
   }) => {
     try {

@@ -161,6 +161,8 @@ const AgenciesPage = () => {
         numberOfClients: "" as string | number,
         contactName: "",
         contactEmail: "",
+        resetPassword: "",
+        resetPasswordConfirm: "",
         contactPhone: "",
         contactJobTitle: "",
         streetAddress: "",
@@ -192,6 +194,8 @@ const AgenciesPage = () => {
         numberOfClients: "" as string | number,
         contactName: "",
         contactEmail: "",
+        resetPassword: "",
+        resetPasswordConfirm: "",
         contactPhone: "",
         contactJobTitle: "",
         streetAddress: "",
@@ -294,13 +298,15 @@ const AgenciesPage = () => {
                         primaryGoals: (f.primaryGoals?.length ? f.primaryGoals : undefined) as string[] | undefined,
                         primaryGoalsOther: f.primaryGoalsOther || undefined,
                         currentTools: f.currentTools || undefined,
+                        resetPassword: f.resetPassword?.trim() || undefined,
+                        resetPasswordConfirm: f.resetPassword?.trim() ? f.resetPasswordConfirm?.trim() : undefined,
                     }) as any
                 )
                     .unwrap()
                     .then(() => {
                         sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
                         cleanUrl();
-                        toast.success("Agency created. Set-password email sent to contact.");
+                        toast.success(f.resetPassword?.trim() ? "Agency created with password set." : "Agency created. Set-password email sent to contact.");
                         dispatch(fetchAgencies() as any);
                         window.dispatchEvent(new CustomEvent("agency-created"));
                     });
@@ -399,6 +405,16 @@ const AgenciesPage = () => {
             toast.error("Contact email is required.");
             return;
         }
+        const createResetPassword = createForm.resetPassword.trim();
+        const createResetPasswordConfirm = createForm.resetPasswordConfirm.trim();
+        if ((createResetPassword || createResetPasswordConfirm) && createResetPassword.length < 6) {
+            toast.error("Password must be at least 6 characters.");
+            return;
+        }
+        if ((createResetPassword || createResetPasswordConfirm) && createResetPassword !== createResetPasswordConfirm) {
+            toast.error("Passwords do not match.");
+            return;
+        }
         if (!createForm.billingOption) {
             toast.error("Please select a billing type.");
             return;
@@ -464,12 +480,14 @@ const AgenciesPage = () => {
                 primaryGoals: createForm.primaryGoals.length ? createForm.primaryGoals : undefined,
                 primaryGoalsOther: createForm.primaryGoalsOther || undefined,
                 currentTools: createForm.currentTools || undefined,
+                resetPassword: createResetPassword || undefined,
+                resetPasswordConfirm: createResetPassword ? createResetPasswordConfirm : undefined,
             }) as any).unwrap();
             setCreateForm(initialCreateForm);
             setShowCreateModal(false);
             setIsEnterpriseFromCalculator(false);
             sessionStorage.removeItem(CREATE_AGENCY_DRAFT_KEY);
-            toast.success("Agency created. Set-password email sent to contact.");
+            toast.success(createResetPassword ? "Agency created with password set." : "Agency created. Set-password email sent to contact.");
             dispatch(fetchAgencies() as any);
             window.dispatchEvent(new CustomEvent("agency-created"));
         } catch (error: any) {
@@ -498,6 +516,8 @@ const AgenciesPage = () => {
                 numberOfClients: a.numberOfClients ?? "",
                 contactName: a.contactName ?? "",
                 contactEmail: a.contactEmail ?? "",
+                resetPassword: "",
+                resetPasswordConfirm: "",
                 contactPhone: a.contactPhone ?? "",
                 contactJobTitle: a.contactJobTitle ?? "",
                 streetAddress: a.streetAddress ?? "",
@@ -537,6 +557,16 @@ const AgenciesPage = () => {
         }
         if (!editForm.contactEmail.trim()) {
             toast.error("Contact email is required.");
+            return;
+        }
+        const editResetPassword = editForm.resetPassword.trim();
+        const editResetPasswordConfirm = editForm.resetPasswordConfirm.trim();
+        if ((editResetPassword || editResetPasswordConfirm) && editResetPassword.length < 6) {
+            toast.error("Password must be at least 6 characters.");
+            return;
+        }
+        if ((editResetPassword || editResetPasswordConfirm) && editResetPassword !== editResetPasswordConfirm) {
+            toast.error("Passwords do not match.");
             return;
         }
         const editNeedsCardNow = editForm.billingType === "paid" || editForm.billingType === "custom";
@@ -586,6 +616,8 @@ const AgenciesPage = () => {
                 subscriptionTier: editForm.subscriptionTier || undefined,
                 customPricing: editForm.billingType === "custom" && editForm.customPricing !== "" ? Number(editForm.customPricing) : undefined,
                 internalNotes: editForm.internalNotes || undefined,
+                resetPassword: editResetPassword || undefined,
+                resetPasswordConfirm: editResetPassword ? editResetPasswordConfirm : undefined,
             };
             if (paymentMethodId) updatePayload.paymentMethodId = paymentMethodId;
             await dispatch(updateAgency({ agencyId: editingAgency.id, data: updatePayload as any }) as any).unwrap();
@@ -1567,6 +1599,14 @@ const AgenciesPage = () => {
                                             <input type="tel" value={createForm.contactPhone} onChange={(e) => setCreateForm({ ...createForm, contactPhone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="+1 (631) 555-1234" />
                                         </div>
                                         <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Set Password (optional)</label>
+                                            <input type="password" value={createForm.resetPassword} onChange={(e) => setCreateForm({ ...createForm, resetPassword: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="At least 6 characters" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                                            <input type="password" value={createForm.resetPasswordConfirm} onChange={(e) => setCreateForm({ ...createForm, resetPasswordConfirm: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Re-enter password" />
+                                        </div>
+                                        <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
                                             <input type="text" value={createForm.contactJobTitle} onChange={(e) => setCreateForm({ ...createForm, contactJobTitle: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Owner, Marketing Director, SEO Manager" />
                                         </div>
@@ -1848,7 +1888,7 @@ const AgenciesPage = () => {
                                         </div>
                                     </div>
                                 </section>
-                                <p className="text-xs text-gray-500 border-t border-gray-200 pt-4 mt-4">After creation, an email will be sent to the contact with a secure &quot;Set your password&quot; link (expires in 24 hours). No password is collected in this form.</p>
+                                <p className="text-xs text-gray-500 border-t border-gray-200 pt-4 mt-4">Leave password blank to send a secure &quot;Set your password&quot; email link (expires in 24 hours), or set a password now to activate the account immediately.</p>
                                 </>
                                 )}
                             </div>
@@ -1996,6 +2036,14 @@ const AgenciesPage = () => {
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
                                             <input type="tel" value={editForm.contactPhone} onChange={(e) => setEditForm({ ...editForm, contactPhone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="+1 (631) 555-1234" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Reset Password (optional)</label>
+                                            <input type="password" value={editForm.resetPassword} onChange={(e) => setEditForm({ ...editForm, resetPassword: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Leave blank to keep current password" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+                                            <input type="password" value={editForm.resetPasswordConfirm} onChange={(e) => setEditForm({ ...editForm, resetPasswordConfirm: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Re-enter new password" />
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>

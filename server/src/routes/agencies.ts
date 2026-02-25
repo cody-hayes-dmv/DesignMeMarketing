@@ -314,6 +314,8 @@ const createAgencySchema = z.object({
   primaryGoals: z.array(z.string()).optional(),
   primaryGoalsOther: z.string().optional(),
   currentTools: z.string().optional(),
+  resetPassword: z.string().min(6, 'Password must be at least 6 characters').optional(),
+  resetPasswordConfirm: z.string().optional(),
 }).refine((data) => {
   const w = data.website?.trim();
   if (!w) return false;
@@ -323,7 +325,10 @@ const createAgencySchema = z.object({
   } catch {
     return false;
   }
-}, { message: 'Agency website must be a valid URL', path: ['website'] });
+}, { message: 'Agency website must be a valid URL', path: ['website'] }).refine((data) => {
+  if (!data.resetPassword && !data.resetPasswordConfirm) return true;
+  return data.resetPassword === data.resetPasswordConfirm;
+}, { message: 'Passwords do not match', path: ['resetPasswordConfirm'] });
 
 // Self-registration: same fields as create (sections A–D, F), plus payment method to activate 7-day reporting trial; password required.
 // paymentMethodId is required so the agency activates with CC on file; after 7-day trial they are auto-billed for the reporting plan.
@@ -926,6 +931,7 @@ router.post('/', authenticateToken, async (req, res) => {
       primaryGoals,
       primaryGoalsOther,
       currentTools,
+      resetPassword,
     } = body;
 
     if ((billingOption === 'charge' || billingOption === 'manual_invoice') && !paymentMethodId) {
@@ -1112,14 +1118,15 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
+    const passwordHash = resetPassword ? await bcrypt.hash(resetPassword, 12) : null;
     const agencyUser = await prisma.user.create({
       data: {
         email: contactEmail,
         name: contactName,
-        passwordHash: null,
+        passwordHash,
         role: 'AGENCY',
-        verified: false,
-        invited: true,
+        verified: Boolean(passwordHash),
+        invited: !passwordHash,
       },
     });
 
@@ -1150,40 +1157,42 @@ router.post('/', authenticateToken, async (req, res) => {
       console.warn('Auto agency dashboard create failed:', dashboardErr?.message);
     }
 
-    const inviteToken = jwt.sign(
-      { userId: agencyUser.id, email: agencyUser.email },
-      getJwtSecret(),
-      { expiresIn: '24h' }
-    );
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    await prisma.token.create({
-      data: {
-        type: 'INVITE',
-        email: agencyUser.email,
-        token: inviteToken,
-        expiresAt,
-        userId: agencyUser.id,
-        agencyId: agency.id,
-        role: 'AGENCY',
-      },
-    });
-
-    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/invite?token=${encodeURIComponent(inviteToken)}`;
-    try {
-      await sendEmail({
-        to: contactEmail,
-        subject: `Set your password – ${name}`,
-        html: `
-          <h1>Your agency account is ready</h1>
-          <p>Hi ${contactName || 'there'},</p>
-          <p>An agency account for <strong>${name}</strong> has been created. Set your password using the link below (expires in 24 hours):</p>
-          <p><a href="${inviteUrl}">Set your password</a></p>
-          <p>If the link doesn't work, copy and paste this URL into your browser:</p>
-          <p style="word-break:break-all">${inviteUrl}</p>
-        `,
+    if (!passwordHash) {
+      const inviteToken = jwt.sign(
+        { userId: agencyUser.id, email: agencyUser.email },
+        getJwtSecret(),
+        { expiresIn: '24h' }
+      );
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await prisma.token.create({
+        data: {
+          type: 'INVITE',
+          email: agencyUser.email,
+          token: inviteToken,
+          expiresAt,
+          userId: agencyUser.id,
+          agencyId: agency.id,
+          role: 'AGENCY',
+        },
       });
-    } catch (emailErr: any) {
-      console.warn('Set-password email failed:', emailErr?.message);
+
+      const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/invite?token=${encodeURIComponent(inviteToken)}`;
+      try {
+        await sendEmail({
+          to: contactEmail,
+          subject: `Set your password – ${name}`,
+          html: `
+            <h1>Your agency account is ready</h1>
+            <p>Hi ${contactName || 'there'},</p>
+            <p>An agency account for <strong>${name}</strong> has been created. Set your password using the link below (expires in 24 hours):</p>
+            <p><a href="${inviteUrl}">Set your password</a></p>
+            <p>If the link doesn't work, copy and paste this URL into your browser:</p>
+            <p style="word-break:break-all">${inviteUrl}</p>
+          `,
+        });
+      } catch (emailErr: any) {
+        console.warn('Set-password email failed:', emailErr?.message);
+      }
     }
 
     res.status(201).json({
@@ -1614,6 +1623,8 @@ const updateAgencySuperAdminSchema = z.object({
   enterpriseCreditsPerMonth: z.coerce.number().int().min(0).optional().nullable(),
   enterpriseMaxTeamUsers: z.coerce.number().int().min(1).optional().nullable(),
   paymentMethodId: z.string().optional(), // required when billingType is paid or custom and agency has no Stripe customer
+  resetPassword: z.string().min(6, 'Password must be at least 6 characters').optional(),
+  resetPasswordConfirm: z.string().optional(),
 }).refine((data) => {
   const w = data.website;
   if (!w || w === '') return true;
@@ -1623,7 +1634,10 @@ const updateAgencySuperAdminSchema = z.object({
   } catch {
     return false;
   }
-}, { message: 'Agency website must be a valid URL', path: ['website'] });
+}, { message: 'Agency website must be a valid URL', path: ['website'] }).refine((data) => {
+  if (!data.resetPassword && !data.resetPasswordConfirm) return true;
+  return data.resetPassword === data.resetPasswordConfirm;
+}, { message: 'Passwords do not match', path: ['resetPasswordConfirm'] });
 
 router.put('/:agencyId', authenticateToken, async (req, res) => {
   try {
@@ -1784,6 +1798,25 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
           }
         }
       }
+    }
+
+    if (updateData.resetPassword) {
+      const ownerMembership = await prisma.userAgency.findFirst({
+        where: { agencyId, agencyRole: 'OWNER' },
+        select: { userId: true },
+      });
+      if (!ownerMembership) {
+        return res.status(400).json({ message: 'Agency owner account not found for password reset.' });
+      }
+      const newPasswordHash = await bcrypt.hash(updateData.resetPassword, 12);
+      await prisma.user.update({
+        where: { id: ownerMembership.userId },
+        data: {
+          passwordHash: newPasswordHash,
+          invited: false,
+          verified: true,
+        },
+      });
     }
 
     res.json({
