@@ -18,6 +18,13 @@ function matchProvider(source: string): ProviderKey | null {
   return null;
 }
 
+function formatDateLocal(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export async function fetchGA4AiSearchVisibility(
   clientId: string,
   startDate: Date,
@@ -52,8 +59,9 @@ export async function fetchGA4AiSearchVisibility(
 
   const analytics = await getAnalyticsClient(clientId);
   const propertyId = client.ga4PropertyId.startsWith("properties/") ? client.ga4PropertyId : `properties/${client.ga4PropertyId}`;
-  const startDateStr = startDate.toISOString().split("T")[0];
-  const endDateStr = endDate.toISOString().split("T")[0];
+  // Use server-local calendar dates to avoid UTC day-shift issues in production.
+  const startDateStr = formatDateLocal(startDate);
+  const endDateStr = formatDateLocal(endDate);
 
   const providers: Record<ProviderKey, { sessions: number; users: number; citedPages: Set<string> }> = {
     chatgpt: { sessions: 0, users: 0, citedPages: new Set<string>() },

@@ -74,6 +74,19 @@ function coerceBoolean(value: unknown): boolean {
   return false;
 }
 
+function parseDateInput(value: string): Date {
+  const trimmed = String(value || "").trim();
+  // Parse YYYY-MM-DD as server-local calendar date to avoid UTC offset drift.
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (ymd) {
+    const year = Number(ymd[1]);
+    const month = Number(ymd[2]);
+    const day = Number(ymd[3]);
+    return new Date(year, month - 1, day, 0, 0, 0, 0);
+  }
+  return new Date(trimmed);
+}
+
 async function dedupeInFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const existing = inflightByKey.get(key) as Promise<T> | undefined;
   if (existing) return existing;
@@ -4837,8 +4850,8 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
     let startDate: Date;
     let endDate: Date;
     if (start && end) {
-      startDate = new Date(start as string);
-      endDate = new Date(end as string);
+      startDate = parseDateInput(start as string);
+      endDate = parseDateInput(end as string);
       if (isNaN(startDate.getTime())) return res.status(400).json({ message: "Invalid start date" });
       if (isNaN(endDate.getTime())) return res.status(400).json({ message: "Invalid end date" });
       if (endDate > new Date()) endDate = new Date();
@@ -7000,7 +7013,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
 router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const strictAccuracy = false;
+    const strictAccuracy = req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN";
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -7637,7 +7650,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 // Domain overview for ANY domain (not just clients) — fetches all data live from DataForSEO APIs
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
-    const strictAccuracy = false;
+    const strictAccuracy = req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN";
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });

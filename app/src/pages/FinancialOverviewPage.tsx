@@ -83,6 +83,15 @@ interface DataForSeoUsageResponse {
   dailyExpenses: DataForSeoDailyExpense[];
 }
 
+type DataForSeoGranularity = "day" | "week" | "month";
+
+interface AggregatedDataForSeoExpense {
+  key: string;
+  label: string;
+  total: number;
+  byApi: Record<string, number>;
+}
+
 const formatCurrency = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(n);
 
@@ -121,6 +130,21 @@ const formatApiName = (key: string): string => {
   return map[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+const toDateString = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const getWeekStart = (dateStr: string): string => {
+  const d = new Date(`${dateStr}T00:00:00`);
+  const day = d.getDay(); // 0=Sun
+  const diffToMonday = (day + 6) % 7;
+  d.setDate(d.getDate() - diffToMonday);
+  return toDateString(d);
+};
+
 const FinancialOverviewPage: React.FC = () => {
   const [mrrLoading, setMrrLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
@@ -129,13 +153,10 @@ const FinancialOverviewPage: React.FC = () => {
   const [activityData, setActivityData] = useState<SubscriptionActivityResponse | null>(null);
   const [dataForSeoData, setDataForSeoData] = useState<DataForSeoUsageResponse | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<MrrSegment | null>(null);
-  const [dataForSeoDateStart, setDataForSeoDateStart] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dataForSeoDateEnd, setDataForSeoDateEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dataForSeoDateStart, setDataForSeoDateStart] = useState("");
+  const [dataForSeoDateEnd, setDataForSeoDateEnd] = useState("");
   const [dataForSeoSort, setDataForSeoSort] = useState<"date_asc" | "date_desc" | "total_asc" | "total_desc">("date_desc");
+  const [dataForSeoGranularity, setDataForSeoGranularity] = useState<DataForSeoGranularity>("day");
 
   const fetchMrrBreakdown = async () => {
     setMrrLoading(true);
@@ -166,8 +187,19 @@ const FinancialOverviewPage: React.FC = () => {
     try {
       const res = await api.get<DataForSeoUsageResponse>("/financial/dataforseo-usage");
       setDataForSeoData(res.data);
+      const dates = (res.data.dailyExpenses || []).map((d) => d.date).filter(Boolean).sort((a, b) => a.localeCompare(b));
+      if (dates.length > 0) {
+        // Default to full available history so Super Admin sees complete spend trend.
+        setDataForSeoDateStart(dates[0]);
+        setDataForSeoDateEnd(dates[dates.length - 1]);
+      } else {
+        setDataForSeoDateStart("");
+        setDataForSeoDateEnd("");
+      }
     } catch {
       setDataForSeoData(null);
+      setDataForSeoDateStart("");
+      setDataForSeoDateEnd("");
     } finally {
       setDataForSeoLoading(false);
     }
@@ -212,31 +244,73 @@ const FinancialOverviewPage: React.FC = () => {
     return sorted;
   }, [dataForSeoData?.dailyExpenses, dataForSeoDateStart, dataForSeoDateEnd, dataForSeoSort]);
 
+  const dataForSeoAggregatedAndSorted = useMemo<AggregatedDataForSeoExpense[]>(() => {
+    const source = dataForSeoFilteredAndSorted;
+    if (dataForSeoGranularity === "day") {
+      return source.map((d) => ({ key: d.date, label: d.date, total: d.total, byApi: d.byApi }));
+    }
+
+    const byKey = new Map<string, AggregatedDataForSeoExpense>();
+    for (const row of source) {
+      const key = dataForSeoGranularity === "month" ? row.date.slice(0, 7) : getWeekStart(row.date);
+      const label = dataForSeoGranularity === "month" ? key : `${key} (week)`;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, { key, label, total: row.total, byApi: { ...row.byApi } });
+        continue;
+      }
+      existing.total += row.total;
+      for (const [apiName, value] of Object.entries(row.byApi)) {
+        existing.byApi[apiName] = (existing.byApi[apiName] || 0) + value;
+      }
+    }
+
+    const aggregated = Array.from(byKey.values()).map((row) => ({
+      ...row,
+      total: Math.round(row.total * 10000) / 10000,
+      byApi: Object.fromEntries(
+        Object.entries(row.byApi).map(([k, v]) => [k, Math.round(v * 10000) / 10000])
+      ),
+    }));
+
+    return aggregated.sort((a, b) => {
+      if (dataForSeoSort === "date_asc") return a.key.localeCompare(b.key);
+      if (dataForSeoSort === "date_desc") return b.key.localeCompare(a.key);
+      if (dataForSeoSort === "total_asc") return a.total - b.total;
+      return b.total - a.total;
+    });
+  }, [dataForSeoFilteredAndSorted, dataForSeoGranularity, dataForSeoSort]);
+
   const apiKeys = useMemo(() => {
     const keySet = new Set<string>();
-    for (const d of dataForSeoFilteredAndSorted) {
+    for (const d of dataForSeoAggregatedAndSorted) {
       for (const k of Object.keys(d.byApi)) {
         if (d.byApi[k] > 0) keySet.add(k);
       }
     }
     return Array.from(keySet).sort();
-  }, [dataForSeoFilteredAndSorted]);
+  }, [dataForSeoAggregatedAndSorted]);
 
   const dataForSeoChartData = useMemo(
     () =>
-      [...dataForSeoFilteredAndSorted]
-        .sort((a, b) => a.date.localeCompare(b.date))
+      [...dataForSeoAggregatedAndSorted]
+        .sort((a, b) => a.key.localeCompare(b.key))
         .map((d) => {
           const row: Record<string, unknown> = {
             ...d,
-            dateShort: d.date.slice(5).replace(/-/, "/"),
+            dateShort:
+              dataForSeoGranularity === "month"
+                ? d.key
+                : dataForSeoGranularity === "week"
+                  ? d.key.slice(5)
+                  : d.key.slice(5).replace(/-/, "/"),
           };
           for (const k of apiKeys) {
             row[`api_${k}`] = d.byApi[k] ?? 0;
           }
           return row;
         }),
-    [dataForSeoFilteredAndSorted, apiKeys]
+    [dataForSeoAggregatedAndSorted, apiKeys, dataForSeoGranularity]
   );
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -251,9 +325,17 @@ const FinancialOverviewPage: React.FC = () => {
     monthStart.setDate(monthStart.getDate() - 30);
     const monthStartStr = monthStart.toISOString().slice(0, 10);
     const thisMonth = list.filter((d) => d.date >= monthStartStr && d.date <= todayStr).reduce((s, d) => s + d.total, 0);
-    const rangeTotal = dataForSeoFilteredAndSorted.reduce((s, d) => s + d.total, 0);
+    const rangeTotal = dataForSeoAggregatedAndSorted.reduce((s, d) => s + d.total, 0);
     return { today, thisWeek, thisMonth, rangeTotal };
-  }, [dataForSeoData?.dailyExpenses, dataForSeoFilteredAndSorted, todayStr]);
+  }, [dataForSeoData?.dailyExpenses, dataForSeoAggregatedAndSorted, todayStr]);
+
+  const dataForSeoRangeLabel = useMemo(() => {
+    if (dataForSeoAggregatedAndSorted.length === 0) return "No data";
+    const first = dataForSeoAggregatedAndSorted[0]?.label;
+    const last = dataForSeoAggregatedAndSorted[dataForSeoAggregatedAndSorted.length - 1]?.label;
+    if (first && last) return `${first} - ${last}`;
+    return "Full history";
+  }, [dataForSeoAggregatedAndSorted]);
 
   const notConfigured = !mrrData?.configured && !activityData?.configured;
 
@@ -540,7 +622,7 @@ const FinancialOverviewPage: React.FC = () => {
               {/* Expenses summary header */}
               <div className="flex flex-wrap items-center justify-between gap-4 mb-3">
                 <p className="text-sm font-medium text-slate-300">
-                  Expenses Summary ({dataForSeoDateStart} – {dataForSeoDateEnd}) : <span className="text-white font-semibold">${dataForSeoSummaries.rangeTotal.toFixed(4)}</span>
+                  Expenses Summary ({dataForSeoRangeLabel}) : <span className="text-white font-semibold">${dataForSeoSummaries.rangeTotal.toFixed(4)}</span>
                 </p>
               </div>
 
@@ -559,6 +641,21 @@ const FinancialOverviewPage: React.FC = () => {
                   className="rounded-lg border border-slate-600 bg-[#232839] px-3 py-1.5 text-sm text-slate-200 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                 />
                 <p className="text-xs text-slate-500 italic">This chart shows the dynamics of your money expenses.</p>
+                <div className="flex gap-1">
+                  {[
+                    { id: "day" as const, label: "Day" },
+                    { id: "week" as const, label: "Week" },
+                    { id: "month" as const, label: "Month" },
+                  ].map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => setDataForSeoGranularity(id)}
+                      className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${dataForSeoGranularity === id ? "bg-blue-600 text-white" : "bg-[#232839] border border-slate-600 text-slate-400 hover:text-slate-200"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <div className="ml-auto flex gap-1">
                   {[
                     { id: "date_asc" as const, label: "Date ↑" },
@@ -597,7 +694,7 @@ const FinancialOverviewPage: React.FC = () => {
                         contentStyle={{ backgroundColor: "#1e2333", border: "1px solid #374151", borderRadius: "8px", color: "#e2e8f0" }}
                         labelStyle={{ color: "#94a3b8" }}
                         formatter={(v: number, name: string) => [`$${v.toFixed(4)}`, name]}
-                        labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ""}
+                        labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
                       />
                       <Legend wrapperStyle={{ color: "#94a3b8", fontSize: "12px", paddingTop: "8px" }} />
                       {apiKeys.map((key, i) => (
@@ -655,16 +752,16 @@ const FinancialOverviewPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {dataForSeoFilteredAndSorted.length === 0 ? (
+                  {dataForSeoAggregatedAndSorted.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
                         No daily data in selected range. Data accumulates automatically each time you view this page.
                       </td>
                     </tr>
                   ) : (
-                    dataForSeoFilteredAndSorted.map((row) => (
-                      <tr key={row.date} className="border-b border-gray-100 hover:bg-slate-50/50">
-                        <td className="px-4 py-2 font-medium text-gray-900">{row.date}</td>
+                    dataForSeoAggregatedAndSorted.map((row) => (
+                      <tr key={row.key} className="border-b border-gray-100 hover:bg-slate-50/50">
+                        <td className="px-4 py-2 font-medium text-gray-900">{row.label}</td>
                         <td className="px-4 py-2 text-right font-medium">${row.total.toFixed(4)}</td>
                         <td className="px-4 py-2 text-gray-600">
                           {Object.entries(row.byApi)

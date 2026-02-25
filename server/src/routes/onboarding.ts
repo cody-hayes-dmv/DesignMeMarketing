@@ -108,7 +108,6 @@ const taskSelectWithoutDueDays = {
   category: true,
   priority: true,
   estimatedHours: true,
-  dueDate: true,
   order: true,
 };
 
@@ -193,12 +192,28 @@ function isUnknownDueDateArg(error: any): boolean {
   );
 }
 
+function isMissingOnboardingTasksColumn(error: any): boolean {
+  const msg = String(error?.message || "");
+  const col = String(error?.meta?.column || "");
+  return (
+    error?.code === "P2022" &&
+    (col.includes("onboarding_tasks.") ||
+      msg.includes("onboarding_tasks.") ||
+      msg.includes("onboarding_tasks"))
+  );
+}
+
 function canFallbackDueDaysAfterStart(error: any): boolean {
   return isUnknownDueDaysAfterStartArg(error) || isMissingDueDaysAfterStartColumn(error);
 }
 
 function canFallbackTaskColumns(error: any): boolean {
-  return canFallbackDueDaysAfterStart(error) || isMissingDueDateColumn(error) || isUnknownDueDateArg(error);
+  return (
+    canFallbackDueDaysAfterStart(error) ||
+    isMissingDueDateColumn(error) ||
+    isUnknownDueDateArg(error) ||
+    isMissingOnboardingTasksColumn(error)
+  );
 }
 
 async function findTemplatesWithTaskFallback(opts: {
