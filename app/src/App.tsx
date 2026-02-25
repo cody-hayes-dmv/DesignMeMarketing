@@ -105,8 +105,6 @@ function App() {
     { path: "/agency/clients", component: ClientsPage },
     { path: "/agency/vendasta", component: VendastaPage },
     { path: "/agency/included", component: IncludedPage },
-    { path: "/admin/research", component: KeywordsPage },
-    { path: "/superadmin/research", component: KeywordsPage },
     { path: "/agency/rankings", component: RankingsPage },
     { path: "/agency/reports", component: ReportsPage },
     { path: "/agency/managed-services", component: ManagedServicesPage },
@@ -148,9 +146,7 @@ function App() {
 
   const getResearchUrlByRole = () => {
     if (!user) return "/login";
-    if (user.role === "SUPER_ADMIN") return "/superadmin/research";
-    if (user.role === "ADMIN") return "/admin/research";
-    if (user.role === "AGENCY") return "/agency/research";
+    if (user.role === "SUPER_ADMIN" || user.role === "ADMIN" || user.role === "AGENCY") return "/agency/research";
     return getRedirectUrl();
   };
 
@@ -301,7 +297,7 @@ function App() {
             <Navigate to="/login" replace />
           ) : !["AGENCY", "ADMIN", "SUPER_ADMIN"].includes(user.role) ? (
             <Navigate to={getRedirectUrl()} replace />
-          ) : user.role === "AGENCY" ? (
+          ) : ["AGENCY", "ADMIN", "SUPER_ADMIN"].includes(user.role) ? (
             <DashboardLayout>
               <KeywordsPage />
             </DashboardLayout>
@@ -310,6 +306,8 @@ function App() {
           )
         }
       />
+      <Route path="/admin/research" element={<Navigate to="/agency/research" replace />} />
+      <Route path="/superadmin/research" element={<Navigate to="/agency/research" replace />} />
       <Route
         path="/agnecy/research"
         element={

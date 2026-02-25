@@ -183,14 +183,14 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     {
       icon: Search,
       label: "Research",
-      path: "/admin/research",
+      path: "/agency/research",
       hasSubMenu: false,
       roles: ["ADMIN"],
     },
     {
       icon: Search,
       label: "Research",
-      path: "/superadmin/research",
+      path: "/agency/research",
       hasSubMenu: false,
       roles: ["SUPER_ADMIN"],
     },
