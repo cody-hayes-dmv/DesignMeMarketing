@@ -1491,6 +1491,7 @@ const ClientDashboardPage: React.FC = () => {
   const handleRefreshDashboard = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
     if (!clientId) return;
+    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
     try {
       setRefreshingDashboard(true);
       setGa4ConnectionError(null); // Clear any previous errors
@@ -1588,11 +1589,12 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingDashboard(false);
     }
-  }, [clientId, buildDashboardUrl, dateRange, customStartDate, customEndDate]);
+  }, [clientId, buildDashboardUrl, dateRange, customStartDate, customEndDate, user?.role]);
 
   const handleRefreshTopPages = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
     if (!clientId) return;
+    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
     try {
       setRefreshingTopPages(true);
       const refreshRes = await api.post(`/seo/top-pages/${clientId}/refresh`);
@@ -1629,7 +1631,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingTopPages(false);
     }
-  }, [clientId]);
+  }, [clientId, user?.role]);
 
   const fetchBacklinksForChart = useCallback(async () => {
     if (!clientId) return;
@@ -1691,6 +1693,7 @@ const ClientDashboardPage: React.FC = () => {
   const handleRefreshBacklinks = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
     if (!clientId) return;
+    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
     try {
       setRefreshingBacklinks(true);
       const refreshRes = await api.post(`/seo/backlinks/${clientId}/refresh`);
@@ -1725,7 +1728,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingBacklinks(false);
     }
-  }, [activeTab, backlinksFilter, backlinksSortBy, backlinksOrder, clientId, dashboardSection, fetchBacklinksForChart]);
+  }, [activeTab, backlinksFilter, backlinksSortBy, backlinksOrder, clientId, dashboardSection, fetchBacklinksForChart, user?.role]);
 
   const refreshedOnOpenByClientRef = useRef<Record<string, boolean>>({});
   const getAutoRefreshStorageKey = useCallback(() => {
@@ -2112,6 +2115,7 @@ const ClientDashboardPage: React.FC = () => {
         // This prevents the "first load shows blanks until manual browser refresh" glitch.
         if (
           isGA4Connected &&
+          ["SUPER_ADMIN", "ADMIN"].includes(user?.role || "") &&
           (dataSource !== "ga4" || looksLikeMissingGa4Metrics) &&
           !autoRefreshAttemptedRef.current[autoRefreshKey]
         ) {
@@ -2221,7 +2225,7 @@ const ClientDashboardPage: React.FC = () => {
     };
 
     fetchSummary();
-  }, [clientId, dateRange, customStartDate, customEndDate, buildDashboardUrl]);
+  }, [clientId, dateRange, customStartDate, customEndDate, buildDashboardUrl, user?.role]);
 
   // Fetch comparison period data when "Compare To" is enabled
   useEffect(() => {
