@@ -7140,13 +7140,18 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
                 const kd = item?.keyword_data || {};
                 const ki = kd?.keyword_info || {};
                 const serpItem = item?.ranked_serp_element?.serp_item || {};
+                const rawPosition = serpItem?.rank_group ?? serpItem?.rank_absolute;
+                const parsedPosition = Number(rawPosition);
+                const rawSearchVolume = Number(ki?.search_volume);
+                const rawCpc = Number(ki?.cpc);
+                const rawUrl = serpItem?.url || serpItem?.relative_url;
                 return {
-                  keyword: kd?.keyword || "",
-                  currentPosition: serpItem?.rank_group ?? serpItem?.rank_absolute ?? null,
-                  searchVolume: ki?.search_volume != null ? Number(ki.search_volume) : null,
-                  ctr: null,
-                  googleUrl: serpItem?.url || serpItem?.relative_url || null,
-                  cpc: ki?.cpc != null ? Number(ki.cpc) : null,
+                  keyword: String(kd?.keyword || ""),
+                  currentPosition: Number.isFinite(parsedPosition) ? parsedPosition : null,
+                  searchVolume: Number.isFinite(rawSearchVolume) ? Math.max(0, Math.round(rawSearchVolume)) : 0,
+                  ctr: 0,
+                  googleUrl: rawUrl ? String(rawUrl) : null,
+                  cpc: Number.isFinite(rawCpc) ? rawCpc : null,
                 };
               });
               const liveTraffic = liveItems.reduce((sum: number, item: any) => {
