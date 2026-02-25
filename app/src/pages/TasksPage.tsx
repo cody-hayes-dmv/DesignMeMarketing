@@ -86,7 +86,6 @@ const TasksPage = () => {
     const [assignSelectedSpecialistId, setAssignSelectedSpecialistId] = useState<string>("");
     const [bulkAssigning, setBulkAssigning] = useState(false);
     const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-    const [unreadCountsSupported, setUnreadCountsSupported] = useState(true);
     const { tasks } = useSelector((state: RootState) => state.task);
     const { user } = useSelector((state: RootState) => state.auth);
     const { clients } = useSelector((state: RootState) => state.client);
@@ -127,26 +126,42 @@ const TasksPage = () => {
         }
     }, [searchParams, tasks]);
 
-    // Fetch unread activity counts per task
+    // Fetch unread activity counts per task from notifications feed.
+    // This avoids depending on /tasks/unread-counts, which may not exist on older production backends.
     const fetchUnreadCounts = () => {
-        if (!unreadCountsSupported) return;
-        api.get("/tasks/unread-counts")
-            .then((res) => setUnreadCounts(res.data || {}))
-            .catch((error: any) => {
-                const status = error?.response?.status;
-                if (status === 404) {
-                    // Backward compatibility: older API versions may not expose this endpoint.
-                    setUnreadCountsSupported(false);
-                }
-                setUnreadCounts({});
-            });
+        const role = user?.role;
+        const notificationsUrl =
+            role === "SUPER_ADMIN" || role === "ADMIN"
+                ? "/seo/super-admin/notifications"
+                : role === "AGENCY" || role === "SPECIALIST"
+                    ? "/agencies/me/notifications"
+                    : null;
+
+        if (!notificationsUrl) {
+            setUnreadCounts({});
+            return;
+        }
+
+        api.get(notificationsUrl, { _silent: true } as any)
+            .then((res: any) => {
+                const items = Array.isArray(res?.data?.items) ? res.data.items : [];
+                const counts: Record<string, number> = {};
+                items.forEach((n: any) => {
+                    if (n?.read) return;
+                    const link = String(n?.link || "");
+                    const match = link.match(/[?&]taskId=([a-zA-Z0-9_-]+)/);
+                    if (!match?.[1]) return;
+                    counts[match[1]] = (counts[match[1]] || 0) + 1;
+                });
+                setUnreadCounts(counts);
+            })
+            .catch(() => setUnreadCounts({}));
     };
     useEffect(() => {
-        if (!unreadCountsSupported) return;
         fetchUnreadCounts();
         const interval = setInterval(fetchUnreadCounts, 30000);
         return () => clearInterval(interval);
-    }, [unreadCountsSupported]);
+    }, [user?.role]);
 
     // Only agency/admin/super-admin can create, bulk-assign, and manage tasks
     const isClientUser = user?.role === "USER";

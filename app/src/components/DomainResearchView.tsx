@@ -351,26 +351,30 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       return;
     }
 
-    const nameMatches = clients.filter((c) => {
+    const exactNameMatches = clients.filter((c) => {
       const name = (c.name || "").toLowerCase().trim();
-      return (
-        name === raw.toLowerCase().trim() ||
-        name.startsWith(raw.toLowerCase().trim()) ||
-        name.includes(raw.toLowerCase().trim())
-      );
+      return name === raw.toLowerCase().trim();
     });
 
-    if (nameMatches.length === 1) {
-      setSelectedClientId(nameMatches[0].id);
+    if (exactNameMatches.length === 1) {
+      setSelectedClientId(exactNameMatches[0].id);
       setDirectDomain(null);
       setSearchQuery("");
       setSearchOpen(false);
       return;
     }
 
-    if (nameMatches.length > 1) {
+    if (exactNameMatches.length > 1) {
       setSearchOpen(true);
       toast("Multiple clients match this name. Please pick one from the list.");
+      return;
+    }
+
+    // Avoid fuzzy auto-selection mistakes on large admin datasets:
+    // if client suggestions exist, force explicit selection from the dropdown.
+    if (filteredClients.length > 0) {
+      setSearchOpen(true);
+      toast("Please choose the correct client from the list.");
       return;
     }
 
@@ -385,7 +389,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     setDirectDomain(domain);
     setSearchQuery("");
     setSearchOpen(false);
-  }, [searchQuery, clients]);
+  }, [searchQuery, clients, filteredClients]);
 
   const fetchOverview = useCallback(async (clientIdOrDomain: string, isDirect: boolean = false) => {
     setLoading(true);
