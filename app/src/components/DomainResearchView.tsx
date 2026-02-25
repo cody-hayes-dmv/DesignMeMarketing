@@ -414,14 +414,25 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
       const ignoreFilter = (el: Element) => el.getAttribute?.("data-pdf-hide") === "true";
       const sectionCanvases: HTMLCanvasElement[] = [];
+      const captureScale = Math.min(4, Math.max(2, (window.devicePixelRatio || 1) * 2));
       for (const sec of exportSections) {
         const cvs = await html2canvas(sec, {
-          scale: 2,
+          scale: captureScale,
           useCORS: true,
           scrollY: -window.scrollY,
           scrollX: -window.scrollX,
           backgroundColor: "#FFFFFF",
           ignoreElements: ignoreFilter,
+          windowWidth: Math.max(document.documentElement.clientWidth, sec.scrollWidth),
+          windowHeight: Math.max(document.documentElement.clientHeight, sec.scrollHeight),
+          onclone: (doc) => {
+            const scrollables = doc.querySelectorAll('[data-pdf-scrollable="true"]') as NodeListOf<HTMLElement>;
+            scrollables.forEach((node) => {
+              node.style.maxHeight = "none";
+              node.style.overflow = "visible";
+              node.style.overflowY = "visible";
+            });
+          },
         });
         sectionCanvases.push(cvs);
       }
@@ -452,6 +463,9 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       const usableWidth = pageWidth - marginX * 2;
       const usableHeight = pageHeight - contentMarginTop - contentMarginBottom;
       const sectionGap = 4;
+      const exportContentScale = 1.1;
+      const renderWidth = usableWidth * exportContentScale;
+      const renderX = marginX + (usableWidth - renderWidth) / 2;
 
       const drawHeader = () => {
         pdf.setFillColor(15, 23, 42);
@@ -522,23 +536,61 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
 
       // Content pages
-      const sectionNaturalHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
-      const sectionHeights = sectionNaturalHeights.map((h) => Math.min(h, usableHeight));
-      const sectionScales = sectionNaturalHeights.map((h) => (h > usableHeight ? usableHeight / h : 1));
-
-      const pageAssignments: { pageIdx: number; cursorY: number; sectionIdx: number }[] = [];
+      const pageAssignments: Array<{ pageIdx: number; cursorY: number; canvas: HTMLCanvasElement; renderHeight: number }> = [];
       let curPage = 0;
       let cursorY = 0;
-      for (let i = 0; i < sectionCanvases.length; i++) {
-        const h = sectionHeights[i];
-        const fitsOnCurrentPage = cursorY === 0 || cursorY + sectionGap + h <= usableHeight;
-        if (!fitsOnCurrentPage) {
-          curPage++;
-          cursorY = 0;
+      for (const sectionCanvas of sectionCanvases) {
+        const mmPerPx = renderWidth / sectionCanvas.width;
+        const maxPxPerPage = Math.max(1, Math.floor(usableHeight / mmPerPx));
+        let offsetPx = 0;
+        while (offsetPx < sectionCanvas.height) {
+          const remainingPx = sectionCanvas.height - offsetPx;
+          const chunkHeightPx = Math.min(maxPxPerPage, remainingPx);
+          const renderHeightMm = chunkHeightPx * mmPerPx;
+
+          const fitsOnCurrentPage = cursorY === 0 || cursorY + sectionGap + renderHeightMm <= usableHeight;
+          if (!fitsOnCurrentPage) {
+            curPage++;
+            cursorY = 0;
+          }
+
+          const yPos = cursorY === 0 ? 0 : cursorY + sectionGap;
+          let chunkCanvas = sectionCanvas;
+          if (!(offsetPx === 0 && chunkHeightPx === sectionCanvas.height)) {
+            chunkCanvas = document.createElement("canvas");
+            chunkCanvas.width = sectionCanvas.width;
+            chunkCanvas.height = chunkHeightPx;
+            const ctx = chunkCanvas.getContext("2d");
+            if (ctx) {
+              ctx.imageSmoothingEnabled = true;
+              ctx.drawImage(
+                sectionCanvas,
+                0,
+                offsetPx,
+                sectionCanvas.width,
+                chunkHeightPx,
+                0,
+                0,
+                sectionCanvas.width,
+                chunkHeightPx
+              );
+            }
+          }
+
+          pageAssignments.push({
+            pageIdx: curPage,
+            cursorY: yPos,
+            canvas: chunkCanvas,
+            renderHeight: renderHeightMm,
+          });
+          cursorY = yPos + renderHeightMm;
+          offsetPx += chunkHeightPx;
+
+          if (offsetPx < sectionCanvas.height) {
+            curPage++;
+            cursorY = 0;
+          }
         }
-        const yPos = cursorY === 0 ? 0 : cursorY + sectionGap;
-        pageAssignments.push({ pageIdx: curPage, cursorY: yPos, sectionIdx: i });
-        cursorY = yPos + h;
       }
 
       const totalContentPages = curPage + 1;
@@ -551,13 +603,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
           currentPageRendered = assignment.pageIdx;
         }
 
-        const idx = assignment.sectionIdx;
-        const scale = sectionScales[idx];
-        const imgW = usableWidth * scale;
-        const imgH = sectionHeights[idx];
-        const imgX = marginX + (usableWidth - imgW) / 2;
-        const imgData = sectionCanvases[idx].toDataURL("image/png");
-        pdf.addImage(imgData, "PNG", imgX, contentMarginTop + assignment.cursorY, imgW, imgH);
+        const imgData = assignment.canvas.toDataURL("image/png");
+        pdf.addImage(imgData, "PNG", renderX, contentMarginTop + assignment.cursorY, renderWidth, assignment.renderHeight);
       }
 
       for (let p = 0; p < totalContentPages; p++) {
@@ -1019,6 +1066,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-3">Distribution by Country</h4>
                   <div
+                    data-pdf-scrollable="true"
                     className={`overflow-x-auto rounded-lg border border-gray-200 ${(1 + (aiSearch?.distributionByCountry ?? []).length) > 4 ? "max-h-56 overflow-y-auto" : ""}`}
                   >
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -1067,6 +1115,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </button>
                   </div>
                   <div
+                    data-pdf-scrollable="true"
                     className={`overflow-x-auto rounded-lg border border-gray-200 ${(aiSearch?.topCitedSources ?? []).length > 4 ? "max-h-56 overflow-y-auto" : ""}`}
                   >
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -1152,7 +1201,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       <input type="checkbox" checked={trafficOrganic} onChange={(e) => setTrafficOrganic(e.target.checked)} className="rounded border-gray-300 focus:ring-2 focus:ring-offset-1" style={{ accentColor: "#3B82F6" }} />
                       <span className="text-sm text-blue-600 font-medium">Organic Traffic</span>
                     </label>
-                    <select className="ml-auto text-sm border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white">
+                    <select data-pdf-hide="true" className="ml-auto text-sm border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white">
                       <option>Notes</option>
                     </select>
                   </div>
