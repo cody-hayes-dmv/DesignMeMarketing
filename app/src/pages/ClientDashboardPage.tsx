@@ -463,8 +463,8 @@ const ClientDashboardPage: React.FC = () => {
   const [aiSearchLoading, setAiSearchLoading] = useState(false);
   const [aiSearchError, setAiSearchError] = useState<string | null>(null);
   const [aiIntelligence, setAiIntelligence] = useState<{
-    kpis: { aiVisibilityScore: number; aiVisibilityScoreTrend: number; totalAiMentions: number; totalAiMentionsTrend: number; aiSearchVolume: number; aiSearchVolumeTrend: number; monthlyTrendPercent: number };
-    platforms: { platform: string; color: string; mentions: number; aiSearchVol: number; impressions: number; trend: number; share: number }[];
+    kpis: { aiVisibilityScore: number; aiVisibilityScoreTrend: number | null; totalAiMentions: number; totalAiMentionsTrend: number | null; aiSearchVolume: number; aiSearchVolumeTrend: number | null; monthlyTrendPercent: number | null };
+    platforms: { platform: string; color: string; mentions: number; aiSearchVol: number; impressions: number; trend: number | null; share: number }[];
     queriesWhereYouAppear: { query: string; aiVolPerMo: number; platforms: string; mentions: number }[];
     totalQueriesCount: number;
     competitors: { domain: string; label: string; isLeader: boolean; isYou: boolean; score: number; trend: number | null }[];
@@ -493,6 +493,7 @@ const ClientDashboardPage: React.FC = () => {
       apiResponseStatus?: string;
       scoreExplanation?: string;
       dataSource?: string;
+      supportsHistoricalTrends?: boolean;
       queriesFilteredByRelevance?: boolean;
       industry?: string | null;
       hasQueryLevelData?: boolean;
@@ -5394,9 +5395,14 @@ const ClientDashboardPage: React.FC = () => {
                             <p className="mt-2 text-2xl font-bold text-gray-900">
                               {aiIntelligence.kpis?.aiVisibilityScore ?? 0} <span className="text-base font-normal text-gray-500">/100</span>
                             </p>
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
-                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0} pts
-                            </span>
+                            {(aiIntelligence.kpis?.aiVisibilityScoreTrend ?? null) == null ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 mt-1">Trend unavailable</span>
+                            ) : (
+                              <span className={`inline-flex items-center gap-1 text-xs font-medium mt-1 ${(aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                {(aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0) >= 0 && <TrendingUp className="h-3.5 w-3.5" />}
+                                {(aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0) > 0 ? "+" : ""}{aiIntelligence.kpis?.aiVisibilityScoreTrend ?? 0} pts
+                              </span>
+                            )}
                             {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
                               <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
                             )}
@@ -5407,9 +5413,14 @@ const ClientDashboardPage: React.FC = () => {
                               <InfoTooltip content="Number of times your business was mentioned or recommended by AI platforms this period." className="ml-1 inline-flex align-middle" />
                             </p>
                             <p className="mt-2 text-2xl font-bold text-gray-900">{aiIntelligence.kpis?.totalAiMentions ?? 0}</p>
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
-                              <TrendingUp className="h-3.5 w-3.5" />+{aiIntelligence.kpis?.totalAiMentionsTrend ?? 0}
-                            </span>
+                            {(aiIntelligence.kpis?.totalAiMentionsTrend ?? null) == null ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 mt-1">Trend unavailable</span>
+                            ) : (
+                              <span className={`inline-flex items-center gap-1 text-xs font-medium mt-1 ${(aiIntelligence.kpis?.totalAiMentionsTrend ?? 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                {(aiIntelligence.kpis?.totalAiMentionsTrend ?? 0) >= 0 && <TrendingUp className="h-3.5 w-3.5" />}
+                                {(aiIntelligence.kpis?.totalAiMentionsTrend ?? 0) > 0 ? "+" : ""}{aiIntelligence.kpis?.totalAiMentionsTrend ?? 0}
+                              </span>
+                            )}
                             {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
                               <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
                             )}
@@ -5422,9 +5433,14 @@ const ClientDashboardPage: React.FC = () => {
                             <p className="mt-2 text-2xl font-bold text-gray-900">
                               {(aiIntelligence.kpis?.aiSearchVolume ?? 0).toLocaleString()}
                             </p>
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 mt-1">
-                              <TrendingUp className="h-3.5 w-3.5" />+{(aiIntelligence.kpis?.aiSearchVolumeTrend ?? 0).toLocaleString()}
-                            </span>
+                            {(aiIntelligence.kpis?.aiSearchVolumeTrend ?? null) == null ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 mt-1">Trend unavailable</span>
+                            ) : (
+                              <span className={`inline-flex items-center gap-1 text-xs font-medium mt-1 ${(aiIntelligence.kpis?.aiSearchVolumeTrend ?? 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                {(aiIntelligence.kpis?.aiSearchVolumeTrend ?? 0) >= 0 && <TrendingUp className="h-3.5 w-3.5" />}
+                                {(aiIntelligence.kpis?.aiSearchVolumeTrend ?? 0) > 0 ? "+" : ""}{(aiIntelligence.kpis?.aiSearchVolumeTrend ?? 0).toLocaleString()}
+                              </span>
+                            )}
                             {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
                               <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
                             )}
@@ -5432,10 +5448,21 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm min-h-[140px] flex flex-col border-t-4 border-t-amber-500">
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                               Monthly Trend
-                              <InfoTooltip content="Percentage change in your AI visibility compared to last month." className="ml-1 inline-flex align-middle" />
+                              <InfoTooltip content="Month-over-month change in AI search volume trend when monthly history is available." className="ml-1 inline-flex align-middle" />
                             </p>
-                            <p className="mt-2 text-2xl font-bold text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</p>
-                            <p className="text-xs text-gray-500 mt-1">vs last month</p>
+                            {(aiIntelligence.kpis?.monthlyTrendPercent ?? null) == null ? (
+                              <>
+                                <p className="mt-2 text-2xl font-bold text-gray-500">N/A</p>
+                                <p className="text-xs text-gray-500 mt-1">Need at least 2 monthly data points</p>
+                              </>
+                            ) : (
+                              <>
+                                <p className={`mt-2 text-2xl font-bold ${(aiIntelligence.kpis?.monthlyTrendPercent ?? 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                  {(aiIntelligence.kpis?.monthlyTrendPercent ?? 0) > 0 ? "+" : ""}{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">vs previous month</p>
+                              </>
+                            )}
                             {formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated) && (
                               <p className="text-xs text-gray-500 mt-auto pt-3">{formatLastUpdatedHours(aiIntelligence.meta?.lastUpdated)}</p>
                             )}
@@ -5511,9 +5538,10 @@ const ClientDashboardPage: React.FC = () => {
                                       <td className="px-6 py-4 text-gray-700 font-medium">{(p.aiSearchVol ?? 0).toLocaleString()}</td>
                                       <td className="px-6 py-4 text-gray-700 font-medium">{(p.impressions ?? 0).toLocaleString()}</td>
                                       <td className="px-6 py-4">
-                                        {(p.trend ?? 0) > 0 && <span className="inline-flex items-center gap-1 text-green-600 font-medium"><TrendingUp className="h-4 w-4" />+{p.trend}%</span>}
-                                        {(p.trend ?? 0) === 0 && <span className="text-gray-400">—</span>}
-                                        {(p.trend ?? 0) < 0 && <span className="inline-flex items-center gap-1 text-red-600 font-medium">{p.trend}%</span>}
+                                        {p.trend == null && <span className="text-gray-400">N/A</span>}
+                                        {p.trend != null && p.trend > 0 && <span className="inline-flex items-center gap-1 text-green-600 font-medium"><TrendingUp className="h-4 w-4" />+{p.trend}%</span>}
+                                        {p.trend != null && p.trend === 0 && <span className="text-gray-400">—</span>}
+                                        {p.trend != null && p.trend < 0 && <span className="inline-flex items-center gap-1 text-red-600 font-medium">{p.trend}%</span>}
                                       </td>
                                       <td className="px-6 py-4 text-gray-700 font-medium">{p.share ?? 0}%</td>
                                     </tr>
@@ -5525,7 +5553,11 @@ const ClientDashboardPage: React.FC = () => {
                                     <td className="px-6 py-4 text-gray-900">
                                       {(aiIntelligence.platforms ?? []).reduce((s, p) => s + (p.impressions ?? 0), 0).toLocaleString()}
                                     </td>
-                                    <td className="px-6 py-4 text-green-600">+{aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%</td>
+                                    <td className={`px-6 py-4 ${(aiIntelligence.kpis?.monthlyTrendPercent ?? null) == null ? "text-gray-500" : (aiIntelligence.kpis?.monthlyTrendPercent ?? 0) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                      {(aiIntelligence.kpis?.monthlyTrendPercent ?? null) == null
+                                        ? "N/A"
+                                        : `${(aiIntelligence.kpis?.monthlyTrendPercent ?? 0) > 0 ? "+" : ""}${aiIntelligence.kpis?.monthlyTrendPercent ?? 0}%`}
+                                    </td>
                                     <td className="px-6 py-4 text-gray-900">100%</td>
                                   </tr>
                                 </tbody>

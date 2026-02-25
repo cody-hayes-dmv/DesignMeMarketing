@@ -257,10 +257,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const [aiSearchTimeRange, setAiSearchTimeRange] = useState<"1M" | "6M" | "1Y" | "2Y" | "All">("1Y");
   const [aiSearchGranularity, setAiSearchGranularity] = useState<"Days" | "Months">("Months");
   const [trafficOrganic, setTrafficOrganic] = useState(true);
-  const [trafficPaid, setTrafficPaid] = useState(true);
-  const [trafficBranded, setTrafficBranded] = useState(true);
   const [keywordsTab, setKeywordsTab] = useState<"Organic" | "Paid">("Organic");
-  const [keywordRanges, setKeywordRanges] = useState({ top3: true, "4-10": true, "11-20": true, "21-50": true, "51-100": true, aiOverviews: true, otherSerp: true });
+  const [keywordRanges, setKeywordRanges] = useState({ top3: true, "4-10": true, "11-20": true, "21-50": true, "51-100": true });
   const [keywordRangesPaid, setKeywordRangesPaid] = useState({ "1-4": true, "5-10": true, "11-20": true, "21+": true });
   const [topKeywordsModalOpen, setTopKeywordsModalOpen] = useState(false);
   const [intentModalOpen, setIntentModalOpen] = useState(false);
@@ -273,13 +271,14 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const selectedClient = clients.find((c) => c.id === selectedClientId) || null;
   const activeDomain = selectedClient?.domain || directDomain || null;
 
-  // Derive kpis and platforms from rows for detail sections (API returns rows)
+  // Use GA4-comparable rows for top-line KPIs; AI Overview/Mode are keyword-level SERP metrics.
   const aiSearchKpis = React.useMemo(() => {
     const rows = aiSearch?.rows ?? [];
-    const totalAiMentions = rows.reduce((s, r) => s + (r.mentions ?? 0), 0);
-    const visSum = rows.reduce((s, r) => s + (r.visibility ?? 0), 0);
-    const aiVisibilityScore = rows.length > 0 ? Math.round(visSum / rows.length) : 0;
-    return { aiVisibilityScore, totalAiMentions };
+    const ga4Rows = rows.filter((r) => r.name === "ChatGPT" || r.name === "Gemini");
+    const totalAiMentions = ga4Rows.reduce((s, r) => s + (r.mentions ?? 0), 0);
+    const aiVisibilityScore = Math.min(100, ga4Rows.reduce((s, r) => s + (r.visibility ?? 0), 0));
+    const worldwideVisibility = totalAiMentions > 0 ? 100 : 0;
+    return { aiVisibilityScore, totalAiMentions, worldwideVisibility };
   }, [aiSearch?.rows]);
 
   const aiSearchPlatforms = React.useMemo(() => {
@@ -654,8 +653,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       monthFull: `${FULL_MONTH_NAMES[monthNum - 1]} ${year}`,
       monthShort: `${MONTH_NAMES[monthNum - 1]} ${year}`,
       dayLabel: `1 ${MONTH_NAMES[monthNum - 1]}`,
-      trafficPaid: 0,
-      trafficBranded: 0,
     };
   });
   const trafficChartData = trafficChartDataRaw.slice(-monthsLimit);
@@ -678,8 +675,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
         "11-20": Math.max(0, top20),
         "21-50": pos21_30 + pos31_50,
         "51-100": pos51Plus,
-        "AI Overviews": aiSearchKpis.totalAiMentions ? Math.round(aiSearchKpis.totalAiMentions / 12) : 0,
-        "Other SERP Features": 0,
       };
     }) ?? [];
   const keywordsStackData = keywordsStackDataRaw.slice(-monthsLimit);
@@ -891,6 +886,9 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </p>
                   </div>
                 </div>
+                <p className="mb-3 text-xs text-gray-500">
+                  AI Visibility and Mentions are based on GA4 AI referrals (ChatGPT + Gemini) for the selected period.
+                </p>
 
                 {loading ? (
                   <div className="pt-4 border-t border-gray-100 text-sm text-gray-500">Loading AI Search visibility...</div>
@@ -1034,7 +1032,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       <tbody className="divide-y divide-gray-200">
                         <tr className="bg-gray-50 hover:bg-gray-100">
                           <td className="px-4 py-2 text-gray-900">Worldwide</td>
-                          <td className="px-4 py-2 text-gray-900">{aiSearchKpis.aiVisibilityScore}</td>
+                          <td className="px-4 py-2 text-gray-900">{aiSearchKpis.worldwideVisibility}</td>
                           <td className="px-4 py-2 text-blue-600 font-medium">{aiSearchKpis.totalAiMentions}</td>
                         </tr>
                         {(aiSearch?.distributionByCountry ?? []).map((c, i) => (
@@ -1147,19 +1145,12 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               {/* Right panel: 70% - Traffic and Keywords */}
               <div className="flex flex-col gap-6">
                 <div>
-                  <h4 className="text-sm font-medium text-gray-700 mb-3">Traffic</h4>
+                  <h4 className="text-sm font-medium text-gray-700 mb-1">Traffic <span className="text-xs font-normal text-amber-600">(Estimated)</span></h4>
+                  <p className="text-xs text-gray-500 mb-3">Trend is modeled from organic keyword history; paid and branded trend lines are hidden until source data is available.</p>
                   <div className="flex flex-wrap gap-4 mb-2">
                     <label className="inline-flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={trafficOrganic} onChange={(e) => setTrafficOrganic(e.target.checked)} className="rounded border-gray-300 focus:ring-2 focus:ring-offset-1" style={{ accentColor: "#3B82F6" }} />
                       <span className="text-sm text-blue-600 font-medium">Organic Traffic</span>
-                    </label>
-                    <label className="inline-flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={trafficPaid} onChange={(e) => setTrafficPaid(e.target.checked)} className="rounded border-gray-300 focus:ring-2 focus:ring-offset-1" style={{ accentColor: "#F97316" }} />
-                      <span className="text-sm text-orange-500 font-medium">Paid Traffic</span>
-                    </label>
-                    <label className="inline-flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={trafficBranded} onChange={(e) => setTrafficBranded(e.target.checked)} className="rounded border-gray-300 focus:ring-2 focus:ring-offset-1" style={{ accentColor: "#22C55E" }} />
-                      <span className="text-sm text-green-600 font-medium">Branded Traffic</span>
                     </label>
                     <select className="ml-auto text-sm border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white">
                       <option>Notes</option>
@@ -1177,8 +1168,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                             if (!row) return null;
                             const items = [
                               { key: "Organic Traffic", val: row.traffic ?? 0, color: "#3B82F6" },
-                              { key: "Paid Traffic", val: row.trafficPaid ?? 0, color: "#F97316" },
-                              { key: "Branded Traffic", val: row.trafficBranded ?? 0, color: "#22C55E" },
                             ];
                             const total = items.reduce((s, i) => s + i.val, 0);
                             return (
@@ -1204,12 +1193,10 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                           }}
                         />
                         {trafficOrganic && <Line type="monotone" dataKey="traffic" stroke="#3B82F6" strokeWidth={2} name="Organic Traffic" dot={{ r: 2 }} />}
-                        {trafficPaid && <Line type="monotone" dataKey="trafficPaid" stroke="#F97316" strokeWidth={2} name="Paid Traffic" dot={{ r: 2 }} />}
-                        {trafficBranded && <Line type="monotone" dataKey="trafficBranded" stroke="#22C55E" strokeWidth={2} name="Branded Traffic" dot={{ r: 2 }} />}
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
-                  {trafficChartData.every((d) => (d.traffic ?? 0) === 0 && (d.trafficPaid ?? 0) === 0 && (d.trafficBranded ?? 0) === 0) && (
+                  {trafficChartData.every((d) => (d.traffic ?? 0) === 0) && (
                     <p className="mt-2 text-xs text-gray-500">Connect traffic sources and refresh ranked keywords on the client dashboard for trends.</p>
                   )}
                 </div>
@@ -1222,12 +1209,12 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </div>
                     <div className="flex flex-wrap gap-3">
                       {keywordsTab === "Organic" ? (
-                        (["top3", "4-10", "11-20", "21-50", "51-100", "aiOverviews", "otherSerp"] as const).map((key) => {
-                          const accentColor = { top3: "#FACC15", "4-10": "#3B82F6", "11-20": "#22C55E", "21-50": "#F97316", "51-100": "#94A3B8", aiOverviews: "#8B5CF6", otherSerp: "#22C55E" }[key];
+                        (["top3", "4-10", "11-20", "21-50", "51-100"] as const).map((key) => {
+                          const accentColor = { top3: "#FACC15", "4-10": "#3B82F6", "11-20": "#22C55E", "21-50": "#F97316", "51-100": "#94A3B8" }[key];
                           return (
                             <label key={key} className="inline-flex items-center gap-1.5 cursor-pointer">
                               <input type="checkbox" checked={keywordRanges[key]} onChange={(e) => setKeywordRanges((prev) => ({ ...prev, [key]: e.target.checked }))} className="rounded border-gray-300 focus:ring-2 focus:ring-offset-1" style={{ accentColor }} />
-                              <span className="text-xs text-gray-700">{key === "top3" ? "Top 3" : key === "4-10" ? "4-10" : key === "11-20" ? "11-20" : key === "21-50" ? "21-50" : key === "51-100" ? "51-100" : key === "aiOverviews" ? "AI Overviews" : "Other SERP Features"}</span>
+                              <span className="text-xs text-gray-700">{key === "top3" ? "Top 3" : key}</span>
                             </label>
                           );
                         })
@@ -1262,8 +1249,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                             { key: "11-20", val: row["11-20"] ?? 0, color: "#22C55E" },
                             { key: "21-50", val: row["21-50"] ?? 0, color: "#F97316" },
                             { key: "51-100", val: row["51-100"] ?? 0, color: "#94A3B8" },
-                            { key: "AI Overviews", val: row["AI Overviews"] ?? 0, color: "#8B5CF6" },
-                            { key: "Other SERP Features", val: row["Other SERP Features"] ?? 0, color: "#22C55E" },
                           ];
                           const total = items.reduce((s, i) => s + i.val, 0);
                           return (
@@ -1293,8 +1278,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       {keywordRanges["11-20"] && <Area type="monotone" dataKey="11-20" stackId="1" stroke="#22C55E" fill="#22C55E" fillOpacity={0.8} />}
                       {keywordRanges["21-50"] && <Area type="monotone" dataKey="21-50" stackId="1" stroke="#F97316" fill="#F97316" fillOpacity={0.8} />}
                       {keywordRanges["51-100"] && <Area type="monotone" dataKey="51-100" stackId="1" stroke="#94A3B8" fill="#94A3B8" fillOpacity={0.8} />}
-                      {keywordRanges.aiOverviews && <Area type="monotone" dataKey="AI Overviews" stackId="1" stroke="#8B5CF6" fill="#8B5CF6" fillOpacity={0.8} />}
-                      {keywordRanges.otherSerp && <Area type="monotone" dataKey="Other SERP Features" stackId="1" stroke="#22C55E" fill="#22C55E" fillOpacity={0.6} />}
                     </AreaChart>
                     </ResponsiveContainer>
                   ) : (

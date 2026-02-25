@@ -4881,9 +4881,15 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
       }
     }
 
-    // AI Overview / AI Mode from cached SERP item types (best effort for mentions/visibility)
+    // AI Overview / AI Mode from cached SERP item types (windowed by keyword freshness).
     const tks = await prisma.targetKeyword.findMany({
-      where: { clientId },
+      where: {
+        clientId,
+        updatedAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
       select: { serpItemTypes: true },
     });
     const parsedTypes = tks
@@ -5001,7 +5007,13 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
       if (!client.domain || !clientHost) return null;
       // Limit to a small sample to control billable calls
       const sample = await prisma.targetKeyword.findMany({
-        where: { clientId },
+        where: {
+          clientId,
+          updatedAt: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
         orderBy: [{ searchVolume: "desc" }, { updatedAt: "desc" }],
         take: 8,
         select: {
@@ -5864,21 +5876,11 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     const dateFrom = formatDateForAPI(startDate);
     const dateTo = formatDateForAPI(endDate);
 
-    // Calculate previous period for trends
-    const periodDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-    const prevEndDate = new Date(startDate);
-    prevEndDate.setDate(prevEndDate.getDate() - 1);
-    const prevStartDate = new Date(prevEndDate);
-    prevStartDate.setDate(prevStartDate.getDate() - periodDays);
-    const prevDateFrom = formatDateForAPI(prevStartDate);
-    const prevDateTo = formatDateForAPI(prevEndDate);
-
     let currentMetrics: any = null;
-    let previousMetrics: any = null;
     let searchMentions: any[] = [];
 
     // Parallelize independent DataForSEO API calls to reduce total time
-    const [currentMetricsResult, previousMetricsResult, searchMentionsResult] = await Promise.allSettled([
+    const [currentMetricsResult, searchMentionsResult] = await Promise.allSettled([
       // Fetch DataForSEO AI aggregated metrics (current period)
       fetchAiAggregatedMetrics(
         targetDomain,
@@ -5887,15 +5889,6 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         languageCode,
         dateFrom,
         dateTo
-      ),
-      // Fetch DataForSEO AI aggregated metrics (previous period for trends)
-      fetchAiAggregatedMetrics(
-        targetDomain,
-        "domain",
-        locationCode,
-        languageCode,
-        prevDateFrom,
-        prevDateTo
       ),
       // Fetch DataForSEO AI search mentions (queries)
       fetchAiSearchMentions(
@@ -5928,13 +5921,6 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         dateFrom,
         dateTo,
       });
-    }
-
-    // Process previous metrics result
-    if (previousMetricsResult.status === 'fulfilled') {
-      previousMetrics = previousMetricsResult.value;
-    } else {
-      console.warn("[AI Intelligence] DataForSEO previous period metrics fetch failed:", previousMetricsResult.reason?.message);
     }
 
     // Process search mentions result
@@ -6039,40 +6025,14 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       });
     }
 
-    // Previous period: same DataForSEO structure (result[0].total.platform)
-    const prevTotalObj = previousMetrics?.total;
-    const prevPlatformArr = Array.isArray(prevTotalObj?.platform) ? prevTotalObj.platform : [];
-    const prevTotalMentions = prevPlatformArr.reduce((s: number, p: any) => s + Number(p?.mentions || 0), 0);
-    const prevTotalAiSearchVolume = prevPlatformArr.reduce((s: number, p: any) => s + Number(p?.ai_search_volume || 0), 0);
-    const prevPlatformMap: Record<string, { mentions: number; aiSearchVol: number; impressions: number }> = {};
-    for (const item of prevPlatformArr) {
-      const keyStr = String(item?.key || "").toLowerCase();
-      const key = keyStr.includes("chat_gpt") || keyStr === "chatgpt" ? "chatgpt" :
-                  keyStr.includes("google") || keyStr === "google" ? "google_ai" :
-                  keyStr.includes("perplexity") ? "perplexity" : null;
-      if (!key) continue;
-      if (!prevPlatformMap[key]) prevPlatformMap[key] = { mentions: 0, aiSearchVol: 0, impressions: 0 };
-      prevPlatformMap[key].mentions += Number(item?.mentions || 0);
-      prevPlatformMap[key].aiSearchVol += Number(item?.ai_search_volume || 0);
-      prevPlatformMap[key].impressions += Number(item?.impressions || 0);
-    }
+    // Aggregated_metrics is a live snapshot endpoint (no date window support),
+    // so period-over-period trends cannot be computed reliably from it.
+    const totalAiMentionsTrend: number | null = null;
+    const aiSearchVolumeTrend: number | null = null;
+    const monthlyTrendPercent: number | null = null;
 
-    // Calculate trends
-    const calculateTrend = (current: number, previous: number) => {
-      if (!previous || previous === 0) return current > 0 ? 100 : 0;
-      return Math.round(((current - previous) / previous) * 100);
-    };
-
-    const monthlyTrendPercent = calculateTrend(totalMentions, prevTotalMentions);
-    const aiSearchVolumeTrend = totalAiSearchVolume - prevTotalAiSearchVolume;
-    const totalAiMentionsTrend = totalMentions - prevTotalMentions;
-
-    // Calculate platform trends
-    const getPlatformTrend = (key: string) => {
-      const current = platformMap[key]?.mentions || 0;
-      const previous = prevPlatformMap[key]?.mentions || 0;
-      return calculateTrend(current, previous);
-    };
+    // Platform trends are not reliable without historical snapshots.
+    const getPlatformTrend = (_key: string): number | null => null;
 
     // Calculate platform diversity (number of platforms with mentions > 0)
     const platformDiversity = Object.keys(platformMap).filter(k => (platformMap[k]?.mentions || 0) > 0).length;
@@ -6081,18 +6041,12 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     const rawVisibilityScore = (totalMentions * 2) + (totalAiSearchVolume / 100) + (platformDiversity * 10);
     const aiVisibilityScore = Math.min(99, Math.min(100, rawVisibilityScore));
 
-    // Calculate AI Visibility Score trend (compare to previous period)
-    const prevPlatformDiversity = Object.keys(prevPlatformMap).filter(k => (prevPlatformMap[k]?.mentions || 0) > 0).length;
-    const prevVisibilityScore = Math.min(99,
-      (prevTotalMentions * 2) +
-      (prevTotalAiSearchVolume / 100) +
-      (prevPlatformDiversity * 10)
-    );
-    const aiVisibilityScoreTrend = Math.round(aiVisibilityScore - prevVisibilityScore);
+    // AI visibility trend is unavailable without historical snapshots.
+    const aiVisibilityScoreTrend: number | null = null;
 
     // Build platforms array
     const getShare = (m: number) => (totalMentions > 0 ? Math.round((m / totalMentions) * 100) : 0);
-    const platforms: { platform: string; color: string; mentions: number; aiSearchVol: number; impressions: number; trend: number; share: number }[] = [
+    const platforms: { platform: string; color: string; mentions: number; aiSearchVol: number; impressions: number; trend: number | null; share: number }[] = [
       {
         platform: "ChatGPT",
         color: "#22c55e",
@@ -6264,14 +6218,9 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     // Competitor domains already extracted above in parallel section
     // Fetch current and previous period competitor AI metrics in parallel for trend
     let competitorMetricsMap = new Map<string, any>();
-    let previousCompetitorMetricsMap = new Map<string, any>();
     if (competitorDomains.length > 0) {
-      const [currentMap, previousMap] = await Promise.all([
-        fetchCompetitorAiMetrics(competitorDomains, locationCode, languageCode, dateFrom, dateTo),
-        fetchCompetitorAiMetrics(competitorDomains, locationCode, languageCode, prevDateFrom, prevDateTo),
-      ]);
+      const currentMap = await fetchCompetitorAiMetrics(competitorDomains, locationCode, languageCode, dateFrom, dateTo);
       competitorMetricsMap = currentMap;
-      previousCompetitorMetricsMap = previousMap;
     }
 
     // Build competitors array with real data and trends
@@ -6287,22 +6236,19 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       trend: typeof aiVisibilityScoreTrend === "number" ? aiVisibilityScoreTrend : null,
     });
 
-    // Add competitors with real scores and trend (current score - previous period score)
+    // Add competitors with real scores (trend requires historical snapshots).
     for (const [compDomain, compData] of competitorMetricsMap.entries()) {
       const compLabel = compDomain.replace(/^www\./, "").split(".")[0]
         .split("-")
         .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
         .join(" ");
-      const prevData = previousCompetitorMetricsMap.get(compDomain);
-      const prevScore = prevData?.score != null ? Number(prevData.score) : null;
-      const trend = prevScore != null ? Math.round(compData.score - prevScore) : null;
       competitors.push({
         domain: compDomain,
         label: compLabel,
         isLeader: false,
         isYou: false,
         score: compData.score,
-        trend,
+        trend: null,
       });
     }
 
@@ -6380,7 +6326,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
 
     // When domain-level AI search volume is 0 but we have 12-month keyword trend data, show the latest month in the KPI so the top section matches the line graph.
     let kpiAiSearchVolume = totalAiSearchVolume || 0;
-    let kpiAiSearchVolumeTrend = aiSearchVolumeTrend;
+    let kpiAiSearchVolumeTrend: number | null = aiSearchVolumeTrend;
     let kpiVolumeFromTrend = false;
     if (totalAiSearchVolume === 0 && aiSearchVolumeTrend12Months.length > 0) {
       const last = aiSearchVolumeTrend12Months[aiSearchVolumeTrend12Months.length - 1];
@@ -6389,6 +6335,15 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
       kpiAiSearchVolumeTrend = prev ? last.searchVolume - prev.searchVolume : 0;
       kpiVolumeFromTrend = true;
     }
+    const kpiMonthlyTrendPercent =
+      aiSearchVolumeTrend12Months.length >= 2
+        ? (() => {
+            const last = aiSearchVolumeTrend12Months[aiSearchVolumeTrend12Months.length - 1]?.searchVolume ?? 0;
+            const prev = aiSearchVolumeTrend12Months[aiSearchVolumeTrend12Months.length - 2]?.searchVolume ?? 0;
+            if (prev <= 0) return last > 0 ? 100 : 0;
+            return Math.round(((last - prev) / prev) * 100);
+          })()
+        : null;
 
     return res.json({
       kpis: {
@@ -6398,7 +6353,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         totalAiMentionsTrend: totalAiMentionsTrend,
         aiSearchVolume: kpiAiSearchVolume,
         aiSearchVolumeTrend: kpiAiSearchVolumeTrend,
-        monthlyTrendPercent: monthlyTrendPercent,
+        monthlyTrendPercent: kpiMonthlyTrendPercent,
       },
       platforms,
       queriesWhereYouAppear,
@@ -6425,6 +6380,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         apiResponseStatus: (currentMetrics || totalMentions > 0) ? "success" : "no_data_or_error",
         scoreExplanation,
         dataSource: "DataForSEO",
+        supportsHistoricalTrends: false,
         queriesFilteredByRelevance: hasRelevanceSignal,
         industry: client.industry || null,
         kpiVolumeFromTrend: kpiVolumeFromTrend,
@@ -6515,9 +6471,15 @@ router.get("/share/:token/ai-search-visibility", async (req, res) => {
       }
     }
 
-    // AI Overview / AI Mode from cached SERP item types
+    // AI Overview / AI Mode from cached SERP item types (windowed by keyword freshness).
     const tks = await prisma.targetKeyword.findMany({
-      where: { clientId },
+      where: {
+        clientId,
+        updatedAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
       select: { serpItemTypes: true },
     });
     const parsedTypes = tks
