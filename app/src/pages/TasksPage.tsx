@@ -86,6 +86,7 @@ const TasksPage = () => {
     const [assignSelectedSpecialistId, setAssignSelectedSpecialistId] = useState<string>("");
     const [bulkAssigning, setBulkAssigning] = useState(false);
     const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+    const [unreadCountsSupported, setUnreadCountsSupported] = useState(true);
     const { tasks } = useSelector((state: RootState) => state.task);
     const { user } = useSelector((state: RootState) => state.auth);
     const { clients } = useSelector((state: RootState) => state.client);
@@ -128,15 +129,24 @@ const TasksPage = () => {
 
     // Fetch unread activity counts per task
     const fetchUnreadCounts = () => {
+        if (!unreadCountsSupported) return;
         api.get("/tasks/unread-counts")
             .then((res) => setUnreadCounts(res.data || {}))
-            .catch(() => setUnreadCounts({}));
+            .catch((error: any) => {
+                const status = error?.response?.status;
+                if (status === 404) {
+                    // Backward compatibility: older API versions may not expose this endpoint.
+                    setUnreadCountsSupported(false);
+                }
+                setUnreadCounts({});
+            });
     };
     useEffect(() => {
+        if (!unreadCountsSupported) return;
         fetchUnreadCounts();
         const interval = setInterval(fetchUnreadCounts, 30000);
         return () => clearInterval(interval);
-    }, []);
+    }, [unreadCountsSupported]);
 
     // Only agency/admin/super-admin can create, bulk-assign, and manage tasks
     const isClientUser = user?.role === "USER";

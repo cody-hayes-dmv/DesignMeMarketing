@@ -329,19 +329,60 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const handleDomainSearch = useCallback(() => {
     const raw = searchQuery.trim();
     if (!raw) return;
+    const normalizedQuery = normalizeDomainForMatch(raw.toLowerCase());
     const domain = normalizeDomainForMatch(raw);
-    const rawNormalized = normalizeDomainForMatch(raw.toLowerCase());
-    const matchedClient = clients.find((c) => {
+
+    const exactDomainMatches = clients.filter((c) => {
       const cd = normalizeDomainForMatch(c.domain || "");
-      return cd === domain || cd === rawNormalized;
+      return cd === domain || cd === normalizedQuery;
     });
-    if (matchedClient) {
-      setSelectedClientId(matchedClient.id);
+
+    if (exactDomainMatches.length === 1) {
+      setSelectedClientId(exactDomainMatches[0].id);
       setDirectDomain(null);
-    } else {
-      setSelectedClientId(null);
-      setDirectDomain(domain);
+      setSearchQuery("");
+      setSearchOpen(false);
+      return;
     }
+
+    if (exactDomainMatches.length > 1) {
+      setSearchOpen(true);
+      toast("Multiple clients match this domain. Please pick one from the list.");
+      return;
+    }
+
+    const nameMatches = clients.filter((c) => {
+      const name = (c.name || "").toLowerCase().trim();
+      return (
+        name === raw.toLowerCase().trim() ||
+        name.startsWith(raw.toLowerCase().trim()) ||
+        name.includes(raw.toLowerCase().trim())
+      );
+    });
+
+    if (nameMatches.length === 1) {
+      setSelectedClientId(nameMatches[0].id);
+      setDirectDomain(null);
+      setSearchQuery("");
+      setSearchOpen(false);
+      return;
+    }
+
+    if (nameMatches.length > 1) {
+      setSearchOpen(true);
+      toast("Multiple clients match this name. Please pick one from the list.");
+      return;
+    }
+
+    const looksLikeDomain = normalizedQuery.includes(".");
+    if (!looksLikeDomain) {
+      setSearchOpen(true);
+      toast("Select a client from the list or enter a full domain (e.g. example.com).");
+      return;
+    }
+
+    setSelectedClientId(null);
+    setDirectDomain(domain);
     setSearchQuery("");
     setSearchOpen(false);
   }, [searchQuery, clients]);
