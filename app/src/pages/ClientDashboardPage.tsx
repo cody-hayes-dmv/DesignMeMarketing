@@ -1487,7 +1487,8 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [activeTab, client?.name]);
 
-  const handleRefreshDashboard = useCallback(async () => {
+  const handleRefreshDashboard = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
     if (!clientId) return;
     try {
       setRefreshingDashboard(true);
@@ -1500,7 +1501,7 @@ const ClientDashboardPage: React.FC = () => {
       if (refreshData.ga4Refreshed) {
         successMessage += " GA4 data updated.";
       }
-      toast.success(successMessage);
+      if (!silent) toast.success(successMessage);
       
       // Refetch dashboard data (this will get fresh DataForSEO and GA4 data)
       const res = await api.get(buildDashboardUrl(clientId), { timeout: DASHBOARD_REQUEST_TIMEOUT_MS });
@@ -1575,7 +1576,7 @@ const ClientDashboardPage: React.FC = () => {
         console.warn("Failed to refresh visitor sources:", err);
       }
     } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
+      if (!silent) toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
       
       // If error is GA4-related, mark connection as invalid
       if (error?.response?.data?.message?.toLowerCase().includes("ga4") || 
@@ -1588,7 +1589,8 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [clientId, buildDashboardUrl, dateRange, customStartDate, customEndDate]);
 
-  const handleRefreshTopPages = useCallback(async () => {
+  const handleRefreshTopPages = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
     if (!clientId) return;
     try {
       setRefreshingTopPages(true);
@@ -1597,9 +1599,9 @@ const ClientDashboardPage: React.FC = () => {
       const message = String(refreshRes?.data?.message || "").trim();
 
       if (skipped) {
-        toast(message || "Using cached top pages data (refresh limited to every 48 hours).");
+        if (!silent) toast(message || "Using cached top pages data (refresh limited to every 48 hours).");
       } else {
-        toast.success(message || "Top pages refreshed successfully!");
+        if (!silent) toast.success(message || "Top pages refreshed successfully!");
       }
 
       // Refetch top pages (same formatting as initial load)
@@ -1622,7 +1624,7 @@ const ClientDashboardPage: React.FC = () => {
       setTopPages(formatted);
       setTopPagesError(null);
     } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to refresh top pages");
+      if (!silent) toast.error(error.response?.data?.message || "Failed to refresh top pages");
     } finally {
       setRefreshingTopPages(false);
     }
@@ -1685,7 +1687,8 @@ const ClientDashboardPage: React.FC = () => {
     void fetchBacklinksForChart();
   }, [fetchBacklinksForChart]);
 
-  const handleRefreshBacklinks = useCallback(async () => {
+  const handleRefreshBacklinks = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
     if (!clientId) return;
     try {
       setRefreshingBacklinks(true);
@@ -1694,9 +1697,9 @@ const ClientDashboardPage: React.FC = () => {
       const message = String(refreshRes?.data?.message || "").trim();
 
       if (skipped) {
-        toast(message || "Using cached backlinks data (refresh limited to every 48 hours).");
+        if (!silent) toast(message || "Using cached backlinks data (refresh limited to every 48 hours).");
       } else {
-        toast.success(message || "Backlinks refreshed successfully!");
+        if (!silent) toast.success(message || "Backlinks refreshed successfully!");
       }
 
       // Refetch chart rows (built from backlink rows; matches the table)
@@ -1717,11 +1720,29 @@ const ClientDashboardPage: React.FC = () => {
         }
       }
     } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to refresh backlinks");
+      if (!silent) toast.error(error.response?.data?.message || "Failed to refresh backlinks");
     } finally {
       setRefreshingBacklinks(false);
     }
   }, [activeTab, backlinksFilter, backlinksSortBy, backlinksOrder, clientId, dashboardSection, fetchBacklinksForChart]);
+
+  const refreshedOnOpenByClientRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!clientId) return;
+    if (!["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")) return;
+    if (refreshedOnOpenByClientRef.current[clientId]) return;
+    refreshedOnOpenByClientRef.current[clientId] = true;
+
+    const run = async () => {
+      await Promise.allSettled([
+        handleRefreshDashboard({ silent: true }),
+        handleRefreshTopPages({ silent: true }),
+        handleRefreshBacklinks({ silent: true }),
+      ]);
+    };
+    void run();
+  }, [clientId, user?.role, handleRefreshDashboard, handleRefreshTopPages, handleRefreshBacklinks]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;
