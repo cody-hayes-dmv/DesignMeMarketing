@@ -7653,24 +7653,42 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
     // Direct domain search should return only measured values (no extrapolated fallback math).
-    const strictAccuracy = false;  
+    const strictAccuracy = false;
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });
+    }
+
+    const normalizeDomain = (d: string) =>
+      d.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
+    const domain = normalizeDomain(rawDomain);
+    const domainsMatch = (aRaw: string, bRaw: string) => {
+      const a = normalizeDomain(aRaw || "");
+      const b = normalizeDomain(bRaw || "");
+      if (!a || !b) return false;
+      return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
+    };
+
+    if (!domain || domain.length < 3 || !domain.includes(".")) {
+      return res.status(400).json({ message: "Invalid domain format" });
+    }
+
+    // If this domain belongs to a tracked client, use the exact client endpoint path.
+    // This keeps Admin/Super Admin results consistent with Agency panel accuracy.
+    if (req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN") {
+      const candidateClients = await prisma.client.findMany({
+        select: { id: true, domain: true },
+      });
+      const matchedClient = candidateClients.find((c) => domainsMatch(c.domain || "", domain));
+      if (matchedClient?.id) {
+        return res.redirect(307, `${req.baseUrl}/domain-overview/${matchedClient.id}`);
+      }
     }
 
     const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
     const creditCheck = hasResearchCredits(tierCtx, 1);
     if (!creditCheck.allowed) {
       return res.status(403).json({ message: creditCheck.message, code: "CREDITS_EXHAUSTED" });
-    }
-
-    const normalizeDomain = (d: string) =>
-      d.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
-    const domain = normalizeDomain(rawDomain);
-
-    if (!domain || domain.length < 3 || !domain.includes(".")) {
-      return res.status(400).json({ message: "Invalid domain format" });
     }
 
     const base64Auth = process.env.DATAFORSEO_BASE64;

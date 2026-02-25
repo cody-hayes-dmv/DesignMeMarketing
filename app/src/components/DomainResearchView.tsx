@@ -336,9 +336,14 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     const normalizedQuery = normalizeDomainForMatch(raw.toLowerCase());
     const domain = normalizeDomainForMatch(raw);
 
+    const domainsMatch = (a: string, b: string) => {
+      if (!a || !b) return false;
+      return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
+    };
+
     const exactDomainMatches = clients.filter((c) => {
       const cd = normalizeDomainForMatch(c.domain || "");
-      return cd === domain || cd === normalizedQuery;
+      return domainsMatch(cd, domain) || domainsMatch(cd, normalizedQuery);
     });
 
     if (exactDomainMatches.length === 1) {
@@ -381,11 +386,21 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       return;
     }
 
-    // For agency/non-admin users, keep forcing explicit client choice when suggestions exist.
-    // For Admin/Super Admin, allow direct domain lookup from search button.
-    if (filteredClients.length > 0 && !isAdminPanelUser) {
+    // For Admin/Super Admin, when there is a single obvious client candidate,
+    // prefer exact client endpoint to avoid direct-domain approximation.
+    if (isAdminPanelUser && filteredClients.length === 1) {
+      setSelectedClientId(filteredClients[0].id);
+      setDirectDomain(null);
+      setSearchQuery("");
+      setSearchOpen(false);
+      return;
+    }
+
+    // When there are suggested clients, force explicit selection so overview data
+    // is fetched from the exact client endpoint rather than direct-domain fallback.
+    if (filteredClients.length > 0) {
       setSearchOpen(true);
-      toast("Please choose the correct client from the list.");
+      toast(isAdminPanelUser ? "Multiple possible clients found. Please choose the correct client from the list." : "Please choose the correct client from the list.");
       return;
     }
 
