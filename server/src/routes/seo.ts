@@ -7652,9 +7652,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 // Domain overview for ANY domain (not just clients) — fetches all data live from DataForSEO APIs
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
-    // Keep metric shaping consistent across roles so direct-domain lookups
-    // behave the same in Agency, Admin, and Super Admin panels.
-    const strictAccuracy = false;
+    // Direct domain search should return only measured values (no extrapolated fallback math).
+    const strictAccuracy = false;  
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });
@@ -7768,6 +7767,25 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       });
     }
 
+    const parseNum = (value: unknown): number => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const monthlyTrafficByKey = new Map<string, number>();
+    for (const h of historyData || []) {
+      const y = Number((h as any)?.year);
+      const m = Number((h as any)?.month);
+      if (!Number.isFinite(y) || !Number.isFinite(m) || y <= 0 || m <= 0) continue;
+      const key = `${y}-${String(m).padStart(2, "0")}`;
+      const etv =
+        parseNum((h as any)?.rawData?.metrics?.organic?.etv) ||
+        parseNum((h as any)?.metrics?.organic?.etv) ||
+        parseNum((h as any)?.organic?.etv);
+      monthlyTrafficByKey.set(key, Math.max(0, Math.round(etv)));
+    }
+
     const domainFromUrl = (url: string): string => {
       try { return new URL(url.startsWith("http") ? url : `https://${url}`).hostname.replace(/^www\./, ""); }
       catch { return ""; }
@@ -7838,11 +7856,14 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
         ];
 
     const organicTrafficOverTime = strictAccuracy
-      ? organicKeywordsOverTime.map((m) => ({
-          month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-          // Strict accuracy: no modeled monthly traffic curve for direct-domain lookups.
-          traffic: 0,
-        }))
+      ? organicKeywordsOverTime.map((m) => {
+          const key = `${m.year}-${String(m.month).padStart(2, "0")}`;
+          return {
+            month: key,
+            // In strict mode, use measured monthly traffic (ETV) only.
+            traffic: monthlyTrafficByKey.get(key) ?? 0,
+          };
+        })
       : (() => {
           const totalKwSum = organicKeywordsOverTime.reduce((s, m) => s + m.keywords, 0);
           if (totalKwSum > 0) {
@@ -7869,10 +7890,17 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
           };
         });
 
+    const currentMonthKey = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
+    const currentTrafficMeasured = monthlyTrafficByKey.get(currentMonthKey);
+    const organicTrafficCurrent =
+      typeof currentTrafficMeasured === "number" && currentTrafficMeasured > 0
+        ? currentTrafficMeasured
+        : scaledTraffic;
+
     const result = {
       client: { id: "external", name: domain, domain },
       metrics: {
-        organicSearch: { keywords: rankedKwData.totalCount, traffic: scaledTraffic, trafficCost: 0 },
+        organicSearch: { keywords: rankedKwData.totalCount, traffic: organicTrafficCurrent, trafficCost: 0 },
         paidSearch: { keywords: 0, traffic: 0, trafficCost: 0 },
         backlinks: { referringDomains: referringDomainsCount, totalBacklinks },
         authorityScore: Math.round(avgDr),
@@ -7882,7 +7910,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
         { name: "Direct", value: 0, pct: 0 },
         { name: "AI traffic", value: 0, pct: 0 },
         { name: "Referral", value: 0, pct: 0 },
-        { name: "Organic Search", value: scaledTraffic, pct: 100 },
+        { name: "Organic Search", value: organicTrafficCurrent, pct: 100 },
         { name: "Google AI Mode", value: 0, pct: 0 },
         { name: "Paid Search", value: 0, pct: 0 },
         { name: "Other", value: 0, pct: 0 },

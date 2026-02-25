@@ -42,6 +42,8 @@ import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import { Client } from "@/store/slices/clientSlice";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store";
 
 export interface DomainOverviewData {
   client: { id: string; name: string; domain: string };
@@ -250,6 +252,8 @@ interface DomainResearchViewProps {
 }
 
 const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, clientsError, onGetTopics }) => {
+  const user = useSelector((state: RootState) => state.auth.user);
+  const isAdminPanelUser = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [directDomain, setDirectDomain] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -370,14 +374,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       return;
     }
 
-    // Avoid fuzzy auto-selection mistakes on large admin datasets:
-    // if client suggestions exist, force explicit selection from the dropdown.
-    if (filteredClients.length > 0) {
-      setSearchOpen(true);
-      toast("Please choose the correct client from the list.");
-      return;
-    }
-
     const looksLikeDomain = normalizedQuery.includes(".");
     if (!looksLikeDomain) {
       setSearchOpen(true);
@@ -385,11 +381,19 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       return;
     }
 
+    // For agency/non-admin users, keep forcing explicit client choice when suggestions exist.
+    // For Admin/Super Admin, allow direct domain lookup from search button.
+    if (filteredClients.length > 0 && !isAdminPanelUser) {
+      setSearchOpen(true);
+      toast("Please choose the correct client from the list.");
+      return;
+    }
+
     setSelectedClientId(null);
     setDirectDomain(domain);
     setSearchQuery("");
     setSearchOpen(false);
-  }, [searchQuery, clients, filteredClients]);
+  }, [searchQuery, clients, filteredClients, isAdminPanelUser]);
 
   const fetchOverview = useCallback(async (clientIdOrDomain: string, isDirect: boolean = false) => {
     setLoading(true);
