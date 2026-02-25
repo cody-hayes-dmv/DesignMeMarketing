@@ -270,20 +270,16 @@ router.get("/templates", authenticateToken, async (req, res) => {
       return res.json(templates);
     }
 
-    // Agency/Admin: show global templates + this agency's templates (for use in Create onboarding task)
+    // Agency/Admin: only templates from their own agency.
+    // Do not include global templates in the "Use a template" flow.
     if (user.role === "AGENCY" || user.role === "ADMIN") {
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId },
       });
-      const agencyId = userAgency?.agencyId ?? undefined;
-      const where = agencyId
-        ? { OR: [{ agencyId: null }, { agencyId }] }
-        : { agencyId: null };
-      let templates = await findTemplatesWithTaskFallback({ where });
-      if ((templates?.length ?? 0) === 0 && agencyId) {
-        await ensureDefaultTemplateForAgency(agencyId);
-        templates = await findTemplatesWithTaskFallback({ where: { OR: [{ agencyId: null }, { agencyId }] } });
+      if (!userAgency?.agencyId) {
+        return res.json([]);
       }
+      const templates = await findTemplatesWithTaskFallback({ where: { agencyId: userAgency.agencyId } });
       return res.json(templates);
     }
 
