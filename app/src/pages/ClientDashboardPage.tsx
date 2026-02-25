@@ -1727,12 +1727,47 @@ const ClientDashboardPage: React.FC = () => {
   }, [activeTab, backlinksFilter, backlinksSortBy, backlinksOrder, clientId, dashboardSection, fetchBacklinksForChart]);
 
   const refreshedOnOpenByClientRef = useRef<Record<string, boolean>>({});
+  const getAutoRefreshStorageKey = useCallback(() => {
+    const userId = (user as any)?.id ? String((user as any).id) : "anonymous";
+    return `client-dashboard-auto-refresh-once:${userId}`;
+  }, [user]);
+
+  const hasClientBeenAutoRefreshed = useCallback(
+    (id: string): boolean => {
+      if (refreshedOnOpenByClientRef.current[id]) return true;
+      try {
+        const raw = localStorage.getItem(getAutoRefreshStorageKey());
+        if (!raw) return false;
+        const parsed = JSON.parse(raw) as Record<string, boolean>;
+        return Boolean(parsed?.[id]);
+      } catch {
+        return false;
+      }
+    },
+    [getAutoRefreshStorageKey]
+  );
+
+  const markClientAutoRefreshed = useCallback(
+    (id: string) => {
+      refreshedOnOpenByClientRef.current[id] = true;
+      try {
+        const key = getAutoRefreshStorageKey();
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+        parsed[id] = true;
+        localStorage.setItem(key, JSON.stringify(parsed));
+      } catch {
+        // Ignore storage errors; in-memory guard still prevents duplicate refreshes this session.
+      }
+    },
+    [getAutoRefreshStorageKey]
+  );
 
   useEffect(() => {
     if (!clientId) return;
-    if (!["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")) return;
-    if (refreshedOnOpenByClientRef.current[clientId]) return;
-    refreshedOnOpenByClientRef.current[clientId] = true;
+    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
+    if (hasClientBeenAutoRefreshed(clientId)) return;
+    markClientAutoRefreshed(clientId);
 
     const run = async () => {
       await Promise.allSettled([
@@ -1742,7 +1777,7 @@ const ClientDashboardPage: React.FC = () => {
       ]);
     };
     void run();
-  }, [clientId, user?.role, handleRefreshDashboard, handleRefreshTopPages, handleRefreshBacklinks]);
+  }, [clientId, user?.role, handleRefreshDashboard, handleRefreshTopPages, handleRefreshBacklinks, hasClientBeenAutoRefreshed, markClientAutoRefreshed]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;

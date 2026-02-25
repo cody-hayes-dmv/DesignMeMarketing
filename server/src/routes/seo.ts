@@ -63,7 +63,7 @@ async function resolveLocationCodeFromName(locationName: string): Promise<number
 
 // DataForSEO-billable refresh throttling + in-flight dedupe
 // Requirement: avoid repeated pulls (and billing) when users visit/refresh the same report/dashboard many times.
-const DATAFORSEO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+const DATAFORSEO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // Default/fallback
 const VENDASTA_AUTO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // 48h for Vendasta clients
 const OTHER_CLIENTS_AUTO_REFRESH_TTL_MS = 40 * 60 * 60 * 1000; // 40h for other clients
 const inflightByKey = new Map<string, Promise<any>>();
@@ -85,6 +85,15 @@ async function dedupeInFlight<T>(key: string, fn: () => Promise<T>): Promise<T> 
 function isFresh(lastUpdatedAt: Date | null | undefined, ttlMs: number): boolean {
   if (!lastUpdatedAt) return false;
   return Date.now() - lastUpdatedAt.getTime() < ttlMs;
+}
+
+function getClientDataRefreshTtlMs(client: { vendasta?: boolean | null } | null | undefined): number {
+  if (client?.vendasta) return VENDASTA_AUTO_REFRESH_TTL_MS;
+  return OTHER_CLIENTS_AUTO_REFRESH_TTL_MS;
+}
+
+function ttlHoursLabel(ttlMs: number): number {
+  return Math.round(ttlMs / (60 * 60 * 1000));
 }
 
 /** Returns true if the URL is a Google search/SERP page (e.g. google.com/search?q=...), not a ranking website. */
@@ -1399,8 +1408,25 @@ async function refreshBacklinksForClientInternal(params: {
   const { clientId } = params;
   const force = Boolean(params.force);
 
+  const clientForTtl = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { id: true, vendasta: true, domain: true },
+  });
+  if (!clientForTtl || !clientForTtl.domain) {
+    return {
+      message: "Client not found or has no domain",
+      skipped: true,
+      items: 0,
+      backlinksInserted: 0,
+      lastRefreshedAt: null,
+      nextAllowedAt: null,
+    };
+  }
+  const refreshTtlMs = getClientDataRefreshTtlMs(clientForTtl);
+  const refreshHours = ttlHoursLabel(refreshTtlMs);
+
   const lastRefreshedAt = await getLatestBacklinksUpdatedAt(clientId);
-  const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+  const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + refreshTtlMs) : null;
   // If the backlinks list hasn't been synced yet (no non-manual backlinks),
   // don't skip even if timeseries is fresh — otherwise UI can show New Links but an empty Backlinks list.
   const nonManualBacklinksCount = await prisma.backlink.count({
@@ -1410,9 +1436,9 @@ async function refreshBacklinksForClientInternal(params: {
     },
   });
 
-  if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS) && nonManualBacklinksCount > 0) {
+  if (!force && isFresh(lastRefreshedAt, refreshTtlMs) && nonManualBacklinksCount > 0) {
     return {
-      message: "Using cached backlinks data (refresh limited to every 48 hours).",
+      message: `Using cached backlinks data (refresh limited to every ${refreshHours} hours).`,
       skipped: true,
       items: 0,
       backlinksInserted: 0,
@@ -1610,7 +1636,7 @@ async function refreshBacklinksForClientInternal(params: {
     items: (result as any).items ?? 0,
     backlinksInserted: (result as any).backlinksInserted ?? 0,
     lastRefreshedAt: new Date(),
-    nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
+    nextAllowedAt: new Date(Date.now() + refreshTtlMs),
   };
 }
 
@@ -3824,8 +3850,17 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
 
     const { clientId } = req.params;
     const force = coerceBoolean(req.query.force);
+    const clientForTtl = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, vendasta: true, domain: true },
+    });
+    if (!clientForTtl || !clientForTtl.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+    const refreshTtlMs = getClientDataRefreshTtlMs(clientForTtl);
+    const refreshHours = ttlHoursLabel(refreshTtlMs);
 
-    // 48h throttle to prevent repeated billable DataForSEO pulls.
+    // Per-client throttle (Vendasta: 48h, non-Vendasta: 40h) to prevent repeated billable DataForSEO pulls.
     const [trafficUpdatedAt, rankedUpdatedAt] = await Promise.all([
       getLatestTrafficSourceUpdatedAt(clientId),
       getLatestRankedKeywordsHistoryUpdatedAt(clientId),
@@ -3834,11 +3869,11 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
       trafficUpdatedAt && rankedUpdatedAt
         ? new Date(Math.max(trafficUpdatedAt.getTime(), rankedUpdatedAt.getTime()))
         : (trafficUpdatedAt ?? rankedUpdatedAt);
-    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
+    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + refreshTtlMs) : null;
 
-    if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+    if (!force && isFresh(lastRefreshedAt, refreshTtlMs)) {
       return res.json({
-        message: "Using cached dashboard data (refresh limited to every 48 hours).",
+        message: `Using cached dashboard data (refresh limited to every ${refreshHours} hours).`,
         skipped: true,
         lastRefreshedAt,
         nextAllowedAt,
@@ -4065,7 +4100,7 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
       rankedKeywordsCount: result.rankedKeywordsCount,
       ga4Refreshed: result.ga4Refreshed,
       lastRefreshedAt: new Date(),
-      nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
+      nextAllowedAt: new Date(Date.now() + refreshTtlMs),
     });
   } catch (error: any) {
     console.error("Refresh dashboard error:", error);
@@ -4083,11 +4118,21 @@ router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) 
 
     const { clientId } = req.params;
     const force = coerceBoolean(req.query.force);
+    const clientForTtl = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, vendasta: true, domain: true },
+    });
+    if (!clientForTtl || !clientForTtl.domain) {
+      return res.status(404).json({ message: "Client not found or has no domain" });
+    }
+    const refreshTtlMs = getClientDataRefreshTtlMs(clientForTtl);
+    const refreshHours = ttlHoursLabel(refreshTtlMs);
+
     const lastRefreshedAt = await getLatestTopPagesUpdatedAt(clientId);
-    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + DATAFORSEO_REFRESH_TTL_MS) : null;
-    if (!force && isFresh(lastRefreshedAt, DATAFORSEO_REFRESH_TTL_MS)) {
+    const nextAllowedAt = lastRefreshedAt ? new Date(lastRefreshedAt.getTime() + refreshTtlMs) : null;
+    if (!force && isFresh(lastRefreshedAt, refreshTtlMs)) {
       return res.json({
-        message: "Using cached top pages data (refresh limited to every 48 hours).",
+        message: `Using cached top pages data (refresh limited to every ${refreshHours} hours).`,
         skipped: true,
         lastRefreshedAt,
         nextAllowedAt,
@@ -4185,7 +4230,7 @@ router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) 
       skipped: false,
       pages: result.pages,
       lastRefreshedAt: new Date(),
-      nextAllowedAt: new Date(Date.now() + DATAFORSEO_REFRESH_TTL_MS),
+      nextAllowedAt: new Date(Date.now() + refreshTtlMs),
     });
   } catch (error: any) {
     console.error("Refresh top pages error:", error);
