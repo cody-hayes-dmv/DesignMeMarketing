@@ -93,7 +93,25 @@ const TasksPage = () => {
     useEffect(() => {
         const clientId = searchParams.get("clientId");
         if (clientId) setFilterClientId(clientId);
-    }, [searchParams]);
+
+        const status = searchParams.get("status");
+        const allowedStatuses = new Set([
+            "all",
+            "upcoming",
+            "overdue",
+            "TODO",
+            "IN_PROGRESS",
+            "REVIEW",
+            "NEEDS_APPROVAL",
+            "DONE",
+        ]);
+        if (status && allowedStatuses.has(status)) setFilterStatus(status);
+
+        const assigneeMe = searchParams.get("assigneeMe");
+        if ((assigneeMe === "true" || assigneeMe === "1") && user?.id) {
+            setFilterAssigneeId(user.id);
+        }
+    }, [searchParams, user?.id]);
 
     // Auto-open task modal from notification link (?taskId=xxx)
     useEffect(() => {

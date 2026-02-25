@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchAgencies } from "@/store/slices/agencySlice";
@@ -35,14 +35,14 @@ const SuperAdminDashboard = () => {
   const [mrrData, setMrrData] = useState<{ totalMrr: number; segments: Array<{ label: string; mrr: number; color?: string }> } | null>(null);
   const [activityData, setActivityData] = useState<{ newMrrAdded: number; churnedMrr: number; netChange: number } | null>(null);
   const [financialLoading, setFinancialLoading] = useState(true);
-  const [upcomingTasks, setUpcomingTasks] = useState<Array<{
+  const [myTasks, setMyTasks] = useState<Array<{
     id: string;
     title: string;
     status: string;
     dueDate?: string | null;
     client?: { id: string; name: string; domain?: string } | null;
   }>>([]);
-  const [upcomingTasksLoading, setUpcomingTasksLoading] = useState(true);
+  const [myTasksLoading, setMyTasksLoading] = useState(true);
 
   const fetchFinancial = async () => {
     setFinancialLoading(true);
@@ -100,26 +100,48 @@ const SuperAdminDashboard = () => {
   }, []);
 
   useEffect(() => {
-    const fetchUpcoming = async () => {
-      setUpcomingTasksLoading(true);
+    const fetchMyTasks = async () => {
+      setMyTasksLoading(true);
       try {
         const res = await api.get("/tasks?assigneeMe=true");
         const list = Array.isArray(res.data) ? res.data : [];
-        const notDone = list.filter((t: any) => t.status !== "DONE");
-        const sorted = [...notDone].sort((a: any, b: any) => {
-          const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
-          const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
-          return aDue - bDue;
-        });
-        setUpcomingTasks(sorted.slice(0, 7));
+        setMyTasks(list);
       } catch {
-        setUpcomingTasks([]);
+        setMyTasks([]);
       } finally {
-        setUpcomingTasksLoading(false);
+        setMyTasksLoading(false);
       }
     };
-    fetchUpcoming();
+    fetchMyTasks();
   }, []);
+
+  const sortedMyTasks = useMemo(() => {
+    const getDueMs = (t: { dueDate?: string | null }) =>
+      t.dueDate ? new Date(t.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+    return [...myTasks].sort((a, b) => getDueMs(a) - getDueMs(b));
+  }, [myTasks]);
+
+  const upcoming14Tasks = useMemo(() => {
+    const now = Date.now();
+    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+    const end = now + fourteenDaysMs;
+    return sortedMyTasks.filter((t) => {
+      if (t.status === "DONE" || !t.dueDate) return false;
+      const due = new Date(t.dueDate).getTime();
+      return due >= now && due <= end;
+    });
+  }, [sortedMyTasks]);
+
+  const overdueTasks = useMemo(() => {
+    const now = Date.now();
+    return sortedMyTasks.filter((t) => {
+      if (t.status === "DONE" || !t.dueDate) return false;
+      const due = new Date(t.dueDate).getTime();
+      return due < now;
+    });
+  }, [sortedMyTasks]);
+
+  const allMyTasks = useMemo(() => sortedMyTasks, [sortedMyTasks]);
 
   const safeParseObject = (raw: any): Record<string, any> => {
     if (!raw) return {};
@@ -197,15 +219,185 @@ const SuperAdminDashboard = () => {
     (client) => new Date(client.createdAt) >= thirtyDaysAgo
   ).length;
 
+  const renderTaskBuckets = () => (
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      {/* Upcoming (14 days) */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-blue-500">
+        <div className="p-6 border-b border-gray-200 bg-blue-50/30 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Upcoming Tasks (14 days)</h2>
+          <button
+            type="button"
+            onClick={() => navigate("/agency/tasks?assigneeMe=true&status=upcoming")}
+            className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+          >
+            View all
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-6">
+          {myTasksLoading ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+            </div>
+          ) : upcoming14Tasks.length === 0 ? (
+            <div className="text-center py-6 text-gray-500">No tasks due in the next 14 days</div>
+          ) : (
+            <ul className="space-y-3">
+              {upcoming14Tasks.slice(0, 5).map((task) => {
+                const dueStr = task.dueDate ? format(new Date(task.dueDate), "MMM d, yyyy") : "—";
+                return (
+                  <li key={task.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/agency/tasks?assigneeMe=true&status=upcoming")}
+                      className="w-full flex items-center gap-3 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                    >
+                      <div className="bg-primary-50 p-2 rounded-lg shrink-0">
+                        <ListTodo className="h-4 w-4 text-primary-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{task.title || "Untitled"}</p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {task.client?.name || task.client?.domain || "No client"}{dueStr !== "—" ? ` · Due ${dueStr}` : ""}
+                        </p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* Overdue */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-rose-500">
+        <div className="p-6 border-b border-gray-200 bg-rose-50/30 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Overdue Tasks</h2>
+          <button
+            type="button"
+            onClick={() => navigate("/agency/tasks?assigneeMe=true&status=overdue")}
+            className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+          >
+            View all
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-6">
+          {myTasksLoading ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+            </div>
+          ) : overdueTasks.length === 0 ? (
+            <div className="text-center py-6 text-gray-500">No overdue tasks</div>
+          ) : (
+            <ul className="space-y-3">
+              {overdueTasks.slice(0, 5).map((task) => {
+                const dueStr = task.dueDate ? format(new Date(task.dueDate), "MMM d, yyyy") : "—";
+                return (
+                  <li key={task.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/agency/tasks?assigneeMe=true&status=overdue")}
+                      className="w-full flex items-center gap-3 p-3 rounded-lg bg-rose-50 hover:bg-rose-100 transition-colors text-left"
+                    >
+                      <div className="bg-rose-100 p-2 rounded-lg shrink-0">
+                        <ListTodo className="h-4 w-4 text-rose-700" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{task.title || "Untitled"}</p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {task.client?.name || task.client?.domain || "No client"}{dueStr !== "—" ? ` · Due ${dueStr}` : ""}
+                        </p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* All Tasks (Me) */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-violet-500">
+        <div className="p-6 border-b border-gray-200 bg-violet-50/30 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">All Tasks (Me)</h2>
+          <button
+            type="button"
+            onClick={() => navigate("/agency/tasks?assigneeMe=true&status=all")}
+            className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+          >
+            View all
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-6">
+          {myTasksLoading ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+            </div>
+          ) : allMyTasks.length === 0 ? (
+            <div className="text-center py-6 text-gray-500">No tasks assigned</div>
+          ) : (
+            <ul className="space-y-3">
+              {allMyTasks.slice(0, 5).map((task) => {
+                const dueStr = task.dueDate ? format(new Date(task.dueDate), "MMM d, yyyy") : "—";
+                const statusLabel =
+                  task.status === "TODO"
+                    ? "Pending"
+                    : task.status === "IN_PROGRESS"
+                      ? "In progress"
+                      : task.status === "REVIEW"
+                        ? "In review"
+                        : task.status === "NEEDS_APPROVAL"
+                          ? "Needs Approval"
+                          : task.status === "DONE"
+                            ? "Completed"
+                            : task.status;
+                return (
+                  <li key={task.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/agency/tasks?assigneeMe=true&status=all")}
+                      className="w-full flex items-center justify-between gap-3 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                    >
+                      <div className="min-w-0 flex-1 flex items-center gap-3">
+                        <div className="bg-violet-50 p-2 rounded-lg shrink-0">
+                          <ListTodo className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-gray-900 truncate">{task.title || "Untitled"}</p>
+                          <p className="text-xs text-gray-500 truncate">
+                            {task.client?.name || task.client?.domain || "No client"}{dueStr !== "—" ? ` · Due ${dueStr}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700">
+                        {statusLabel}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const dashboardTitle = user?.role === "ADMIN" ? "Admin Dashboard" : "Super Admin Dashboard";
+
   return (
-    <Layout title="Super Admin Dashboard">
+    <Layout title={dashboardTitle}>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 space-y-10 p-8 -m-8">
         {/* Header Banner */}
         <div className="relative rounded-2xl bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-500 p-8 shadow-lg overflow-hidden">
           <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuNSIgZmlsbD0id2hpdGUiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-50" />
           <div className="relative">
             <h1 className="text-3xl font-bold text-white tracking-tight">
-              Super Admin Dashboard
+              {dashboardTitle}
             </h1>
             <p className="text-blue-100 mt-2 text-base">
               Overview of agencies, clients, and platform activity
@@ -316,6 +508,9 @@ const SuperAdminDashboard = () => {
           </button>
         </div>
 
+        {/* Admin-first task management */}
+        {user?.role === "ADMIN" && renderTaskBuckets()}
+
         {/* Pending managed service approvals */}
         {(loadingPending || pendingManagedServices.length > 0) && (
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-amber-500">
@@ -412,89 +607,6 @@ const SuperAdminDashboard = () => {
           </div>
         )}
 
-        {/* Upcoming tasks */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-blue-500">
-          <div className="p-6 border-b border-gray-200 bg-blue-50/30 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Upcoming tasks</h2>
-            <button
-              type="button"
-              onClick={() => navigate("/agency/tasks")}
-              className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
-            >
-              View all
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="p-6">
-            {upcomingTasksLoading ? (
-              <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
-                <Loader2 className="h-5 w-5 animate-spin" /> Loading…
-              </div>
-            ) : upcomingTasks.length === 0 ? (
-              <div className="text-center py-6 text-gray-500">No upcoming tasks</div>
-            ) : (
-              <ul className="space-y-3">
-                {upcomingTasks.map((task) => {
-                  const dueStr = task.dueDate
-                    ? format(new Date(task.dueDate), "MMM d, yyyy")
-                    : "—";
-                  const statusLabel =
-                    task.status === "TODO"
-                      ? "Pending"
-                      : task.status === "IN_PROGRESS"
-                        ? "In progress"
-                        : task.status === "REVIEW"
-                          ? "In review"
-                          : task.status === "NEEDS_APPROVAL"
-                            ? "Needs Approval"
-                            : task.status === "DONE"
-                              ? "Completed"
-                              : task.status;
-                  const statusClass =
-                    task.status === "DONE"
-                      ? "bg-gray-100 text-gray-800"
-                      : task.status === "IN_PROGRESS"
-                        ? "bg-blue-100 text-blue-800"
-                        : task.status === "REVIEW"
-                          ? "bg-amber-100 text-amber-800"
-                          : task.status === "NEEDS_APPROVAL"
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-gray-100 text-gray-700";
-                  return (
-                    <li key={task.id}>
-                      <button
-                        type="button"
-                        onClick={() => navigate("/agency/tasks")}
-                        className="w-full flex items-center justify-between gap-3 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors text-left"
-                      >
-                        <div className="min-w-0 flex-1 flex items-center gap-3">
-                          <div className="bg-primary-50 p-2 rounded-lg shrink-0">
-                            <ListTodo className="h-4 w-4 text-primary-600" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-medium text-gray-900 truncate">
-                              {task.title || "Untitled"}
-                            </p>
-                            <p className="text-xs text-gray-500 truncate">
-                              {task.client?.name || task.client?.domain || "No client"}
-                              {dueStr !== "—" ? ` · Due ${dueStr}` : ""}
-                            </p>
-                          </div>
-                        </div>
-                        <span
-                          className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded-full ${statusClass}`}
-                        >
-                          {statusLabel}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </div>
-
         {/* Financial Overview (Super Admin only) */}
         {user?.role === "SUPER_ADMIN" && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-emerald-500">
@@ -581,6 +693,8 @@ const SuperAdminDashboard = () => {
           </div>
         </div>
         )}
+
+        {user?.role !== "ADMIN" && renderTaskBuckets()}
 
         {/* Recent Agencies and Clients */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
