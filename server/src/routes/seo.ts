@@ -7013,7 +7013,9 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
 router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const strictAccuracy = req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN";
+    // Keep metric shaping consistent across roles so the same client/domain
+    // returns the same overview in Agency, Admin, and Super Admin panels.
+    const strictAccuracy = false;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -7650,7 +7652,9 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 // Domain overview for ANY domain (not just clients) — fetches all data live from DataForSEO APIs
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
-    const strictAccuracy = req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN";
+    // Keep metric shaping consistent across roles so direct-domain lookups
+    // behave the same in Agency, Admin, and Super Admin panels.
+    const strictAccuracy = false;
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });
