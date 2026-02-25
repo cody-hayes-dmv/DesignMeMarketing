@@ -7015,7 +7015,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
     const { clientId } = req.params;
     // Keep metric shaping consistent across roles so the same client/domain
     // returns the same overview in Agency, Admin, and Super Admin panels.
-    const strictAccuracy = false;
+    const strictAccuracy = true;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -7322,7 +7322,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       keyword: k.keyword,
       position: k.currentPosition ?? 0,
       trafficPercent: k.ctr != null ? k.ctr * 100 : null,
-      traffic: k.ctr != null
+      traffic: !strictAccuracy && k.ctr != null
         ? Math.round(k.ctr * organicTraffic)
         : null,
       volume: k.searchVolume ?? null,
@@ -7394,15 +7394,25 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
     const referringDomainsCount = referringDomainsMap.size;
 
     const trafficTotal = breakdown.reduce((s, t) => s + t.value, 0);
-    const marketTrendsChannels: Array<{ name: string; value: number; pct: number }> = [
-      { name: "Direct", value: breakdown.find((b) => b.name === "Direct")?.value ?? 0, pct: 0 },
-      { name: "AI traffic", value: 0, pct: 0 },
-      { name: "Referral", value: breakdown.find((b) => b.name === "Referral")?.value ?? 0, pct: 0 },
-      { name: "Organic Search", value: breakdown.find((b) => /organic/i.test(b.name))?.value ?? organicTraffic, pct: 0 },
-      { name: "Google AI Mode", value: 0, pct: 0 },
-      { name: "Paid Search", value: breakdown.find((b) => /paid/i.test(b.name))?.value ?? 0, pct: 0 },
-      { name: "Other", value: breakdown.find((b) => b.name === "Other")?.value ?? 0, pct: 0 },
-    ];
+    const marketTrendsChannels: Array<{ name: string; value: number; pct: number }> = strictAccuracy
+      ? [
+          { name: "Direct", value: 0, pct: 0 },
+          { name: "AI traffic", value: 0, pct: 0 },
+          { name: "Referral", value: 0, pct: 0 },
+          { name: "Organic Search", value: Math.round(organicTraffic), pct: 0 },
+          { name: "Google AI Mode", value: 0, pct: 0 },
+          { name: "Paid Search", value: 0, pct: 0 },
+          { name: "Other", value: 0, pct: 0 },
+        ]
+      : [
+          { name: "Direct", value: breakdown.find((b) => b.name === "Direct")?.value ?? 0, pct: 0 },
+          { name: "AI traffic", value: 0, pct: 0 },
+          { name: "Referral", value: breakdown.find((b) => b.name === "Referral")?.value ?? 0, pct: 0 },
+          { name: "Organic Search", value: breakdown.find((b) => /organic/i.test(b.name))?.value ?? organicTraffic, pct: 0 },
+          { name: "Google AI Mode", value: 0, pct: 0 },
+          { name: "Paid Search", value: breakdown.find((b) => /paid/i.test(b.name))?.value ?? 0, pct: 0 },
+          { name: "Other", value: breakdown.find((b) => b.name === "Other")?.value ?? 0, pct: 0 },
+        ];
     const sumChannels = Math.max(1, marketTrendsChannels.reduce((s, c) => s + c.value, 0));
     marketTrendsChannels.forEach((c) => {
       c.pct = Math.round((c.value / sumChannels) * 100);
@@ -7494,8 +7504,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
           trafficCost: trafficCost,
         },
         paidSearch: {
-          keywords: paidSource?.totalKeywords ?? 0,
-          traffic: Math.round(breakdown.find((b) => /paid/i.test(b.name))?.value ?? 0),
+          keywords: strictAccuracy ? 0 : (paidSource?.totalKeywords ?? 0),
+          traffic: strictAccuracy ? 0 : Math.round(breakdown.find((b) => /paid/i.test(b.name))?.value ?? 0),
           trafficCost: 0,
         },
         backlinks: {
@@ -7503,7 +7513,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
           totalBacklinks,
         },
         authorityScore,
-        trafficShare: trafficTotal > 0 ? Math.round((organicTraffic / trafficTotal) * 100) : 0,
+        trafficShare: strictAccuracy ? 0 : (trafficTotal > 0 ? Math.round((organicTraffic / trafficTotal) * 100) : 0),
       },
       marketTrendsChannels,
       backlinksList,
@@ -7554,7 +7564,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       indexedPages,
       referringDomainsByTld,
       referringDomainsByCountry: [],
-      totalCompetitorsCount: referringDomains.length,
+      totalCompetitorsCount: strictAccuracy ? 0 : referringDomains.length,
       organicCompetitors: strictAccuracy
         ? []
         : referringDomains.slice(0, 15).map((r) => {
@@ -7653,7 +7663,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
     // Direct domain search should return only measured values (no extrapolated fallback math).
-    const strictAccuracy = false;
+    const strictAccuracy = true;
+    const forceLive = coerceBoolean(req.query.live);
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });
@@ -7679,26 +7690,33 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Invalid domain format" });
     }
 
-    // If this domain belongs to a tracked client, use the exact client endpoint path.
-    // This keeps Admin/Super Admin results consistent with Agency panel accuracy.
+    // For tracked client domains, default behavior keeps legacy parity by redirecting
+    // to the client route unless live=true is explicitly requested.
+    let matchedClientId: string | null = null;
     if (req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN") {
       const candidateClients = await prisma.client.findMany({
         select: { id: true, domain: true },
       });
       const matchedClient = candidateClients.find((c) => domainsMatch(c.domain || "", domain));
-      if (matchedClient?.id) {
-        return res.redirect(307, `${req.baseUrl}/domain-overview/${matchedClient.id}`);
+      matchedClientId = matchedClient?.id ?? null;
+      if (matchedClientId && !forceLive) {
+        return res.redirect(307, `${req.baseUrl}/domain-overview/${matchedClientId}`);
       }
     }
 
-    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
-    const creditCheck = hasResearchCredits(tierCtx, 1);
-    if (!creditCheck.allowed) {
-      console.warn("[domain-overview-any] blocked by credits", {
-        ...logCtx,
-        message: creditCheck.message,
-      });
-      return res.status(403).json({ message: creditCheck.message, code: "CREDITS_EXHAUSTED" });
+    const bypassCreditsForTrackedClientLive = forceLive && Boolean(matchedClientId);
+    const tierCtx = bypassCreditsForTrackedClientLive
+      ? null
+      : await getAgencyTierContext(req.user.userId, req.user.role);
+    if (!bypassCreditsForTrackedClientLive && tierCtx) {
+      const creditCheck = hasResearchCredits(tierCtx, 1);
+      if (!creditCheck.allowed) {
+        console.warn("[domain-overview-any] blocked by credits", {
+          ...logCtx,
+          message: creditCheck.message,
+        });
+        return res.status(403).json({ message: creditCheck.message, code: "CREDITS_EXHAUSTED" });
+      }
     }
 
     const base64Auth = process.env.DATAFORSEO_BASE64;
@@ -7999,7 +8017,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       totalPaidCompetitorsCount: 0,
     };
 
-    if (tierCtx.agencyId) {
+    if (tierCtx?.agencyId) {
       const isFreeOnetime = tierCtx.tierConfig?.id === "free";
       await useResearchCredits(tierCtx.agencyId, 1, isFreeOnetime);
     }

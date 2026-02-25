@@ -398,7 +398,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     if (!silentError) setError(null);
     try {
       const overviewRes = isDirect
-        ? await api.get<DomainOverviewData>(`/seo/domain-overview-any`, { params: { domain: clientIdOrDomain } })
+        ? await api.get<DomainOverviewData>(`/seo/domain-overview-any`, { params: { domain: clientIdOrDomain, live: "true" } })
         : await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
       setOverview(overviewRes.data);
       return true;
@@ -700,9 +700,9 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   useEffect(() => {
     if (selectedClientId) {
       setAiSearch(null);
-      // For Agency/Admin/Super Admin, use domain endpoint only.
+      // Prefer domain-based live endpoint whenever we have a concrete domain.
       const selectedDomain = selectedClient?.domain?.trim();
-      if ((isAdminPanelUser || isAgencyUser) && selectedDomain) {
+      if (selectedDomain) {
         fetchOverview(selectedDomain, true, false);
       } else {
         fetchOverview(selectedClientId, false);
