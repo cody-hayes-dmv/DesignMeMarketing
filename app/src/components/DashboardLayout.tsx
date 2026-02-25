@@ -55,7 +55,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/agency/financial-overview") return "Financial Overview";
     if (path === "/agency/clients") return "Clients";
     if (path === "/agency/tasks") return "Tasks";
-    if (path === "/agnecy/research") return "Research";
+    if (path === "/agnecy/research" || path === "/admin/research" || path === "/superadmin/research") return "Research";
     if (path === "/agency/rankings") return "Rankings";
     if (path === "/agency/reports") return "Reports";
     if (path === "/agency/managed-services") return "Managed Services";

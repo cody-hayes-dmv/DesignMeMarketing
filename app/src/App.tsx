@@ -105,7 +105,8 @@ function App() {
     { path: "/agency/clients", component: ClientsPage },
     { path: "/agency/vendasta", component: VendastaPage },
     { path: "/agency/included", component: IncludedPage },
-    { path: "/agnecy/research", component: KeywordsPage },
+    { path: "/admin/research", component: KeywordsPage },
+    { path: "/superadmin/research", component: KeywordsPage },
     { path: "/agency/rankings", component: RankingsPage },
     { path: "/agency/reports", component: ReportsPage },
     { path: "/agency/managed-services", component: ManagedServicesPage },
@@ -143,6 +144,14 @@ function App() {
       return firstClientId ? `/client/dashboard/${firstClientId}` : "/login";
     }
     return dashboardUrls[user.role as keyof typeof dashboardUrls] || "/login";
+  };
+
+  const getResearchUrlByRole = () => {
+    if (!user) return "/login";
+    if (user.role === "SUPER_ADMIN") return "/superadmin/research";
+    if (user.role === "ADMIN") return "/admin/research";
+    if (user.role === "AGENCY") return "/agnecy/research";
+    return getRedirectUrl();
   };
 
   return (
@@ -260,6 +269,64 @@ function App() {
 
       {/* Redirect old Workers path to Team (Workers combined into Team) */}
       <Route path="/agency/workers" element={<Navigate to="/agency/team" replace />} />
+      {/* Legacy Research URLs -> role-based Research panel URL */}
+      <Route
+        path="/agency/keywords"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : (
+            <Navigate to={getResearchUrlByRole()} replace />
+          )
+        }
+      />
+      <Route
+        path="/agency/research"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : (
+            <Navigate to={getResearchUrlByRole()} replace />
+          )
+        }
+      />
+      <Route
+        path="/agnecy/research"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : !["AGENCY", "ADMIN", "SUPER_ADMIN"].includes(user.role) ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : user.role === "AGENCY" ? (
+            <DashboardLayout>
+              <KeywordsPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to={getResearchUrlByRole()} replace />
+          )
+        }
+      />
       {/* Redirect legacy worker portal paths */}
       <Route path="/worker/*" element={<Navigate to="/specialist/dashboard" replace />} />
 

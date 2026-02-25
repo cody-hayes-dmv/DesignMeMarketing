@@ -531,7 +531,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       pdf.setFontSize(11);
       pdf.setTextColor(148, 163, 184);
       const labelY = pageHeight * 0.32;
-      pdf.text("AI SEARCH REPORT", pageWidth / 2, labelY, { align: "center" });
+      pdf.text("DOMAIN RESEARCH REPORT", pageWidth / 2, labelY, { align: "center" });
       const lineW = 50;
       pdf.setDrawColor(59, 130, 246);
       pdf.setLineWidth(0.6);
