@@ -1,9 +1,49 @@
 import axios from "axios";
 import toast from "react-hot-toast";
 
-// Prefer VITE_API_URL; fallback to same origin (e.g. dev proxy or missing env)
-const BASE = import.meta.env.VITE_API_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:5000");
-const baseURL = BASE ? new URL("/api", BASE).toString() : "/api";
+// Prefer VITE_API_URL; fallback to same origin (e.g. dev proxy or missing env).
+// Normalize malformed values (e.g. "api.example.com" without protocol) to avoid
+// DNS errors such as ERR_NAME_NOT_RESOLVED in production.
+const RAW_BASE = (import.meta.env.VITE_API_URL || "").trim();
+const FALLBACK_ORIGIN = typeof window !== "undefined" ? window.location.origin : "http://localhost:5000";
+
+const resolveApiOrigin = (): string => {
+  if (!RAW_BASE) return FALLBACK_ORIGIN;
+  try {
+    let resolvedOrigin = "";
+    if (/^https?:\/\//i.test(RAW_BASE)) {
+      resolvedOrigin = new URL(RAW_BASE).origin;
+    } else if (RAW_BASE.startsWith("//")) {
+      const protocol = typeof window !== "undefined" ? window.location.protocol : "https:";
+      resolvedOrigin = new URL(`${protocol}${RAW_BASE}`).origin;
+    } else if (RAW_BASE.startsWith("/")) {
+      resolvedOrigin = FALLBACK_ORIGIN;
+    } else {
+      const protocol = typeof window !== "undefined" ? window.location.protocol : "https:";
+      resolvedOrigin = new URL(`${protocol}//${RAW_BASE}`).origin;
+    }
+
+    // Safety guard for production: ignore local/single-label hosts from env
+    // when app is served from a real public domain.
+    if (typeof window !== "undefined") {
+      const currentHost = window.location.hostname.toLowerCase();
+      const resolvedHost = new URL(resolvedOrigin).hostname.toLowerCase();
+      const currentIsLocal = currentHost === "localhost" || currentHost === "127.0.0.1";
+      const resolvedIsLocal = resolvedHost === "localhost" || resolvedHost === "127.0.0.1";
+      const resolvedLooksSingleLabel = !resolvedHost.includes(".") && resolvedHost !== "localhost";
+      if (!currentIsLocal && (resolvedIsLocal || resolvedLooksSingleLabel)) {
+        return window.location.origin;
+      }
+    }
+
+    return resolvedOrigin;
+  } catch {
+    return FALLBACK_ORIGIN;
+  }
+};
+
+const API_ORIGIN = resolveApiOrigin();
+const baseURL = `${API_ORIGIN.replace(/\/+$/, "")}/api`;
 
 /**
  * Resolve a stored upload URL to a download URL that hits the backend.
@@ -19,7 +59,7 @@ export function getUploadFileUrl(url: string | undefined): string {
     const match = u.match(/\/uploads\/([^/?]+)/);
     if (!match) return u;
     const filename = match[1];
-    const origin = BASE ? new URL(BASE).origin : (typeof window !== "undefined" ? window.location.origin : "");
+    const origin = API_ORIGIN || (typeof window !== "undefined" ? window.location.origin : "");
     if (!origin) return u;
     return `${origin}/api/upload/${encodeURIComponent(filename)}`;
   } catch {

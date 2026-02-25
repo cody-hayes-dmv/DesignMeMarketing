@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Loader2,
   Search,
-  TrendingUp,
   ExternalLink,
   Link2,
   Download,
@@ -142,19 +141,6 @@ export interface AiSearchVisibilityData {
   platforms?: Array<{ platform: string; mentions: number; aiSearchVol: number; impressions?: number }>;
 }
 
-const formatLastUpdatedHours = (iso: string | null | undefined): string | null => {
-  if (!iso) return null;
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const hours = Math.floor(diffMs / (1000 * 60 * 60));
-  if (hours < 1) return "Last updated less than 1 hour ago";
-  if (hours === 1) return "Last updated 1 hour ago";
-  if (hours < 24) return `Last updated ${hours} hours ago`;
-  const days = Math.floor(hours / 24);
-  return days === 1 ? "Last updated 1 day ago" : `Last updated ${days} days ago`;
-};
-
 const formatCompactNumber = (n: number): string => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
@@ -243,16 +229,16 @@ const AI_SEARCH_PDF_TABLE_ROW_LIMIT = 5;
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const FULL_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const POSITION_COLORS = ["#22C55E", "#3B82F6", "#FACC15", "#F97316", "#EF4444", "#8B5CF6"];
-
 interface DomainResearchViewProps {
   clients: Client[];
   clientsError: string | null;
   onGetTopics?: (domain: string) => void;
 }
 
-const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, clientsError, onGetTopics }) => {
+const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, clientsError }) => {
   const user = useSelector((state: RootState) => state.auth.user);
+  const isAdminPanelUser = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
+  const isAgencyUser = user?.role === "AGENCY";
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [directDomain, setDirectDomain] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -381,12 +367,11 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     const looksLikeDomain = normalizedQuery.includes(".");
     if (!looksLikeDomain) {
       setSearchOpen(true);
-      toast("Select a client from the list or enter a full domain (e.g. example.com).");
+      toast("Please choose a client from the list.");
       return;
     }
 
-    // Keep Research behavior consistent across roles:
-    // pick exact client when there is one, require choice when there are many.
+    // If there's one clear candidate in filtered results, auto-select it.
     if (filteredClients.length === 1) {
       setSelectedClientId(filteredClients[0].id);
       setDirectDomain(null);
@@ -395,32 +380,34 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       return;
     }
 
-    if (filteredClients.length > 0) {
-      setSearchOpen(true);
-      toast("Please choose the correct client from the list.");
+    setSearchOpen(true);
+    if (filteredClients.length > 1) {
+      toast("Multiple possible clients found. Please choose the correct client from the list.");
       return;
     }
 
+    // Recover direct-domain fallback for non-client domains.
     setSelectedClientId(null);
     setDirectDomain(domain);
     setSearchQuery("");
     setSearchOpen(false);
   }, [searchQuery, clients, filteredClients]);
 
-  const fetchOverview = useCallback(async (clientIdOrDomain: string, isDirect: boolean = false) => {
+  const fetchOverview = useCallback(async (clientIdOrDomain: string, isDirect: boolean = false, silentError: boolean = false): Promise<boolean> => {
     setLoading(true);
-    setError(null);
+    if (!silentError) setError(null);
     try {
-      let overviewRes;
-      if (isDirect) {
-        overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview-any`, { params: { domain: clientIdOrDomain } });
-      } else {
-        overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
-      }
+      const overviewRes = isDirect
+        ? await api.get<DomainOverviewData>(`/seo/domain-overview-any`, { params: { domain: clientIdOrDomain } })
+        : await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
       setOverview(overviewRes.data);
+      return true;
     } catch (err: any) {
       setOverview(null);
-      setError(err?.response?.data?.message || "Failed to load domain overview");
+      if (!silentError) {
+        setError(err?.response?.data?.message || "Failed to load domain overview");
+      }
+      return false;
     } finally {
       setLoading(false);
     }
@@ -713,7 +700,13 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   useEffect(() => {
     if (selectedClientId) {
       setAiSearch(null);
-      fetchOverview(selectedClientId, false);
+      // For Agency/Admin/Super Admin, use domain endpoint only.
+      const selectedDomain = selectedClient?.domain?.trim();
+      if ((isAdminPanelUser || isAgencyUser) && selectedDomain) {
+        fetchOverview(selectedDomain, true, false);
+      } else {
+        fetchOverview(selectedClientId, false);
+      }
     } else if (directDomain) {
       setAiSearch(null);
       fetchOverview(directDomain, true);
@@ -722,7 +715,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       setAiSearch(null);
       setError(null);
     }
-  }, [selectedClientId, directDomain, fetchOverview]);
+  }, [selectedClientId, directDomain, fetchOverview, isAdminPanelUser, isAgencyUser, selectedClient?.domain]);
 
   useEffect(() => {
     if (selectedClientId) {
@@ -928,9 +921,16 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
         {(selectedClient || directDomain) && (
           <div className="px-4 py-4 flex flex-wrap items-center justify-between gap-3 bg-white border-b border-gray-100 border-l-4 border-l-primary-500">
-            <h2 className="text-xl font-semibold text-gray-900">
-              Domain Overview for {activeDomain || selectedClient?.name || ""} /
-            </h2>
+            <div className="flex flex-col gap-1">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Domain Overview for {activeDomain || selectedClient?.name || ""} /
+              </h2>
+              {selectedClientId && (
+                <p className="text-xs text-gray-500">
+                  Client ID: <span className="font-mono">{selectedClientId}</span> | Domain: <span className="font-mono">{activeDomain || "-"}</span>
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1076,7 +1076,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       {m.icon && <PieChartIcon className="h-3 w-3 text-gray-400 flex-shrink-0" aria-hidden />}
                     </p>
                     <p className="mt-1.5 text-lg font-bold text-blue-600 tabular-nums">
-                      {typeof m.value === "number" ? m.format(m.value) : m.format(m.value as string)}
+                      {m.format(m.value as any)}
                     </p>
                   </div>
                 ))}
@@ -1252,7 +1252,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                               paddingAngle={2}
                               dataKey="value"
                               nameKey="name"
-                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(1)}%`}
+                              label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(1)}%`}
                             >
                               {serpData.map((d, i) => (
                                 <Cell key={i} fill={d.fill} />
@@ -1612,7 +1612,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} label={{ value: "Positions on Google SERP", position: "bottom", offset: 0, style: { fontSize: 11, fill: "#6b7280" } }} />
                         <YAxis type="number" domain={[0, positionBarYMax]} ticks={[0, Math.round(positionBarYMax / 2), positionBarYMax]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
-                        <Tooltip formatter={(_value: number, _name: string, props: any) => [`${props.payload.pct}%`, props.payload.name]} />
+                        <Tooltip formatter={(_value: number | undefined, _name: string | undefined, props: any) => [`${props?.payload?.pct ?? 0}%`, props?.payload?.name ?? ""]} />
                         <Bar dataKey="pct" radius={[4, 4, 0, 0]} fill="#3B82F6" />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1781,7 +1781,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                         <YAxis type="number" domain={[0, 100]} ticks={[0, 50, 100]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
-                        <Tooltip formatter={(_v: number, _n: string, props: any) => [`${props.payload.pct}%`, props.payload.name]} />
+                        <Tooltip formatter={(_v: number | undefined, _n: string | undefined, props: any) => [`${props?.payload?.pct ?? 0}%`, props?.payload?.name ?? ""]} />
                         <Bar dataKey="pct" radius={[4, 4, 0, 0]} fill="#F97316" />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1959,7 +1959,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                                 <Cell key={i} fill={followNofollowData[i].fill} />
                               ))}
                             </Pie>
-                            <Tooltip formatter={(value: number, name: string) => [`${name} links: ${value >= 1000 ? (value / 1000).toFixed(2) + "K" : value.toLocaleString()}`, ""]} />
+                            <Tooltip formatter={(value: number | undefined, name: string | undefined) => [`${name ?? ""} links: ${(value ?? 0) >= 1000 ? ((value ?? 0) / 1000).toFixed(2) + "K" : (value ?? 0).toLocaleString()}`, ""]} />
                           </PieChart>
                         </ResponsiveContainer>
                       </div>

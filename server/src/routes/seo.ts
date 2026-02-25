@@ -7662,6 +7662,12 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
     const normalizeDomain = (d: string) =>
       d.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").toLowerCase();
     const domain = normalizeDomain(rawDomain);
+    const logCtx = {
+      route: "domain-overview-any",
+      userId: req.user.userId,
+      role: req.user.role,
+      domain,
+    };
     const domainsMatch = (aRaw: string, bRaw: string) => {
       const a = normalizeDomain(aRaw || "");
       const b = normalizeDomain(bRaw || "");
@@ -7688,11 +7694,16 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
     const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
     const creditCheck = hasResearchCredits(tierCtx, 1);
     if (!creditCheck.allowed) {
+      console.warn("[domain-overview-any] blocked by credits", {
+        ...logCtx,
+        message: creditCheck.message,
+      });
       return res.status(403).json({ message: creditCheck.message, code: "CREDITS_EXHAUSTED" });
     }
 
     const base64Auth = process.env.DATAFORSEO_BASE64;
     if (!base64Auth) {
+      console.error("[domain-overview-any] DataForSEO credentials missing", logCtx);
       return res.status(500).json({ message: "DataForSEO credentials not configured" });
     }
 
@@ -7704,13 +7715,34 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
           headers: { Authorization: `Basic ${base64Auth}`, "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        if (!resp.ok) return { totalCount: 0, items: [] as any[] };
+        if (!resp.ok) {
+          const errBody = await resp.text().catch(() => "");
+          console.warn("[domain-overview-any] ranked_keywords/live failed", {
+            ...logCtx,
+            status: resp.status,
+            statusText: resp.statusText,
+            body: errBody.slice(0, 500),
+          });
+          return { totalCount: 0, items: [] as any[] };
+        }
         const data = await resp.json();
         const result = data?.tasks?.[0]?.result?.[0];
         return { totalCount: result?.total_count ?? 0, items: result?.items ?? [] };
       })(),
-      fetchHistoricalRankOverviewFromDataForSEO(domain).catch(() => []),
-      fetchBacklinksListFromDataForSEO(domain, "live", 200).catch(() => []),
+      fetchHistoricalRankOverviewFromDataForSEO(domain).catch((err: any) => {
+        console.warn("[domain-overview-any] historical rank fetch failed", {
+          ...logCtx,
+          error: err?.message || String(err),
+        });
+        return [];
+      }),
+      fetchBacklinksListFromDataForSEO(domain, "live", 200).catch((err: any) => {
+        console.warn("[domain-overview-any] backlinks fetch failed", {
+          ...logCtx,
+          error: err?.message || String(err),
+        });
+        return [];
+      }),
     ]);
 
     const topKeywords = rankedKwData.items.map((item: any) => {
@@ -7974,7 +8006,12 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
 
     res.json(result);
   } catch (error: any) {
-    console.error("Domain overview (any) error:", error);
+    console.error("Domain overview (any) error:", {
+      userId: req.user?.userId,
+      role: req.user?.role,
+      domain: (req.query.domain as string | undefined) ?? null,
+      message: error?.message || String(error),
+    });
     res.status(500).json({ message: error?.message || "Internal server error" });
   }
 });
