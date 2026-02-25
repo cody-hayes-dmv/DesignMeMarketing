@@ -168,6 +168,11 @@ const getDomainFromUrl = (url: string): string => {
   }
 };
 
+const normalizeDomainForMatch = (value: string): string => {
+  if (!value) return "";
+  return getDomainFromUrl(value).toLowerCase().replace(/^www\./, "").trim();
+};
+
 const exportToCsv = (headers: string[], rows: string[][], filename: string) => {
   const csvContent = [headers.join(","), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
   const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8" });
@@ -316,7 +321,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const filteredClients = searchNormalized
     ? clients.filter((c) => {
         const name = (c.name || "").toLowerCase();
-        const domain = (c.domain || "").toLowerCase();
+        const domain = normalizeDomainForMatch(c.domain || "");
         return name.includes(searchNormalized) || domain.includes(searchNormalized) || domain === searchNormalized || name.startsWith(searchNormalized) || domain.startsWith(searchNormalized);
       })
     : clients;
@@ -324,10 +329,11 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const handleDomainSearch = useCallback(() => {
     const raw = searchQuery.trim();
     if (!raw) return;
-    const domain = getDomainFromUrl(raw);
+    const domain = normalizeDomainForMatch(raw);
+    const rawNormalized = normalizeDomainForMatch(raw.toLowerCase());
     const matchedClient = clients.find((c) => {
-      const cd = (c.domain || "").toLowerCase();
-      return cd === domain.toLowerCase() || cd === raw.toLowerCase();
+      const cd = normalizeDomainForMatch(c.domain || "");
+      return cd === domain || cd === rawNormalized;
     });
     if (matchedClient) {
       setSelectedClientId(matchedClient.id);
@@ -678,12 +684,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     : 100;
 
   const intentColors: Record<string, string> = { Informational: "#3B82F6", Navigational: "#8B5CF6", Commercial: "#F59E0B", Transactional: "#22C55E" };
-  const intentData = (overview?.keywordsByIntent ?? [
-    { intent: "Informational", pct: 32.4, keywords: Math.round((overview?.metrics.organicSearch.keywords ?? 0) * 0.324), traffic: Math.round((overview?.metrics.organicSearch.traffic ?? 0) * 0.38) },
-    { intent: "Navigational", pct: 1.5, keywords: Math.round((overview?.metrics.organicSearch.keywords ?? 0) * 0.015), traffic: Math.round((overview?.metrics.organicSearch.traffic ?? 0) * 0.01) },
-    { intent: "Commercial", pct: 63.4, keywords: Math.round((overview?.metrics.organicSearch.keywords ?? 0) * 0.634), traffic: Math.round((overview?.metrics.organicSearch.traffic ?? 0) * 0.35) },
-    { intent: "Transactional", pct: 2.8, keywords: Math.round((overview?.metrics.organicSearch.keywords ?? 0) * 0.028), traffic: Math.round((overview?.metrics.organicSearch.traffic ?? 0) * 0.02) },
-  ]).map((d) => ({ ...d, fill: intentColors[d.intent] ?? "#3B82F6" }));
+  const intentData = (overview?.keywordsByIntent ?? []).map((d) => ({ ...d, fill: intentColors[d.intent] ?? "#3B82F6" }));
 
   const competitorMapData = (() => {
     const clientKw = overview?.metrics.organicSearch.keywords ?? 0;
@@ -1481,21 +1482,25 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     <Sparkles className="h-4 w-4 text-purple-500" />
                     Key Topics
                   </h4>
-                  <div className="p-4 grid grid-cols-2 gap-3">
-                    {intentData.map((d, i) => (
-                      <div key={i} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.fill }} />
-                          <span className="text-sm font-semibold text-gray-900">{d.intent}</span>
+                  {intentData.length > 0 ? (
+                    <div className="p-4 grid grid-cols-2 gap-3">
+                      {intentData.map((d, i) => (
+                        <div key={i} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.fill }} />
+                            <span className="text-sm font-semibold text-gray-900">{d.intent}</span>
+                          </div>
+                          <div className="text-xs text-gray-600 space-y-1">
+                            <p>{d.keywords.toLocaleString()} Keywords</p>
+                            <p>{d.traffic.toLocaleString()} Traffic</p>
+                          </div>
+                          <p className="mt-2 text-xs font-medium text-blue-600">{d.pct}%</p>
                         </div>
-                        <div className="text-xs text-gray-600 space-y-1">
-                          <p>{d.keywords.toLocaleString()} Keywords</p>
-                          <p>{d.traffic.toLocaleString()} Traffic</p>
-                        </div>
-                        <p className="mt-2 text-xs font-medium text-blue-600">{d.pct}%</p>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-gray-500 text-sm">No intent data available</div>
+                  )}
                   <div className="px-4 py-3 border-t border-gray-100">
                     <p className="text-xs text-gray-600">View {overview.client?.domain ?? "this domain"} key topics</p>
                   </div>
@@ -1504,35 +1509,39 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="rounded-lg border border-gray-200 border-l-4 border-l-teal-500 overflow-hidden bg-teal-50/40">
                   <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-teal-50 to-white">Keywords by Intent</h4>
-                  <div className="p-4">
-                    <div className="h-8 w-full flex rounded overflow-hidden mb-4">
-                      {intentData.map((d, i) => (
-                        <div key={i} className="h-full" style={{ width: `${d.pct}%`, backgroundColor: d.fill, opacity: 0.9 }} title={`${d.intent} ${d.pct}%`} />
-                      ))}
-                    </div>
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-gray-500 font-medium border-b border-gray-100">
-                          <th className="pb-2">Intent</th>
-                          <th className="pb-2">Keywords</th>
-                          <th className="pb-2">Traffic</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
+                  {intentData.length > 0 ? (
+                    <div className="p-4">
+                      <div className="h-8 w-full flex rounded overflow-hidden mb-4">
                         {intentData.map((d, i) => (
-                          <tr key={i}>
-                            <td className="py-2 flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.fill }} />
-                              <span className="text-gray-900">{d.intent}</span>
-                              <span className="text-blue-600 font-medium">{typeof d.pct === "number" ? d.pct.toFixed(1) : d.pct}%</span>
-                            </td>
-                            <td className="py-2 text-gray-900 tabular-nums">{d.keywords}</td>
-                            <td className="py-2 text-gray-900 tabular-nums">{d.traffic}</td>
-                          </tr>
+                          <div key={i} className="h-full" style={{ width: `${d.pct}%`, backgroundColor: d.fill, opacity: 0.9 }} title={`${d.intent} ${d.pct}%`} />
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </div>
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-500 font-medium border-b border-gray-100">
+                            <th className="pb-2">Intent</th>
+                            <th className="pb-2">Keywords</th>
+                            <th className="pb-2">Traffic</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {intentData.map((d, i) => (
+                            <tr key={i}>
+                              <td className="py-2 flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.fill }} />
+                                <span className="text-gray-900">{d.intent}</span>
+                                <span className="text-blue-600 font-medium">{typeof d.pct === "number" ? d.pct.toFixed(1) : d.pct}%</span>
+                              </td>
+                              <td className="py-2 text-gray-900 tabular-nums">{d.keywords}</td>
+                              <td className="py-2 text-gray-900 tabular-nums">{d.traffic}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-gray-500 text-sm">No intent data available</div>
+                  )}
                 </div>
                 <div className="rounded-lg border border-gray-200 border-l-4 border-l-indigo-500 overflow-hidden bg-indigo-50/40">
                   <h4 className="px-4 py-3 border-b border-gray-200 font-medium text-gray-900 bg-gradient-to-r from-indigo-50 to-white">Organic Position Distribution</h4>

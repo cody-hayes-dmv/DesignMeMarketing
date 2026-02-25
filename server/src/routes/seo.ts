@@ -7000,7 +7000,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
 router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const strictAccuracy = true;
+    const strictAccuracy = false;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -7041,7 +7041,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const [trafficSources, historyRows, topKeywords, keywordsWithSerpFeatures, backlinks, topPagesPaid, targetKeywordsWithIntent] = await Promise.all([
+    const [trafficSources, historyRows, topKeywordsDb, keywordsWithSerpFeatures, backlinks, topPagesPaid, targetKeywordsWithIntent] = await Promise.all([
       prisma.trafficSource.findMany({ where: { clientId } }),
       prisma.rankedKeywordsHistory.findMany({
         where: { clientId },
@@ -7099,10 +7099,74 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       }),
       { totalKeywords: 0, totalEstimatedTraffic: 0, organicEstimatedTraffic: 0 }
     );
-    const organicKeywords = aggregateTotals.totalKeywords;
-    const organicTraffic = organicSource?.value ?? aggregateTotals.organicEstimatedTraffic ?? aggregateTotals.totalEstimatedTraffic ?? 0;
+    let organicKeywords = aggregateTotals.totalKeywords;
+    let organicTraffic = organicSource?.value ?? aggregateTotals.organicEstimatedTraffic ?? aggregateTotals.totalEstimatedTraffic ?? 0;
+    let topKeywords = topKeywordsDb;
     const trafficCost = 0; // DataForSEO doesn't provide paid traffic cost in same flow; optional later
     const breakdown = trafficSources.map((ts) => ({ name: ts.name, value: ts.value })).filter((t) => t.value > 0);
+
+    // If stored traffic/keyword totals are empty, fallback to live DataForSEO ranked keywords for this client domain.
+    if ((organicTraffic <= 0 || organicKeywords <= 0) && client.domain) {
+      const base64Auth = process.env.DATAFORSEO_BASE64;
+      if (base64Auth) {
+        try {
+          const normalizedDomain = String(client.domain || "")
+            .replace(/^https?:\/\//, "")
+            .replace(/^www\./, "")
+            .replace(/\/.*$/, "")
+            .toLowerCase()
+            .trim();
+          if (normalizedDomain) {
+            const liveResp = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live", {
+              method: "POST",
+              headers: {
+                Authorization: `Basic ${base64Auth}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify([
+                {
+                  target: normalizedDomain,
+                  location_code: 2840,
+                  language_code: "en",
+                  limit: 100,
+                },
+              ]),
+            });
+            if (liveResp.ok) {
+              const liveJson: any = await liveResp.json();
+              const liveResult = liveJson?.tasks?.[0]?.result?.[0];
+              const liveItems: any[] = Array.isArray(liveResult?.items) ? liveResult.items : [];
+              const mappedLiveKeywords = liveItems.map((item: any) => {
+                const kd = item?.keyword_data || {};
+                const ki = kd?.keyword_info || {};
+                const serpItem = item?.ranked_serp_element?.serp_item || {};
+                return {
+                  keyword: kd?.keyword || "",
+                  currentPosition: serpItem?.rank_group ?? serpItem?.rank_absolute ?? null,
+                  searchVolume: ki?.search_volume != null ? Number(ki.search_volume) : null,
+                  ctr: null,
+                  googleUrl: serpItem?.url || serpItem?.relative_url || null,
+                  cpc: ki?.cpc != null ? Number(ki.cpc) : null,
+                };
+              });
+              const liveTraffic = liveItems.reduce((sum: number, item: any) => {
+                const etv = Number(item?.ranked_serp_element?.serp_item?.etv ?? 0);
+                return sum + (Number.isFinite(etv) ? Math.max(0, etv) : 0);
+              }, 0);
+              const liveTotalKeywords = Number(liveResult?.total_count ?? mappedLiveKeywords.length) || 0;
+
+              if (mappedLiveKeywords.length > 0) {
+                topKeywords = mappedLiveKeywords;
+                if (organicKeywords <= 0) organicKeywords = liveTotalKeywords;
+                if (organicTraffic <= 0) organicTraffic = Math.round(liveTraffic);
+              }
+            }
+          }
+        } catch (liveErr: any) {
+          console.warn("[domain-overview] DataForSEO live fallback failed:", liveErr?.message || liveErr);
+        }
+      }
+    }
 
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -7238,8 +7302,9 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       keyword: k.keyword,
       position: k.currentPosition ?? 0,
       trafficPercent: k.ctr != null ? k.ctr * 100 : null,
-      // Strict accuracy: do not synthesize per-keyword traffic from CTR * aggregate traffic.
-      traffic: null,
+      traffic: k.ctr != null
+        ? Math.round(k.ctr * organicTraffic)
+        : null,
       volume: k.searchVolume ?? null,
       url: k.googleUrl ?? null,
       cpc: k.cpc ?? null,
@@ -7520,7 +7585,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
             const intent = intentMap.get(k.keyword.toLowerCase().trim());
             if (intent && byIntent[intent]) {
               byIntent[intent].keywords += 1;
-              byIntent[intent].traffic += 0;
+              byIntent[intent].traffic += Math.round(k.traffic ?? 0);
             }
           }
           const totalKw = topOrganicKeywords.length;
@@ -7567,7 +7632,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 // Domain overview for ANY domain (not just clients) — fetches all data live from DataForSEO APIs
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
-    const strictAccuracy = true;
+    const strictAccuracy = false;
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });
