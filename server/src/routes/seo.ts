@@ -7087,9 +7087,19 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       }),
     ]);
 
-    const firstSource = trafficSources[0];
-    const organicKeywords = firstSource?.totalKeywords ?? 0;
-    const organicTraffic = firstSource?.organicEstimatedTraffic ?? firstSource?.totalEstimatedTraffic ?? 0;
+    const findTrafficByName = (matcher: RegExp) => trafficSources.find((ts) => matcher.test((ts.name || "").toLowerCase()));
+    const organicSource = findTrafficByName(/organic/);
+    const paidSource = findTrafficByName(/paid/);
+    const aggregateTotals = trafficSources.reduce(
+      (acc, ts) => ({
+        totalKeywords: Math.max(acc.totalKeywords, ts.totalKeywords ?? 0),
+        totalEstimatedTraffic: Math.max(acc.totalEstimatedTraffic, ts.totalEstimatedTraffic ?? 0),
+        organicEstimatedTraffic: Math.max(acc.organicEstimatedTraffic, ts.organicEstimatedTraffic ?? 0),
+      }),
+      { totalKeywords: 0, totalEstimatedTraffic: 0, organicEstimatedTraffic: 0 }
+    );
+    const organicKeywords = aggregateTotals.totalKeywords;
+    const organicTraffic = organicSource?.value ?? aggregateTotals.organicEstimatedTraffic ?? aggregateTotals.totalEstimatedTraffic ?? 0;
     const trafficCost = 0; // DataForSEO doesn't provide paid traffic cost in same flow; optional later
     const breakdown = trafficSources.map((ts) => ({ name: ts.name, value: ts.value })).filter((t) => t.value > 0);
 
@@ -7227,8 +7237,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       keyword: k.keyword,
       position: k.currentPosition ?? 0,
       trafficPercent: k.ctr != null ? k.ctr * 100 : null,
-      traffic: k.ctr != null && firstSource?.organicEstimatedTraffic != null
-        ? Math.round(k.ctr * firstSource.organicEstimatedTraffic)
+      traffic: k.ctr != null
+        ? Math.round(k.ctr * organicTraffic)
         : null,
       volume: k.searchVolume ?? null,
       url: k.googleUrl ?? null,
@@ -7303,9 +7313,9 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       { name: "Direct", value: breakdown.find((b) => b.name === "Direct")?.value ?? 0, pct: 0 },
       { name: "AI traffic", value: 0, pct: 0 },
       { name: "Referral", value: breakdown.find((b) => b.name === "Referral")?.value ?? 0, pct: 0 },
-      { name: "Organic Search", value: breakdown.find((b) => b.name === "Organic")?.value ?? organicTraffic, pct: 0 },
+      { name: "Organic Search", value: breakdown.find((b) => /organic/i.test(b.name))?.value ?? organicTraffic, pct: 0 },
       { name: "Google AI Mode", value: 0, pct: 0 },
-      { name: "Paid Search", value: breakdown.find((b) => b.name === "Paid")?.value ?? 0, pct: 0 },
+      { name: "Paid Search", value: breakdown.find((b) => /paid/i.test(b.name))?.value ?? 0, pct: 0 },
       { name: "Other", value: breakdown.find((b) => b.name === "Other")?.value ?? 0, pct: 0 },
     ];
     const sumChannels = Math.max(1, marketTrendsChannels.reduce((s, c) => s + c.value, 0));
@@ -7356,7 +7366,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       }
     }
 
-    const paidKeywordsCount = (trafficSources.find((ts) => ts.name === "Paid")?.totalKeywords ?? topPaidKeywords.length) || 0;
+    const paidKeywordsCount = (paidSource?.totalKeywords ?? topPaidKeywords.length) || 0;
     const totalPaidPages = topPagesPaid.reduce((s, p) => s + p.paidCount, 0);
     const paidKwTotal = paidKeywordsCount > 0 ? paidKeywordsCount : (totalPaidPages || 1);
     const paidPositionDistribution = {
@@ -7387,8 +7397,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
           trafficCost: trafficCost,
         },
         paidSearch: {
-          keywords: trafficSources.find((ts) => ts.name === "Paid")?.totalKeywords ?? 0,
-          traffic: Math.round(breakdown.find((b) => b.name === "Paid")?.value ?? 0),
+          keywords: paidSource?.totalKeywords ?? 0,
+          traffic: Math.round(breakdown.find((b) => /paid/i.test(b.name))?.value ?? 0),
           trafficCost: 0,
         },
         backlinks: {

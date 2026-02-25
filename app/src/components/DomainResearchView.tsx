@@ -428,9 +428,10 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
           onclone: (doc) => {
             const scrollables = doc.querySelectorAll('[data-pdf-scrollable="true"]') as NodeListOf<HTMLElement>;
             scrollables.forEach((node) => {
-              node.style.maxHeight = "none";
-              node.style.overflow = "visible";
-              node.style.overflowY = "visible";
+              // Keep export limited to first ~5 rows and show scroll, instead of expanding full table.
+              node.style.maxHeight = "220px";
+              node.style.overflowX = "auto";
+              node.style.overflowY = "scroll";
             });
           },
         });
