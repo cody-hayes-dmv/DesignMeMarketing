@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { useLocation, Link, Navigate } from "react-router-dom";
-import { useSelector } from "react-redux";
+import { useLocation, Link, Navigate, useNavigate } from "react-router-dom";
+import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import Sidebar from "./Sidebar";
 import NotificationBell from "./NotificationBell";
 import api from "@/lib/api";
-import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare } from "lucide-react";
+import { logout } from "@/store/slices/authSlice";
+import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare, Menu, ChevronLeft, LogOut } from "lucide-react";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -21,6 +22,8 @@ interface AgencyMe {
 }
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agencyMe, setAgencyMe] = useState<AgencyMe | null>(null);
@@ -77,52 +80,133 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     if (path === "/specialist/dashboard") return "Dashboard";
     if (path === "/specialist/clients") return "My Clients";
-    if (path === "/specialist/team") return "Team";
     if (path === "/specialist/tasks") return "Tasks";
     if (path === "/specialist/settings") return "Settings";
 
+    if (path.startsWith("/client/dashboard")) return "Dashboard";
+    if (path === "/client/tasks") return "Tasks";
     if (path === "/client/report" || path.startsWith("/client/report/")) return "Report";
 
     return "Dashboard";
   };
 
-  // Client portal: minimal nav bar with notification bell
+  // Client portal: left sidebar with Dashboard + Tasks
   if (isClientPortal || user?.role === "USER") {
+    const handleClientSignOut = () => {
+      dispatch(logout() as any);
+      navigate("/login", { replace: true });
+    };
     const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
     const clientNavItems = [
-      { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/report", label: "Dashboard", icon: LayoutDashboard },
+      { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks", label: "Dashboard", icon: LayoutDashboard },
       { path: "/client/tasks", label: "Tasks", icon: CheckSquare },
     ];
+
     return (
       <div className="min-h-screen bg-gray-50">
-        <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4 sticky top-0 z-40">
-          <div className="flex items-center gap-6">
-            <span className="text-lg font-bold bg-gradient-to-r from-violet-600 to-blue-600 bg-clip-text text-transparent">
-              Client Portal
-            </span>
-            <nav className="flex items-center gap-1">
+        <div
+          className={`${sidebarCollapsed ? "w-16" : "w-64"} bg-gray-900 h-screen flex flex-col transition-all duration-300 fixed left-0 top-0 z-30`}
+        >
+          <div className="absolute -right-3 top-6 z-40">
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="bg-white border border-gray-200 rounded-full p-1.5 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110"
+            >
+              {sidebarCollapsed ? (
+                <Menu className="h-4 w-4 text-gray-600" />
+              ) : (
+                <ChevronLeft className="h-4 w-4 text-gray-600" />
+              )}
+            </button>
+          </div>
+
+          <div className={`${sidebarCollapsed ? "px-3 py-5" : "px-4 py-6"} border-b border-gray-700 transition-all duration-300 flex flex-col items-center justify-center text-center`}>
+            <div className={`${sidebarCollapsed ? "h-8 w-8" : "h-14 w-14"} rounded-full bg-primary-600/90 flex items-center justify-center transition-all duration-300 overflow-hidden`}>
+              {user?.profileImageUrl ? (
+                <img
+                  src={user.profileImageUrl}
+                  alt="User avatar"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="text-sm font-medium text-white">
+                  {user?.name?.charAt(0) || user?.email?.charAt(0) || "U"}
+                </span>
+              )}
+            </div>
+            {!sidebarCollapsed && (
+              <p className="mt-2 text-xs font-medium text-gray-400 tracking-wide">Client Panel</p>
+            )}
+          </div>
+
+          <nav className={`flex-1 ${sidebarCollapsed ? "p-2" : "p-4"} transition-all duration-300`}>
+            <ul className="space-y-2">
               {clientNavItems.map((item) => {
+                const Icon = item.icon;
                 const isActive = location.pathname.startsWith(item.path.split("?")[0]);
                 return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-violet-50 text-violet-700"
-                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                    }`}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
+                  <li key={item.path}>
+                    <Link
+                      to={item.path}
+                      className={`w-full flex items-center ${sidebarCollapsed ? "justify-center px-2 py-3" : "space-x-3 px-4 py-3"} rounded-lg text-left transition-all duration-300 ${
+                        isActive ? "bg-primary-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                      } group relative`}
+                      title={sidebarCollapsed ? item.label : undefined}
+                    >
+                      <Icon className="h-5 w-5 transition-all duration-300" />
+                      {!sidebarCollapsed && <span className="font-medium transition-opacity duration-300">{item.label}</span>}
+                    </Link>
+                  </li>
                 );
               })}
-            </nav>
+            </ul>
+          </nav>
+
+          <div className={`${sidebarCollapsed ? "p-2" : "p-4"} border-t border-gray-700 transition-all duration-300`}>
+            <div
+              className={`flex items-center ${sidebarCollapsed ? "justify-center mb-2" : "space-x-3 mb-4"} transition-all duration-300`}
+            >
+              <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center overflow-hidden">
+                {user?.profileImageUrl ? (
+                  <img
+                    src={user.profileImageUrl}
+                    alt="User avatar"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="text-sm font-medium text-white">
+                    {user?.name?.charAt(0) || user?.email?.charAt(0) || "U"}
+                  </span>
+                )}
+              </div>
+              {!sidebarCollapsed && (
+                <div className="flex-1 min-w-0 transition-opacity duration-300">
+                  <p className="text-sm font-medium text-white truncate">
+                    {user?.name || user?.email}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleClientSignOut}
+              className={`w-full flex items-center ${sidebarCollapsed ? "justify-center px-2 py-2" : "space-x-3 px-4 py-2"} text-gray-300 hover:bg-red-600 hover:text-white rounded-lg transition-all duration-300`}
+              title={sidebarCollapsed ? "Sign out" : undefined}
+            >
+              <LogOut className="h-4 w-4" />
+              {!sidebarCollapsed && <span className="text-sm">Sign out</span>}
+            </button>
           </div>
-          <NotificationBell />
         </div>
-        <div className="flex-1">{children}</div>
+
+        <div className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}>
+          <div className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4">
+            <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
+            <NotificationBell />
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">{children}</div>
+        </div>
       </div>
     );
   }

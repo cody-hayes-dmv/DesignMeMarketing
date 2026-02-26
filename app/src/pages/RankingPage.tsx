@@ -126,9 +126,14 @@ const RankingsPage = () => {
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
           </select>
-          <button className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2">
+          <button
+            type="button"
+            disabled
+            title="Export is coming soon."
+            className="bg-gray-100 text-gray-400 px-4 py-2 rounded-lg cursor-not-allowed flex items-center space-x-2"
+          >
             <Download className="h-4 w-4" />
-            <span>Export</span>
+            <span>Export (Coming soon)</span>
           </button>
         </div>
       </div>

@@ -11,7 +11,6 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import VerifyPage from "./pages/VerifyPage";
 import SpecialistDashboard from "./pages/Specialist/SpecialistDashboardPage";
 import SpecialistClientsPage from "./pages/Specialist/SpecialistClientsPage";
-import SpecialistTeamPage from "./pages/Specialist/SpecialistTeamPage";
 import DashboardLayout from "./components/DashboardLayout";
 import ClientsPage from "./pages/ClientsPage";
 import KeywordsPage from "./pages/KeywordsPage";
@@ -121,7 +120,6 @@ function App() {
   const specialistRoutes = [
     { path: "/specialist/dashboard", component: SpecialistDashboard },
     { path: "/specialist/clients", component: SpecialistClientsPage },
-    { path: "/specialist/team", component: SpecialistTeamPage },
     { path: "/specialist/tasks", component: TasksPage },
     { path: "/specialist/settings", component: SettingsPage },
   ];
@@ -254,6 +252,8 @@ function App() {
               <Navigate to="/login" replace />
             ) : user.role !== "USER" ? (
               <Navigate to={getRedirectUrl()} replace />
+            ) : path.startsWith("/client/report") ? (
+              <Navigate to={getRedirectUrl()} replace />
             ) : (
               <DashboardLayout>
                 <Component />
@@ -316,6 +316,8 @@ function App() {
       />
       {/* Redirect legacy worker portal paths */}
       <Route path="/worker/*" element={<Navigate to="/specialist/dashboard" replace />} />
+      {/* Redirect removed specialist team page */}
+      <Route path="/specialist/team" element={<Navigate to="/specialist/dashboard" replace />} />
 
       {/* Agency routes - accessible by AGENCY, ADMIN, and SUPER_ADMIN */}
       {agencyRoutes.map(({ path, component: Component }) => (

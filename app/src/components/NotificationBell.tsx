@@ -31,6 +31,9 @@ const NotificationBell: React.FC = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isSuperOrAdmin = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
+  const isClientUser = user?.role === "USER";
+  const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
+  const clientDashboardPath = firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks";
   const notificationsUrl = isSuperOrAdmin ? "/seo/super-admin/notifications" : "/agencies/me/notifications";
   const markReadUrl = isSuperOrAdmin ? "/seo/super-admin/notifications/mark-read" : "/agencies/me/notifications/mark-read";
 
@@ -96,6 +99,11 @@ const NotificationBell: React.FC = () => {
       }
     }
     setOpen(false);
+    // Client portal: respect notification deep-links (e.g. /client/tasks?taskId=...).
+    if (isClientUser) {
+      navigate(item.link || "/client/tasks");
+      return;
+    }
     // Agency panel requirement: reading a notification should always
     // land on Agency Dashboard with a fresh reload.
     if (!isSuperOrAdmin) {
@@ -230,7 +238,7 @@ const NotificationBell: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  navigate(isSuperOrAdmin ? "/superadmin/dashboard" : "/agency/dashboard");
+                  navigate(isSuperOrAdmin ? "/superadmin/dashboard" : isClientUser ? clientDashboardPath : "/agency/dashboard");
                 }}
                 className="w-full text-center text-xs font-medium text-primary-600 hover:text-primary-700 py-1.5"
               >

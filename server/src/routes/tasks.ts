@@ -255,8 +255,33 @@ export function selectTaskActivityRecipientIds(params: {
   return [...recipients];
 }
 
+export function selectTaskStatusCreatorRecipientId(params: {
+  actorRole: Role | null | undefined;
+  actorId: string;
+  createdById?: string | null;
+  createdByRole?: Role | null;
+  fromStatus?: TaskStatus | null;
+  toStatus?: TaskStatus | null;
+}): string | null {
+  const { actorRole, actorId, createdById, createdByRole, fromStatus, toStatus } = params;
+
+  if (actorRole !== "SPECIALIST") return null;
+  if (!createdById || createdById === actorId) return null;
+  if (!createdByRole || !["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(createdByRole)) return null;
+  if (!fromStatus || !toStatus || fromStatus === toStatus) return null;
+
+  return createdById;
+}
+
 async function createTaskActivityNotifications(
-  task: { id: string; title: string; clientId?: string | null; agencyId?: string | null; assigneeId?: string | null },
+  task: {
+    id: string;
+    title: string;
+    clientId?: string | null;
+    agencyId?: string | null;
+    assigneeId?: string | null;
+    createdById?: string | null;
+  },
   authorId: string,
   authorName: string,
   commentType: string,
@@ -310,6 +335,17 @@ async function createTaskActivityNotifications(
   }
   if (task.assigneeId) {
     internalUserIds.add(task.assigneeId);
+  }
+  // Ensure task creator gets internal-side activity notifications
+  // for client/specialist-side updates when creator is a panel user.
+  if (task.createdById) {
+    const creator = await prisma.user.findUnique({
+      where: { id: task.createdById },
+      select: { id: true, role: true },
+    });
+    if (creator && ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(creator.role)) {
+      internalUserIds.add(creator.id);
+    }
   }
 
   // Client-side recipients
@@ -1155,7 +1191,14 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
       select: { name: true, email: true },
     });
     createTaskActivityNotifications(
-      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId, assigneeId: task.assigneeId },
+      {
+        id: task.id,
+        title: task.title,
+        clientId: task.clientId,
+        agencyId: task.agencyId,
+        assigneeId: task.assigneeId,
+        createdById: task.createdById,
+      },
       req.user.userId,
       author?.name || author?.email || "Someone",
       commentType,
@@ -1492,6 +1535,29 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
     });
     const actorName = actor?.name || actor?.email || "A user";
 
+    const statusRecipientUserId = selectTaskStatusCreatorRecipientId({
+      actorRole: req.user.role as Role | null | undefined,
+      actorId: req.user.userId,
+      createdById: task.createdById,
+      createdByRole: task.createdBy?.role as Role | null | undefined,
+      fromStatus: task.status as TaskStatus,
+      toStatus: updated.status as TaskStatus,
+    });
+    if (statusRecipientUserId) {
+      prisma.notification
+        .create({
+          data: {
+            userId: statusRecipientUserId,
+            agencyId: task.agencyId ?? null,
+            type: "task_activity",
+            title: `${actorName} updated task status`,
+            message: `"${task.title}" moved from ${task.status} to ${updated.status}.`,
+            link: `/agency/tasks?taskId=${task.id}`,
+          },
+        })
+        .catch((e) => console.warn("[Task] Status notification failed", e?.message));
+    }
+
     if (updated.status === "NEEDS_APPROVAL" && (body.approvalNotifyUserIds?.length ?? 0) > 0) {
       sendTaskApprovalRequestEmails(
         body.approvalNotifyUserIds!,
@@ -1655,7 +1721,14 @@ router.post("/:id/approve", authenticateToken, async (req, res) => {
 
     // Fire notifications
     createTaskActivityNotifications(
-      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId, assigneeId: task.assigneeId },
+      {
+        id: task.id,
+        title: task.title,
+        clientId: task.clientId,
+        agencyId: task.agencyId,
+        assigneeId: task.assigneeId,
+        createdById: task.createdById,
+      },
       req.user.userId,
       authorName,
       "APPROVAL",
@@ -1718,7 +1791,14 @@ router.post("/:id/request-revisions", authenticateToken, async (req, res) => {
 
     // Fire notifications
     createTaskActivityNotifications(
-      { id: task.id, title: task.title, clientId: task.clientId, agencyId: task.agencyId, assigneeId: task.assigneeId },
+      {
+        id: task.id,
+        title: task.title,
+        clientId: task.clientId,
+        agencyId: task.agencyId,
+        assigneeId: task.assigneeId,
+        createdById: task.createdById,
+      },
       req.user.userId,
       authorName,
       "REVISION_REQUEST",

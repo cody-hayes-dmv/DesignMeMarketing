@@ -155,8 +155,13 @@ const AdminDashboard = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <button className="text-primary-600 hover:text-primary-900">
-                        Manage
+                      <button
+                        type="button"
+                        disabled
+                        title="Agency management controls are coming soon."
+                        className="text-primary-300 cursor-not-allowed"
+                      >
+                        Manage (Coming soon)
                       </button>
                     </td>
                   </tr>

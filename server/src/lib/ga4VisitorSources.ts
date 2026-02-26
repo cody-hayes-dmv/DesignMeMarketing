@@ -14,6 +14,7 @@ export async function fetchGA4VisitorSources(
   source: string;
   users: number;
 }>> {
+  const GA4_VISITOR_SOURCES_TIMEOUT_MS = 15000;
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     select: { ga4PropertyId: true },
@@ -32,7 +33,7 @@ export async function fetchGA4VisitorSources(
   const endDateStr = endDate.toISOString().split('T')[0];
 
   try {
-    const [response] = await analytics.runReport({
+    const requestPromise: Promise<[any, any?, any?]> = analytics.runReport({
       property: propertyId,
       dateRanges: [
         {
@@ -60,6 +61,10 @@ export async function fetchGA4VisitorSources(
       ],
       limit: limit,
     });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("GA4 visitor sources request timed out")), GA4_VISITOR_SOURCES_TIMEOUT_MS);
+    });
+    const [response] = await Promise.race([requestPromise, timeoutPromise]);
 
     if (!response.rows || response.rows.length === 0) {
       return [];

@@ -2,6 +2,14 @@ import { prisma } from './prisma.js';
 import { sendEmail } from './email.js';
 import PDFDocument from 'pdfkit';
 import crypto from "crypto";
+import {
+  BRAND_DISPLAY_NAME,
+  buildReportEmailSubject,
+  normalizeReportPeriod,
+  normalizeReportStatus,
+  normalizeEmailRecipients,
+  REPORT_SECTION_TITLES,
+} from "./qualityContracts.js";
 
 type ReportTargetKeywordRow = {
   id: string;
@@ -280,7 +288,8 @@ export function generateReportEmailHTML(
   client: any,
   opts?: { targetKeywords?: ReportTargetKeywordRow[]; shareUrl?: string | null }
 ): string {
-  const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
+  const normalizedPeriod = normalizeReportPeriod(report.period);
+  const periodLabel = normalizedPeriod.charAt(0).toUpperCase() + normalizedPeriod.slice(1);
   const reportDate = new Date(report.reportDate).toLocaleDateString();
   const safeClientName = escapeHtml(client?.name);
   const safeDomain = client?.domain ? escapeHtml(client.domain) : "";
@@ -299,7 +308,7 @@ export function generateReportEmailHTML(
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>SEO Report - ${safeClientName}</title>
+      <title>${BRAND_DISPLAY_NAME} Report - ${safeClientName}</title>
     </head>
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #111827; background-color: #f3f4f6; margin: 0; padding: 24px;">
       <div style="max-width: 900px; margin: 0 auto; background-color: #ffffff;">
@@ -352,7 +361,7 @@ export function generateReportEmailHTML(
           <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
             <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
               <span style="display: inline-block; width: 4px; height: 20px; background-color: #3b82f6; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-              Traffic Overview
+              ${REPORT_SECTION_TITLES.traffic_overview}
             </h2>
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
               <tr>
@@ -404,7 +413,7 @@ export function generateReportEmailHTML(
           <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
             <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
               <span style="display: inline-block; width: 4px; height: 20px; background-color: #10b981; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-              SEO Performance
+              ${REPORT_SECTION_TITLES.seo_performance}
             </h2>
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
               <tr>
@@ -456,7 +465,7 @@ export function generateReportEmailHTML(
           <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
             <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;">
               <span style="display: inline-block; width: 4px; height: 20px; background-color: #2563eb; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-              Money Keywords
+              ${REPORT_SECTION_TITLES.money_keywords}
             </h2>
             <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">(Sorted by highest rank)</p>
             ${
@@ -472,7 +481,7 @@ export function generateReportEmailHTML(
           <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
             <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;">
               <span style="display: inline-block; width: 4px; height: 20px; background-color: #8b5cf6; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-              Topical Keywords
+              ${REPORT_SECTION_TITLES.topical_keywords}
             </h2>
             <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">(Sorted by highest rank)</p>
             ${
@@ -490,7 +499,7 @@ export function generateReportEmailHTML(
               ? `<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
                   <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
                     <span style="display: inline-block; width: 4px; height: 20px; background-color: #a855f7; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-                    Live Dashboard
+                    ${REPORT_SECTION_TITLES.live_dashboard}
                   </h2>
                   <div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 16px;">
                     <a href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" style="color: #7c3aed; font-weight: 600; text-decoration: underline; word-break: break-all;">
@@ -504,7 +513,7 @@ export function generateReportEmailHTML(
 
         <div style="background-color: #f9fafb; border-top: 1px solid #e5e7eb; padding: 16px; text-align: center;">
           <p style="margin: 0; color: #6b7280; font-size: 12px;">
-            This is an automated report generated by SEO Dashboard.
+            This is an automated report generated by ${BRAND_DISPLAY_NAME}.
           </p>
         </div>
       </div>
@@ -532,7 +541,8 @@ export async function generateReportPDFBuffer(
     // doc.on('error', (err) => reject(err));
     doc.on("error", (err: Error) => reject(err));
 
-    const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
+    const normalizedPeriod = normalizeReportPeriod(report.period);
+    const periodLabel = normalizedPeriod.charAt(0).toUpperCase() + normalizedPeriod.slice(1);
     const reportDate = new Date(report.reportDate).toLocaleDateString();
     const shareUrl = opts?.shareUrl || null;
     const targetKeywords = opts?.targetKeywords || [];
@@ -550,7 +560,7 @@ export async function generateReportPDFBuffer(
     doc.text(`Report date: ${reportDate}`);
 
     doc.moveDown();
-    doc.fontSize(14).text('Traffic Overview');
+    doc.fontSize(14).text(REPORT_SECTION_TITLES.traffic_overview);
     doc.moveDown(0.5);
     doc.fontSize(12);
     const webVisitors = (report as any).totalUsers ?? report.activeUsers ?? 0;
@@ -561,7 +571,7 @@ export async function generateReportPDFBuffer(
     doc.text(`Engaged Visitors: ${Number((report as any).engagedSessions ?? 0).toLocaleString()}`);
 
     doc.moveDown();
-    doc.fontSize(14).text('SEO Performance');
+    doc.fontSize(14).text(REPORT_SECTION_TITLES.seo_performance);
     doc.moveDown(0.5);
     doc.fontSize(12);
     if (report.averagePosition != null) {
@@ -742,7 +752,7 @@ export async function generateReportPDFBuffer(
 
     doc.moveDown(2);
     doc.fontSize(10).fillColor('#666').text(
-      'This PDF was generated automatically by SEO Dashboard based on the latest available analytics data.',
+      `This PDF was generated automatically by ${BRAND_DISPLAY_NAME} based on the latest available analytics data.`,
       { align: 'center' }
     );
 
@@ -769,15 +779,16 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
   // so Report Traffic Overview metrics match SEO Overview when viewing the same period
   const endDate = new Date();
   let startDate: Date;
-  if (period === "weekly") {
+  const normalizedPeriod = normalizeReportPeriod(period);
+  if (normalizedPeriod === "weekly") {
     // Last 7 days - matches SEO Overview "Last 7 days"
     startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 7);
-  } else if (period === "biweekly") {
+  } else if (normalizedPeriod === "biweekly") {
     // Last 14 days - matches SEO Overview when user selects 14-day equivalent
     startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 14);
-  } else if (period === "monthly") {
+  } else if (normalizedPeriod === "monthly") {
     // Last 30 days - matches SEO Overview default "Last 30 days"
     startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - 30);
@@ -832,21 +843,15 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
   // Total Clicks / Impressions: use Keyword table (GSC) when available; fallback to traffic source when 0
   const keywordClicks = keywordStats._sum.clicks ?? 0;
   const keywordImpressions = keywordStats._sum.impressions ?? 0;
-  const totalClicks = keywordClicks > 0
-    ? keywordClicks
-    : Math.round(trafficSourceSummary?.organicEstimatedTraffic ?? 0);
-  const totalImpressions = keywordImpressions > 0
-    ? keywordImpressions
-    : (trafficSourceSummary?.organicEstimatedTraffic != null
-        ? Math.round(trafficSourceSummary.organicEstimatedTraffic * 15)
-        : 0);
+  const totalClicks = keywordClicks > 0 ? keywordClicks : 0;
+  const totalImpressions = keywordImpressions > 0 ? keywordImpressions : 0;
 
   // Create report data
   // Traffic Overview aligns with SEO Overview: Web Visitors, Organic Traffic, First Time Visitors, Engaged Visitors
   const reportData = {
     reportDate: endDate,
-    period: period,
-    status: "draft" as string,
+    period: normalizedPeriod,
+    status: normalizeReportStatus("draft"),
     totalSessions: Math.round(ga4Data?.totalSessions || trafficSourceSummary?.totalEstimatedTraffic || 0),
     organicSessions: Math.round(ga4Data?.organicSessions || trafficSourceSummary?.organicEstimatedTraffic || 0),
     paidSessions: 0,
@@ -887,7 +892,7 @@ export async function autoGenerateReport(clientId: string, period: string = "mon
 
   // If there's an active schedule, set status to "scheduled" instead of "draft"
   if (activeSchedule && reportData.status === "draft") {
-    reportData.status = "scheduled";
+    reportData.status = normalizeReportStatus("scheduled");
   }
 
   const report = existing
@@ -1032,7 +1037,7 @@ function campaignWinsEmailHtml(params: {
     ? `<a href="${escapeHtml(params.dashboardUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(params.dashboardUrl)}</a>`
     : "Dashboard link unavailable right now.";
   const lines = params.eventDetails.map((line) => `<p style="margin: 0 0 10px 0;">${escapeHtml(line)}</p>`).join("");
-  const agencyName = process.env.AGENCY_NAME || "Design ME Marketing";
+  const agencyName = BRAND_DISPLAY_NAME;
   return `
     <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
       <p>Hi ${escapeHtml(params.clientFirstName || "there")},</p>
@@ -1670,15 +1675,7 @@ export async function processScheduledReports(): Promise<void> {
         });
 
         // Send email to recipients (stored as JSON string)
-        const recipients: string[] = (() => {
-          if (!schedule.recipients) return [];
-          try {
-            const parsed = JSON.parse(String(schedule.recipients));
-            return Array.isArray(parsed) ? parsed : [];
-          } catch {
-            return [];
-          }
-        })();
+        const recipients = normalizeEmailRecipients(schedule.recipients);
         if (recipients && recipients.length > 0) {
           console.log(`[Report Scheduler] Sending emails to: ${recipients.join(", ")}`);
           
@@ -1699,7 +1696,7 @@ export async function processScheduledReports(): Promise<void> {
           });
 
           const emailHtml = generateReportEmailHTML(report, schedule.client, { targetKeywords, shareUrl });
-          const emailSubject = schedule.emailSubject || `SEO Report - ${schedule.client.name} - ${schedule.frequency.charAt(0).toUpperCase() + schedule.frequency.slice(1)}`;
+          const emailSubject = schedule.emailSubject || buildReportEmailSubject(schedule.client.name, schedule.frequency);
           const pdfBuffer = await generateReportPDFBuffer(report, schedule.client, { targetKeywords, shareUrl });
 
           const emailPromises = recipients.map((email: string) =>
@@ -1728,7 +1725,7 @@ export async function processScheduledReports(): Promise<void> {
           await prisma.seoReport.update({
             where: { id: report.id },
             data: {
-              status: "sent",
+              status: normalizeReportStatus("sent"),
               sentAt: new Date(),
               // SeoReport.recipients is a String column; store as JSON for consistency with ReportSchedule.recipients.
               recipients: JSON.stringify(recipients),

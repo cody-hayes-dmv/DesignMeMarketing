@@ -18,7 +18,6 @@ import {
   ChevronRight,
   Clock3,
   Loader2,
-  Mail,
   TrendingUp,
 } from "lucide-react";
 import {
@@ -34,16 +33,6 @@ import {
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import TaskModal from "@/components/TaskModal";
-
-interface TeamMember {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  verified?: boolean;
-  invited?: boolean;
-  lastActive?: string | null;
-}
 
 const parseDate = (value?: string | null) => {
   if (!value) return null;
@@ -85,9 +74,6 @@ const SpecialistDashboardPage = () => {
   const dispatch = useDispatch();
   const { tasks, loading } = useSelector((state: RootState) => state.task);
   const { user } = useSelector((state: RootState) => state.auth);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [teamLoading, setTeamLoading] = useState(false);
-  const [teamError, setTeamError] = useState<string | null>(null);
   const [updatingTaskIds, setUpdatingTaskIds] = useState<string[]>([]);
   const [collapsedClientIds, setCollapsedClientIds] = useState<Set<string>>(new Set());
   const didInitUpcomingCollapsed = useRef(false);
@@ -100,24 +86,6 @@ const SpecialistDashboardPage = () => {
   useEffect(() => {
     dispatch(fetchTasks() as any);
   }, [dispatch]);
-
-  useEffect(() => {
-    const fetchTeamMembers = async () => {
-      try {
-        setTeamLoading(true);
-        const res = await api.get("/team");
-        setTeamMembers(res.data || []);
-        setTeamError(null);
-      } catch (error: any) {
-        console.error("Failed to load team members", error);
-        setTeamError(error?.response?.data?.message || "Unable to load team members");
-      } finally {
-        setTeamLoading(false);
-      }
-    };
-
-    fetchTeamMembers();
-  }, []);
 
   const myTasks: Task[] = useMemo(() => {
     const safeTasks = Array.isArray(tasks) ? tasks : [];
@@ -403,8 +371,6 @@ const SpecialistDashboardPage = () => {
     return <span className="text-gray-500">{formatted}</span>;
   };
 
-  const teamSnapshot = useMemo(() => teamMembers.slice(0, 4), [teamMembers]);
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-violet-50/30 p-8 space-y-8">
       {/* Header Banner */}
@@ -677,47 +643,6 @@ const SpecialistDashboardPage = () => {
             )}
           </div>
 
-          <div className="bg-white border border-gray-200 border-l-4 border-l-purple-500 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Team Snapshot</h2>
-              <Link to="/specialist/team" className="text-xs font-medium text-primary-600 hover:text-primary-700">
-                View team
-              </Link>
-            </div>
-            {teamLoading ? (
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
-                Loading teammates...
-              </div>
-            ) : teamError ? (
-              <p className="text-sm text-rose-500">{teamError}</p>
-            ) : teamSnapshot.length === 0 ? (
-              <p className="text-sm text-gray-500">No team members found.</p>
-            ) : (
-              <ul className="space-y-4">
-                {teamSnapshot.map((member) => (
-                  <li key={member.id} className="flex items-start space-x-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-600">
-                      {member.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900">{member.name}</p>
-                      <p className="text-xs text-gray-500 truncate">{member.email}</p>
-                      <div className="mt-1 flex items-center gap-2 flex-wrap">
-                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
-                          {member.role}
-                        </span>
-                        <span className="inline-flex items-center text-[11px] text-gray-400 gap-1">
-                          <Mail className="h-3 w-3" />
-                          {member.verified ? "Verified" : "Pending"}
-                        </span>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         </div>
       </div>
 

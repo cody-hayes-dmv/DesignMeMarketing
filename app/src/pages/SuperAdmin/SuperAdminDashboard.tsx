@@ -143,28 +143,6 @@ const SuperAdminDashboard = () => {
 
   const allMyTasks = useMemo(() => sortedMyTasks, [sortedMyTasks]);
 
-  const safeParseObject = (raw: any): Record<string, any> => {
-    if (!raw) return {};
-    if (typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, any>;
-    if (typeof raw !== "string") return {};
-    try {
-      const v = JSON.parse(raw);
-      return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : {};
-    } catch {
-      return {};
-    }
-  };
-
-  const isManagedServiceClient = (client: (typeof clients)[number]) => {
-    const info = safeParseObject((client as any)?.accountInfo);
-    return Boolean(
-      info.seoRoadmapStartMonth ||
-      info.pagesPerMonth ||
-      info.technicalHoursPerMonth ||
-      info.campaignDurationMonths
-    );
-  };
-
   // Dashboard metrics: prefer API (SUPER_ADMIN) for correct definitions
   const [stats, setStats] = useState<{
     totalAgencies: number;
@@ -408,7 +386,7 @@ const SuperAdminDashboard = () => {
         {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6 lg:gap-8">
           {/* Total Agencies */}
-          <button className="bg-white rounded-2xl border border-primary-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <div className="bg-white rounded-2xl border border-primary-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-primary-400/20 to-primary-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -424,10 +402,10 @@ const SuperAdminDashboard = () => {
                 <Building2 className="h-6 w-6 text-white" />
               </div>
             </div>
-          </button>
+          </div>
 
           {/* Active Agencies */}
-          <button className="bg-white rounded-2xl border border-green-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <div className="bg-white rounded-2xl border border-green-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-green-400/20 to-green-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -443,10 +421,10 @@ const SuperAdminDashboard = () => {
                 <CheckCircle className="h-6 w-6 text-white" />
               </div>
             </div>
-          </button>
+          </div>
 
           {/* Active Clients */}
-          <button className="bg-white rounded-2xl border border-indigo-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <div className="bg-white rounded-2xl border border-indigo-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-400/20 to-indigo-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -462,10 +440,10 @@ const SuperAdminDashboard = () => {
                 <Users className="h-6 w-6 text-white" />
               </div>
             </div>
-          </button>
+          </div>
 
           {/* Total Dashboards */}
-          <button className="bg-white rounded-2xl border border-blue-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <div className="bg-white rounded-2xl border border-blue-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-400/20 to-blue-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -481,10 +459,10 @@ const SuperAdminDashboard = () => {
                 <Activity className="h-6 w-6 text-white" />
               </div>
             </div>
-          </button>
+          </div>
 
           {/* Pending Requests */}
-          <button className="bg-white rounded-2xl border border-rose-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <div className="bg-white rounded-2xl border border-rose-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-rose-400/20 to-rose-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -505,7 +483,7 @@ const SuperAdminDashboard = () => {
                 )}
               </div>
             </div>
-          </button>
+          </div>
         </div>
 
         {/* Admin-first task management */}

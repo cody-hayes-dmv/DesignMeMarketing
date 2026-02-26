@@ -817,10 +817,12 @@ const SettingsPage = () => {
                       </p>
                     </div>
                     <button
-                      onClick={() => toast("2FA feature coming soon", { icon: "ℹ️" })}
-                      className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors"
+                      type="button"
+                      disabled
+                      title="Two-factor authentication is coming soon."
+                      className="bg-primary-300 text-white px-4 py-2 rounded-lg cursor-not-allowed"
                     >
-                      Enable
+                      Enable (Coming soon)
                     </button>
                   </div>
                 </div>
@@ -835,10 +837,12 @@ const SettingsPage = () => {
                       </p>
                     </div>
                     <button
-                      onClick={() => toast("API Keys feature coming soon", { icon: "ℹ️" })}
-                      className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                      type="button"
+                      disabled
+                      title="API keys management is coming soon."
+                      className="bg-gray-200 text-gray-500 px-4 py-2 rounded-lg cursor-not-allowed"
                     >
-                      Manage
+                      Manage (Coming soon)
                     </button>
                   </div>
                 </div>

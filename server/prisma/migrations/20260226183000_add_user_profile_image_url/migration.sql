@@ -1,0 +1,2 @@
+ALTER TABLE `users`
+ADD COLUMN `profileImageUrl` VARCHAR(2048) NULL;

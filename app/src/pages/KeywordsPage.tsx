@@ -74,6 +74,29 @@ const formatCompact = (value: number | null | undefined) => {
   return value.toString();
 };
 
+const withSeedKeywordFirst = (seed: string, suggestions: ResearchKeyword[]): ResearchKeyword[] => {
+  const normalizedSeed = seed.trim();
+  if (!normalizedSeed) return suggestions;
+  const byKeyword = new Map<string, ResearchKeyword>();
+  for (const row of suggestions) {
+    byKeyword.set((row.keyword || "").trim().toLowerCase(), row);
+  }
+  const seedKey = normalizedSeed.toLowerCase();
+  const existingSeed = byKeyword.get(seedKey);
+  const seedRow: ResearchKeyword = existingSeed ?? {
+    keyword: normalizedSeed,
+    searchVolume: 0,
+    cpc: null,
+    competition: null,
+    competitionLevel: null,
+    difficulty: null,
+    monthlySearches: null,
+    seed: normalizedSeed,
+  };
+  const rest = suggestions.filter((row) => (row.keyword || "").trim().toLowerCase() !== seedKey);
+  return [seedRow, ...rest];
+};
+
 // Difficulty description for Keyword Detail card (screenshot 1)
 function getDifficultyDescription(label: string): string {
   const lower = (label || "").toLowerCase();
@@ -204,15 +227,16 @@ const KeywordsPage: React.FC = () => {
         | { suggestions?: ResearchKeyword[]; variations?: ResearchKeyword[]; questions?: ResearchKeyword[]; strategy?: { pillar: string; items: ResearchKeyword[] } }
         | ResearchKeyword[];
       const suggestions: ResearchKeyword[] = Array.isArray(data) ? data : (data?.suggestions ?? []);
-      setResearchResults(suggestions);
+      const orderedSuggestions = withSeedKeywordFirst(researchSeed, suggestions);
+      setResearchResults(orderedSuggestions);
       if (data && !Array.isArray(data) && data.suggestions) {
         setKeywordIdeas({
           variations: data.variations ?? [],
           questions: data.questions ?? [],
-          strategy: data.strategy ?? { pillar: researchSeed.trim(), items: suggestions },
+          strategy: data.strategy ?? { pillar: researchSeed.trim(), items: orderedSuggestions },
         });
       }
-      if (suggestions.length === 0) {
+      if (orderedSuggestions.length === 0) {
         setResearchError("No suggestions were found for this keyword. Try a different phrase.");
       }
     } catch (error: any) {
@@ -338,7 +362,9 @@ const KeywordsPage: React.FC = () => {
           const cacheKey = `${researchSeed.trim()}|${researchLocation}|${researchLanguage}`;
           if (serpCacheRef.current.key !== cacheKey) serpCacheRef.current = { key: cacheKey, byOffset: {} };
           serpCacheRef.current.byOffset[0] = page0;
-          [10, 20].forEach((off) => {
+          const totalCount = Number(page0.totalCount || 0);
+          const offsetsToPrefetch = [10, 20].filter((off) => totalCount > off);
+          offsetsToPrefetch.forEach((off) => {
             api
               .get("/seo/serp-analysis", {
                 params: { keyword: researchSeed.trim(), locationCode: researchLocation, languageCode: researchLanguage, offset: off },
@@ -421,15 +447,16 @@ const KeywordsPage: React.FC = () => {
         | { suggestions?: ResearchKeyword[]; variations?: ResearchKeyword[]; questions?: ResearchKeyword[]; strategy?: { pillar: string; items: ResearchKeyword[] } }
         | ResearchKeyword[];
       const suggestions: ResearchKeyword[] = Array.isArray(data) ? data : (data?.suggestions ?? []);
-      setResearchResults(suggestions);
+      const orderedSuggestions = withSeedKeywordFirst(keyword, suggestions);
+      setResearchResults(orderedSuggestions);
       if (data && !Array.isArray(data) && data.suggestions) {
         setKeywordIdeas({
           variations: data.variations ?? [],
           questions: data.questions ?? [],
-          strategy: data.strategy ?? { pillar: keyword.trim(), items: suggestions },
+          strategy: data.strategy ?? { pillar: keyword.trim(), items: orderedSuggestions },
         });
       }
-      if (suggestions.length === 0) setResearchError("No suggestions found for this keyword.");
+      if (orderedSuggestions.length === 0) setResearchError("No suggestions found for this keyword.");
     } catch (err: any) {
       setResearchResults([]);
       setKeywordIdeas({ variations: [], questions: [], strategy: { pillar: "", items: [] } });
@@ -938,94 +965,9 @@ const KeywordsPage: React.FC = () => {
               </div>
             )}
 
-            <div className="pdf-section overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gradient-to-r from-primary-100 via-blue-100 to-indigo-100">
-                  <tr>
-                    <th className="px-6 py-4">
-                      <span className="sr-only">Select</span>
-                    </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
-                      Keyword
-                    </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
-                      Search volume
-                    </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
-                      CPC (USD)
-                    </th>
-                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
-                      Difficulty
-                    </th>
-                    <th className="px-6 py-4">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
-                  {researchLoading ? (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
-                        <span className="inline-flex items-center gap-2 text-sm">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
-                          Fetching keyword suggestions…
-                        </span>
-                      </td>
-                    </tr>
-                  ) : researchResults.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500 text-sm">
-                        Run a keyword search to see suggestions.
-                      </td>
-                    </tr>
-                  ) : (
-                    researchResults.map((result) => (
-                      <tr key={result.keyword} className="hover:bg-blue-50/50 transition-colors duration-150">
-                        <td className="px-6 py-4">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(selectedSuggestions[result.keyword])}
-                            onChange={() => toggleSuggestionSelection(result.keyword)}
-                            className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 cursor-pointer"
-                          />
-                        </td>
-                        <td className="px-6 py-4">
-                          <div>
-                            <p className="font-semibold text-gray-900">{result.keyword}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              Seed: <span className="font-medium text-gray-600">{result.seed}</span>
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-gray-700 font-medium">
-                          {formatNumber(result.searchVolume)}
-                        </td>
-                        <td className="px-6 py-4 text-gray-700 font-medium">
-                          {result.cpc && result.cpc > 0 ? `$${result.cpc.toFixed(2)}` : "—"}
-                        </td>
-                        <td className="px-6 py-4 text-gray-700 font-medium">
-                          {result.difficulty !== null ? `${result.difficulty}` : "—"}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleAssignSingle(result)}
-                            disabled={assigningKeywords}
-                            className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-60 transition-all duration-150 shadow-sm"
-                          >
-                            Track
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
             {/* Keyword Detail (4 cards) - screenshot 1: Volume & KD, Global Volume, Intent & Trend, CPC & Competitive Density */}
             {researchResults.length > 0 && (keywordDetail || keywordDetailLoading) && (
-              <div className="pdf-section border-t border-gray-200 p-6 bg-gradient-to-r from-blue-50/40 to-indigo-50/30">
+              <div className="pdf-section border-b border-gray-200 p-6 bg-gradient-to-r from-blue-50/40 to-indigo-50/30">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <span className="w-1 h-6 rounded-full bg-gradient-to-b from-primary-500 to-indigo-500" aria-hidden />
                   Keyword: {researchSeed || keywordDetail?.keyword}
@@ -1127,6 +1069,91 @@ const KeywordsPage: React.FC = () => {
                 )}
               </div>
             )}
+
+            <div className="pdf-section overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gradient-to-r from-primary-100 via-blue-100 to-indigo-100">
+                  <tr>
+                    <th className="px-6 py-4">
+                      <span className="sr-only">Select</span>
+                    </th>
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
+                      Keyword
+                    </th>
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
+                      Search volume
+                    </th>
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
+                      CPC (USD)
+                    </th>
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
+                      Difficulty
+                    </th>
+                    <th className="px-6 py-4">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {researchLoading ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                        <span className="inline-flex items-center gap-2 text-sm">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                          Fetching keyword suggestions…
+                        </span>
+                      </td>
+                    </tr>
+                  ) : researchResults.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500 text-sm">
+                        Run a keyword search to see suggestions.
+                      </td>
+                    </tr>
+                  ) : (
+                    researchResults.map((result) => (
+                      <tr key={result.keyword} className="hover:bg-blue-50/50 transition-colors duration-150">
+                        <td className="px-6 py-4">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selectedSuggestions[result.keyword])}
+                            onChange={() => toggleSuggestionSelection(result.keyword)}
+                            className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 cursor-pointer"
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <div>
+                            <p className="font-semibold text-gray-900">{result.keyword}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Seed: <span className="font-medium text-gray-600">{result.seed}</span>
+                            </p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-gray-700 font-medium">
+                          {formatNumber(result.searchVolume)}
+                        </td>
+                        <td className="px-6 py-4 text-gray-700 font-medium">
+                          {result.cpc && result.cpc > 0 ? `$${result.cpc.toFixed(2)}` : "—"}
+                        </td>
+                        <td className="px-6 py-4 text-gray-700 font-medium">
+                          {result.difficulty !== null ? `${result.difficulty}` : "—"}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleAssignSingle(result)}
+                            disabled={assigningKeywords}
+                            className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-60 transition-all duration-150 shadow-sm"
+                          >
+                            Track
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
 
             {/* Keyword Ideas — all data from DataForSEO (variations, questions, strategy) */}
             {researchResults.length > 0 && (
@@ -1245,43 +1272,63 @@ const KeywordsPage: React.FC = () => {
                       Select a client in the research section above to track keywords.
                     </div>
                   )}
-                  <div className="flex-1 overflow-auto px-6 py-4">
-                    <table className="min-w-full text-sm">
-                      <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="text-left py-3 font-semibold text-gray-700">Keywords</th>
-                          <th className="text-right py-3 font-semibold text-gray-700">Volume</th>
-                          <th className="text-right py-3 font-semibold text-gray-700">KD %</th>
-                          <th className="text-right py-3 font-semibold text-gray-700 w-24">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {keywordIdeasModal.items.map((r) => (
-                          <tr key={r.keyword} className="hover:bg-gray-50">
-                            <td className="py-2 pr-4">
-                              <button type="button" onClick={() => { handleKeywordIdeaClick(r.keyword); setKeywordIdeasModal(null); }} className="text-primary-600 hover:underline text-left font-medium">
-                                {r.keyword}
-                              </button>
-                            </td>
-                            <td className="py-2 text-right text-gray-700">{formatCompact(r.searchVolume)}</td>
-                            <td className="py-2 text-right">
-                              <span className={`inline-block w-2 h-2 rounded-full mr-1 align-middle ${(r.difficulty ?? 0) >= 70 ? "bg-red-500" : (r.difficulty ?? 0) >= 40 ? "bg-amber-500" : "bg-green-500"}`} />
-                              {r.difficulty ?? "—"}
-                            </td>
-                            <td className="py-2 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleAssignSingle(r)}
-                                disabled={!assignClientId || assigningKeywords}
-                                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
-                              >
-                                Track
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="flex-1 px-6 py-4 min-h-0">
+                    <div className="rounded-lg border border-gray-200 overflow-hidden">
+                      <div className="overflow-x-auto bg-gray-50 border-b border-gray-200">
+                        <table className="min-w-full text-sm table-fixed">
+                          <colgroup>
+                            <col className="w-[58%]" />
+                            <col className="w-[14%]" />
+                            <col className="w-[14%]" />
+                            <col className="w-[14%]" />
+                          </colgroup>
+                          <thead>
+                            <tr>
+                              <th className="text-left py-3 px-3 font-semibold text-gray-700">Keywords</th>
+                              <th className="text-right py-3 px-3 font-semibold text-gray-700">Volume</th>
+                              <th className="text-right py-3 px-3 font-semibold text-gray-700">KD %</th>
+                              <th className="text-right py-3 px-3 font-semibold text-gray-700">Action</th>
+                            </tr>
+                          </thead>
+                        </table>
+                      </div>
+                      <div className="max-h-[50vh] overflow-auto">
+                        <table className="min-w-full text-sm table-fixed">
+                          <colgroup>
+                            <col className="w-[58%]" />
+                            <col className="w-[14%]" />
+                            <col className="w-[14%]" />
+                            <col className="w-[14%]" />
+                          </colgroup>
+                          <tbody className="divide-y divide-gray-100">
+                            {keywordIdeasModal.items.map((r) => (
+                              <tr key={r.keyword} className="hover:bg-gray-50">
+                                <td className="py-2 px-3 pr-4">
+                                  <button type="button" onClick={() => { handleKeywordIdeaClick(r.keyword); setKeywordIdeasModal(null); }} className="text-primary-600 hover:underline text-left font-medium">
+                                    {r.keyword}
+                                  </button>
+                                </td>
+                                <td className="py-2 px-3 text-right text-gray-700">{formatCompact(r.searchVolume)}</td>
+                                <td className="py-2 px-3 text-right">
+                                  <span className={`inline-block w-2 h-2 rounded-full mr-1 align-middle ${(r.difficulty ?? 0) >= 70 ? "bg-red-500" : (r.difficulty ?? 0) >= 40 ? "bg-amber-500" : "bg-green-500"}`} />
+                                  {r.difficulty ?? "—"}
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAssignSingle(r)}
+                                    disabled={!assignClientId || assigningKeywords}
+                                    className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                                  >
+                                    Track
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1333,52 +1380,155 @@ const KeywordsPage: React.FC = () => {
                     </div>
                     {/* Expandable SERP feature sections */}
                     {serpAnalysis.serpFeatureDetails && (
-                      <div className="mb-4 space-y-1 border border-gray-200 rounded-xl overflow-hidden">
-                        <button type="button" onClick={() => setSerpFeatureExpanded((p) => ({ ...p, local_pack: !p.local_pack }))} className="w-full flex items-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left text-sm font-medium text-gray-700">
-                          {serpFeatureExpanded.local_pack ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          <MapPin className="h-4 w-4" />
-                          Local pack
-                        </button>
-                        {serpFeatureExpanded.local_pack && (serpAnalysis.serpFeatureDetails.local_pack?.length ? (
-                          <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-600 space-y-2">
-                            {serpAnalysis.serpFeatureDetails.local_pack.map((item, i) => (
-                              <div key={i}>
-                                {item.title && <p className="font-medium text-gray-900">{item.title}</p>}
-                                {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">{item.link}</a>}
-                              </div>
-                            ))}
+                      <div className="mb-4 rounded-xl border border-gray-200 overflow-hidden bg-white">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-slate-50">
+                          <p className="text-sm font-semibold text-gray-800">Feature Insights</p>
+                          <div className="flex items-center gap-2" data-pdf-hide="true">
+                            <button
+                              type="button"
+                              onClick={() => setSerpFeatureExpanded({ local_pack: true, people_also_ask: true, things_to_know: true })}
+                              className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                            >
+                              Expand all
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSerpFeatureExpanded({ local_pack: false, people_also_ask: false, things_to_know: false })}
+                              className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                            >
+                              Collapse all
+                            </button>
                           </div>
-                        ) : <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-500">No local pack data</div>)}
-                        <button type="button" onClick={() => setSerpFeatureExpanded((p) => ({ ...p, people_also_ask: !p.people_also_ask }))} className="w-full flex items-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left text-sm font-medium text-gray-700">
-                          {serpFeatureExpanded.people_also_ask ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          <MessageCircle className="h-4 w-4" />
-                          People also ask
-                        </button>
-                        {serpFeatureExpanded.people_also_ask && (serpAnalysis.serpFeatureDetails.people_also_ask?.length ? (
-                          <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-600 space-y-3">
-                            {serpAnalysis.serpFeatureDetails.people_also_ask.map((item, i) => (
-                              <div key={i}>
-                                {item.title && <p className="font-medium text-gray-900">{item.title}</p>}
-                                {item.snippet && <p className="text-gray-600">{item.snippet}</p>}
+                        </div>
+
+                        <div className="space-y-1">
+                          <button
+                            type="button"
+                            onClick={() => setSerpFeatureExpanded((p) => ({ ...p, local_pack: !p.local_pack }))}
+                            className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left text-sm font-medium text-gray-700"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              {serpFeatureExpanded.local_pack ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              <MapPin className="h-4 w-4 text-rose-600" />
+                              Local pack
+                            </span>
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                              {serpAnalysis.serpFeatureDetails.local_pack?.length || 0}
+                            </span>
+                          </button>
+                          {serpFeatureExpanded.local_pack && (
+                            serpAnalysis.serpFeatureDetails.local_pack?.length ? (
+                              <div className="px-4 py-3 border-t border-gray-100 bg-white space-y-2">
+                                {serpAnalysis.serpFeatureDetails.local_pack.map((item, i) => (
+                                  <div key={i} className="rounded-lg border border-gray-200 bg-gray-50 p-3 hover:border-rose-300 hover:bg-rose-50/40 transition-colors">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <p className="text-sm font-semibold text-gray-900">
+                                        {item.title || "Untitled local result"}
+                                      </p>
+                                      <span className="shrink-0 rounded-md bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700">
+                                        #{i + 1}
+                                      </span>
+                                    </div>
+                                    {item.link ? (
+                                      <a
+                                        href={item.link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="mt-2 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                                      >
+                                        Open listing <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    ) : (
+                                      <p className="mt-2 text-xs text-gray-500">No link provided.</p>
+                                    )}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        ) : <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-500">No people also ask data</div>)}
-                        <button type="button" onClick={() => setSerpFeatureExpanded((p) => ({ ...p, things_to_know: !p.things_to_know }))} className="w-full flex items-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left text-sm font-medium text-gray-700">
-                          {serpFeatureExpanded.things_to_know ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          <List className="h-4 w-4" />
-                          Things to know
-                        </button>
-                        {serpFeatureExpanded.things_to_know && (serpAnalysis.serpFeatureDetails.things_to_know?.length ? (
-                          <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-600 space-y-3">
-                            {serpAnalysis.serpFeatureDetails.things_to_know.map((item, i) => (
-                              <div key={i}>
-                                {item.title && <p className="font-medium text-gray-900">{item.title}</p>}
-                                {item.snippet && <p className="text-gray-600">{item.snippet}</p>}
+                            ) : <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-500">No local pack data</div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setSerpFeatureExpanded((p) => ({ ...p, people_also_ask: !p.people_also_ask }))}
+                            className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left text-sm font-medium text-gray-700"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              {serpFeatureExpanded.people_also_ask ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              <MessageCircle className="h-4 w-4 text-blue-600" />
+                              People also ask
+                            </span>
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                              {serpAnalysis.serpFeatureDetails.people_also_ask?.length || 0}
+                            </span>
+                          </button>
+                          {serpFeatureExpanded.people_also_ask && (
+                            serpAnalysis.serpFeatureDetails.people_also_ask?.length ? (
+                              <div className="px-4 py-3 border-t border-gray-100 bg-white space-y-2">
+                                {serpAnalysis.serpFeatureDetails.people_also_ask.map((item, i) => (
+                                  <div key={i} className="rounded-lg border border-gray-200 bg-gray-50 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <p className="text-sm font-semibold text-gray-900">
+                                        {item.title || "Untitled question"}
+                                      </p>
+                                      {item.title && (
+                                        <a
+                                          href={`https://www.google.com/search?q=${encodeURIComponent(item.title)}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="shrink-0 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                                        >
+                                          Search <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      )}
+                                    </div>
+                                    {item.snippet && <p className="mt-1 text-sm text-gray-600 leading-relaxed">{item.snippet}</p>}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        ) : <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-500">No things to know data</div>)}
+                            ) : <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-500">No people also ask data</div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setSerpFeatureExpanded((p) => ({ ...p, things_to_know: !p.things_to_know }))}
+                            className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left text-sm font-medium text-gray-700"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              {serpFeatureExpanded.things_to_know ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              <List className="h-4 w-4 text-violet-600" />
+                              Things to know
+                            </span>
+                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                              {serpAnalysis.serpFeatureDetails.things_to_know?.length || 0}
+                            </span>
+                          </button>
+                          {serpFeatureExpanded.things_to_know && (
+                            serpAnalysis.serpFeatureDetails.things_to_know?.length ? (
+                              <div className="px-4 py-3 border-t border-gray-100 bg-white space-y-2">
+                                {serpAnalysis.serpFeatureDetails.things_to_know.map((item, i) => (
+                                  <div key={i} className="rounded-lg border border-gray-200 bg-gray-50 p-3 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <p className="text-sm font-semibold text-gray-900">
+                                        {item.title || "Untitled insight"}
+                                      </p>
+                                      {item.title && (
+                                        <a
+                                          href={`https://www.google.com/search?q=${encodeURIComponent(item.title)}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="shrink-0 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                                        >
+                                          Explore <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      )}
+                                    </div>
+                                    {item.snippet && <p className="mt-1 text-sm text-gray-600 leading-relaxed">{item.snippet}</p>}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : <div className="px-4 py-3 bg-white border-t border-gray-100 text-sm text-gray-500">No things to know data</div>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="overflow-x-auto rounded-xl border border-gray-200">

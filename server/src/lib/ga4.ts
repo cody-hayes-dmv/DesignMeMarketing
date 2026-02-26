@@ -308,6 +308,7 @@ export async function fetchGA4TrafficData(
   console.log(`[GA4] Stored property ID: ${client.ga4PropertyId}, Formatted: ${propertyId}`);
 
   // Run requests with individual error handling to avoid one failure breaking all requests
+  const GA4_TRAFFIC_REQUEST_TIMEOUT_MS = 15000;
   let sessionsResponse,
     usersResponse,
     engagementResponse,
@@ -319,7 +320,11 @@ export async function fetchGA4TrafficData(
   // Helper to safely run a report request
   const safeRunReport = async (requestConfig: any, requestName: string) => {
     try {
-      const [response] = await analytics.runReport(requestConfig);
+      const requestPromise: Promise<[any, any?, any?]> = analytics.runReport(requestConfig);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`${requestName} request timed out`)), GA4_TRAFFIC_REQUEST_TIMEOUT_MS);
+      });
+      const [response] = await Promise.race([requestPromise, timeoutPromise]);
       return response;
     } catch (error: any) {
       // Suppress warnings for expected errors (conversions not configured, etc.)
@@ -1364,9 +1369,9 @@ export async function getGA4MetricsFromDB(
       activeUsersTrend,
       events,
       visitorSources: null,
-      // Fallbacks (DB may not have these columns yet)
-      totalUsers: totalUsersFromDb !== null ? totalUsersFromDb : Number(metric.activeUsers),
-      engagedSessions: engagedSessionsFromDb !== null ? engagedSessionsFromDb : Number(metric.keyEvents),
+      // Accuracy-first fallbacks: do not remap semantically different GA4 metrics.
+      totalUsers: totalUsersFromDb !== null ? totalUsersFromDb : 0,
+      engagedSessions: engagedSessionsFromDb !== null ? engagedSessionsFromDb : 0,
       engagementRate: null,
     };
   } catch (error: any) {

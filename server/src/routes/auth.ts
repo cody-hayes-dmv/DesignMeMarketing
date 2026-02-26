@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { TokenType } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../lib/email.js";
+import { BRAND_DISPLAY_NAME } from "../lib/qualityContracts.js";
 import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -140,20 +141,37 @@ router.post("/login", async (req, res) => {
       data: { lastLoginAt: new Date() },
     });
 
+    let clientUsers = user.clientUsers ?? [];
+    if (user.role === "USER" && clientUsers.length === 0) {
+      const pendingCount = await prisma.clientUser.count({
+        where: { userId: user.id, status: "PENDING" },
+      });
+      if (pendingCount > 0) {
+        const acceptedAt = new Date();
+        await prisma.clientUser.updateMany({
+          where: { userId: user.id, status: "PENDING" },
+          data: { status: "ACTIVE", acceptedAt },
+        });
+        clientUsers = await prisma.clientUser.findMany({
+          where: { userId: user.id, status: "ACTIVE" },
+          select: { clientId: true, clientRole: true, status: true },
+        });
+      }
+    }
+
     // Generate JWT
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       getJwtSecret(),
       { expiresIn: "7d" }
     );
-
-    const clientUsers = user.clientUsers ?? [];
     res.json({
       token,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
+        profileImageUrl: (user as any).profileImageUrl ?? null,
         role: user.role,
         verified: user.verified,
         invited: user.invited,
@@ -217,17 +235,36 @@ router.get("/me", authenticateToken, async (req, res) => {
       }
     }
 
+    let clientUsers = user.clientUsers ?? [];
+    if (user.role === "USER" && clientUsers.length === 0) {
+      const pendingCount = await prisma.clientUser.count({
+        where: { userId: user.id, status: "PENDING" },
+      });
+      if (pendingCount > 0) {
+        const acceptedAt = new Date();
+        await prisma.clientUser.updateMany({
+          where: { userId: user.id, status: "PENDING" },
+          data: { status: "ACTIVE", acceptedAt },
+        });
+        clientUsers = await prisma.clientUser.findMany({
+          where: { userId: user.id, status: "ACTIVE" },
+          select: { clientId: true, clientRole: true, status: true },
+        });
+      }
+    }
+
     res.json({
       id: user.id,
       email: user.email,
       name: user.name,
+      profileImageUrl: (user as any).profileImageUrl ?? null,
       role: user.role,
       verified: user.verified,
       invited: user.invited,
       notificationPreferences,
       ...(user.role === "SPECIALIST" ? { specialties } : {}),
       clientAccess: {
-        clients: user.clientUsers.map((c) => ({
+        clients: clientUsers.map((c) => ({
           clientId: c.clientId,
           role: c.clientRole,
           status: c.status,
@@ -287,25 +324,47 @@ router.get("/invite", async (req, res) => {
       where: { token },
     });
 
-    if (!record || record.usedAt || record.expiresAt < new Date()) {
+    const verifiedPayload = (() => {
+      try {
+        return jwt.verify(token, getJwtSecret()) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })();
+
+    if (!record && !verifiedPayload) {
+      return res.status(400).json({ message: "Invalid or expired token" });
+    }
+
+    if (record && record.expiresAt < new Date()) {
       return res.status(400).json({ message: "Invalid or expired token" });
     }
 
     let metadata: any = null;
     try {
-      metadata = record.metadata ? JSON.parse(record.metadata) : null;
+      metadata = record?.metadata ? JSON.parse(record.metadata) : null;
     } catch {
       metadata = null;
     }
+
+    const tokenPayload = ((record ? jwt.decode(record.token) : null) || verifiedPayload || {}) as Record<string, unknown>;
+    const inviteKind = String(metadata?.kind || tokenPayload?.kind || "");
 
     const clientIds: string[] = Array.isArray(metadata?.clientIds)
       ? metadata.clientIds.map((c: any) => String(c))
       : metadata?.clientId
         ? [String(metadata.clientId)]
-        : [];
+        : Array.isArray(tokenPayload?.clientIds)
+          ? (tokenPayload.clientIds as unknown[]).map((c) => String(c))
+          : tokenPayload?.clientId
+            ? [String(tokenPayload.clientId)]
+            : [];
 
-    // Client user invite: token has metadata.kind === "CLIENT_USER_INVITE" and clientIds
-    if (record.type === "INVITE" && metadata?.kind === "CLIENT_USER_INVITE" && clientIds.length > 0) {
+    const recordType = record?.type ?? "INVITE";
+    const isClientUserInvite = recordType === "INVITE" && (inviteKind === "CLIENT_USER_INVITE" || clientIds.length > 0);
+
+    // Client user invite: prefer explicit kind, but also support legacy tokens that only carry clientId/clientIds.
+    if (isClientUserInvite && clientIds.length > 0) {
       const clients = await prisma.client.findMany({
         where: { id: { in: clientIds } },
         select: { id: true, name: true },
@@ -314,13 +373,14 @@ router.get("/invite", async (req, res) => {
       if (clients.length === 0) return res.status(404).json({ message: "Client not found" });
       return res.json({
         kind: "CLIENT_USER_INVITE",
-        email: record.email,
+        email: String(record?.email || tokenPayload?.email || ""),
         clients,
+        used: Boolean(record?.usedAt),
       });
     }
 
-    // Team invite: token created by team invite (type INVITE, userId set, no client metadata)
-    if (record.type === "INVITE" && record.userId) {
+    // Team invite: token created by team invite (type INVITE, userId set, non-client invite kind)
+    if (record && record.type === "INVITE" && record.userId && !isClientUserInvite) {
       let agencyName: string | null = null;
       if (record.agencyId) {
         const agency = await prisma.agency.findUnique({
@@ -370,16 +430,28 @@ router.post("/invite/accept", async (req, res) => {
       metadata = null;
     }
 
+    const tokenPayload = (jwt.decode(record.token) || {}) as Record<string, unknown>;
+    const inviteKind = String(metadata?.kind || tokenPayload?.kind || "");
+
     const clientIds: string[] = Array.isArray(metadata?.clientIds)
       ? metadata.clientIds.map((c: any) => String(c))
       : metadata?.clientId
         ? [String(metadata.clientId)]
+        : Array.isArray(tokenPayload?.clientIds)
+          ? (tokenPayload.clientIds as unknown[]).map((c) => String(c))
+          : tokenPayload?.clientId
+            ? [String(tokenPayload.clientId)]
         : [];
 
-    // Client user invite
-    if (record.type === "INVITE" && metadata?.kind === "CLIENT_USER_INVITE" && clientIds.length > 0) {
-      // Create or update user (do NOT overwrite password for already-verified users)
-      const existingUser = await prisma.user.findUnique({ where: { email: record.email } });
+    const isClientUserInvite = record.type === "INVITE" && (inviteKind === "CLIENT_USER_INVITE" || clientIds.length > 0);
+
+    // Client user invite: prefer explicit kind, but also support legacy tokens that only carry clientId/clientIds.
+    if (isClientUserInvite && clientIds.length > 0) {
+      // Prefer the exact invited userId from the token to avoid drifting to a different account with the same email.
+      const invitedUserById = record.userId
+        ? await prisma.user.findUnique({ where: { id: record.userId } })
+        : null;
+      const existingUser = invitedUserById ?? (await prisma.user.findUnique({ where: { email: record.email } }));
       let user;
 
       if (existingUser?.verified) {
@@ -417,10 +489,10 @@ router.post("/invite/accept", async (req, res) => {
         });
       }
 
-      const resolvedClientRole = String(metadata?.clientRole || "CLIENT");
+      const resolvedClientRole = String(metadata?.clientRole || tokenPayload?.clientRole || "CLIENT");
       const acceptedAt = new Date();
 
-      // Ensure memberships exist for all invited clients
+      // Ensure memberships exist for all invited clients and are activated immediately after acceptance.
       for (const clientId of clientIds) {
         await prisma.clientUser.upsert({
           where: { clientId_userId: { clientId, userId: user.id } },
@@ -466,8 +538,8 @@ router.post("/invite/accept", async (req, res) => {
       });
     }
 
-    // Team invite: token created by team invite (type INVITE, userId set, non-client metadata)
-    if (record.type === "INVITE" && record.userId) {
+    // Team invite: token created by team invite (type INVITE, userId set, non-client invite kind)
+    if (record.type === "INVITE" && record.userId && !isClientUserInvite) {
       const teamUser = await prisma.user.findUnique({ where: { id: record.userId } });
       if (!teamUser) return res.status(400).json({ message: "User not found" });
       const passwordHash = await bcrypt.hash(password, 12);
@@ -712,9 +784,9 @@ router.post("/forgot-password", async (req, res) => {
     const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
     await sendEmail({
       to: user.email,
-      subject: "Reset your ZOESI password",
+      subject: `Reset your ${BRAND_DISPLAY_NAME} password`,
       html: `
-        <p>You requested a password reset for your ZOESI account.</p>
+        <p>You requested a password reset for your ${BRAND_DISPLAY_NAME} account.</p>
         <p><a href="${resetUrl}">Reset your password</a></p>
         <p>This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>
       `,

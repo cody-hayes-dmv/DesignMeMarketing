@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useImperativeHandle, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { RootState } from "@/store";
@@ -149,8 +149,6 @@ const AgenciesPage = () => {
         clientId: null,
         clientName: null,
     });
-    const [allClients, setAllClients] = useState<Array<{ id: string; name: string; domain: string }>>([]);
-    const [loadingAllClients, setLoadingAllClients] = useState(false);
     const statusButtonRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const navigate = useNavigate();
     const [sortField, setSortField] = useState<"agency" | "subdomain" | "clients">("agency");
@@ -759,19 +757,6 @@ const AgenciesPage = () => {
             console.error("Failed to remove client from agency:", error);
             toast.error(error?.response?.data?.message || "Failed to remove client from agency");
             setRemoveClientConfirm({ isOpen: false, agencyId: null, clientId: null, clientName: null });
-        }
-    };
-
-    const loadAllClients = async () => {
-        setLoadingAllClients(true);
-        try {
-            const response = await api.get("/clients");
-            setAllClients(response.data || []);
-        } catch (error: any) {
-            console.error("Failed to fetch clients:", error);
-            toast.error(error.response?.data?.message || "Failed to fetch clients");
-        } finally {
-            setLoadingAllClients(false);
         }
     };
 
@@ -1731,22 +1716,22 @@ const AgenciesPage = () => {
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Billing Type *</label>
                                             <div className="space-y-2">
                                                 <label className="flex items-center gap-2">
-                                                    <input type="radio" name="billingOption" value="free_account" checked={createForm.billingOption === "free_account"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "free_account", tier: "" })} className="text-primary-600" />
+                                                    <input type="radio" name="billingOption" value="free_account" checked={createForm.billingOption === "free_account"} onChange={() => setCreateForm({ ...createForm, billingOption: "free_account", tier: "" })} className="text-primary-600" />
                                                     <span>Free Account</span>
                                                     <span className="text-xs text-gray-500">(Free tier, no payment)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
-                                                    <input type="radio" name="billingOption" value="charge" checked={createForm.billingOption === "charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "charge" })} className="text-primary-600" />
+                                                    <input type="radio" name="billingOption" value="charge" checked={createForm.billingOption === "charge"} onChange={() => setCreateForm({ ...createForm, billingOption: "charge" })} className="text-primary-600" />
                                                     <span>Charge to Card</span>
                                                     <span className="text-xs text-gray-500">(any tier, subscription immediately)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
-                                                    <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "no_charge", tier: "" })} className="text-primary-600" />
+                                                    <input type="radio" name="billingOption" value="no_charge" checked={createForm.billingOption === "no_charge"} onChange={() => setCreateForm({ ...createForm, billingOption: "no_charge", tier: "" })} className="text-primary-600" />
                                                     <span>No Charge during 7 days trial</span>
                                                     <span className="text-xs text-gray-500">(Free tier for 7 days, then must subscribe)</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
-                                                    <input type="radio" name="billingOption" value="manual_invoice" checked={createForm.billingOption === "manual_invoice"} onChange={(e) => setCreateForm({ ...createForm, billingOption: "manual_invoice" })} className="text-primary-600" />
+                                                    <input type="radio" name="billingOption" value="manual_invoice" checked={createForm.billingOption === "manual_invoice"} onChange={() => setCreateForm({ ...createForm, billingOption: "manual_invoice" })} className="text-primary-600" />
                                                     <span>Enterprise</span>
                                                     <span className="text-xs text-gray-500">(manual invoice)</span>
                                                 </label>
@@ -2910,54 +2895,47 @@ const AgenciesPage = () => {
                             <button
                                 onClick={() => {
                                     setAssignClientModal({ isOpen: false, clientId: null, clientName: null });
-                                    setAllClients([]);
                                 }}
                                 className="text-gray-400 hover:text-gray-600"
                             >
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
-                        {loadingAllClients ? (
-                            <div className="text-center py-8 text-gray-500">
-                                Loading clients...
-                            </div>
-                        ) : (
-                            <div className="space-y-4">
-                                <p className="text-sm text-gray-600">
-                                    Select an agency to assign "{assignClientModal.clientName}" to:
-                                </p>
-                                <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
-                                    {agencies.length === 0 ? (
-                                        <div className="p-4 text-center text-gray-500">
-                                            No agencies available
-                                        </div>
-                                    ) : (
-                                        <div className="divide-y divide-gray-200">
-                                            {agencies.map((agency) => (
-                                                <button
-                                                    key={agency.id}
-                                                    onClick={() => {
-                                                        if (assignClientModal.clientId) {
-                                                            handleAssignClientToAgency(agency.id, assignClientModal.clientId);
-                                                        }
-                                                    }}
-                                                    className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                                                >
-                                                    <div className="font-medium text-gray-900">{agency.name}</div>
-                                                    {(() => {
-                                                        const sd = agency.subdomain != null ? String(agency.subdomain).trim() : "";
-                                                        const hasSubdomain = sd && sd.toLowerCase() !== "null";
-                                                        return hasSubdomain ? (
-                                                            <div className="text-sm text-gray-500">{sd}.yourseodashboard.com</div>
-                                                        ) : null;
-                                                    })()}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-600">
+                                Select an agency to assign "{assignClientModal.clientName}" to:
+                            </p>
+                            <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+                                {agencies.length === 0 ? (
+                                    <div className="p-4 text-center text-gray-500">
+                                        No agencies available
+                                    </div>
+                                ) : (
+                                    <div className="divide-y divide-gray-200">
+                                        {agencies.map((agency) => (
+                                            <button
+                                                key={agency.id}
+                                                onClick={() => {
+                                                    if (assignClientModal.clientId) {
+                                                        handleAssignClientToAgency(agency.id, assignClientModal.clientId);
+                                                    }
+                                                }}
+                                                className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                                            >
+                                                <div className="font-medium text-gray-900">{agency.name}</div>
+                                                {(() => {
+                                                    const sd = agency.subdomain != null ? String(agency.subdomain).trim() : "";
+                                                    const hasSubdomain = sd && sd.toLowerCase() !== "null";
+                                                    return hasSubdomain ? (
+                                                        <div className="text-sm text-gray-500">{sd}.yourseodashboard.com</div>
+                                                    ) : null;
+                                                })()}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                                 </div>
-                            </div>
-                        )}
+                        </div>
                     </div>
                 </div>
             )}

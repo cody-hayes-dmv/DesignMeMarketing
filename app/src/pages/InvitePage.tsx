@@ -11,6 +11,7 @@ type InviteInfo =
       kind: "CLIENT_USER_INVITE";
       email: string;
       clients: Array<{ id: string; name: string }>;
+      used?: boolean;
     }
   | {
       kind: "TEAM_INVITE";
@@ -58,8 +59,9 @@ const InvitePage = () => {
       try {
         setLoading(true);
         setError(null);
-        // If already authenticated (e.g. invite just accepted), don't re-validate used invite token.
-        if (user?.verified) {
+        // If no invite token is present and user is already authenticated, go to dashboard.
+        // When a token exists, always honor invite flow (allows accepting from a browser that already has another session).
+        if (user?.verified && !token) {
           navigate(getAuthedRedirectPath(), { replace: true });
           return;
         }
@@ -76,8 +78,17 @@ const InvitePage = () => {
           return;
         }
         const res = await api.get("/auth/invite", { params: { token } });
-        setInvite(res.data as InviteInfo);
+        const inviteInfo = res.data as InviteInfo;
+        if (user?.verified && inviteInfo?.kind === "CLIENT_USER_INVITE" && (inviteInfo as any)?.used) {
+          navigate(getAuthedRedirectPath(), { replace: true });
+          return;
+        }
+        setInvite(inviteInfo);
       } catch (e: any) {
+        if (user?.verified && e?.response?.status === 400) {
+          navigate(getAuthedRedirectPath(), { replace: true });
+          return;
+        }
         setInvite(null);
         setError(e?.response?.data?.message || "Invalid or expired invite.");
       } finally {

@@ -8,6 +8,14 @@ import jwt from "jsonwebtoken";
 import { getAgencyTierContext, canAddTargetKeyword, hasResearchCredits, useResearchCredits } from "../lib/agencyLimits.js";
 import { getTierConfig, getRankRefreshIntervalMs, getAiRefreshIntervalMs } from "../lib/tiers.js";
 import { syncAgencyTierFromStripe } from "../lib/stripeTierSync.js";
+import {
+  buildReportEmailSubject,
+  normalizeReportPeriod,
+  normalizeReportStatus,
+  normalizeEmailRecipients,
+  parsePeriodDays,
+  REPORT_SECTION_ORDER,
+} from "../lib/qualityContracts.js";
 
 const router = express.Router();
 
@@ -67,6 +75,8 @@ const DATAFORSEO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // Default/fallback
 const VENDASTA_AUTO_REFRESH_TTL_MS = 48 * 60 * 60 * 1000; // 48h for Vendasta clients
 const OTHER_CLIENTS_AUTO_REFRESH_TTL_MS = 40 * 60 * 60 * 1000; // 40h for other clients
 const inflightByKey = new Map<string, Promise<any>>();
+const RESEARCH_RESPONSE_CACHE_TTL_MS = 5 * 60 * 1000; // 5m
+const researchResponseCache = new Map<string, { expiresAt: number; payload: any }>();
 
 function coerceBoolean(value: unknown): boolean {
   if (typeof value === "boolean") return value;
@@ -93,6 +103,25 @@ async function dedupeInFlight<T>(key: string, fn: () => Promise<T>): Promise<T> 
   const p = fn().finally(() => inflightByKey.delete(key));
   inflightByKey.set(key, p as any);
   return p;
+}
+
+function getCachedResearchResponse<T = any>(key: string): T | null {
+  const entry = researchResponseCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    researchResponseCache.delete(key);
+    return null;
+  }
+  return entry.payload as T;
+}
+
+function setCachedResearchResponse(key: string, payload: any, ttlMs: number = RESEARCH_RESPONSE_CACHE_TTL_MS): void {
+  researchResponseCache.set(key, { expiresAt: Date.now() + ttlMs, payload });
+  if (researchResponseCache.size > 500) {
+    for (const [k, v] of researchResponseCache.entries()) {
+      if (v.expiresAt <= Date.now()) researchResponseCache.delete(k);
+    }
+  }
 }
 
 function isFresh(lastUpdatedAt: Date | null | undefined, ttlMs: number): boolean {
@@ -1743,7 +1772,7 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
     const { clientId } = req.params;
     const ensureFresh = coerceBoolean(req.query.ensureFresh);
     const periodQuery = typeof req.query.period === "string" ? req.query.period : undefined;
-    const requestedPeriod = periodQuery && ["weekly", "biweekly", "monthly"].includes(periodQuery) ? periodQuery : "monthly";
+    const requestedPeriod = normalizeReportPeriod(periodQuery);
 
     const parseRecipientsField = (value: unknown): string[] => {
       if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
@@ -1811,9 +1840,7 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
         select: { updatedAt: true, period: true },
       });
 
-      const periodToUse = existing?.period && ["weekly", "biweekly", "monthly"].includes(String(existing.period))
-        ? String(existing.period)
-        : requestedPeriod;
+      const periodToUse = normalizeReportPeriod(existing?.period ?? requestedPeriod);
 
       if (existing && !isFresh(existing.updatedAt, DATAFORSEO_REFRESH_TTL_MS)) {
         await dedupeInFlight(`report-autogen:${clientId}:${periodToUse}`, async () => {
@@ -1861,7 +1888,8 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       id: report.id,
       reportDate: report.reportDate,
       period: report.period,
-      status: report.status,
+      status: normalizeReportStatus(report.status),
+      reportSections: REPORT_SECTION_ORDER,
       clientId: report.clientId,
       client: report.client,
       // Traffic metrics from database
@@ -2269,7 +2297,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
       engagedVisitors: ga4Data?.engagedSessions ?? null,
       newUsersTrend: ga4Data?.newUsersTrend || null,
       activeUsersTrend: ga4Data?.activeUsersTrend || null,
-      totalUsersTrend: ga4Data?.activeUsersTrend || null,
+      totalUsersTrend: (ga4Data as any)?.totalUsersTrend ?? ga4Data?.activeUsersTrend ?? null,
       isGA4Connected: isGA4Connected,
       dataSources: {
         traffic: trafficDataSource === "ga4" ? "ga4" : (trafficSourceSummary ? "database" : latestReport ? "seo_report" : "fallback"),
@@ -6939,7 +6967,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     const firstTimeVisitors = newUsers; // Map newUsers to firstTimeVisitors for compatibility
     // Engaged Visitors is the same as Engaged Sessions from GA4
     const engagedVisitors = ga4Data?.engagedSessions ?? null;
-    const totalUsersTrend = activeUsersTrend; // Map activeUsersTrend to totalUsersTrend for compatibility
+    const totalUsersTrend = (ga4Data as any)?.totalUsersTrend ?? activeUsersTrend;
 
     const averagePosition =
       trafficSourceSummary?.averageRank ??
@@ -7015,7 +7043,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
     const { clientId } = req.params;
     // Keep metric shaping consistent across roles so the same client/domain
     // returns the same overview in Agency, Admin, and Super Admin panels.
-    const strictAccuracy = true;
+    const strictAccuracy = false;
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -7054,6 +7082,12 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
+    }
+
+    const domainOverviewClientCacheKey = `domain-overview:${req.user.userId}:${clientId}:strict:${strictAccuracy ? 1 : 0}`;
+    const cachedClientOverview = getCachedResearchResponse<any>(domainOverviewClientCacheKey);
+    if (cachedClientOverview) {
+      return res.json(cachedClientOverview);
     }
 
     const [trafficSources, historyRows, topKeywordsDb, keywordsWithSerpFeatures, backlinks, topPagesPaid, targetKeywordsWithIntent] = await Promise.all([
@@ -7495,7 +7529,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
           };
         });
 
-    res.json({
+    const response = {
       client: { id: client.id, name: client.name, domain: client.domain },
       metrics: {
         organicSearch: {
@@ -7652,7 +7686,10 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       },
       mainPaidCompetitors,
       totalPaidCompetitorsCount: mainPaidCompetitors.length,
-    });
+    };
+
+    setCachedResearchResponse(domainOverviewClientCacheKey, response);
+    res.json(response);
   } catch (error: any) {
     console.error("Domain overview error:", error);
     res.status(500).json({ message: error?.message || "Internal server error" });
@@ -7663,7 +7700,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
     // Direct domain search should return only measured values (no extrapolated fallback math).
-    const strictAccuracy = true;
+    const strictAccuracy = false;
     const forceLive = coerceBoolean(req.query.live);
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
@@ -7702,6 +7739,12 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       if (matchedClientId && !forceLive) {
         return res.redirect(307, `${req.baseUrl}/domain-overview/${matchedClientId}`);
       }
+    }
+
+    const domainOverviewAnyCacheKey = `domain-overview-any:${req.user.userId}:${domain}:live:${forceLive ? 1 : 0}:strict:${strictAccuracy ? 1 : 0}`;
+    const cachedAnyOverview = getCachedResearchResponse<any>(domainOverviewAnyCacheKey);
+    if (cachedAnyOverview) {
+      return res.json(cachedAnyOverview);
     }
 
     const bypassCreditsForTrackedClientLive = forceLive && Boolean(matchedClientId);
@@ -8022,6 +8065,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       await useResearchCredits(tierCtx.agencyId, 1, isFreeOnetime);
     }
 
+    setCachedResearchResponse(domainOverviewAnyCacheKey, result);
     res.json(result);
   } catch (error: any) {
     console.error("Domain overview (any) error:", {
@@ -8743,7 +8787,13 @@ router.post("/reports/schedules/:scheduleId/trigger", authenticateToken, async (
     }
 
     // Import and use the scheduler functions
-    const { autoGenerateReport, generateReportEmailHTML } = await import("../lib/reportScheduler.js");
+    const {
+      autoGenerateReport,
+      generateReportEmailHTML,
+      generateReportPDFBuffer,
+      getReportTargetKeywords,
+      buildShareDashboardUrl,
+    } = await import("../lib/reportScheduler.js");
     const { sendEmail } = await import("../lib/email.js");
 
     // Generate report
@@ -8756,24 +8806,26 @@ router.post("/reports/schedules/:scheduleId/trigger", authenticateToken, async (
     });
 
     // Send email to recipients (stored as JSON string)
-    const recipients: string[] = (() => {
-      if (!schedule.recipients) return [];
-      try {
-        const parsed = JSON.parse(String(schedule.recipients));
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    })();
+    const recipients = normalizeEmailRecipients(schedule.recipients);
     if (recipients && recipients.length > 0) {
-      const emailHtml = generateReportEmailHTML(report, schedule.client);
-      const emailSubject = schedule.emailSubject || `SEO Report - ${schedule.client.name} - ${schedule.frequency.charAt(0).toUpperCase() + schedule.frequency.slice(1)}`;
+      const shareUrl = await buildShareDashboardUrl(schedule.clientId).catch(() => null);
+      const targetKeywords = await getReportTargetKeywords(schedule.clientId).catch(() => []);
+      const emailHtml = generateReportEmailHTML(report, schedule.client, { targetKeywords, shareUrl });
+      const emailSubject = schedule.emailSubject || buildReportEmailSubject(schedule.client.name, schedule.frequency);
+      const pdfBuffer = await generateReportPDFBuffer(report, schedule.client, { targetKeywords, shareUrl });
 
       const emailPromises = recipients.map((email: string) =>
         sendEmail({
           to: email,
           subject: emailSubject,
-          html: emailHtml
+          html: emailHtml,
+          attachments: [
+            {
+              filename: `seo-report-${schedule.client.name.replace(/\s+/g, "-").toLowerCase()}-${report.period}.pdf`,
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ],
         })
       );
 
@@ -8857,7 +8909,7 @@ router.delete("/reports/schedules/:scheduleId", authenticateToken, async (req, r
     if (linkedReports.length > 0) {
       for (const report of linkedReports) {
         // Only update if status is "scheduled" (don't change "sent" reports)
-        if (report.status === "scheduled") {
+        if (normalizeReportStatus(report.status) === "scheduled") {
           await prisma.seoReport.update({
             where: { id: report.id },
             data: {
@@ -8939,30 +8991,13 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const parseRecipientsField = (value: unknown): string[] => {
-      if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
-      if (value == null) return [];
-      const raw = String(value).trim();
-      if (!raw) return [];
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
-        }
-      } catch {
-        // ignore
-      }
-      if (raw.includes(",")) return raw.split(",").map((s) => s.trim()).filter(Boolean);
-      return [raw];
-    };
-
     const recipientsList: string[] =
       Array.isArray(recipients) && recipients.length > 0
-        ? parseRecipientsField(recipients)
+        ? normalizeEmailRecipients(recipients)
         : (() => {
-            const fromReport = parseRecipientsField(report.recipients);
+            const fromReport = normalizeEmailRecipients(report.recipients);
             if (fromReport.length > 0) return fromReport;
-            return parseRecipientsField(report.schedule?.recipients);
+            return normalizeEmailRecipients(report.schedule?.recipients);
           })();
     if (!recipientsList || recipientsList.length === 0) {
       return res.status(400).json({ message: "No recipients specified" });
@@ -8990,7 +9025,7 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
         subject:
           emailSubject ||
           report.schedule?.emailSubject ||
-          `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`,
+          buildReportEmailSubject(report.client.name, report.period),
         html: emailHtml,
         attachments: [
           {
@@ -9014,7 +9049,7 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
         emailSubject:
           emailSubject ||
           report.schedule?.emailSubject ||
-          `SEO Report - ${report.client.name} - ${report.period.charAt(0).toUpperCase() + report.period.slice(1)}`
+          buildReportEmailSubject(report.client.name, report.period)
       }
     });
 
@@ -10999,7 +11034,8 @@ router.get("/serp-analysis", authenticateToken, async (req, res) => {
     // No bulk endpoint; one request per row so each row gets its own result
     if (rows.length > 0 && base64Auth) {
       try {
-        const slice = rows.slice(0, 10);
+        // Cap enrichment fan-out to keep research latency stable.
+        const slice = rows.slice(0, 5);
         const rkResults = await Promise.all(slice.map(async (r) => {
           const target = r.url && (r.url.startsWith("http://") || r.url.startsWith("https://")) ? r.url : (r.url ? `https://${r.url}` : r.domain ? `https://${r.domain}` : r.domain || "");
           if (!target) return null;
@@ -11056,7 +11092,7 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       return res.status(401).json({ message: "Invalid session" });
     }
     const { period = "30" } = req.query;
-    const days = parseInt(period as string) || 30;
+    const days = parsePeriodDays(period, 30);
 
     // Get user's accessible clients
     let accessibleClientIds: string[] = [];
@@ -11248,8 +11284,8 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
     const topPages = topPagesFromDb.map(page => ({
       url: page.url,
       clicks: Math.round(page.organicEtv),
-      impressions: page.organicCount * 100, // Estimate
-      ctr: 5.0, // Default CTR
+      impressions: 0,
+      ctr: 0,
       position: page.organicPos1 > 0 ? 1 : (page.organicPos2_3 > 0 ? 2.5 : 5),
     }));
 
@@ -11333,8 +11369,8 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       .map((r) => ({
         clientId: r.clientId,
         clientName: nameMap.get(r.clientId) || "Unknown",
-        trafficChangePercent: Math.round((Math.random() - 0.2) * 80), // Placeholder until we have historical
-        trafficChangeVisits: Math.round((Math.random() - 0.2) * 2000),
+        trafficChangePercent: 0,
+        trafficChangeVisits: 0,
         organicEtv: Math.round(r._sum.organicEtv || 0),
       }))
       .sort((a, b) => b.organicEtv - a.organicEtv)
@@ -11376,24 +11412,11 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
       { text: "Keywords added to a client", date: new Date(Date.now() - 259200000).toISOString() },
     ];
 
-    // Generate mock trends data (in a real app, you'd fetch historical data)
-    const rankingTrends = Array.from({ length: 30 }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (29 - i));
-      return {
-        date: date.toISOString().split("T")[0],
-        avgPosition: (keywordStats._avg.currentPosition || 15) + Math.random() * 5 - 2.5,
-      };
-    });
-
-    const trafficTrends = Array.from({ length: 30 }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (29 - i));
-      return {
-        date: date.toISOString().split("T")[0],
-        traffic: organicTraffic / 30 + Math.random() * (organicTraffic / 10),
-      };
-    });
+    const rankingTrends: Array<{ date: string; avgPosition: number }> = [];
+    const trafficTrends = ga4Summary.newUsersTrend.map((point) => ({
+      date: point.date,
+      traffic: point.value,
+    }));
 
     res.json({
       totalKeywords: keywordStats._count.id,

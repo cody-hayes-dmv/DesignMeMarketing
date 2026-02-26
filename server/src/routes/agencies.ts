@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
+import { BRAND_DISPLAY_NAME } from "../lib/qualityContracts.js";
 import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { requireAgencyTrialNotExpired } from '../middleware/requireAgencyTrialNotExpired.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
@@ -2150,9 +2151,9 @@ router.post('/invite', authenticateToken, async (req, res) => {
     // Send invitation email
     await sendEmail({
       to: email,
-      subject: 'You\'re invited to YourSEODashboard',
+      subject: `You're invited to ${BRAND_DISPLAY_NAME}`,
       html: `
-        <h1>You've been invited to join YourSEODashboard!</h1>
+        <h1>You've been invited to join ${BRAND_DISPLAY_NAME}!</h1>
         <p>You've been invited to create an agency account: <strong>${name}</strong></p>
         <p>Click the link below to accept the invitation:</p>
         <a href="${process.env.FRONTEND_URL}/invite?token=${inviteToken}">Accept Invitation</a>
@@ -2209,7 +2210,7 @@ router.post('/:agencyId/invite-specialist', authenticateToken, async (req, res) 
     // Send invitation email
     await sendEmail({
       to: email,
-      subject: 'You\'re invited to join an agency on YourSEODashboard',
+      subject: `You're invited to join an agency on ${BRAND_DISPLAY_NAME}`,
       html: `
         <h1>You've been invited to join ${membership?.agency.name || 'an agency'}!</h1>
         <p>Click the link below to accept the invitation:</p>
@@ -2975,7 +2976,7 @@ router.patch('/managed-services/:id/approve', authenticateToken, async (req, res
           html: `
             <p>The managed service for <strong>${clientName}</strong> has been approved. Billing has started.</p>
             <p>Package: ${packageName}. You can now provide full managed services for this client.</p>
-            <p>— SEO Dashboard</p>
+            <p>— ${BRAND_DISPLAY_NAME}</p>
           `,
         }).catch((e) => console.warn('Notify agency approval email failed:', e));
       }
@@ -3045,7 +3046,7 @@ router.patch('/managed-services/:id/reject', authenticateToken, async (req, res)
           subject: `Managed service request not approved: ${clientName}`,
           html: `
             <p>The managed service request for <strong>${clientName}</strong> was not approved. The client remains in Dashboard Only mode.</p>
-            <p>— SEO Dashboard</p>
+            <p>— ${BRAND_DISPLAY_NAME}</p>
           `,
         }).catch((e) => console.warn('Notify agency reject email failed:', e));
       }

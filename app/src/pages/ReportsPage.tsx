@@ -25,6 +25,13 @@ import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
 import { useNavigate } from "react-router-dom";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { ReportEmptyState, ReportSection } from "@/components/report/ReportPrimitives";
+import {
+  formatReportPeriodLabel,
+  getReportStatusBadgeClass,
+  normalizeReportStatus,
+  toDisplayReportStatus,
+} from "@/lib/reportPresentation";
 
 interface Report {
   id: string;
@@ -47,8 +54,6 @@ interface Report {
   createdAt: string;
 }
 
-type ReportStatus = "Sent" | "Draft" | "Scheduled";
-
 interface ReportSchedule {
   id: string;
   frequency: "weekly" | "biweekly" | "monthly";
@@ -68,15 +73,6 @@ interface CampaignWinsSettings {
   recipients: string[];
   lastSent?: string | null;
 }
-
-const getStatusBadge = (status: ReportStatus) => {
-  const styles: Record<ReportStatus, string> = {
-    Sent: "bg-green-100 text-green-800",
-    Draft: "bg-yellow-100 text-yellow-800",
-    Scheduled: "bg-blue-100 text-blue-800",
-  };
-  return styles[status];
-};
 
 const ReportsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -185,7 +181,7 @@ const ReportsPage: React.FC = () => {
             clientSchedules.some((s: ReportSchedule) => s.isActive && s.clientId === clientId);
           
           // If report is draft but has active schedule, show as scheduled
-          let displayStatus = report.status || "draft";
+          let displayStatus = normalizeReportStatus(report.status);
           if (displayStatus === "draft" && hasActiveSchedule) {
             displayStatus = "scheduled";
           }
@@ -444,20 +440,21 @@ const ReportsPage: React.FC = () => {
   // Calculate statistics from actual database reports
   const totalReports = reports.length;
   const activeReportsCount = activeReports.length;
-  const sentReports = reports.filter(r => r.status === "sent" || r.status === "Sent").length;
-  const scheduledReports = reports.filter(r => r.status === "scheduled" || r.status === "Scheduled").length;
-  const draftReports = reports.filter(r => !r.status || r.status === "draft" || r.status === "Draft").length;
+  const sentReports = reports.filter((r) => normalizeReportStatus(r.status) === "sent").length;
+  const scheduledReports = reports.filter((r) => normalizeReportStatus(r.status) === "scheduled").length;
+  const draftReports = reports.filter((r) => normalizeReportStatus(r.status) === "draft").length;
+  const configuredCampaignWinsClients = clients.filter((client) => campaignWinsByClient[client.id]?.enabled);
 
   const reportsForView = useMemo(() => {
     switch (cardFilter) {
       case "active":
         return activeReports;
       case "sent":
-        return reports.filter((r) => r.status === "sent" || r.status === "Sent");
+        return reports.filter((r) => normalizeReportStatus(r.status) === "sent");
       case "scheduled":
-        return reports.filter((r) => r.status === "scheduled" || r.status === "Scheduled");
+        return reports.filter((r) => normalizeReportStatus(r.status) === "scheduled");
       case "draft":
-        return reports.filter((r) => !r.status || r.status === "draft" || r.status === "Draft");
+        return reports.filter((r) => normalizeReportStatus(r.status) === "draft");
       default:
         return reports;
     }
@@ -617,16 +614,16 @@ const ReportsPage: React.FC = () => {
           </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full" aria-label="Reports list">
             <thead>
               <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Report</th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Type</th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Project</th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Last Generated</th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Recipients</th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Report</th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Type</th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Project</th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Last Generated</th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Recipients</th>
+                <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -650,31 +647,25 @@ const ReportsPage: React.FC = () => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div>
                         <div className="text-sm font-medium text-gray-900">
-                          {report.period ? report.period.charAt(0).toUpperCase() + report.period.slice(1) : "Report"} Report - {report.client?.name || "Unknown Client"}
+                          {formatReportPeriodLabel(report.period)} Report - {report.client?.name || "Unknown Client"}
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {report.period.charAt(0).toUpperCase() + report.period.slice(1)}
+                      {formatReportPeriodLabel(report.period)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       {report.client?.name || "Unknown"}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        report.status === "sent" 
-                          ? "bg-green-100 text-green-800" 
-                          : report.status === "scheduled"
-                          ? "bg-blue-100 text-blue-800"
-                          : "bg-yellow-100 text-yellow-800"
-                      }`}>
-                        {report.status === "sent" ? "Sent" : report.status === "scheduled" ? "Scheduled" : "Draft"}
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getReportStatusBadgeClass(report.status)}`}>
+                        {toDisplayReportStatus(report.status)}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                       {new Date(report.reportDate).toLocaleDateString()}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                  <td className="px-6 py-4 text-sm text-gray-600 max-w-sm break-words">
                       {Array.isArray(report.recipients) && report.recipients.length > 0
                         ? report.recipients.join(", ")
                         : "No recipients"}
@@ -685,6 +676,7 @@ const ReportsPage: React.FC = () => {
                           onClick={() => handleViewClick(report)}
                           className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                           title="View report"
+                          aria-label={`View report for ${report.client?.name || "client"}`}
                         >
                         <Eye className="h-4 w-4" />
                       </button>
@@ -692,10 +684,11 @@ const ReportsPage: React.FC = () => {
                           onClick={() => handleShareClick(report)}
                           className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                           title="Share report"
+                          aria-label={`Share report for ${report.client?.name || "client"}`}
                         >
                         <Share2 className="h-4 w-4" />
                       </button>
-                        {report.status !== "sent" && (
+                        {normalizeReportStatus(report.status) !== "sent" && (
                           <button
                             onClick={() => {
                               setSelectedReportForSend(report);
@@ -703,6 +696,7 @@ const ReportsPage: React.FC = () => {
                             }}
                             className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                             title="Send report via email"
+                            aria-label={`Send report for ${report.client?.name || "client"}`}
                           >
                             <Send className="h-4 w-4" />
                           </button>
@@ -711,6 +705,7 @@ const ReportsPage: React.FC = () => {
                           onClick={() => handleDeleteReport(report.id)}
                           className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                           title="Delete report"
+                          aria-label={`Delete report for ${report.client?.name || "client"}`}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -969,22 +964,16 @@ const ReportsPage: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 mt-8">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Campaign Wins Report</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Automatically sends positive milestone updates only. No manual send.
-          </p>
-        </div>
-        <div className="p-6 space-y-4">
-          {clients.filter((client) => Boolean(campaignWinsByClient[client.id])).length === 0 && (
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-600 bg-gray-50">
-              No Campaign Wins items configured.
-            </div>
+      <ReportSection
+        title="Campaign Wins Report"
+        subtitle="Automatically sends positive milestone updates only. No manual send."
+        className="mt-8"
+      >
+        <div className="space-y-4">
+          {configuredCampaignWinsClients.length === 0 && (
+            <ReportEmptyState message="No Campaign Wins items configured." />
           )}
-          {clients
-            .filter((client) => Boolean(campaignWinsByClient[client.id]))
-            .map((client) => {
+          {configuredCampaignWinsClients.map((client) => {
             const settings = campaignWinsByClient[client.id] || { enabled: false, recipients: [], lastSent: null };
             const draft = campaignWinsDrafts[client.id] || { enabled: settings.enabled, recipients: settings.recipients.join(", ") };
             return (
@@ -1063,7 +1052,7 @@ const ReportsPage: React.FC = () => {
             );
           })}
         </div>
-      </div>
+      </ReportSection>
       <ConfirmDialog
         isOpen={removeCampaignWinsConfirm.isOpen}
         onClose={() => setRemoveCampaignWinsConfirm({ isOpen: false, clientId: null, clientName: null })}

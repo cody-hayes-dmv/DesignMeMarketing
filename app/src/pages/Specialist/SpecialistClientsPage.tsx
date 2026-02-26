@@ -177,7 +177,20 @@ const SpecialistClientsPage = () => {
                   className={`transition-colors ${index % 2 === 0 ? "hover:bg-violet-50/50" : "bg-gray-50/60 hover:bg-violet-50/50"}`}
                 >
                   <td className="px-6 py-4 text-sm font-semibold text-gray-900">{client.name}</td>
-                  <td className="px-6 py-4 text-sm text-primary-800/90">{client.domain}</td>
+                  <td className="px-6 py-4 text-sm">
+                    {client.domain?.trim() ? (
+                      <a
+                        href={/^https?:\/\//i.test(client.domain) ? client.domain : `https://${client.domain}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary-700 hover:text-primary-900 hover:underline"
+                      >
+                        {client.domain}
+                      </a>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4 text-sm">
                     <Link
                       to={`/specialist/tasks?clientId=${client.id}`}

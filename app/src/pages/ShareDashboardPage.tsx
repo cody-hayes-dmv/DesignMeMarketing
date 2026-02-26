@@ -1005,11 +1005,11 @@ const ShareDashboardPage: React.FC = () => {
                     newUsersTrendData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={newUsersTrendData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#6b7280" />
+                          <YAxis tick={{ fontSize: 11 }} stroke="#6b7280" />
+                          <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} />
+                          <Legend wrapperStyle={{ fontSize: 12 }} />
                           <Line type="monotone" dataKey="newUsers" stroke="#3B82F6" strokeWidth={2} />
                         </LineChart>
                       </ResponsiveContainer>
@@ -1033,11 +1033,11 @@ const ShareDashboardPage: React.FC = () => {
                     totalUsersTrendData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={totalUsersTrendData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#6b7280" />
+                          <YAxis tick={{ fontSize: 11 }} stroke="#6b7280" />
+                          <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} />
+                          <Legend wrapperStyle={{ fontSize: 12 }} />
                           <Line type="monotone" dataKey="totalUsers" name="Total Users" stroke="#10B981" strokeWidth={2} />
                         </LineChart>
                       </ResponsiveContainer>
@@ -1083,7 +1083,10 @@ const ShareDashboardPage: React.FC = () => {
             <div className="pdf-section grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="rounded-xl border-l-4 border-violet-500 bg-white p-4 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-violet-900">Traffic Sources</h3>
+                  <div>
+                    <h3 className="text-lg font-semibold text-violet-900">Traffic Sources</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Channel mix for the selected period.</p>
+                  </div>
                 </div>
                 {trafficSourcesError && (
                   <p className="mb-3 text-sm text-rose-600">{trafficSourcesError}</p>
@@ -1104,17 +1107,19 @@ const ShareDashboardPage: React.FC = () => {
                         layout="vertical"
                         margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis type="number" tick={{ fontSize: 11 }} stroke="#6b7280" />
                         <YAxis 
                           dataKey="name" 
                           type="category" 
                           width={70}
-                          tick={{ fontSize: 12 }}
+                          tick={{ fontSize: 11 }}
+                          stroke="#6b7280"
                         />
                         <Tooltip 
+                          isAnimationActive={false}
                           formatter={(value: number) => value.toLocaleString()}
-                          contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '4px' }}
+                          contentStyle={{ pointerEvents: "none", backgroundColor: "#fff", border: "1px solid #ccc", borderRadius: "4px" }}
                         />
                         <Bar 
                           dataKey="value" 
@@ -1184,7 +1189,10 @@ const ShareDashboardPage: React.FC = () => {
             <div className="pdf-section grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="rounded-xl border-l-4 border-teal-500 bg-white p-6 shadow-sm ring-1 ring-gray-200/80">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-teal-900">Visitor Sources</h3>
+                  <div>
+                    <h3 className="text-lg font-semibold text-teal-900">Visitor Sources</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Top acquisition sources by users.</p>
+                  </div>
                 </div>
                 {visitorSourcesError && (
                   <p className="mb-4 text-sm text-rose-600">
@@ -1248,6 +1256,7 @@ const ShareDashboardPage: React.FC = () => {
             <div className="pdf-section rounded-xl border-l-4 border-primary-500 bg-white shadow-sm ring-1 ring-gray-200/80 overflow-hidden">
               <div className="p-6 border-b-2 border-gray-100 bg-gradient-to-r from-primary-50/50 to-blue-50/50">
                 <h3 className="text-lg font-semibold text-primary-900">Top Pages</h3>
+                <p className="text-xs text-gray-500 mt-1">Best-performing URLs with ranking movement details.</p>
                 {topPagesError && (
                   <p className="mt-2 text-sm text-rose-600">
                     {topPagesError}
@@ -1255,7 +1264,7 @@ const ShareDashboardPage: React.FC = () => {
                 )}
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full" aria-label="Top pages performance table">
                   <thead className="bg-gradient-to-r from-primary-50/80 to-slate-100">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider">Page</th>
@@ -1317,7 +1326,13 @@ const ShareDashboardPage: React.FC = () => {
                             <tr className="hover:bg-gray-50">
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="flex items-center gap-2">
-                                  <button onClick={handleToggleExpand} className="text-gray-400 hover:text-gray-600" title="Show keywords ranking for this page" data-pdf-hide="true">
+                                  <button
+                                    onClick={handleToggleExpand}
+                                    className="text-gray-400 hover:text-gray-600"
+                                    title="Show keywords ranking for this page"
+                                    aria-label={`${isExpanded ? "Hide" : "Show"} keyword rankings for ${page.url}`}
+                                    data-pdf-hide="true"
+                                  >
                                     {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                   </button>
                                   <a href={page.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:text-blue-800 break-all">
@@ -1377,7 +1392,7 @@ const ShareDashboardPage: React.FC = () => {
                                       <div className="text-sm text-gray-500 text-center py-4">No keywords found ranking for this page.</div>
                                     ) : (
                                       <div className="max-h-64 overflow-y-auto">
-                                        <table className="w-full text-sm">
+                                        <table className="w-full text-sm" aria-label={`Keyword rankings for ${page.url}`}>
                                           <thead className="bg-gray-100 sticky top-0">
                                             <tr>
                                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Keyword</th>

@@ -6,7 +6,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { Upload, X, Image, Video, Link as LinkIcon, Plus, Trash2, Send, Loader2, Download, CheckSquare, MessageSquare, HelpCircle, CheckCircle2, RotateCcw, ThumbsUp } from "lucide-react";
 import api, { getUploadFileUrl } from "@/lib/api";
-import { fetchClients, Client } from "@/store/slices/clientSlice";
+import { fetchClients } from "@/store/slices/clientSlice";
 import toast from "react-hot-toast";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
@@ -850,7 +850,15 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                             const isAuthor = user?.id && c.author?.id === user.id;
                                             const canDelete = canComment && (isAdmin || isAuthor);
                                             const isSystemEntry = c.type === "APPROVAL" || c.type === "REVISION_REQUEST";
-                                            const authorRole = c.author?.role === "USER" ? "Client" : c.author?.role === "SPECIALIST" ? "Team" : "Agency";
+                                            const authorRole = c.author?.role === "USER"
+                                                ? "Client"
+                                                : c.author?.role === "SPECIALIST"
+                                                ? "Specialist"
+                                                : c.author?.role === "SUPER_ADMIN"
+                                                ? "Super Admin"
+                                                : c.author?.role === "ADMIN"
+                                                ? "Admin"
+                                                : "Agency";
                                             const when = (() => {
                                                 try {
                                                     return new Date(c.createdAt).toLocaleString();

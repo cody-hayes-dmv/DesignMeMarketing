@@ -166,7 +166,7 @@ const TasksPage = () => {
     // Only agency/admin/super-admin can create, bulk-assign, and manage tasks
     const isClientUser = user?.role === "USER";
     const canCreate = !isClientUser && (user?.role as ROLE | undefined) !== "SPECIALIST";
-    const canFilterByClient = (user?.role as ROLE | undefined) !== "USER";
+    const canFilterByClient = true;
 
     const assigneeRoleLabel = (role: string | undefined) => {
         if (role === "SUPER_ADMIN") return "Super Admin";
@@ -286,6 +286,25 @@ const TasksPage = () => {
         }
         return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
     }, [tasks]);
+
+    const assigneeFilterOptions = useMemo(() => {
+        if (canCreate) {
+            return assignableUsers.map((u) => ({
+                id: u.id,
+                label: `${u.name || u.email} (${assigneeRoleLabel(u.role)})`,
+            }));
+        }
+        const map = new Map<string, { id: string; label: string }>();
+        for (const t of tasks) {
+            if (t.assignee?.id) {
+                map.set(t.assignee.id, {
+                    id: t.assignee.id,
+                    label: t.assignee.name || t.assignee.email || "Unknown",
+                });
+            }
+        }
+        return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+    }, [canCreate, assignableUsers, tasks]);
 
     const filtered = tasks.filter((t) => {
         const q = searchTerm.toLowerCase();
@@ -620,25 +639,23 @@ const TasksPage = () => {
                         </select>
                     </div>
 
-                    {/* Assignee Filter (Specialist / Admin tasks) */}
-                    {canCreate && (
-                        <div className="flex items-center space-x-2">
-                            <User className="h-5 w-5 text-gray-400" />
-                            <select
-                                value={filterAssigneeId}
-                                onChange={(e) => setFilterAssigneeId(e.target.value)}
-                                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            >
-                                <option value="all">All Assignees</option>
-                                <option value="unassigned">Unassigned</option>
-                                {assignableUsers.map((u) => (
-                                    <option key={u.id} value={u.id}>
-                                        {u.name || u.email} ({assigneeRoleLabel(u.role)})
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
+                    {/* Assignee Filter */}
+                    <div className="flex items-center space-x-2">
+                        <User className="h-5 w-5 text-gray-400" />
+                        <select
+                            value={filterAssigneeId}
+                            onChange={(e) => setFilterAssigneeId(e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                            <option value="all">All Assignee</option>
+                            <option value="unassigned">Unassigned</option>
+                            {assigneeFilterOptions.map((u) => (
+                                <option key={u.id} value={u.id}>
+                                    {u.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
                     {/* Select Mode (Table | Kanban) */}
                     <div className="flex flex-row items-center">

@@ -14,6 +14,7 @@ export async function fetchGA4TopEvents(
   name: string;
   count: number;
 }>> {
+  const GA4_TOP_EVENTS_TIMEOUT_MS = 15000;
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     select: { ga4PropertyId: true },
@@ -32,7 +33,7 @@ export async function fetchGA4TopEvents(
   const endDateStr = endDate.toISOString().split('T')[0];
 
   try {
-    const [response] = await analytics.runReport({
+    const requestPromise: Promise<[any, any?, any?]> = analytics.runReport({
       property: propertyId,
       dateRanges: [
         {
@@ -60,6 +61,10 @@ export async function fetchGA4TopEvents(
       ],
       limit: limit,
     });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("GA4 top events request timed out")), GA4_TOP_EVENTS_TIMEOUT_MS);
+    });
+    const [response] = await Promise.race([requestPromise, timeoutPromise]);
 
     if (!response.rows || response.rows.length === 0) {
       return [];
@@ -98,6 +103,7 @@ export async function fetchGA4TopKeyEvents(
   name: string;
   count: number;
 }>> {
+  const GA4_TOP_KEY_EVENTS_TIMEOUT_MS = 15000;
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     select: { ga4PropertyId: true },
@@ -116,7 +122,7 @@ export async function fetchGA4TopKeyEvents(
   const endDateStr = endDate.toISOString().split("T")[0];
 
   try {
-    const [response] = await analytics.runReport({
+    const requestPromise: Promise<[any, any?, any?]> = analytics.runReport({
       property: propertyId,
       dateRanges: [
         {
@@ -134,6 +140,10 @@ export async function fetchGA4TopKeyEvents(
       ],
       limit: limit,
     });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("GA4 top key events request timed out")), GA4_TOP_KEY_EVENTS_TIMEOUT_MS);
+    });
+    const [response] = await Promise.race([requestPromise, timeoutPromise]);
 
     if (!response.rows || response.rows.length === 0) {
       return [];

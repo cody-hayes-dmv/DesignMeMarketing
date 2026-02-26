@@ -13,6 +13,7 @@ export interface User {
   id: string;
   email: string;
   name?: string;
+  profileImageUrl?: string | null;
   role: ROLE;
   verified: boolean;
   invited: boolean;

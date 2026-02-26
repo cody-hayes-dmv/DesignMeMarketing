@@ -1,4 +1,8 @@
 import nodemailer from "nodemailer";
+import {
+  getWhitelabelFromAddress,
+  normalizeWhitelabelText,
+} from "./qualityContracts.js";
 
 interface EmailAttachment {
   filename: string;
@@ -66,13 +70,15 @@ export const sendEmail = async ({ to, subject, html, attachments }: EmailOptions
     }
 
     const emailTransporter = getTransporter();
-    const from = process.env.SMTP_FROM || "noreply@yourseodashboard.com";
+    const from = getWhitelabelFromAddress();
+    const normalizedSubject = normalizeWhitelabelText(subject);
+    const normalizedHtml = normalizeWhitelabelText(html);
     console.log(`[Email] Attempting send to ${to}, subject: "${subject.slice(0, 50)}..."`);
     const result = await emailTransporter.sendMail({
       from,
       to,
-      subject,
-      html,
+      subject: normalizedSubject,
+      html: normalizedHtml,
       attachments,
     });
     console.log(`[Email] Sent successfully to ${to}, messageId: ${result.messageId || "n/a"}`);

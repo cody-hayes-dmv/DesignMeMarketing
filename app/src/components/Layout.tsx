@@ -1,5 +1,6 @@
 import React from "react";
 import { useSelector, useDispatch } from "react-redux";
+import { useNavigate } from "react-router-dom";
 import { RootState } from "@/store";
 import { logout } from "@/store/slices/authSlice";
 import { BarChart3, LogOut, Settings, User } from "lucide-react";
@@ -12,11 +13,20 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children, title }) => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
 
   const handleLogout = () => {
     dispatch(logout() as any);
+  };
+
+  const handleSettingsClick = () => {
+    if (user?.role === "SPECIALIST") {
+      navigate("/specialist/settings");
+      return;
+    }
+    navigate("/agency/settings");
   };
 
   return (
@@ -52,7 +62,12 @@ const Layout: React.FC<LayoutProps> = ({ children, title }) => {
                   {user?.role}
                 </span>
               </div>
-              <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
+              <button
+                type="button"
+                onClick={handleSettingsClick}
+                title="Open settings"
+                className="p-2 text-gray-400 hover:text-primary-600 transition-colors"
+              >
                 <Settings className="h-5 w-5" />
               </button>
               <button

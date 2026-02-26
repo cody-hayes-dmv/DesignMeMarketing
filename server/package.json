@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test:tasks-notifications": "node --import tsx --test src/routes/tasks.notification-routing.test.ts",
+    "test:quality-contracts": "node --import tsx --test src/lib/qualityContracts.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",

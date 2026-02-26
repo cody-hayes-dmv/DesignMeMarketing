@@ -7,6 +7,7 @@ import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from '../m
 import { requireAgencyTrialNotExpired } from '../middleware/requireAgencyTrialNotExpired.js';
 import { sendEmail } from '../lib/email.js';
 import { getAgencyTierContext, canAddDashboard } from '../lib/agencyLimits.js';
+import { BRAND_DISPLAY_NAME } from "../lib/qualityContracts.js";
 
 const router = express.Router();
 
@@ -35,6 +36,7 @@ const inviteClientUsersMultiSchema = z.object({
 const updateClientUserProfileSchema = z.object({
     firstName: z.string().optional(),
     lastName: z.string().optional(),
+    profileImageUrl: z.string().url().nullable().optional(),
     password: z.string().min(6).optional(),
     // New UI: Yes/No toggles
     sendInviteLink: z.boolean().optional(),
@@ -257,6 +259,7 @@ router.get('/', authenticateToken, async (req, res) => {
             // Client-portal users: only clients they are linked to via client_users
             clients = await prisma.client.findMany({
                 where: {
+                    status: 'ACTIVE',
                     clientUsers: {
                         some: {
                             userId: req.user.userId,
@@ -422,7 +425,7 @@ router.get('/users', authenticateToken, async (req, res) => {
             where: clientIds ? { clientId: { in: clientIds } } : undefined,
             include: {
                 client: { select: { id: true, name: true, domain: true } },
-                user: { select: { id: true, email: true, name: true, lastLoginAt: true } },
+                user: { select: { id: true, email: true, name: true, profileImageUrl: true, lastLoginAt: true } },
             },
             orderBy: [{ user: { lastLoginAt: 'desc' } }, { invitedAt: 'desc' }],
         });
@@ -436,6 +439,7 @@ router.get('/users', authenticateToken, async (req, res) => {
                 userId: r.userId,
                 email: r.user.email,
                 name: r.user.name,
+                profileImageUrl: (r.user as any).profileImageUrl ?? null,
                 role: r.clientRole,
                 status: r.status,
                 lastLoginAt: r.user.lastLoginAt,
@@ -602,6 +606,7 @@ router.get('/:id/users', authenticateToken, async (req, res) => {
                         id: true,
                         email: true,
                         name: true,
+                        profileImageUrl: true,
                         verified: true,
                         invited: true,
                         lastLoginAt: true,
@@ -625,6 +630,7 @@ router.get('/:id/users', authenticateToken, async (req, res) => {
                 invitedAt: r.invitedAt,
                 acceptedAt: r.acceptedAt,
                 lastLoginAt: r.user.lastLoginAt,
+                profileImageUrl: (r.user as any).profileImageUrl ?? null,
             }))
         );
     } catch (error) {
@@ -656,7 +662,7 @@ router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => 
 
         if (!membership) return res.status(404).json({ message: 'Client user not found' });
 
-        const { firstName, lastName, password, emailMode, sendInviteLink, emailCredentials } = updateClientUserProfileSchema.parse(req.body || {});
+        const { firstName, lastName, profileImageUrl, password, emailMode, sendInviteLink, emailCredentials } = updateClientUserProfileSchema.parse(req.body || {});
 
         const resolvedSendInvite = Boolean(sendInviteLink) || emailMode === 'INVITE';
         const resolvedEmailCreds = Boolean(emailCredentials) || emailMode === 'CREDENTIALS';
@@ -665,6 +671,12 @@ router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => 
         const updateUserData: any = {};
         if (nextName) updateUserData.name = nextName;
         if (password) updateUserData.passwordHash = await bcrypt.hash(password, 12);
+        if (profileImageUrl !== undefined) {
+            updateUserData.profileImageUrl =
+                profileImageUrl && String(profileImageUrl).trim()
+                    ? String(profileImageUrl).trim()
+                    : null;
+        }
 
         if (Object.keys(updateUserData).length > 0) {
             await prisma.user.update({
@@ -711,10 +723,10 @@ router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => 
             const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
             await sendEmail({
                 to: membership.user.email,
-                subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+                subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
                 html: `
                   <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                    <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                    <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
                     <p>Hi there,</p>
                     <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
                     <p>
@@ -804,10 +816,10 @@ router.post('/:id/users/:userId/invite', authenticateToken, async (req, res) => 
         const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
         await sendEmail({
             to: membership.user.email,
-            subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+            subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
             html: `
               <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
                 <p>Hi there,</p>
                 <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
                 <p>
@@ -996,10 +1008,10 @@ router.post('/users/invite', authenticateToken, async (req, res) => {
                     .join('');
                 await sendEmail({
                     to: email,
-                    subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+                    subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
                     html: `
                       <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                        <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                        <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
                         <p>Hi there,</p>
                         <p>You will be granted access to these client dashboards:</p>
                         <ul>${listHtml}</ul>
@@ -1107,10 +1119,10 @@ router.post('/:id/users/invite', authenticateToken, async (req, res) => {
                 const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
                 await sendEmail({
                     to: email,
-                    subject: 'Design ME Dashboard has invited you to set up your Client Dashboard.',
+                    subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
                     html: `
                       <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                        <h2>Design ME Dashboard has invited you to set up your Client Dashboard.</h2>
+                        <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
                         <p>Hi there,</p>
                         <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
                         <p>
@@ -1228,7 +1240,23 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update a client
 router.put('/:id', authenticateToken, async (req, res) => {
     const clientId = req.params.id;
-    const { name, domain, status, industry, targets, loginUrl, username, password, accountInfo, vendasta, canceledEndDate } = req.body.data || req.body;
+    const {
+        name,
+        domain,
+        status,
+        industry,
+        targets,
+        loginUrl,
+        username,
+        password,
+        accountInfo,
+        vendasta,
+        canceledEndDate,
+        managedServiceStatus,
+        managedServicePackage,
+        managedServiceActivatedDate,
+        managedServiceEndDate,
+    } = req.body.data || req.body;
 
     try {
         if (req.user.role === 'USER') {
@@ -1313,6 +1341,39 @@ router.put('/:id', authenticateToken, async (req, res) => {
             }
         }
 
+        // Managed service summary fields (ADMIN / SUPER_ADMIN only)
+        if (managedServiceStatus !== undefined) {
+            if (isAdmin) {
+                updateData.managedServiceStatus = managedServiceStatus || null;
+                if (managedServiceStatus === 'canceled' && !managedServiceActivatedDate) {
+                    updateData.managedServiceCanceledDate = new Date();
+                }
+            } else {
+                return res.status(403).json({ message: 'Not allowed to update managed service status' });
+            }
+        }
+        if (managedServicePackage !== undefined) {
+            if (isAdmin) {
+                updateData.managedServicePackage = managedServicePackage || null;
+            } else {
+                return res.status(403).json({ message: 'Not allowed to update managed service package' });
+            }
+        }
+        if (managedServiceActivatedDate !== undefined) {
+            if (isAdmin) {
+                updateData.managedServiceActivatedDate = managedServiceActivatedDate ? new Date(managedServiceActivatedDate) : null;
+            } else {
+                return res.status(403).json({ message: 'Not allowed to update managed service start date' });
+            }
+        }
+        if (managedServiceEndDate !== undefined) {
+            if (isAdmin) {
+                updateData.managedServiceEndDate = managedServiceEndDate ? new Date(managedServiceEndDate) : null;
+            } else {
+                return res.status(403).json({ message: 'Not allowed to update managed service end date' });
+            }
+        }
+
         // Allow updating vendasta field (only ADMIN / SUPER_ADMIN)
         if (vendasta !== undefined) {
             if (isAdmin) {
@@ -1366,7 +1427,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
                     const email = m.user?.email;
                     if (email && !seen.has(email)) {
                         seen.add(email);
-                        const html = `<!DOCTYPE html><html><body><p>${message}</p><p>— Your SEO Dashboard</p></body></html>`;
+                        const html = `<!DOCTYPE html><html><body><p>${message}</p><p>— ${BRAND_DISPLAY_NAME}</p></body></html>`;
                         sendEmail({ to: email, subject, html }).catch(err => console.error('Notify agency email failed:', err));
                     }
                 }

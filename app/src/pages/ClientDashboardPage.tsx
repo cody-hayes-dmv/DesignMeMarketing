@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, BarChart, Bar } from "recharts";
 import {
   FileText,
   Download,
@@ -52,13 +52,12 @@ import api, { getUploadFileUrl } from "@/lib/api";
 import { Client, updateClient } from "@/store/slices/clientSlice";
 import { clientToFormState, formStateToUpdatePayload } from "@/lib/clientAccountForm";
 import ClientAccountFormModal, { EMPTY_CLIENT_FORM } from "@/components/ClientAccountFormModal";
-import { addDays, endOfWeek, format, startOfWeek, subDays } from "date-fns";
+import { endOfWeek, format, startOfWeek, subDays } from "date-fns";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
-import { createNonOverlappingPieValueLabel } from "@/utils/recharts";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { logout } from "@/store/slices/authSlice";
@@ -71,6 +70,7 @@ import ClientKeywordsManager from "@/components/ClientKeywordsManager";
 import WorkLogRecurringModal from "@/components/WorkLogRecurringModal";
 import type { WorkLogRecurringRuleForEdit } from "@/components/WorkLogRecurringModal";
 import InfoTooltip from "@/components/InfoTooltip";
+import { formatReportPeriodLabel, getReportStatusBadgeClass, toDisplayReportStatus } from "@/lib/reportPresentation";
 
 interface TrafficSourceSlice {
   name: string;
@@ -111,6 +111,19 @@ interface ClientReport {
 }
 
 type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
+type ActivityType = "COMMENT" | "QUESTION" | "APPROVAL_REQUEST" | "APPROVAL" | "REVISION_REQUEST";
+type WorkLogComment = {
+  id: string;
+  body: string;
+  type: ActivityType;
+  createdAt: string;
+  author?: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    role?: string | null;
+  } | null;
+};
 type WorkLogTask = {
   id: string;
   title: string;
@@ -277,6 +290,14 @@ const formatDashboardSummary = (payload: any): DashboardSummary => ({
   totalUsersTrend: normalizeTrendPoints(payload?.totalUsersTrend ?? payload?.activeUsersTrend),
 });
 
+const workLogActivityConfig: Record<ActivityType, { label: string; color: string; bg: string; border: string }> = {
+  COMMENT: { label: "Comment", color: "text-slate-700", bg: "bg-slate-50", border: "border-slate-200" },
+  QUESTION: { label: "Question", color: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200" },
+  APPROVAL_REQUEST: { label: "Approval Request", color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200" },
+  APPROVAL: { label: "Approval", color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200" },
+  REVISION_REQUEST: { label: "Revision Request", color: "text-rose-700", bg: "bg-rose-50", border: "border-rose-200" },
+};
+
 const ClientDashboardPage: React.FC = () => {
   const { clientId } = useParams();
   const navigate = useNavigate();
@@ -341,12 +362,18 @@ const ClientDashboardPage: React.FC = () => {
         const res = await api.get("/clients");
         const rows = Array.isArray(res.data) ? res.data : [];
         setClientPortalClients(rows.map((c: any) => ({ id: String(c.id), name: String(c.name || c.domain || c.id) })));
+        if (clientId) {
+          const currentClient = rows.find((c: any) => String(c?.id) === String(clientId));
+          if (currentClient) {
+            setClient(currentClient as Client);
+          }
+        }
       } catch {
         setClientPortalClients([]);
       }
     };
     void run();
-  }, [clientPortalMode]);
+  }, [clientId, clientPortalMode]);
 
   useEffect(() => {
     if (user?.role !== "AGENCY") {
@@ -375,7 +402,6 @@ const ClientDashboardPage: React.FC = () => {
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
-  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [compareTo, setCompareTo] = useState<"none" | "previous_period" | "previous_year" | "custom">("none");
   const [compareStartDate, setCompareStartDate] = useState<string>("");
   const [compareEndDate, setCompareEndDate] = useState<string>("");
@@ -499,6 +525,7 @@ const ClientDashboardPage: React.FC = () => {
       hasQueryLevelData?: boolean;
       hasCompetitorData?: boolean;
       searchMentionsItemCount?: number;
+      kpiVolumeFromTrend?: boolean;
     };
   } | null>(null);
   const [aiIntelligenceLoading, setAiIntelligenceLoading] = useState(false);
@@ -520,7 +547,7 @@ const ClientDashboardPage: React.FC = () => {
     topPages: Record<string, boolean>;
     backlinks: Record<string, boolean>;
   }>({ topPages: {}, backlinks: {} });
-  const [autoRefreshingGa4, setAutoRefreshingGa4] = useState(false);
+  const [, setAutoRefreshingGa4] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const dashboardOuterScrollRef = useRef<HTMLDivElement | null>(null);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
@@ -546,14 +573,14 @@ const ClientDashboardPage: React.FC = () => {
   const [, setGa4AccountEmail] = useState<string | null>(null);
   const [ga4Connecting, setGa4Connecting] = useState(false);
   const [ga4StatusLoading, setGa4StatusLoading] = useState(true); // Track GA4 status check loading
-  const [ga4ConnectionError, setGa4ConnectionError] = useState<string | null>(null);
+  const [, setGa4ConnectionError] = useState<string | null>(null);
   // Google Ads (PPC) connection state
   const [googleAdsConnected, setGoogleAdsConnected] = useState<boolean | null>(null);
   const [googleAdsHasTokens, setGoogleAdsHasTokens] = useState(false);
   const [googleAdsAccountEmail, setGoogleAdsAccountEmail] = useState<string | null>(null);
   const [googleAdsConnecting, setGoogleAdsConnecting] = useState(false);
   const [googleAdsStatusLoading, setGoogleAdsStatusLoading] = useState(true);
-  const [googleAdsConnectionError, setGoogleAdsConnectionError] = useState<string | null>(null);
+  const [, setGoogleAdsConnectionError] = useState<string | null>(null);
   const [showGoogleAdsModal, setShowGoogleAdsModal] = useState(false);
   const [googleAdsCustomerId, setGoogleAdsCustomerId] = useState("");
   const [googleAdsCustomers, setGoogleAdsCustomers] = useState<Array<{
@@ -561,6 +588,7 @@ const ClientDashboardPage: React.FC = () => {
     customerName: string;
     currencyCode: string;
     timeZone: string;
+    isManager?: boolean;
   }>>([]);
   const [loadingGoogleAdsCustomers, setLoadingGoogleAdsCustomers] = useState(false);
   const [googleAdsSelectedManager, setGoogleAdsSelectedManager] = useState<{ customerId: string; customerName: string } | null>(null);
@@ -748,6 +776,12 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogUrlType, setWorkLogUrlType] = useState<"image" | "video" | "url">("url");
   const [workLogAddMenuOpen, setWorkLogAddMenuOpen] = useState(false);
   const [workLogListTab, setWorkLogListTab] = useState<"upcoming" | "completed">("upcoming");
+  const [workLogComments, setWorkLogComments] = useState<WorkLogComment[]>([]);
+  const [workLogCommentsLoading, setWorkLogCommentsLoading] = useState(false);
+  const [workLogCommentsError, setWorkLogCommentsError] = useState<string | null>(null);
+  const [workLogCommentType, setWorkLogCommentType] = useState<ActivityType>("COMMENT");
+  const [workLogNewComment, setWorkLogNewComment] = useState("");
+  const [postingWorkLogComment, setPostingWorkLogComment] = useState(false);
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const workLogAddMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -761,6 +795,7 @@ const ClientDashboardPage: React.FC = () => {
     role: "CLIENT" | "STAFF";
     status: "PENDING" | "ACTIVE";
     lastLoginAt: string | null;
+    profileImageUrl?: string | null;
   };
   const [clientUsers, setClientUsers] = useState<ClientUserRow[]>([]);
   const [clientUsersLoading, setClientUsersLoading] = useState(false);
@@ -784,12 +819,16 @@ const ClientDashboardPage: React.FC = () => {
     userId: string;
     email: string;
     name: string | null;
+    profileImageUrl?: string | null;
   } | null>(null);
   const [editClientUserFirstName, setEditClientUserFirstName] = useState("");
   const [editClientUserLastName, setEditClientUserLastName] = useState("");
   const [editClientUserPassword, setEditClientUserPassword] = useState("");
   const [editClientUserPasswordVisible, setEditClientUserPasswordVisible] = useState(false);
   const [editClientUserEmailCredentials, setEditClientUserEmailCredentials] = useState<"YES" | "NO">("NO");
+  const [editClientUserPhotoUrl, setEditClientUserPhotoUrl] = useState<string | null>(null);
+  const [uploadingClientUserPhoto, setUploadingClientUserPhoto] = useState(false);
+  const editClientUserPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [savingClientUserProfile, setSavingClientUserProfile] = useState(false);
 
   const [editClientAccessOpen, setEditClientAccessOpen] = useState(false);
@@ -970,15 +1009,6 @@ const ClientDashboardPage: React.FC = () => {
       end: endCompare.toISOString().split("T")[0],
     };
   }, [compareTo, dateRange, customStartDate, customEndDate, compareStartDate, compareEndDate]);
-
-  const buildCompareDashboardUrl = useCallback(
-    (clientId: string): string | null => {
-      const params = getComparePeriodParams();
-      if (!params) return null;
-      return `/seo/dashboard/${clientId}?start=${params.start}&end=${params.end}`;
-    },
-    [getComparePeriodParams]
-  );
 
   const fetchWorkLog = useCallback(async () => {
     if (!clientId) return;
@@ -1288,6 +1318,60 @@ const ClientDashboardPage: React.FC = () => {
 
   const selectedWorkLogTask = workLogTasks.find((t) => t.id === selectedWorkLogTaskId);
   const canEditSelectedWorkLog = user?.role === "SUPER_ADMIN" || selectedWorkLogTask?.createdBy?.id === user?.id;
+  const canCommentOnWorkLog = Boolean(user);
+  const workLogCommentTypes: ActivityType[] = user?.role === "USER"
+    ? ["COMMENT", "QUESTION"]
+    : ["COMMENT", "QUESTION", "APPROVAL_REQUEST"];
+
+  const fetchWorkLogComments = useCallback(async (taskId: string) => {
+    try {
+      setWorkLogCommentsLoading(true);
+      const res = await api.get(`/tasks/${taskId}/comments`, { timeout: 30000 });
+      setWorkLogComments(Array.isArray(res.data) ? (res.data as WorkLogComment[]) : []);
+      setWorkLogCommentsError(null);
+    } catch (e: any) {
+      console.error("Failed to fetch work log activity", e);
+      setWorkLogComments([]);
+      setWorkLogCommentsError(e?.response?.data?.message || "Failed to load activity");
+    } finally {
+      setWorkLogCommentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!workLogModalOpen || workLogModalMode === "create" || !selectedWorkLogTaskId) {
+      setWorkLogComments([]);
+      setWorkLogCommentsError(null);
+      setWorkLogNewComment("");
+      setWorkLogCommentType("COMMENT");
+      return;
+    }
+    void fetchWorkLogComments(selectedWorkLogTaskId);
+  }, [workLogModalOpen, workLogModalMode, selectedWorkLogTaskId, fetchWorkLogComments]);
+
+  const handlePostWorkLogComment = async () => {
+    if (!selectedWorkLogTaskId) return;
+    const body = workLogNewComment.trim();
+    if (!body) return;
+    try {
+      setPostingWorkLogComment(true);
+      const res = await api.post(
+        `/tasks/${selectedWorkLogTaskId}/comments`,
+        { body, type: workLogCommentType },
+        { timeout: 30000 },
+      );
+      const created = res.data as WorkLogComment;
+      setWorkLogComments((prev) => [...prev, created]);
+      setWorkLogNewComment("");
+      setWorkLogCommentType("COMMENT");
+      setWorkLogCommentsError(null);
+    } catch (e: any) {
+      console.error("Failed to post work log activity", e);
+      toast.error(e?.response?.data?.message || "Failed to post activity");
+    } finally {
+      setPostingWorkLogComment(false);
+    }
+  };
 
   const handleWorkLogFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1421,49 +1505,198 @@ const ClientDashboardPage: React.FC = () => {
       // Allow layout to settle and paint before snapshotting (longer delay so export captures finished content).
       await new Promise((resolve) => setTimeout(resolve, 800));
 
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        width: element.scrollWidth,
-        height: element.scrollHeight,
-        scrollX: 0,
-        scrollY: 0,
-        backgroundColor: "#FFFFFF",
-        ignoreElements: (el) => {
-          if (el.getAttribute?.("data-pdf-hide") === "true") return true;
-          if (el.classList?.contains?.("cursor-help")) return true;
-          return false;
-        },
-      });
+      const ignoreFilter = (el: Element) => {
+        if (el.getAttribute?.("data-pdf-hide") === "true") return true;
+        if (el.classList?.contains?.("cursor-help")) return true;
+        return false;
+      };
+      const sectionHost = rightScrollEl?.firstElementChild as HTMLElement | null;
+      const sections: HTMLElement[] =
+        sectionHost && sectionHost.children.length > 0
+          ? Array.from(sectionHost.children).filter((node): node is HTMLElement => node instanceof HTMLElement)
+          : [element];
+      if (sections.length === 0) {
+        toast.error("No sections found to export.");
+        setExportingPdf(false);
+        return;
+      }
 
-      const imgData = canvas.toDataURL("image/png");
+      const sectionCanvases: HTMLCanvasElement[] = [];
+      for (const sec of sections) {
+        const cvs = await html2canvas(sec, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          backgroundColor: "#FFFFFF",
+          ignoreElements: ignoreFilter,
+        });
+        sectionCanvases.push(cvs);
+      }
+
       const pdf = new jsPDF("p", "mm", "a4");
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
 
-      const headerHeightMm = 14;
-      const contentHeightMm = pageHeight - headerHeightMm;
       const websiteName = client?.name || client?.domain || "Dashboard";
+      const domain = client?.domain || "";
+      const sectionLabelMap: Record<string, string> = {
+        seo: "SEO Overview",
+        "ai-intelligence": "AI Intelligence",
+        ppc: "PPC",
+        backlinks: "Backlinks",
+        worklog: "Work Log",
+      };
+      const activeSectionLabel = sectionLabelMap[dashboardSection] || "Dashboard";
+      const generatedDate = format(new Date(), "MMMM d, yyyy");
+      const periodLabel =
+        dateRange === "7"
+          ? "Last 7 Days"
+          : dateRange === "90"
+          ? "Last 90 Days"
+          : dateRange === "365"
+          ? "Last Year"
+          : "Last 30 Days";
 
-      pdf.setFontSize(16);
-      pdf.setTextColor(30, 30, 30);
-      pdf.text(websiteName, pageWidth / 2, headerHeightMm / 2 + 4, { align: "center" });
+      const marginX = 12;
+      const headerH = 16;
+      const footerH = 10;
+      const contentMarginTop = headerH + 3;
+      const contentMarginBottom = footerH + 2;
+      const usableWidth = pageWidth - marginX * 2;
+      const usableHeight = pageHeight - contentMarginTop - contentMarginBottom;
 
-      // Fit entire dashboard on one page (size-auto): scale image to fit content area
-      let imgWidth = pageWidth;
-      let imgHeight = (canvas.height * pageWidth) / canvas.width;
-      let x = 0;
-      if (imgHeight > contentHeightMm) {
-        const scale = contentHeightMm / imgHeight;
-        imgWidth = pageWidth * scale;
-        imgHeight = contentHeightMm;
-        x = (pageWidth - imgWidth) / 2;
+      const drawHeader = () => {
+        pdf.setFillColor(15, 23, 42);
+        pdf.rect(0, 0, pageWidth, headerH, "F");
+        pdf.setFillColor(59, 130, 246);
+        pdf.rect(0, headerH, pageWidth, 0.8, "F");
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11);
+        pdf.setTextColor(255, 255, 255);
+        pdf.text(websiteName, marginX, 7);
+        if (domain) {
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+          pdf.setTextColor(148, 163, 184);
+          pdf.text(domain, marginX, 12);
+        }
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(periodLabel, pageWidth - marginX, 7, { align: "right" });
+        pdf.text(generatedDate, pageWidth - marginX, 12, { align: "right" });
+      };
+
+      const drawFooter = (pageNum: number, totalPages: number) => {
+        const footerY = pageHeight - footerH / 2;
+        pdf.setDrawColor(226, 232, 240);
+        pdf.setLineWidth(0.3);
+        pdf.line(marginX, pageHeight - footerH, pageWidth - marginX, pageHeight - footerH);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: "center" });
+        pdf.setFontSize(7);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(`Generated ${generatedDate}`, marginX, footerY);
+        pdf.text("Confidential", pageWidth - marginX, footerY, { align: "right" });
+      };
+
+      // Cover page (same style as Share Dashboard)
+      pdf.setFillColor(15, 23, 42);
+      pdf.rect(0, 0, pageWidth, pageHeight, "F");
+      pdf.setFillColor(59, 130, 246);
+      pdf.rect(0, 0, pageWidth, 3, "F");
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(11);
+      pdf.setTextColor(148, 163, 184);
+      const labelY = pageHeight * 0.32;
+      pdf.text("SEO PERFORMANCE REPORT", pageWidth / 2, labelY, { align: "center" });
+      const lineW = 50;
+      pdf.setDrawColor(59, 130, 246);
+      pdf.setLineWidth(0.6);
+      pdf.line(pageWidth / 2 - lineW / 2, labelY + 4, pageWidth / 2 + lineW / 2, labelY + 4);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(28);
+      pdf.setTextColor(255, 255, 255);
+      pdf.text(websiteName, pageWidth / 2, labelY + 18, { align: "center" });
+      if (domain) {
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(12);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(domain, pageWidth / 2, labelY + 28, { align: "center" });
       }
-      pdf.addImage(imgData, "PNG", x, headerHeightMm, imgWidth, imgHeight);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(`${activeSectionLabel}  ·  ${periodLabel}  ·  ${generatedDate}`, pageWidth / 2, labelY + 42, { align: "center" });
+      pdf.setFillColor(59, 130, 246);
+      pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
 
+      // Section-based content pagination (Share Dashboard behavior)
+      const sectionGap = 4;
+      const sectionNaturalHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
+      const sectionHeights = sectionNaturalHeights.map((h) => Math.min(h, usableHeight));
+      const sectionScales = sectionNaturalHeights.map((h) => (h > usableHeight ? usableHeight / h : 1));
+
+      const pageAssignments: { pageIdx: number; cursorY: number; sectionIdx: number }[] = [];
+      let curPage = 0;
+      let cursorY = 0;
+      for (let i = 0; i < sectionCanvases.length; i++) {
+        const h = sectionHeights[i];
+        const fitsOnCurrentPage = cursorY === 0 || cursorY + sectionGap + h <= usableHeight;
+        if (!fitsOnCurrentPage) {
+          curPage++;
+          cursorY = 0;
+        }
+        const yPos = cursorY === 0 ? 0 : cursorY + sectionGap;
+        pageAssignments.push({ pageIdx: curPage, cursorY: yPos, sectionIdx: i });
+        cursorY = yPos + h;
+      }
+      const totalContentPages = curPage + 1;
+      const totalPages = 1 + totalContentPages;
+
+      let currentPageRendered = -1;
+      for (const assignment of pageAssignments) {
+        if (assignment.pageIdx !== currentPageRendered) {
+          pdf.addPage();
+          drawHeader();
+          currentPageRendered = assignment.pageIdx;
+        }
+
+        const idx = assignment.sectionIdx;
+        const scale = sectionScales[idx];
+        const imgW = usableWidth * scale;
+        const imgH = sectionHeights[idx];
+        const imgX = marginX + (usableWidth - imgW) / 2;
+        const imgData = sectionCanvases[idx].toDataURL("image/png");
+        pdf.addImage(imgData, "PNG", imgX, contentMarginTop + assignment.cursorY, imgW, imgH);
+      }
+
+      for (let p = 0; p < totalContentPages; p++) {
+        pdf.setPage(p + 2);
+        drawFooter(p + 2, totalPages);
+      }
+
+      // Cover page footer
+      pdf.setPage(1);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(`Page 1 of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
+
+      const sectionSlugMap: Record<string, string> = {
+        seo: "seo-overview",
+        "ai-intelligence": "ai-intelligence",
+        ppc: "ppc",
+        backlinks: "backlinks",
+        worklog: "work-log",
+      };
+      const sectionSlug = sectionSlugMap[dashboardSection] || "dashboard";
       const sanitizedName = client?.name ? client.name.replace(/\s+/g, "-").toLowerCase() : "client-dashboard";
-      const fileName = `${sanitizedName}-${format(new Date(), "yyyyMMdd")}.pdf`;
+      const fileName = `${sanitizedName}-${sectionSlug}-report-${format(new Date(), "yyyyMMdd")}.pdf`;
       pdf.save(fileName);
       toast.success("Dashboard exported successfully!");
     } catch (error: any) {
@@ -1486,7 +1719,7 @@ const ClientDashboardPage: React.FC = () => {
       }
       setExportingPdf(false);
     }
-  }, [activeTab, client?.name]);
+  }, [activeTab, client?.name, client?.domain, dateRange, dashboardSection]);
 
   const handleRefreshDashboard = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
@@ -1866,6 +2099,7 @@ const ClientDashboardPage: React.FC = () => {
   useEffect(() => {
     if (!clientId) return;
     if (client) return;
+    if (clientPortalMode) return;
 
     const fetchClient = async () => {
       try {
@@ -1888,7 +2122,7 @@ const ClientDashboardPage: React.FC = () => {
     };
 
     fetchClient();
-  }, [clientId, client, navigate]);
+  }, [clientId, client, clientPortalMode, navigate]);
 
   // Sync view client form when modal opens (same fields as Edit Client modal)
   useEffect(() => {
@@ -2077,7 +2311,6 @@ const ClientDashboardPage: React.FC = () => {
       startDate.setDate(startDate.getDate() - 30);
       setCustomEndDate(endDate.toISOString().split('T')[0]);
       setCustomStartDate(startDate.toISOString().split('T')[0]);
-      setShowCustomDatePicker(true);
       return; // Don't fetch yet, wait for dates to be set
     }
     
@@ -2085,24 +2318,53 @@ const ClientDashboardPage: React.FC = () => {
       try {
         setFetchingSummary(true);
         setGa4ConnectionError(null);
-        const fetchDashboardPayload = async (retryOnTimeout = true): Promise<Record<string, unknown>> => {
-          try {
-            const res = await api.get(buildDashboardUrl(clientId), { timeout: DASHBOARD_REQUEST_TIMEOUT_MS });
-            return (res.data as Record<string, unknown>) || {};
-          } catch (err: unknown) {
-            const isTimeout = (err as { code?: string })?.code === "ECONNABORTED" || (err as Error)?.message?.toLowerCase?.().includes("timeout");
-            if (retryOnTimeout && isTimeout) {
+        const isRetriableDashboardError = (err: unknown): boolean => {
+          const code = (err as { code?: string })?.code;
+          const message = String((err as { message?: string })?.message || "").toLowerCase();
+          return (
+            code === "ECONNABORTED" ||
+            code === "ECONNRESET" ||
+            code === "ERR_NETWORK" ||
+            message.includes("timeout") ||
+            message.includes("connection reset") ||
+            message.includes("network error")
+          );
+        };
+        type DashboardPayload = {
+          isGA4Connected?: boolean;
+          dataSources?: { traffic?: string } | null;
+          activeUsers?: number | null;
+          newUsers?: number | null;
+          totalSessions?: number | null;
+          [key: string]: unknown;
+        };
+        const fetchDashboardPayload = async (): Promise<DashboardPayload> => {
+          const maxAttempts = 3;
+          let attempt = 0;
+          let lastError: unknown = null;
+
+          while (attempt < maxAttempts) {
+            try {
               const res = await api.get(buildDashboardUrl(clientId), { timeout: DASHBOARD_REQUEST_TIMEOUT_MS });
-              return (res.data as Record<string, unknown>) || {};
+              return (res.data as DashboardPayload) || {};
+            } catch (err: unknown) {
+              lastError = err;
+              attempt += 1;
+              if (!isRetriableDashboardError(err) || attempt >= maxAttempts) {
+                throw err;
+              }
+              // Small backoff keeps retries from hammering the API during transient resets.
+              await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
             }
-            throw err;
           }
+
+          throw lastError || new Error("Failed to fetch dashboard payload.");
         };
 
         const autoRefreshKey = `${clientId}:${dateRange}:${customStartDate ?? ""}:${customEndDate ?? ""}`;
 
         let payload = await fetchDashboardPayload();
-        let isGA4Connected = payload?.isGA4Connected || false;
+        let isGA4Connected = Boolean(payload?.isGA4Connected);
         let dataSource = payload?.dataSources?.traffic || "none";
 
         const looksLikeMissingGa4Metrics =
@@ -2124,7 +2386,7 @@ const ClientDashboardPage: React.FC = () => {
             setAutoRefreshingGa4(true);
             await api.post(`/seo/dashboard/${clientId}/refresh`);
             payload = await fetchDashboardPayload();
-            isGA4Connected = payload?.isGA4Connected || false;
+            isGA4Connected = Boolean(payload?.isGA4Connected);
             dataSource = payload?.dataSources?.traffic || "none";
           } catch (refreshError) {
             console.warn("Auto-refresh dashboard skipped/failed", refreshError);
@@ -2211,6 +2473,32 @@ const ClientDashboardPage: React.FC = () => {
         }
       } catch (error: any) {
         console.warn("Failed to fetch dashboard summary", error);
+        const status = Number(error?.response?.status || 0);
+        const allowedClientIds = (((user as any)?.clientAccess?.clients as Array<{ clientId?: string }> | undefined) ?? [])
+          .map((c) => String(c?.clientId || "").trim())
+          .filter(Boolean);
+
+        if (status === 403 && clientPortalMode) {
+          // If URL points to a client this user cannot access, recover to first allowed dashboard.
+          const fallbackClientId = allowedClientIds[0];
+          if (fallbackClientId && fallbackClientId !== clientId) {
+            navigate(`/client/dashboard/${encodeURIComponent(fallbackClientId)}`, { replace: true });
+            return;
+          }
+          if (!fallbackClientId) {
+            navigate("/login", { replace: true });
+            return;
+          }
+        }
+
+        if (status === 400 && dateRange === "custom") {
+          // Recover from invalid custom date payload by falling back to default period.
+          setDateRange("30");
+          setCustomStartDate("");
+          setCustomEndDate("");
+          return;
+        }
+
         setDashboardSummary(null);
         
         // If error is related to GA4, mark connection as invalid
@@ -2225,7 +2513,7 @@ const ClientDashboardPage: React.FC = () => {
     };
 
     fetchSummary();
-  }, [clientId, dateRange, customStartDate, customEndDate, buildDashboardUrl, user?.role]);
+  }, [clientId, clientPortalMode, dateRange, customStartDate, customEndDate, buildDashboardUrl, navigate, user]);
 
   // Fetch comparison period data when "Compare To" is enabled
   useEffect(() => {
@@ -2832,15 +3120,15 @@ const ClientDashboardPage: React.FC = () => {
       String(serverReport.clientId || "") === String(clientId || "")
     ) {
       // Map backend seoReport to UI ClientReport
-      const period = typeof serverReport.period === "string" ? serverReport.period : "Monthly";
+      const period = typeof serverReport.period === "string" ? serverReport.period : "monthly";
       const dateStr = serverReport.reportDate ? format(new Date(serverReport.reportDate), "yyyy-MM-dd") : "";
       return {
         id: serverReport.id || "report",
         clientId: clientId!,
         name: "Client SEO Report",
-        type: period.charAt(0).toUpperCase() + period.slice(1),
+        type: formatReportPeriodLabel(period),
         lastGenerated: dateStr,
-        status: serverReport.status === "sent" ? "Sent" : serverReport.status === "draft" ? "Draft" : "Scheduled",
+        status: toDisplayReportStatus(serverReport.status),
         // Prefer schedule recipients (what user sets in Create Report & Schedule modal) over report.recipients
         recipients: Array.isArray(serverReport.scheduleRecipients) && serverReport.scheduleRecipients.length > 0
           ? serverReport.scheduleRecipients
@@ -3835,14 +4123,51 @@ const ClientDashboardPage: React.FC = () => {
     const first = parts[0] || "";
     const last = parts.slice(1).join(" ");
 
-    setEditClientUserProfileUser({ userId: u.userId, email: u.email, name: u.name });
+    setEditClientUserProfileUser({ userId: u.userId, email: u.email, name: u.name, profileImageUrl: u.profileImageUrl || null });
     setEditClientUserFirstName(first);
     setEditClientUserLastName(last);
     setEditClientUserPassword("");
     setEditClientUserPasswordVisible(false);
     setEditClientUserEmailCredentials("NO");
+    setEditClientUserPhotoUrl(u.profileImageUrl || null);
     setEditClientUserProfileOpen(true);
   }, []);
+
+  const triggerClientUserPhotoPicker = useCallback(() => {
+    if (uploadingClientUserPhoto || savingClientUserProfile) return;
+    editClientUserPhotoInputRef.current?.click();
+  }, [savingClientUserProfile, uploadingClientUserPhoto]);
+
+  const handleClientUserPhotoSelected = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith("image/")) {
+        toast.error("Please select an image file.");
+        event.target.value = "";
+        return;
+      }
+      try {
+        setUploadingClientUserPhoto(true);
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await api.post("/upload", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        const uploadedUrl = String(res.data?.value || "").trim();
+        if (!uploadedUrl) throw new Error("Upload did not return a file URL.");
+        setEditClientUserPhotoUrl(uploadedUrl);
+        toast.success("Profile picture uploaded.");
+      } catch (e: any) {
+        console.error("Failed to upload client user profile image", e);
+        toast.error(e?.response?.data?.message || "Failed to upload profile picture.");
+      } finally {
+        setUploadingClientUserPhoto(false);
+        event.target.value = "";
+      }
+    },
+    []
+  );
 
   const generateRandomPassword = useCallback(() => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
@@ -3871,6 +4196,7 @@ const ClientDashboardPage: React.FC = () => {
       await api.put(`/clients/${clientId}/users/${editClientUserProfileUser.userId}/profile`, {
         firstName: editClientUserFirstName.trim(),
         lastName: editClientUserLastName.trim(),
+        profileImageUrl: editClientUserPhotoUrl || null,
         password: editClientUserPassword.trim() ? editClientUserPassword.trim() : undefined,
         emailCredentials: wantsEmailCredentials,
       });
@@ -3890,6 +4216,7 @@ const ClientDashboardPage: React.FC = () => {
     editClientUserFirstName,
     editClientUserLastName,
     editClientUserPassword,
+    editClientUserPhotoUrl,
     editClientUserProfileUser?.userId,
     fetchClientUsers,
   ]);
@@ -3966,6 +4293,10 @@ const ClientDashboardPage: React.FC = () => {
   const loginAsClientUser = useCallback(
     async (u: ClientUserRow) => {
       if (!clientId) return;
+      if (u.status !== "ACTIVE") {
+        toast.error("Only active users can be logged in.");
+        return;
+      }
       try {
         const res = await api.post(`/clients/${clientId}/users/${u.userId}/impersonate`);
         const token = res.data?.token as string | undefined;
@@ -4014,27 +4345,31 @@ const ClientDashboardPage: React.FC = () => {
       <div className="px-8 pt-6 space-y-6 shrink-0">
         {/* Back navigation */}
         <div>
-          {!reportOnly && !clientPortalMode ? (
-            <button
-              onClick={handleBackToClients}
-              className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-600 shadow-sm ring-1 ring-gray-200/60 transition-all hover:bg-white hover:text-primary-600 hover:shadow-md hover:ring-primary-200"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>Back to Clients</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleBackToLogin}
-              className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-600 shadow-sm ring-1 ring-gray-200/60 transition-all hover:bg-white hover:text-primary-600 hover:shadow-md hover:ring-primary-200"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>Back to Login</span>
-            </button>
-          )}
+          {!clientPortalMode &&
+            (!reportOnly ? (
+              <button
+                onClick={handleBackToClients}
+                className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-600 shadow-sm ring-1 ring-gray-200/60 transition-all hover:bg-white hover:text-primary-600 hover:shadow-md hover:ring-primary-200"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back to Clients</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleBackToLogin}
+                className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-600 shadow-sm ring-1 ring-gray-200/60 transition-all hover:bg-white hover:text-primary-600 hover:shadow-md hover:ring-primary-200"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back to Login</span>
+              </button>
+            ))}
           {clientPortalMode && clientPortalClients.length > 0 && (
-            <div className="mt-3 flex items-center gap-2">
-              <span className="text-sm text-gray-500">Clients</span>
+            <div className="mt-3 inline-flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-primary-600" />
+                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Clients</span>
+              </div>
               <select
                 value={clientId || ""}
                 onChange={(e) => {
@@ -4042,7 +4377,8 @@ const ClientDashboardPage: React.FC = () => {
                   if (!nextId) return;
                   navigate(`/client/dashboard/${encodeURIComponent(nextId)}`, { replace: true });
                 }}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                className="min-w-[220px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:border-primary-300 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                aria-label="Select client"
               >
                 {clientPortalClients.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -4060,7 +4396,7 @@ const ClientDashboardPage: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-4 py-5 pl-7 pr-6">
             {/* Left: Name + meta pills */}
             <div className="flex flex-wrap items-center gap-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-600 to-violet-600 shadow-md">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-primary-600 to-violet-600 shadow-md">
                 <span className="text-lg font-bold text-white">
                   {(client?.name || "C").charAt(0).toUpperCase()}
                 </span>
@@ -4164,7 +4500,7 @@ const ClientDashboardPage: React.FC = () => {
                     {user?.role === "SUPER_ADMIN" && (
                       <button
                         type="button"
-                        onClick={handleRefreshDashboard}
+                        onClick={() => void handleRefreshDashboard()}
                         disabled={refreshingDashboard}
                         data-pdf-hide="true"
                         className="bg-green-600 text-white p-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
@@ -5746,7 +6082,12 @@ const ClientDashboardPage: React.FC = () => {
                                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                                   <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#6b7280" />
                                   <YAxis tick={{ fontSize: 11 }} stroke="#6b7280" tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : String(v))} />
-                                  <Tooltip isAnimationActive={false} contentStyle={{ pointerEvents: "none" }} formatter={(value: number) => [value.toLocaleString(), "AI Search Vol"]} labelFormatter={(l) => l} />
+                                  <Tooltip
+                                    isAnimationActive={false}
+                                    contentStyle={{ pointerEvents: "none" }}
+                                    formatter={(value: number | undefined) => [Number(value ?? 0).toLocaleString(), "AI Search Vol"]}
+                                    labelFormatter={(l) => l}
+                                  />
                                   <Line type="monotone" dataKey="volume" name="AI Search Volume" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
                                 </LineChart>
                               </ResponsiveContainer>
@@ -7252,6 +7593,133 @@ const ClientDashboardPage: React.FC = () => {
                           </div>
                         )}
                       </div>
+
+                      <div className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="block text-sm font-semibold text-teal-800">Activity</label>
+                          {workLogModalMode !== "create" && selectedWorkLogTaskId && (
+                            <button
+                              type="button"
+                              onClick={() => void fetchWorkLogComments(selectedWorkLogTaskId)}
+                              className="text-xs text-gray-500 hover:text-gray-700"
+                            >
+                              Refresh
+                            </button>
+                          )}
+                        </div>
+                        {workLogModalMode === "create" || !selectedWorkLogTaskId ? (
+                          <p className="mt-2 text-sm text-gray-500">Save the work log entry to start the activity feed.</p>
+                        ) : (
+                          <div className="mt-3 rounded-lg border border-gray-200 bg-white">
+                            <div className="max-h-64 overflow-y-auto p-3 space-y-3">
+                              {workLogCommentsLoading ? (
+                                <p className="text-sm text-gray-500">Loading activity...</p>
+                              ) : workLogCommentsError ? (
+                                <p className="text-sm text-rose-600">{workLogCommentsError}</p>
+                              ) : workLogComments.length === 0 ? (
+                                <p className="text-sm text-gray-500">No activity yet. Start the conversation below.</p>
+                              ) : (
+                                workLogComments.map((c) => {
+                                  const config = workLogActivityConfig[c.type] || workLogActivityConfig.COMMENT;
+                                  const authorRole = c.author?.role === "USER"
+                                    ? "Client"
+                                    : c.author?.role === "SPECIALIST"
+                                      ? "Specialist"
+                                      : c.author?.role === "SUPER_ADMIN"
+                                        ? "Super Admin"
+                                        : c.author?.role === "ADMIN"
+                                          ? "Admin"
+                                          : "Agency";
+                                  const when = (() => {
+                                    try {
+                                      return new Date(c.createdAt).toLocaleString();
+                                    } catch {
+                                      return "";
+                                    }
+                                  })();
+                                  return (
+                                    <div key={c.id} className={`rounded-lg border p-3 ${config.border} ${config.bg}`}>
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <p className="text-sm font-medium text-gray-900 truncate">
+                                              {c.author?.name || c.author?.email || "Unknown"}
+                                            </p>
+                                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                              {authorRole}
+                                            </span>
+                                            {c.type !== "COMMENT" && (
+                                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${config.color} ${config.bg} ${config.border}`}>
+                                                {config.label}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
+                                            {c.body}
+                                          </p>
+                                        </div>
+                                        <p className="text-xs text-gray-500 shrink-0">{when}</p>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+
+                            <div className="border-t border-gray-200 p-3">
+                              {!canCommentOnWorkLog ? (
+                                <p className="text-sm text-gray-500">Sign in to participate in the conversation.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    {workLogCommentTypes.map((type) => {
+                                      const cfg = workLogActivityConfig[type];
+                                      return (
+                                        <button
+                                          key={type}
+                                          type="button"
+                                          onClick={() => setWorkLogCommentType(type)}
+                                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                                            workLogCommentType === type
+                                              ? `${cfg.color} ${cfg.bg} ${cfg.border}`
+                                              : "text-gray-500 bg-white border-gray-200 hover:bg-gray-50"
+                                          }`}
+                                        >
+                                          {cfg.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <div className="flex flex-col sm:flex-row gap-2">
+                                    <textarea
+                                      value={workLogNewComment}
+                                      onChange={(e) => setWorkLogNewComment(e.target.value)}
+                                      rows={2}
+                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                      placeholder={
+                                        workLogCommentType === "QUESTION"
+                                          ? "Ask a question..."
+                                          : workLogCommentType === "APPROVAL_REQUEST"
+                                            ? "Request approval (describe what needs review)..."
+                                            : "Write a comment..."
+                                      }
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={postingWorkLogComment || workLogNewComment.trim().length === 0}
+                                      onClick={() => void handlePostWorkLogComment()}
+                                      className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                                    >
+                                      <Send className="h-4 w-4" />
+                                      Post
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     </div>
 
@@ -7514,6 +7982,7 @@ const ClientDashboardPage: React.FC = () => {
                 setForm={setViewClientForm}
                 canEdit={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")}
                 showStatus={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"}
+                showExtendedSuperAdminFields={user?.role === "SUPER_ADMIN"}
                 onClose={() => setShowViewClientModal(false)}
                 onSave={
                   ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")
@@ -7523,6 +7992,7 @@ const ClientDashboardPage: React.FC = () => {
                         try {
                           const data = formStateToUpdatePayload(viewClientForm, {
                             includeStatus: user?.role === "SUPER_ADMIN" || user?.role === "ADMIN",
+                            includeManagedServiceFields: user?.role === "SUPER_ADMIN",
                           });
                           await dispatch(updateClient({ id: client.id, data }) as any).unwrap();
                           setClient((prev) =>
@@ -8041,10 +8511,11 @@ const ClientDashboardPage: React.FC = () => {
                               </button>
                               <button
                                 type="button"
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                onClick={() => toast("Edit Permissions coming soon.")}
+                                disabled
+                                title="Edit permissions is coming soon."
+                                className="w-full text-left px-4 py-2 text-sm text-gray-400 cursor-not-allowed"
                               >
-                                Edit Permissions
+                                Edit Permissions (Coming soon)
                               </button>
                               <div className="h-px bg-gray-100" />
                               {u?.status === "PENDING" && (
@@ -8062,7 +8533,13 @@ const ClientDashboardPage: React.FC = () => {
                               )}
                               <button
                                 type="button"
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                disabled={u?.status !== "ACTIVE"}
+                                title={u?.status === "ACTIVE" ? "Login as user" : "Only active users can be logged in"}
+                                className={`w-full text-left px-4 py-2 text-sm ${
+                                  u?.status === "ACTIVE"
+                                    ? "text-gray-700 hover:bg-gray-50"
+                                    : "text-gray-400 cursor-not-allowed"
+                                }`}
                                 onClick={() => {
                                   if (u) void loginAsClientUser(u);
                                   else toast.error("Unable to load user.");
@@ -8179,19 +8656,19 @@ const ClientDashboardPage: React.FC = () => {
                                   </div>
 
                                   <div className="pt-7">
-                                    <button
-                                      type="button"
-                                      className="h-10 w-10 inline-flex items-center justify-center rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
-                                      title="Remove"
-                                      onClick={() =>
-                                        setInviteClientUsersRows((prev) =>
-                                          prev.length <= 1 ? prev : prev.filter((r) => r.id !== row.id)
-                                        )
-                                      }
-                                      disabled={invitingClientUsers || inviteClientUsersRows.length <= 1}
-                                    >
-                                      <X className="h-5 w-5" />
-                                    </button>
+                                    {inviteClientUsersRows.length > 1 && (
+                                      <button
+                                        type="button"
+                                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                        title="Remove"
+                                        onClick={() =>
+                                          setInviteClientUsersRows((prev) => prev.filter((r) => r.id !== row.id))
+                                        }
+                                        disabled={invitingClientUsers}
+                                      >
+                                        <X className="h-5 w-5" />
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               ))}
@@ -8454,21 +8931,40 @@ const ClientDashboardPage: React.FC = () => {
 
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Photo</label>
+                                <input
+                                  ref={editClientUserPhotoInputRef}
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => void handleClientUserPhotoSelected(e)}
+                                />
                                 <div className="flex items-center gap-3">
                                   <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
-                                    <Users className="h-5 w-5" />
+                                    {editClientUserPhotoUrl ? (
+                                      <img
+                                        src={editClientUserPhotoUrl}
+                                        alt="User profile"
+                                        className="h-10 w-10 rounded-full object-cover"
+                                      />
+                                    ) : (
+                                      <Users className="h-5 w-5" />
+                                    )}
                                   </div>
                                   <button
                                     type="button"
-                                    className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                    onClick={() => toast("Photo upload coming soon.")}
+                                    disabled={uploadingClientUserPhoto || savingClientUserProfile}
+                                    title="Upload profile picture"
+                                    className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    onClick={() => triggerClientUserPhotoPicker()}
                                   >
-                                    Upload New Picture
+                                    {uploadingClientUserPhoto ? "Uploading..." : "Upload New Picture"}
                                   </button>
                                   <button
                                     type="button"
-                                    className="text-sm text-rose-600 hover:text-rose-700"
-                                    onClick={() => toast("Photo delete coming soon.")}
+                                    disabled={!editClientUserPhotoUrl || uploadingClientUserPhoto || savingClientUserProfile}
+                                    title="Delete profile picture"
+                                    className="text-sm text-rose-600 hover:text-rose-700 disabled:text-rose-300 disabled:cursor-not-allowed"
+                                    onClick={() => setEditClientUserPhotoUrl(null)}
                                   >
                                     Delete
                                   </button>
@@ -8621,15 +9117,15 @@ const ClientDashboardPage: React.FC = () => {
 
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="min-w-full">
+                      <table className="min-w-full" aria-label="Client reports table">
                         <thead>
                           <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
-                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Name</th>
-                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Type</th>
-                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Last Generated</th>
-                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
-                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Recipients</th>
-                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300"></th>
+                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Name</th>
+                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Type</th>
+                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Last Generated</th>
+                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
+                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Recipients</th>
+                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -8654,18 +9150,12 @@ const ClientDashboardPage: React.FC = () => {
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{singleReportForClient.lastGenerated}</td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <span
-                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                    singleReportForClient.status === "Sent"
-                                      ? "bg-green-100 text-green-800"
-                                      : singleReportForClient.status === "Draft"
-                                        ? "bg-yellow-100 text-yellow-800"
-                                        : "bg-blue-100 text-blue-800"
-                                  }`}
+                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getReportStatusBadgeClass(singleReportForClient.status)}`}
                                 >
-                                  {singleReportForClient.status}
+                                  {toDisplayReportStatus(singleReportForClient.status)}
                                 </span>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-violet-800/90">
+                              <td className="px-6 py-4 text-sm text-violet-800/90 max-w-xs break-words">
                                 {singleReportForClient.recipients.join(", ")}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -8674,6 +9164,7 @@ const ClientDashboardPage: React.FC = () => {
                                     onClick={() => handleViewReport(singleReportForClient)}
                                     className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                                     title="View report"
+                                    aria-label="View report"
                                   >
                                     <Eye className="h-4 w-4" />
                                   </button>
@@ -8681,6 +9172,7 @@ const ClientDashboardPage: React.FC = () => {
                                     onClick={handleShare}
                                     className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                                     title="Share dashboard"
+                                    aria-label="Share dashboard"
                                   >
                                     <Share2 className="h-4 w-4" />
                                   </button>
@@ -8689,6 +9181,7 @@ const ClientDashboardPage: React.FC = () => {
                                     disabled={sendingReport || !canModifyClientSettings}
                                     className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                     title={canModifyClientSettings ? "Send report via email" : "Included clients are view-only"}
+                                    aria-label="Send report"
                                   >
                                     <Send className="h-4 w-4" />
                                   </button>
@@ -8697,6 +9190,7 @@ const ClientDashboardPage: React.FC = () => {
                                     disabled={!canModifyClientSettings}
                                     className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                     title={canModifyClientSettings ? "Delete report" : "Included clients are view-only"}
+                                    aria-label="Delete report"
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </button>
@@ -9137,6 +9631,133 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                     )}
                   </div>
+
+                  <div className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="block text-sm font-semibold text-teal-800">Activity</label>
+                      {workLogModalMode !== "create" && selectedWorkLogTaskId && (
+                        <button
+                          type="button"
+                          onClick={() => void fetchWorkLogComments(selectedWorkLogTaskId)}
+                          className="text-xs text-gray-500 hover:text-gray-700"
+                        >
+                          Refresh
+                        </button>
+                      )}
+                    </div>
+                    {workLogModalMode === "create" || !selectedWorkLogTaskId ? (
+                      <p className="mt-2 text-sm text-gray-500">Save the work log entry to start the activity feed.</p>
+                    ) : (
+                      <div className="mt-3 rounded-lg border border-gray-200 bg-white">
+                        <div className="max-h-64 overflow-y-auto p-3 space-y-3">
+                          {workLogCommentsLoading ? (
+                            <p className="text-sm text-gray-500">Loading activity...</p>
+                          ) : workLogCommentsError ? (
+                            <p className="text-sm text-rose-600">{workLogCommentsError}</p>
+                          ) : workLogComments.length === 0 ? (
+                            <p className="text-sm text-gray-500">No activity yet. Start the conversation below.</p>
+                          ) : (
+                            workLogComments.map((c) => {
+                              const config = workLogActivityConfig[c.type] || workLogActivityConfig.COMMENT;
+                              const authorRole = c.author?.role === "USER"
+                                ? "Client"
+                                : c.author?.role === "SPECIALIST"
+                                  ? "Specialist"
+                                  : c.author?.role === "SUPER_ADMIN"
+                                    ? "Super Admin"
+                                    : c.author?.role === "ADMIN"
+                                      ? "Admin"
+                                      : "Agency";
+                              const when = (() => {
+                                try {
+                                  return new Date(c.createdAt).toLocaleString();
+                                } catch {
+                                  return "";
+                                }
+                              })();
+                              return (
+                                <div key={c.id} className={`rounded-lg border p-3 ${config.border} ${config.bg}`}>
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <p className="text-sm font-medium text-gray-900 truncate">
+                                          {c.author?.name || c.author?.email || "Unknown"}
+                                        </p>
+                                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                          {authorRole}
+                                        </span>
+                                        {c.type !== "COMMENT" && (
+                                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${config.color} ${config.bg} ${config.border}`}>
+                                            {config.label}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
+                                        {c.body}
+                                      </p>
+                                    </div>
+                                    <p className="text-xs text-gray-500 shrink-0">{when}</p>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        <div className="border-t border-gray-200 p-3">
+                          {!canCommentOnWorkLog ? (
+                            <p className="text-sm text-gray-500">Sign in to participate in the conversation.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                {workLogCommentTypes.map((type) => {
+                                  const cfg = workLogActivityConfig[type];
+                                  return (
+                                    <button
+                                      key={type}
+                                      type="button"
+                                      onClick={() => setWorkLogCommentType(type)}
+                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                                        workLogCommentType === type
+                                          ? `${cfg.color} ${cfg.bg} ${cfg.border}`
+                                          : "text-gray-500 bg-white border-gray-200 hover:bg-gray-50"
+                                      }`}
+                                    >
+                                      {cfg.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <textarea
+                                  value={workLogNewComment}
+                                  onChange={(e) => setWorkLogNewComment(e.target.value)}
+                                  rows={2}
+                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                  placeholder={
+                                    workLogCommentType === "QUESTION"
+                                      ? "Ask a question..."
+                                      : workLogCommentType === "APPROVAL_REQUEST"
+                                        ? "Request approval (describe what needs review)..."
+                                        : "Write a comment..."
+                                  }
+                                />
+                                <button
+                                  type="button"
+                                  disabled={postingWorkLogComment || workLogNewComment.trim().length === 0}
+                                  onClick={() => void handlePostWorkLogComment()}
+                                  className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                                >
+                                  <Send className="h-4 w-4" />
+                                  Post
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 </div>
 
@@ -9395,7 +10016,7 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
                     <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm">
                       <div className="text-primary-200 text-xs font-medium mb-1">Domain</div>
-                      <div className="text-white font-semibold">{client?.domain || "—"}</div>
+                      <div className="text-white font-semibold break-all">{client?.domain || "—"}</div>
                     </div>
                     <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm">
                       <div className="text-primary-200 text-xs font-medium mb-1">Report Date</div>
@@ -9412,6 +10033,7 @@ const ClientDashboardPage: React.FC = () => {
                     <Activity className="h-5 w-5 text-blue-500 mr-2" />
                     <h2 className="text-xl font-bold text-gray-900">Traffic Overview</h2>
                   </div>
+                  <p className="text-sm text-gray-500 mb-4">Core visitor metrics for this reporting period.</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
                       <div className="text-xs font-medium text-blue-600 mb-1">Web Visitors</div>
@@ -9438,6 +10060,7 @@ const ClientDashboardPage: React.FC = () => {
                     <TrendingUp className="h-5 w-5 text-green-500 mr-2" />
                     <h2 className="text-xl font-bold text-gray-900">SEO Performance</h2>
                   </div>
+                  <p className="text-sm text-gray-500 mb-4">Ranking and search visibility metrics for this period.</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                       <div className="text-xs font-medium text-gray-600 mb-1">Average Position</div>
@@ -9487,6 +10110,7 @@ const ClientDashboardPage: React.FC = () => {
                             <h2 className="text-xl font-bold text-gray-900">Money Keywords</h2>
                             <span className="ml-2 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">{moneyKws.length}</span>
                           </div>
+                          <p className="text-sm text-gray-500 mb-4">High-intent keywords that drive qualified opportunities.</p>
                           {moneyKws.length === 0 ? (
                             <div className="p-6 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
                               <DollarSign className="h-10 w-10 mx-auto mb-2 text-gray-400" />
@@ -9573,6 +10197,7 @@ const ClientDashboardPage: React.FC = () => {
                             <h2 className="text-xl font-bold text-gray-900">Topical Keywords</h2>
                             <span className="ml-2 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-bold text-blue-700">{topicalKws.length}</span>
                           </div>
+                          <p className="text-sm text-gray-500 mb-4">Supportive topic coverage and informational discovery terms.</p>
                           {topicalKws.length === 0 ? (
                             <div className="p-6 text-center text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
                               <BookOpen className="h-10 w-10 mx-auto mb-2 text-gray-400" />
@@ -9657,6 +10282,7 @@ const ClientDashboardPage: React.FC = () => {
                     <Share2 className="h-5 w-5 text-purple-500 mr-2" />
                     <h2 className="text-xl font-bold text-gray-900">Live Dashboard</h2>
                   </div>
+                  <p className="text-sm text-gray-500 mb-4">Share this live report URL to provide read-only visibility.</p>
                   {reportPreviewShareLoading ? (
                     <div className="flex items-center justify-center py-8 text-gray-500">
                       <Loader2 className="h-5 w-5 animate-spin mr-2" />

@@ -13,6 +13,20 @@ import {
 } from "@/lib/clientAccountForm";
 
 const inputClass = "w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent";
+const MANAGED_SERVICE_STATUS_OPTIONS = [
+  { value: "none", label: "Dashboard Only" },
+  { value: "pending", label: "Pending" },
+  { value: "active", label: "Active" },
+  { value: "canceled", label: "Canceled" },
+  { value: "suspended", label: "Suspended" },
+  { value: "archived", label: "Archived" },
+] as const;
+const MANAGED_SERVICE_PACKAGE_OPTIONS = [
+  { value: "foundation", label: "Foundation ($750/mo)" },
+  { value: "growth", label: "Growth ($1,500/mo)" },
+  { value: "domination", label: "Domination ($3,000/mo)" },
+  { value: "custom", label: "Custom" },
+] as const;
 
 interface ClientAccountFormModalProps {
   open: boolean;
@@ -22,6 +36,7 @@ interface ClientAccountFormModalProps {
   setForm: React.Dispatch<React.SetStateAction<ClientFormState>>;
   canEdit: boolean;
   showStatus?: boolean;
+  showExtendedSuperAdminFields?: boolean;
   onClose: () => void;
   onSave?: () => void;
   saving?: boolean;
@@ -35,6 +50,7 @@ export default function ClientAccountFormModal({
   setForm,
   canEdit,
   showStatus = false,
+  showExtendedSuperAdminFields = false,
   onClose,
   onSave,
   saving = false,
@@ -42,7 +58,7 @@ export default function ClientAccountFormModal({
   if (!open) return null;
 
   const copyAllToClipboard = () => {
-    const text = buildClientCopyText(form, { showStatus });
+    const text = buildClientCopyText(form, { showStatus, includeExtendedSuperAdminFields: showExtendedSuperAdminFields });
     navigator.clipboard.writeText(text).then(
       () => toast.success("Copied to clipboard"),
       () => toast.error("Failed to copy")
@@ -128,7 +144,7 @@ export default function ClientAccountFormModal({
                         className={`${inputClass} bg-white`}
                       >
                         <option value="">Select business niche</option>
-                        {INDUSTRY_OPTIONS.map((opt) => (
+                        {BUSINESS_NICHE_OPTIONS.map((opt) => (
                           <option key={opt} value={opt}>
                             {opt}
                           </option>
@@ -178,6 +194,43 @@ export default function ClientAccountFormModal({
                     />
                   ) : (
                     ro(form.domain)
+                  )
+                )}
+                {field(
+                  "Industry",
+                  true,
+                  canEdit ? (
+                    <>
+                      <select
+                        value={form.industry}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            industry: e.target.value,
+                            industryOther: e.target.value === "Other" ? prev.industryOther : "",
+                          }))
+                        }
+                        className={`${inputClass} bg-white`}
+                      >
+                        <option value="">Select industry</option>
+                        {INDUSTRY_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                      {form.industry === "Other" && (
+                        <input
+                          type="text"
+                          value={form.industryOther}
+                          onChange={(e) => setForm((f) => ({ ...f, industryOther: e.target.value }))}
+                          className={`mt-2 ${inputClass}`}
+                          placeholder="Enter industry"
+                        />
+                      )}
+                    </>
+                  ) : (
+                    ro(form.industry === "Other" ? form.industryOther : form.industry)
                   )
                 )}
               </div>
@@ -477,31 +530,167 @@ export default function ClientAccountFormModal({
               </div>
             </section>
 
-            {/* Status (Admin / Super Admin only) */}
-            {showStatus && (
-              <section className="rounded-xl border-l-4 border-slate-500 bg-slate-50/50 p-4 sm:p-5">
-                {field(
-                  "Status",
-                  false,
-                  canEdit ? (
-                    <select
-                      value={form.clientStatus}
-                      onChange={(e) => setForm((f) => ({ ...f, clientStatus: e.target.value }))}
-                      className={`${inputClass} bg-white`}
-                    >
-                      <option value="ACTIVE">Active</option>
-                      <option value="PENDING">Pending</option>
-                      <option value="DASHBOARD_ONLY">Dashboard Only</option>
-                      <option value="CANCELED">Canceled</option>
-                      <option value="SUSPENDED">Suspended</option>
-                      <option value="ARCHIVED">Archived</option>
-                    </select>
-                  ) : (
-                    ro(form.clientStatus)
-                  )
-                )}
-              </section>
+            {showExtendedSuperAdminFields && (
+              <>
+                <section className="rounded-xl border-l-4 border-cyan-500 bg-cyan-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-cyan-900 mb-4 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                    KEYWORD ALLOCATION
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {field(
+                      "Number of Keywords for Campaign",
+                      false,
+                      canEdit ? (
+                        <input type="number" min={0} value={form.targetKeywordCount} onChange={(e) => setForm((f) => ({ ...f, targetKeywordCount: e.target.value }))} className={inputClass} placeholder="e.g. 50" />
+                      ) : (
+                        ro(form.targetKeywordCount)
+                      )
+                    )}
+                    {field(
+                      "Total Keywords to Target",
+                      false,
+                      canEdit ? (
+                        <input type="number" min={0} value={form.totalKeywordsToTarget} onChange={(e) => setForm((f) => ({ ...f, totalKeywordsToTarget: e.target.value }))} className={inputClass} placeholder="e.g. 200" />
+                      ) : (
+                        ro(form.totalKeywordsToTarget)
+                      )
+                    )}
+                  </div>
+                </section>
+
+                <section className="rounded-xl border-l-4 border-fuchsia-500 bg-fuchsia-50/40 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-fuchsia-900 mb-4 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-500" />
+                    GEOLOCATION DATA
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {field(
+                      "Latitude",
+                      false,
+                      canEdit ? (
+                        <input type="number" step="any" value={form.latitude} onChange={(e) => setForm((f) => ({ ...f, latitude: e.target.value }))} className={inputClass} placeholder="40.8682" />
+                      ) : (
+                        ro(form.latitude)
+                      )
+                    )}
+                    {field(
+                      "Longitude",
+                      false,
+                      canEdit ? (
+                        <input type="number" step="any" value={form.longitude} onChange={(e) => setForm((f) => ({ ...f, longitude: e.target.value }))} className={inputClass} placeholder="-73.4357" />
+                      ) : (
+                        ro(form.longitude)
+                      )
+                    )}
+                  </div>
+                </section>
+
+                <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+                    SEO ROADMAP
+                  </h3>
+                  <div>
+                    {field(
+                      "SEO Roadmap Section",
+                      false,
+                      canEdit ? (
+                        <textarea
+                          value={form.seoRoadmapSection}
+                          onChange={(e) => setForm((f) => ({ ...f, seoRoadmapSection: e.target.value }))}
+                          className={inputClass}
+                          rows={4}
+                          placeholder="Month 1: Technical audit + on-page optimization. Month 2: Content hub creation. Month 3: Link building campaign."
+                        />
+                      ) : (
+                        ro(form.seoRoadmapSection)
+                      )
+                    )}
+                  </div>
+                </section>
+
+                <section className="rounded-xl border-l-4 border-orange-500 bg-orange-50/50 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-orange-900 mb-4 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                    MANAGED SERVICE STATUS
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {field(
+                      "Managed Service Status",
+                      false,
+                      canEdit ? (
+                        <select
+                          value={form.managedServiceStatus}
+                          onChange={(e) => setForm((f) => ({ ...f, managedServiceStatus: e.target.value }))}
+                          className={`${inputClass} bg-white`}
+                        >
+                          {MANAGED_SERVICE_STATUS_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        ro(form.managedServiceStatus)
+                      )
+                    )}
+                    {(form.managedServiceStatus === "active" || form.managedServiceStatus === "pending" || form.managedServiceStatus === "canceled") &&
+                      field(
+                        "Managed Service Package",
+                        false,
+                        canEdit ? (
+                          <select
+                            value={form.managedServicePackage}
+                            onChange={(e) => setForm((f) => ({ ...f, managedServicePackage: e.target.value }))}
+                            className={`${inputClass} bg-white`}
+                          >
+                            <option value="">Select...</option>
+                            {MANAGED_SERVICE_PACKAGE_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          ro(form.managedServicePackage)
+                        )
+                      )}
+                    {form.managedServiceStatus === "active" &&
+                      field(
+                        "Service Start Date",
+                        false,
+                        canEdit ? (
+                          <input
+                            type="date"
+                            value={form.serviceStartDate}
+                            onChange={(e) => setForm((f) => ({ ...f, serviceStartDate: e.target.value }))}
+                            className={inputClass}
+                          />
+                        ) : (
+                          ro(form.serviceStartDate)
+                        )
+                      )}
+                    {form.managedServiceStatus === "canceled" &&
+                      field(
+                        "Service End Date",
+                        false,
+                        canEdit ? (
+                          <input
+                            type="date"
+                            value={form.managedServiceEndDate}
+                            onChange={(e) => setForm((f) => ({ ...f, managedServiceEndDate: e.target.value }))}
+                            className={inputClass}
+                          />
+                        ) : (
+                          ro(form.managedServiceEndDate)
+                        )
+                      )}
+                  </div>
+                </section>
+              </>
             )}
+
           </div>
 
           <div className="px-6 py-4 border-t-2 border-gray-200 flex justify-end gap-3 shrink-0 bg-gradient-to-r from-gray-50 to-slate-50">

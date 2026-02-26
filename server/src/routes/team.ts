@@ -6,6 +6,7 @@ import { Prisma, Role } from "@prisma/client";
 import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { requireAgencyTrialNotExpired } from '../middleware/requireAgencyTrialNotExpired.js';
 import { sendEmail } from '../lib/email.js';
+import { BRAND_DISPLAY_NAME } from "../lib/qualityContracts.js";
 import jwt from 'jsonwebtoken';
 import { getAgencyTierContext, canAddTeamMember } from '../lib/agencyLimits.js';
 
@@ -343,7 +344,7 @@ router.post('/invite', authenticateToken, async (req, res) => {
         });
 
         // Send invitation email (invite still succeeds if email fails)
-        const companyName = 'Design ME Marketing';
+        const companyName = BRAND_DISPLAY_NAME;
         let teamLabel = companyName + "'s team";
         if (targetAgencyId) {
             const agency = await prisma.agency.findUnique({
@@ -457,7 +458,7 @@ router.post('/:id/resend-invite', authenticateToken, async (req, res) => {
         });
 
         const inviteUrl = `${process.env.FRONTEND_URL || ''}/invite?token=${encodeURIComponent(inviteToken)}`;
-        const companyName = 'Design ME Marketing';
+        const companyName = BRAND_DISPLAY_NAME;
         const inviter = await prisma.user.findUnique({
             where: { id: reqUser.userId },
             select: { name: true },

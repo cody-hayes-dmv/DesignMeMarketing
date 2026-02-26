@@ -19,6 +19,7 @@ type ClientUserRow = {
   role: "CLIENT" | "STAFF";
   status: "PENDING" | "ACTIVE";
   lastLoginAt: string | null;
+  profileImageUrl?: string | null;
 };
 
 type ClientOption = {
@@ -42,6 +43,7 @@ const ClientUsersPage: React.FC = () => {
     userId: string;
     email: string;
     name: string | null;
+    profileImageUrl?: string | null;
   } | null>(null);
   const [editClientUserProfileClientId, setEditClientUserProfileClientId] = useState<string | null>(null);
   const [editClientUserFirstName, setEditClientUserFirstName] = useState("");
@@ -49,6 +51,9 @@ const ClientUsersPage: React.FC = () => {
   const [editClientUserPassword, setEditClientUserPassword] = useState("");
   const [editClientUserPasswordVisible, setEditClientUserPasswordVisible] = useState(false);
   const [editClientUserEmailCredentials, setEditClientUserEmailCredentials] = useState<"YES" | "NO">("NO");
+  const [editClientUserPhotoUrl, setEditClientUserPhotoUrl] = useState<string | null>(null);
+  const [uploadingClientUserPhoto, setUploadingClientUserPhoto] = useState(false);
+  const editClientUserPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [savingClientUserProfile, setSavingClientUserProfile] = useState(false);
 
   // Edit Client Access modal state
@@ -267,6 +272,10 @@ const ClientUsersPage: React.FC = () => {
 
   const loginAsClientUser = useCallback(
     async (u: ClientUserRow) => {
+      if (u.status !== "ACTIVE") {
+        toast.error("Only active users can be logged in.");
+        return;
+      }
       try {
         const res = await api.post(
           `/clients/${encodeURIComponent(u.clientId)}/users/${encodeURIComponent(u.userId)}/impersonate`
@@ -311,14 +320,51 @@ const ClientUsersPage: React.FC = () => {
     const last = parts.slice(1).join(" ");
 
     setEditClientUserProfileClientId(u.clientId);
-    setEditClientUserProfileUser({ userId: u.userId, email: u.email, name: u.name });
+    setEditClientUserProfileUser({ userId: u.userId, email: u.email, name: u.name, profileImageUrl: u.profileImageUrl || null });
     setEditClientUserFirstName(first);
     setEditClientUserLastName(last);
     setEditClientUserPassword("");
     setEditClientUserPasswordVisible(false);
     setEditClientUserEmailCredentials("NO");
+    setEditClientUserPhotoUrl(u.profileImageUrl || null);
     setEditClientUserProfileOpen(true);
   }, []);
+
+  const triggerClientUserPhotoPicker = useCallback(() => {
+    if (uploadingClientUserPhoto || savingClientUserProfile) return;
+    editClientUserPhotoInputRef.current?.click();
+  }, [savingClientUserProfile, uploadingClientUserPhoto]);
+
+  const handleClientUserPhotoSelected = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith("image/")) {
+        toast.error("Please select an image file.");
+        event.target.value = "";
+        return;
+      }
+      try {
+        setUploadingClientUserPhoto(true);
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await api.post("/upload", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        const uploadedUrl = String(res.data?.value || "").trim();
+        if (!uploadedUrl) throw new Error("Upload did not return a file URL.");
+        setEditClientUserPhotoUrl(uploadedUrl);
+        toast.success("Profile picture uploaded.");
+      } catch (e: any) {
+        console.error("Failed to upload client user profile image", e);
+        toast.error(e?.response?.data?.message || "Failed to upload profile picture.");
+      } finally {
+        setUploadingClientUserPhoto(false);
+        event.target.value = "";
+      }
+    },
+    []
+  );
 
   const generateRandomPassword = useCallback(() => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
@@ -351,6 +397,7 @@ const ClientUsersPage: React.FC = () => {
         {
           firstName: editClientUserFirstName.trim(),
           lastName: editClientUserLastName.trim(),
+          profileImageUrl: editClientUserPhotoUrl || null,
           password: editClientUserPassword.trim() ? editClientUserPassword.trim() : undefined,
           emailCredentials: wantsEmailCredentials,
         }
@@ -371,6 +418,7 @@ const ClientUsersPage: React.FC = () => {
     editClientUserFirstName,
     editClientUserLastName,
     editClientUserPassword,
+    editClientUserPhotoUrl,
     editClientUserProfileClientId,
     editClientUserProfileUser?.userId,
     fetchAllUsers,
@@ -655,13 +703,11 @@ const ClientUsersPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    onClick={() => {
-                      toast("Edit Permissions coming soon.");
-                      setClientUserMoreMenu(null);
-                    }}
+                    disabled
+                    title="Edit permissions is coming soon."
+                    className="w-full text-left px-4 py-2 text-sm text-gray-400 cursor-not-allowed"
                   >
-                    Edit Permissions
+                    Edit Permissions (Coming soon)
                   </button>
                   <div className="h-px bg-gray-100" />
                   {u?.status === "PENDING" && (
@@ -679,7 +725,13 @@ const ClientUsersPage: React.FC = () => {
                   )}
                   <button
                     type="button"
-                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    disabled={u?.status !== "ACTIVE"}
+                    title={u?.status === "ACTIVE" ? "Login as user" : "Only active users can be logged in"}
+                    className={`w-full text-left px-4 py-2 text-sm ${
+                      u?.status === "ACTIVE"
+                        ? "text-gray-700 hover:bg-gray-50"
+                        : "text-gray-400 cursor-not-allowed"
+                    }`}
                     onClick={() => {
                       if (u) void loginAsClientUser(u);
                       else toast.error("Unable to load user.");
@@ -831,21 +883,40 @@ const ClientUsersPage: React.FC = () => {
 
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-2">Photo</label>
+                      <input
+                        ref={editClientUserPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => void handleClientUserPhotoSelected(e)}
+                      />
                       <div className="flex items-center gap-3">
                         <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
-                          <Users className="h-5 w-5" />
+                          {editClientUserPhotoUrl ? (
+                            <img
+                              src={editClientUserPhotoUrl}
+                              alt="User profile"
+                              className="h-10 w-10 rounded-full object-cover"
+                            />
+                          ) : (
+                            <Users className="h-5 w-5" />
+                          )}
                         </div>
                         <button
                           type="button"
-                          className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-                          onClick={() => toast("Photo upload coming soon.")}
+                          disabled={uploadingClientUserPhoto || savingClientUserProfile}
+                          title="Upload profile picture"
+                          className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                          onClick={() => triggerClientUserPhotoPicker()}
                         >
-                          Upload New Picture
+                          {uploadingClientUserPhoto ? "Uploading..." : "Upload New Picture"}
                         </button>
                         <button
                           type="button"
-                          className="text-sm text-rose-600 hover:text-rose-700"
-                          onClick={() => toast("Photo delete coming soon.")}
+                          disabled={!editClientUserPhotoUrl || uploadingClientUserPhoto || savingClientUserProfile}
+                          title="Delete profile picture"
+                          className="text-sm text-rose-600 hover:text-rose-700 disabled:text-rose-300 disabled:cursor-not-allowed"
+                          onClick={() => setEditClientUserPhotoUrl(null)}
                         >
                           Delete
                         </button>
@@ -1068,17 +1139,19 @@ const ClientUsersPage: React.FC = () => {
                       </div>
 
                       <div className="pt-7">
-                        <button
-                          type="button"
-                          className="h-10 w-10 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
-                          title="Remove"
-                          onClick={() =>
-                            setInviteRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.id !== row.id)))
-                          }
-                          disabled={inviting || inviteRows.length <= 1}
-                        >
-                          <X className="h-5 w-5" />
-                        </button>
+                        {inviteRows.length > 1 && (
+                          <button
+                            type="button"
+                            className="h-10 w-10 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"
+                            title="Remove"
+                            onClick={() =>
+                              setInviteRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.id !== row.id)))
+                            }
+                            disabled={inviting}
+                          >
+                            <X className="h-5 w-5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectTaskActivityRecipientIds } from "./tasks.js";
+import { selectTaskActivityRecipientIds, selectTaskStatusCreatorRecipientId } from "./tasks.js";
 
 function asSorted(ids: string[]) {
   return [...ids].sort();
@@ -96,4 +96,65 @@ test("super admin assignee activity does not self-notify", () => {
   });
 
   assert.deepEqual(recipients, ["agency-user-1"]);
+});
+
+test("specialist status update notifies super admin creator", () => {
+  const recipient = selectTaskStatusCreatorRecipientId({
+    actorRole: "SPECIALIST",
+    actorId: "specialist-1",
+    createdById: "super-admin-1",
+    createdByRole: "SUPER_ADMIN",
+    fromStatus: "TODO",
+    toStatus: "IN_PROGRESS",
+  });
+
+  assert.equal(recipient, "super-admin-1");
+});
+
+test("specialist status update notifies admin creator", () => {
+  const recipient = selectTaskStatusCreatorRecipientId({
+    actorRole: "SPECIALIST",
+    actorId: "specialist-1",
+    createdById: "admin-1",
+    createdByRole: "ADMIN",
+    fromStatus: "REVIEW",
+    toStatus: "DONE",
+  });
+
+  assert.equal(recipient, "admin-1");
+});
+
+test("specialist status update notifies agency creator", () => {
+  const recipient = selectTaskStatusCreatorRecipientId({
+    actorRole: "SPECIALIST",
+    actorId: "specialist-1",
+    createdById: "agency-1",
+    createdByRole: "AGENCY",
+    fromStatus: "TODO",
+    toStatus: "REVIEW",
+  });
+
+  assert.equal(recipient, "agency-1");
+});
+
+test("status update does not notify when actor is not specialist or status unchanged", () => {
+  const wrongActor = selectTaskStatusCreatorRecipientId({
+    actorRole: "ADMIN",
+    actorId: "admin-1",
+    createdById: "super-admin-1",
+    createdByRole: "SUPER_ADMIN",
+    fromStatus: "TODO",
+    toStatus: "IN_PROGRESS",
+  });
+  assert.equal(wrongActor, null);
+
+  const unchangedStatus = selectTaskStatusCreatorRecipientId({
+    actorRole: "SPECIALIST",
+    actorId: "specialist-1",
+    createdById: "admin-1",
+    createdByRole: "ADMIN",
+    fromStatus: "IN_PROGRESS",
+    toStatus: "IN_PROGRESS",
+  });
+  assert.equal(unchangedStatus, null);
 });

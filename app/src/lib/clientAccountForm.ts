@@ -5,36 +5,15 @@
 import type { Client } from "@/store/slices/clientSlice";
 
 export const INDUSTRY_OPTIONS = [
-  "Automotive Services",
-  "Beauty and Personal Care",
-  "Cleaning and Maintenance Services",
-  "Construction and Contractors",
-  "Dental",
-  "E-commerce",
-  "Education and Training",
-  "Entertainment and Events",
-  "Financial Services",
-  "Fitness and Wellness",
   "Healthcare",
-  "Home Services",
-  "Hospitality and Lodging",
-  "Insurance",
   "Legal Services",
-  "Local Government or Municipality",
-  "Logistics and Transportation",
-  "Manufacturing",
-  "Marketing and Advertising",
-  "Nonprofit and Religious Organizations",
-  "Other",
-  "Professional Services",
-  "Property Management",
-  "Real Estate",
-  "Restaurants and Food Services",
+  "Home Services",
   "Retail",
-  "Security Services",
-  "Technology and IT Services",
-  "Trades and Skilled Labor",
-  "Travel and Tourism",
+  "Restaurants",
+  "Financial Services",
+  "Real Estate",
+  "Professional Services",
+  "Other",
 ] as const;
 
 export type CampaignType = "" | "Local" | "National";
@@ -74,7 +53,9 @@ export type ClientFormState = {
   totalKeywordsToTarget: string;
   seoRoadmapSection: string;
   managedServicePackage: string;
+  managedServiceStatus: string;
   serviceStartDate: string;
+  managedServiceEndDate: string;
   clientStatus: string;
   canceledEndDate: string;
 };
@@ -145,7 +126,9 @@ export const EMPTY_CLIENT_FORM: ClientFormState = {
   totalKeywordsToTarget: "",
   seoRoadmapSection: "",
   managedServicePackage: "",
+  managedServiceStatus: "none",
   serviceStartDate: "",
+  managedServiceEndDate: "",
   clientStatus: "",
   canceledEndDate: "",
 };
@@ -223,8 +206,21 @@ export function clientToFormState(client: Client): ClientFormState {
     campaignDurationMonths: String(info.campaignDurationMonths ?? ""),
     totalKeywordsToTarget: String(info.totalKeywordsToTarget ?? ""),
     seoRoadmapSection: String(info.seoRoadmapSection ?? ""),
-    managedServicePackage: String(info.managedServicePackage ?? ""),
-    serviceStartDate: info.serviceStartDate ? String(info.serviceStartDate).slice(0, 10) : "",
+    managedServicePackage: String((client as any).managedServicePackage ?? info.managedServicePackage ?? ""),
+    managedServiceStatus: String((client as any).managedServiceStatus ?? "").trim() || (
+      String((client as any).status ?? "") === "ACTIVE" ? "active"
+        : String((client as any).status ?? "") === "PENDING" ? "pending"
+          : String((client as any).status ?? "") === "CANCELED" ? "canceled"
+            : String((client as any).status ?? "") === "SUSPENDED" ? "suspended"
+              : String((client as any).status ?? "") === "ARCHIVED" ? "archived"
+                : "none"
+    ),
+    serviceStartDate: ((client as any).managedServiceActivatedDate ?? info.serviceStartDate)
+      ? String((client as any).managedServiceActivatedDate ?? info.serviceStartDate).slice(0, 10)
+      : "",
+    managedServiceEndDate: (client as any).managedServiceEndDate
+      ? String((client as any).managedServiceEndDate).slice(0, 10)
+      : "",
     clientStatus: String((client as { status?: string }).status ?? ""),
     canceledEndDate: (client as { canceledEndDate?: string }).canceledEndDate
       ? String((client as { canceledEndDate?: string }).canceledEndDate).slice(0, 10)
@@ -242,10 +238,10 @@ function parseKeywordsText(raw: string): string[] {
 /** Build update payload (accountInfo + top-level fields) for PUT /clients/:id. */
 export function formStateToUpdatePayload(
   form: ClientFormState,
-  options: { includeStatus?: boolean }
+  options: { includeStatus?: boolean; includeManagedServiceFields?: boolean }
 ): Record<string, unknown> {
   const selectedBusinessNiche = form.businessNiche === "Other" ? form.businessNicheOther.trim() : (form.businessNiche || "").trim();
-  const selectedIndustry = selectedBusinessNiche;
+  const selectedIndustry = form.industry === "Other" ? form.industryOther.trim() : (form.industry || "").trim();
   const accountInfo: Record<string, unknown> = {
     businessNiche: selectedBusinessNiche,
     businessDescription: form.businessDescription || "",
@@ -283,6 +279,14 @@ export function formStateToUpdatePayload(
     username: form.loginUsername || undefined,
     accountInfo,
   };
+  if (options.includeManagedServiceFields) {
+    payload.managedServiceStatus = form.managedServiceStatus || "none";
+    payload.managedServicePackage = ["pending", "active", "canceled"].includes(form.managedServiceStatus || "")
+      ? (form.managedServicePackage || null)
+      : null;
+    payload.managedServiceActivatedDate = form.managedServiceStatus === "active" ? (form.serviceStartDate || null) : null;
+    payload.managedServiceEndDate = form.managedServiceStatus === "canceled" ? (form.managedServiceEndDate || null) : null;
+  }
   if (form.loginPassword) payload.password = form.loginPassword;
   if (options.includeStatus && form.clientStatus) payload.status = form.clientStatus;
   if (options.includeStatus && form.canceledEndDate !== undefined) payload.canceledEndDate = form.canceledEndDate || null;
@@ -290,40 +294,66 @@ export function formStateToUpdatePayload(
 }
 
 /** Build normalized copy text for client info modals. */
-export function buildClientCopyText(form: ClientFormState, options?: { showStatus?: boolean }): string {
-  const industry = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
-  const cityState = [form.primaryLocationCity, form.primaryLocationState].filter(Boolean).join(", ");
-  const serviceRadiusAreas = [form.serviceRadius, form.serviceAreasServed].filter(Boolean).join(" | ");
-  const gbpCategories = [form.gbpPrimaryCategory, form.gbpSecondaryCategories].filter(Boolean).join(" | ");
-  const gbpServices = [form.primaryServicesList, form.secondaryServicesList, form.servicesMarkedPrimary]
-    .filter(Boolean)
-    .join(" | ");
-  const coordinates = [form.latitude, form.longitude].filter(Boolean).join(", ");
-  const lines = [
+export function buildClientCopyText(
+  form: ClientFormState,
+  options?: { showStatus?: boolean; includeExtendedSuperAdminFields?: boolean }
+): string {
+  const businessNiche = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
+  const industry = form.industry === "Other" ? form.industryOther : form.industry;
+  const lines: string[] = [
+    "SECTION A: BUSINESS INFORMATION (Required)",
     `Business Name: ${form.name || ""}`,
-    `Business Niche: ${industry || ""}`,
+    `Business Niche: ${businessNiche || ""}`,
     `Business Description: ${form.businessDescription || ""}`,
     `Primary Domain: ${form.domain || ""}`,
+    `Industry: ${industry || ""}`,
+    "",
+    "SECTION B: LOCATION INFORMATION (Required)",
     `Business Address: ${form.businessAddress || ""}`,
-    `Primary Location (City, State): ${cityState || ""}`,
-    `Service Radius / Areas Served: ${serviceRadiusAreas || ""}`,
+    `Primary Location City: ${form.primaryLocationCity || ""}`,
+    `Primary Location State: ${form.primaryLocationState || ""}`,
+    `Service Radius: ${form.serviceRadius || ""}`,
+    `Areas Served: ${form.serviceAreasServed || ""}`,
+    "",
+    "SECTION C: CONTACT INFORMATION (Required)",
     `Phone Number: ${form.phoneNumber || ""}`,
     `Email: ${form.emailAddress || ""}`,
     "",
+    "SECTION D: WEBSITE LOGIN INFO (Optional)",
+    `Website Login URL: ${form.loginUrl || ""}`,
+    `Website Username: ${form.loginUsername || ""}`,
+    `Website Password: ${form.loginPassword ? form.loginPassword : "[hidden/blank]"}`,
     "",
-    `CAMPAIGN TYPE: (Local or National) ${form.campaignType || ""}`,
+    "SECTION E: CAMPAIGN TYPE (Required)",
+    `Campaign Type: ${form.campaignType || ""}`,
     "",
-    `GBP CATEGORIES: ${gbpCategories || ""}`,
-    "",
-    `GBP SERVICES: ${gbpServices || ""}`,
-    "",
-    `Target number of keywords for this campaign- ${form.targetKeywordCount || form.totalKeywordsToTarget || ""}`,
-    "",
-    `Keywords: ${form.keywords || ""}`,
-    "",
-    "Longitude and Latitude",
-    `Enter Coordinates: ${coordinates || ""}`,
+    "SECTION F: GOOGLE BUSINESS PROFILE (Optional)",
+    `Google Business Profile Category: ${form.gbpPrimaryCategory || ""}`,
+    `Secondary GBP Categories: ${form.gbpSecondaryCategories || ""}`,
   ];
+
+  if (options?.includeExtendedSuperAdminFields) {
+    lines.push(
+      "",
+      "SECTION G: KEYWORD ALLOCATION",
+      `Number of Keywords for Campaign: ${form.targetKeywordCount || ""}`,
+      `Total Keywords to Target: ${form.totalKeywordsToTarget || ""}`,
+      "",
+      "SECTION H: GEOLOCATION DATA",
+      `Latitude: ${form.latitude || ""}`,
+      `Longitude: ${form.longitude || ""}`,
+      "",
+      "SECTION I: SEO ROADMAP",
+      `SEO Roadmap Section: ${form.seoRoadmapSection || ""}`,
+      "",
+      "SECTION J: MANAGED SERVICE STATUS",
+      `Managed Service Status: ${form.managedServiceStatus || ""}`,
+      `Managed Service Package: ${form.managedServicePackage || ""}`,
+      `Service Start Date: ${form.serviceStartDate || ""}`,
+      `Service End Date: ${form.managedServiceEndDate || ""}`
+    );
+  }
+
   if (options?.showStatus) {
     lines.push("", "--- STATUS ---", `Status: ${form.clientStatus || ""}`);
   }
