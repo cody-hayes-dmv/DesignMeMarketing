@@ -153,7 +153,6 @@ const defaultDashboardStats: DashboardStats = mapDashboardResponse({});
 const AgencyDashboardPage = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [selectedPeriod, setSelectedPeriod] = useState("30");
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState<DashboardStats>(defaultDashboardStats);
@@ -167,7 +166,7 @@ const AgencyDashboardPage = () => {
       try {
         setLoading(true);
         const res = await api.get("/seo/agency/dashboard", {
-          params: { period: selectedPeriod },
+          params: { period: "30" },
         });
         setStats(mapDashboardResponse(res.data));
       } catch (error: any) {
@@ -179,7 +178,7 @@ const AgencyDashboardPage = () => {
     };
 
     fetchDashboardData();
-  }, [selectedPeriod]);
+  }, []);
 
   const handleRefresh = async () => {
     try {
@@ -188,7 +187,7 @@ const AgencyDashboardPage = () => {
       toast.success("Agency dashboard data refreshed successfully!");
       // Refetch dashboard data
       const res = await api.get("/seo/agency/dashboard", {
-        params: { period: selectedPeriod },
+        params: { period: "30" },
       });
       setStats(mapDashboardResponse(res.data));
     } catch (error: any) {
@@ -213,15 +212,6 @@ const AgencyDashboardPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <select
-              value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="rounded-lg border-0 bg-white/20 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30 focus:ring-2 focus:ring-white/50 focus:outline-none [&>option]:text-gray-900"
-            >
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-            </select>
             {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
               <button
                 type="button"

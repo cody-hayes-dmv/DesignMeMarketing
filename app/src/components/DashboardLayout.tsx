@@ -6,7 +6,7 @@ import Sidebar from "./Sidebar";
 import NotificationBell from "./NotificationBell";
 import api from "@/lib/api";
 import { logout } from "@/store/slices/authSlice";
-import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare, Menu, ChevronLeft, LogOut } from "lucide-react";
+import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare, Menu, ChevronLeft, LogOut, Settings } from "lucide-react";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -85,6 +85,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     if (path.startsWith("/client/dashboard")) return "Dashboard";
     if (path === "/client/tasks") return "Tasks";
+    if (path === "/client/settings") return "Settings";
     if (path === "/client/report" || path.startsWith("/client/report/")) return "Report";
 
     return "Dashboard";
@@ -100,6 +101,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const clientNavItems = [
       { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks", label: "Dashboard", icon: LayoutDashboard },
       { path: "/client/tasks", label: "Tasks", icon: CheckSquare },
+      { path: "/client/settings", label: "Settings", icon: Settings },
     ];
 
     return (

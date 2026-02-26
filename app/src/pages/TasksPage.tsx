@@ -31,6 +31,8 @@ import {
     Link as LinkIcon,
     ExternalLink,
     MessageSquare,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react";
 
 import "react-datepicker/dist/react-datepicker.css";
@@ -47,6 +49,8 @@ import toast from "react-hot-toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import api, { getUploadFileUrl } from "@/lib/api";
 
+const TASKS_PAGE_SIZES = [25, 50, 100, 250] as const;
+
 const TasksPage = () => {
     const dispatch = useDispatch();
     const [searchParams] = useSearchParams();
@@ -60,6 +64,8 @@ const TasksPage = () => {
     const [filterClientId, setFilterClientId] = useState<string>("all");
     const [filterAssigneeId, setFilterAssigneeId] = useState<string>("all");
     const [taskListTab, setTaskListTab] = useState<"upcoming" | "completed">("upcoming");
+    const [tasksPageSize, setTasksPageSize] = useState<(typeof TASKS_PAGE_SIZES)[number]>(25);
+    const [tasksPage, setTasksPage] = useState(1);
     const [showOnboardingModal, setShowOnboardingModal] = useState(false);
     const [showRecurringModal, setShowRecurringModal] = useState(false);
     const [recurringRules, setRecurringRules] = useState<Array<{
@@ -197,8 +203,16 @@ const TasksPage = () => {
         );
     };
     const selectAllFiltered = () => {
-        const ids = displayedTasks.map((t) => t.id);
-        setSelectedTaskIds((prev) => (prev.length === ids.length ? [] : ids));
+        const ids = paginatedDisplayedTasks.rows.map((t) => t.id);
+        setSelectedTaskIds((prev) => {
+            const visibleSet = new Set(ids);
+            const selectedVisibleCount = prev.filter((id) => visibleSet.has(id)).length;
+            if (selectedVisibleCount === ids.length) {
+                return prev.filter((id) => !visibleSet.has(id));
+            }
+            const merged = new Set([...prev, ...ids]);
+            return Array.from(merged);
+        });
     };
     const clearSelection = () => setSelectedTaskIds([]);
 
@@ -367,6 +381,30 @@ const TasksPage = () => {
             ? upcomingTasks
             : completedTasks
         : filteredSortedByDueDate;
+
+    const paginatedDisplayedTasks = useMemo(() => {
+        const totalRows = displayedTasks.length;
+        const totalPages = Math.max(1, Math.ceil(totalRows / tasksPageSize));
+        const page = Math.min(Math.max(1, tasksPage), totalPages);
+        const startIdx = (page - 1) * tasksPageSize;
+        const endIdx = Math.min(totalRows, startIdx + tasksPageSize);
+        const from = totalRows === 0 ? 0 : startIdx + 1;
+        const to = endIdx;
+        const rows = displayedTasks.slice(startIdx, endIdx);
+        return { totalRows, totalPages, page, from, to, rows };
+    }, [displayedTasks, tasksPage, tasksPageSize]);
+
+    useEffect(() => {
+        setTasksPage(1);
+    }, [tasksPageSize]);
+
+    useEffect(() => {
+        setTasksPage(1);
+    }, [taskListTab]);
+
+    useEffect(() => {
+        setTasksPage((p) => Math.min(p, paginatedDisplayedTasks.totalPages));
+    }, [paginatedDisplayedTasks.totalPages]);
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
 
@@ -864,7 +902,10 @@ const TasksPage = () => {
                                         <th className="px-4 py-3.5 text-left border-l-4 border-transparent">
                                             <input
                                                 type="checkbox"
-                                                checked={displayedTasks.length > 0 && selectedTaskIds.length === displayedTasks.length}
+                                                checked={
+                                                    paginatedDisplayedTasks.rows.length > 0 &&
+                                                    paginatedDisplayedTasks.rows.every((t) => selectedTaskIds.includes(t.id))
+                                                }
                                                 onChange={selectAllFiltered}
                                                 className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                                             />
@@ -879,7 +920,7 @@ const TasksPage = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {displayedTasks.map((task, index) => (
+                                {paginatedDisplayedTasks.rows.map((task, index) => (
                                     <tr key={task.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50 ${isOverdue(task.dueDate) ? 'bg-red-50/50' : ''}`}>
                                         {canCreate && (
                                             <td className="px-4 py-4">
@@ -1060,6 +1101,55 @@ const TasksPage = () => {
                             </tbody>
                         </table>
                     </div>
+                    {paginatedDisplayedTasks.totalRows > 0 && (
+                        <div className="border-t border-gray-200 px-6 py-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                                    <span>Rows per page</span>
+                                    <select
+                                        value={tasksPageSize}
+                                        onChange={(e) =>
+                                            setTasksPageSize(Number(e.target.value) as (typeof TASKS_PAGE_SIZES)[number])
+                                        }
+                                        className="rounded-lg border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    >
+                                        {TASKS_PAGE_SIZES.map((size) => (
+                                            <option key={size} value={size}>
+                                                {size}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <span className="text-xs text-gray-500">
+                                        Showing {paginatedDisplayedTasks.from}-{paginatedDisplayedTasks.to} of {paginatedDisplayedTasks.totalRows}
+                                    </span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setTasksPage((p) => Math.max(1, p - 1))}
+                                        disabled={paginatedDisplayedTasks.page <= 1}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <ChevronLeft className="h-4 w-4" />
+                                        Prev
+                                    </button>
+                                    <span className="text-sm text-gray-600">
+                                        Page {paginatedDisplayedTasks.page} of {paginatedDisplayedTasks.totalPages}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setTasksPage((p) => Math.min(paginatedDisplayedTasks.totalPages, p + 1))}
+                                        disabled={paginatedDisplayedTasks.page >= paginatedDisplayedTasks.totalPages}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Next
+                                        <ChevronRight className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             ) : (
                 <KanbanBoard

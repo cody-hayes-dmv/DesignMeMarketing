@@ -105,13 +105,13 @@ const SettingsPage = () => {
   const [agenciesList, setAgenciesList] = useState<Array<{ id: string; name: string }>>([]);
 
   const tabs = [
-    { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
+    { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
     { id: "enterprise-calculator", label: "Enterprise Calculator", icon: Calculator, roles: ["SUPER_ADMIN"] },
     { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
-    { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
-    { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST"] },
+    { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
+    { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
   ];
 
   // Fetch agency data on mount if user is an agency member
@@ -734,7 +734,7 @@ const SettingsPage = () => {
         return <EnterpriseCalculatorPage embedded />;
 
       case "ai-commands":
-        return <AiCommandsPage embedded readOnly={user?.role === "SPECIALIST"} />;
+        return <AiCommandsPage embedded readOnly={user?.role === "SPECIALIST" || user?.role === "USER"} />;
 
       case "notifications":
         return (

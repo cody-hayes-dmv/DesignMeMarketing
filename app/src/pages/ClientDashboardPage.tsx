@@ -91,6 +91,7 @@ type ReportTargetKeywordRow = {
 };
 
 const BACKLINKS_PAGE_SIZES = [25, 50, 100, 250] as const;
+const WORKLOG_PAGE_SIZES = [25, 50, 100, 250] as const;
 
 /** Dashboard API can be slow (DataForSEO + GA4); use 2 min and retry once on timeout to reduce "Request timed out" toasts. */
 const DASHBOARD_REQUEST_TIMEOUT_MS = 120000;
@@ -776,6 +777,8 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogUrlType, setWorkLogUrlType] = useState<"image" | "video" | "url">("url");
   const [workLogAddMenuOpen, setWorkLogAddMenuOpen] = useState(false);
   const [workLogListTab, setWorkLogListTab] = useState<"upcoming" | "completed">("upcoming");
+  const [workLogPageSize, setWorkLogPageSize] = useState<(typeof WORKLOG_PAGE_SIZES)[number]>(25);
+  const [workLogPage, setWorkLogPage] = useState(1);
   const [workLogComments, setWorkLogComments] = useState<WorkLogComment[]>([]);
   const [workLogCommentsLoading, setWorkLogCommentsLoading] = useState(false);
   const [workLogCommentsError, setWorkLogCommentsError] = useState<string | null>(null);
@@ -2726,6 +2729,36 @@ const ClientDashboardPage: React.FC = () => {
     if (activeTab !== "dashboard" || dashboardSection !== "backlinks") return;
     void fetchBacklinksList();
   }, [activeTab, dashboardSection, fetchBacklinksList]);
+
+  const workLogFilteredTasks = useMemo(() => {
+    return workLogListTab === "completed"
+      ? workLogTasks.filter((t) => t.status === "DONE")
+      : workLogTasks.filter((t) => t.status !== "DONE");
+  }, [workLogListTab, workLogTasks]);
+
+  const workLogPagination = useMemo(() => {
+    const totalRows = workLogFilteredTasks.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / workLogPageSize));
+    const page = Math.min(Math.max(1, workLogPage), totalPages);
+    const startIdx = (page - 1) * workLogPageSize;
+    const endIdx = Math.min(totalRows, startIdx + workLogPageSize);
+    const from = totalRows === 0 ? 0 : startIdx + 1;
+    const to = endIdx;
+    const rows = workLogFilteredTasks.slice(startIdx, endIdx);
+    return { totalRows, totalPages, page, from, to, rows };
+  }, [workLogFilteredTasks, workLogPage, workLogPageSize]);
+
+  useEffect(() => {
+    setWorkLogPage(1);
+  }, [workLogListTab]);
+
+  useEffect(() => {
+    setWorkLogPage(1);
+  }, [workLogPageSize]);
+
+  useEffect(() => {
+    setWorkLogPage((p) => Math.min(p, workLogPagination.totalPages));
+  }, [workLogPagination.totalPages]);
 
   const openAddBacklink = useCallback(() => {
     if (reportOnly || includedClientReadOnly) return;
@@ -7209,20 +7242,14 @@ const ClientDashboardPage: React.FC = () => {
                                   {workLogError}
                                 </td>
                               </tr>
-                            ) : (() => {
-                              const filtered = workLogListTab === "completed"
-                                ? workLogTasks.filter((t) => t.status === "DONE")
-                                : workLogTasks.filter((t) => t.status !== "DONE");
-                              if (filtered.length === 0) {
-                                return (
-                                  <tr>
-                                    <td className="px-6 py-8 text-sm text-gray-500 bg-amber-50/50" colSpan={6}>
-                                      {workLogListTab === "completed" ? "No completed entries yet." : "No upcoming entries."}
-                                    </td>
-                                  </tr>
-                                );
-                              }
-                              return filtered.map((task, index) => {
+                            ) : workLogFilteredTasks.length === 0 ? (
+                              <tr>
+                                <td className="px-6 py-8 text-sm text-gray-500 bg-amber-50/50" colSpan={6}>
+                                  {workLogListTab === "completed" ? "No completed entries yet." : "No upcoming entries."}
+                                </td>
+                              </tr>
+                            ) : (
+                              workLogPagination.rows.map((task, index) => {
                                 const dueDateRaw = (task as any).dueDate;
                                 const dueDateStr = dueDateRaw
                                   ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10))
@@ -7281,11 +7308,61 @@ const ClientDashboardPage: React.FC = () => {
                                     </td>
                                   </tr>
                                 );
-                              });
-                            })()}
+                              })
+                            )}
                           </tbody>
                         </table>
                       </div>
+
+                      {!workLogLoading && !workLogError && workLogFilteredTasks.length > 0 && (
+                        <div className="border-t border-gray-200 px-6 py-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                              <span>Rows per page</span>
+                              <select
+                                value={workLogPageSize}
+                                onChange={(e) =>
+                                  setWorkLogPageSize(Number(e.target.value) as (typeof WORKLOG_PAGE_SIZES)[number])
+                                }
+                                className="rounded-lg border border-gray-300 px-2 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                              >
+                                {WORKLOG_PAGE_SIZES.map((size) => (
+                                  <option key={size} value={size}>
+                                    {size}
+                                  </option>
+                                ))}
+                              </select>
+                              <span className="text-xs text-gray-500">
+                                Showing {workLogPagination.from}-{workLogPagination.to} of {workLogPagination.totalRows}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setWorkLogPage((p) => Math.max(1, p - 1))}
+                                disabled={workLogPagination.page <= 1}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                                Prev
+                              </button>
+                              <span className="text-sm text-gray-600">
+                                Page {workLogPagination.page} of {workLogPagination.totalPages}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setWorkLogPage((p) => Math.min(workLogPagination.totalPages, p + 1))}
+                                disabled={workLogPagination.page >= workLogPagination.totalPages}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Next
+                                <ChevronRight className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

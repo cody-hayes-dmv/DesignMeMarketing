@@ -128,6 +128,7 @@ function App() {
   const clientRoutes = [
     { path: "/client/dashboard/:clientId", component: ClientDashboardPage },
     { path: "/client/tasks", component: TasksPage },
+    { path: "/client/settings", component: SettingsPage },
     // Back-compat: keep report portal paths if still used
     { path: "/client/report", component: ClientReportIndexPage },
     { path: "/client/report/:clientId", component: ClientDashboardPage },
