@@ -11345,7 +11345,8 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
     let tierLimit: number = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
     const keywordLimit = tierCtx.effectiveKeywordCap;
-    let researchLimit = tierCtx.creditsLimit;
+    const researchBonusCredits = Math.max(0, -(tierCtx.creditsUsed ?? 0));
+    let researchLimit = tierCtx.creditsLimit + researchBonusCredits;
     let monthlySpendDollars = tierCtx.tierConfig?.priceMonthlyUsd ?? 0;
     if (agencyIds.length > 0) {
       const addOns = await prisma.agencyAddOn.findMany({
@@ -11365,7 +11366,7 @@ router.get("/agency/dashboard", authenticateToken, async (req, res) => {
     const resetsInDays = tierCtx.creditsResetsAt
       ? Math.max(0, Math.ceil((tierCtx.creditsResetsAt.getTime() - Date.now()) / 86400000))
       : 30;
-    const researchCredits = { used: tierCtx.creditsUsed, limit: researchLimit, resetsInDays };
+    const researchCredits = { used: Math.max(0, tierCtx.creditsUsed), limit: researchLimit, resetsInDays };
 
     // Recent activity (placeholder: from activity log when available)
     const recentActivity = [
@@ -11474,7 +11475,8 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     let tierLimit: number = tierCtx.effectiveMaxDashboards ?? tierCtx.tierConfig?.maxDashboards ?? 10;
     if (tierLimit === null) tierLimit = 999999;
     const keywordLimit = tierCtx.effectiveKeywordCap;
-    const researchLimit = tierCtx.creditsLimit;
+    const researchBonusCredits = Math.max(0, -(tierCtx.creditsUsed ?? 0));
+    const researchLimit = tierCtx.creditsLimit + researchBonusCredits;
     let teamMemberLimit = tierCtx.tierConfig?.maxTeamUsers ?? 10;
     if (teamMemberLimit === null) teamMemberLimit = 999999;
 
@@ -11529,7 +11531,7 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
       usage: {
         clientDashboards: { used: tierCtx.dashboardCount, limit: tierLimit },
         keywordsTracked: { used: keywordCount, limit: keywordLimit },
-        researchCredits: { used: tierCtx.creditsUsed, limit: researchLimit },
+        researchCredits: { used: Math.max(0, tierCtx.creditsUsed), limit: researchLimit },
         teamMembers: { used: tierCtx.teamMemberCount, limit: teamMemberLimit },
         clientsWithActiveManagedServices,
       },

@@ -269,6 +269,7 @@ model Client {
   managedServices       ManagedService[]
   agencyInclusions      ClientAgencyIncluded[]
   campaignWinEvents     CampaignWinEvent[]
+  campaignWinKeywordStates CampaignWinKeywordState[]
 
   @@index([name, domain])
   @@index([userId], map: "clients_userId_fkey")
@@ -291,6 +292,26 @@ model CampaignWinEvent {
   @@index([clientId, notifiedAt])
   @@index([clientId, cooldownUntil])
   @@map("campaign_win_events")
+}
+
+model CampaignWinKeywordState {
+  id             String                  @id @default(cuid())
+  clientId       String                  @map("client_id")
+  keywordId      String                  @map("keyword_id")
+  level          CampaignKeywordWinLevel @map("level")
+  isAbove        Boolean                 @default(false) @map("is_above")
+  aboveStreak    Int                     @default(0) @map("above_streak")
+  belowStreak    Int                     @default(0) @map("below_streak")
+  lastEvaluatedAt DateTime?              @db.DateTime @map("last_evaluated_at")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  client         Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  keyword        Keyword                 @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, keywordId, level])
+  @@index([clientId, level])
+  @@index([keywordId])
+  @@map("campaign_win_keyword_states")
 }
 
 model ClientAgencyIncluded {
@@ -492,6 +513,7 @@ model Keyword {
   locationName     String?  @db.VarChar(255)
   type             String   @default("money") @db.VarChar(20)
   client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  campaignWinKeywordStates CampaignWinKeywordState[]
 
   @@unique([clientId, keyword])
   @@index([clientId, currentPosition])
@@ -867,6 +889,12 @@ enum CampaignWinEventType {
   WORK_COMPLETED
   AI_VISIBILITY
   REVIEW_ACTIVITY
+}
+
+enum CampaignKeywordWinLevel {
+  POSITION1
+  TOP3
+  PAGE1
 }
 
 enum TokenType {

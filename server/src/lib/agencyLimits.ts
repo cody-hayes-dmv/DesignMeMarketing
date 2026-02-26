@@ -1,5 +1,5 @@
 import { prisma } from "./prisma.js";
-import { getTierConfig, type TierConfig } from "./tiers.js";
+import { getTierConfig, DEFAULT_TIER_ID, type TierConfig } from "./tiers.js";
 
 const TRIAL_EXPIRED_MESSAGE = "Trial ended. Contact support to add a paid plan to continue.";
 
@@ -138,7 +138,11 @@ export async function getAgencyTierContext(userId: string, role: string): Promis
     agency.trialEndsAt != null &&
     agency.trialEndsAt <= now &&
     (agency.billingType === "trial" || agency.billingType === "free");
-  const tierConfig = getTierConfig(agency.subscriptionTier) ?? (agency.billingType === "free" || agency.billingType === "trial" ? getTierConfig("free") : null);
+  const tierConfig =
+    getTierConfig(agency.subscriptionTier) ??
+    (agency.billingType === "free" || agency.billingType === "trial"
+      ? getTierConfig("free")
+      : getTierConfig(DEFAULT_TIER_ID));
 
   const agencyUserIds = await prisma.userAgency.findMany({
     where: { agencyId: agency.id },

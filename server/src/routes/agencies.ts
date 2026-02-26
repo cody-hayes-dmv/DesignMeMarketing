@@ -7,7 +7,7 @@ import { sendEmail } from '../lib/email.js';
 import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from '../middleware/auth.js';
 import { requireAgencyTrialNotExpired } from '../middleware/requireAgencyTrialNotExpired.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
-import { getTierConfig, AGENCY_TIER_IDS, type TierId } from '../lib/tiers.js';
+import { getTierConfig, DEFAULT_TIER_ID, AGENCY_TIER_IDS, type TierId } from '../lib/tiers.js';
 import {
   getPriceIdForTier,
   findBasePlanSubscriptionItem,
@@ -1547,6 +1547,201 @@ router.get('/add-ons', authenticateToken, async (req, res) => {
   } catch (err: any) {
     console.error('List add-ons error:', err);
     res.status(500).json({ message: err?.message || 'Failed to list add-ons' });
+  }
+});
+
+const adjustResearchCreditsSchema = z.object({
+  operation: z.enum(['grant', 'consume', 'set_used', 'set_remaining']).default('grant'),
+  amount: z.coerce.number().int().min(0).optional(),
+  used: z.coerce.number().int().min(0).optional(),
+  remaining: z.coerce.number().int().min(0).optional(),
+  reason: z.string().max(500).optional(),
+}).superRefine((data, ctx) => {
+  if ((data.operation === 'grant' || data.operation === 'consume') && data.amount === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['amount'],
+      message: 'amount is required for grant/consume operations',
+    });
+  }
+  if (data.operation === 'set_used' && data.used === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['used'],
+      message: 'used is required for set_used operation',
+    });
+  }
+  if (data.operation === 'set_remaining' && data.remaining === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['remaining'],
+      message: 'remaining is required for set_remaining operation',
+    });
+  }
+});
+
+async function calculateAgencyResearchCreditsLimit(agencyId: string): Promise<number> {
+  const agency = await prisma.agency.findUnique({
+    where: { id: agencyId },
+    select: {
+      subscriptionTier: true,
+      billingType: true,
+      enterpriseCreditsPerMonth: true,
+    },
+  });
+  if (!agency) return 0;
+
+  const tierConfig =
+    getTierConfig(agency.subscriptionTier) ??
+    (agency.billingType === 'free' || agency.billingType === 'trial'
+      ? getTierConfig('free')
+      : getTierConfig(DEFAULT_TIER_ID));
+
+  let creditsLimit = agency.enterpriseCreditsPerMonth ?? tierConfig?.researchCreditsPerMonth ?? 0;
+
+  const addOns = await prisma.agencyAddOn.findMany({
+    where: { agencyId, addOnType: 'extra_keyword_lookups' },
+    select: { addOnOption: true },
+  });
+  for (const a of addOns) {
+    if (a.addOnOption === '50') creditsLimit += 50;
+    else if (a.addOnOption === '150') creditsLimit += 150;
+    else if (a.addOnOption === '300') creditsLimit += 300;
+    // Legacy options
+    else if (a.addOnOption === '100') creditsLimit += 100;
+    else if (a.addOnOption === '500') creditsLimit += 500;
+  }
+
+  return Math.max(0, creditsLimit);
+}
+
+// Super Admin/Admin: adjust research credits for an agency (top-up, consume, or set values)
+router.post('/:agencyId/research-credits/adjust', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can adjust research credits.' });
+    }
+
+    const { agencyId } = req.params;
+    const body = adjustResearchCreditsSchema.parse(req.body ?? {});
+
+    const agency = await prisma.agency.findUnique({
+      where: { id: agencyId },
+      select: {
+        id: true,
+        name: true,
+        subscriptionTier: true,
+        billingType: true,
+        keywordResearchCreditsUsed: true,
+        keywordResearchCreditsResetAt: true,
+      },
+    });
+    if (!agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+
+    const tierConfig =
+      getTierConfig(agency.subscriptionTier) ??
+      (agency.billingType === 'free' || agency.billingType === 'trial'
+        ? getTierConfig('free')
+        : getTierConfig(DEFAULT_TIER_ID));
+    const isFreeOnetime = tierConfig?.id === 'free';
+    const creditsLimit = await calculateAgencyResearchCreditsLimit(agencyId);
+
+    const now = new Date();
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    let effectiveUsed = Number.isFinite(agency.keywordResearchCreditsUsed)
+      ? Number(agency.keywordResearchCreditsUsed)
+      : 0;
+    let effectiveResetAt = agency.keywordResearchCreditsResetAt;
+
+    // For paid tiers, align to the same reset behavior used by runtime checks.
+    if (!isFreeOnetime && (!effectiveResetAt || now > effectiveResetAt)) {
+      effectiveUsed = 0;
+      effectiveResetAt = endOfMonth;
+    }
+
+    const beforeUsed = effectiveUsed;
+    let afterUsed = effectiveUsed;
+
+    if (body.operation === 'grant') {
+      // Allow "top-up" beyond base monthly cap by carrying negative used credits this period.
+      afterUsed = effectiveUsed - (body.amount ?? 0);
+    } else if (body.operation === 'consume') {
+      afterUsed = Math.max(0, effectiveUsed + (body.amount ?? 0));
+    } else if (body.operation === 'set_used') {
+      afterUsed = Math.max(0, body.used ?? 0);
+    } else if (body.operation === 'set_remaining') {
+      const desiredRemaining = Math.max(0, body.remaining ?? 0);
+      afterUsed = Math.max(0, creditsLimit - desiredRemaining);
+    }
+
+    await prisma.agency.update({
+      where: { id: agencyId },
+      data: {
+        keywordResearchCreditsUsed: afterUsed,
+        ...(effectiveResetAt ? { keywordResearchCreditsResetAt: effectiveResetAt } : {}),
+      },
+    });
+
+    if (body.reason?.trim()) {
+      console.log('[Research Credits Adjusted]', {
+        byUserId: req.user.userId,
+        role: req.user.role,
+        agencyId,
+        agencyName: agency.name,
+        operation: body.operation,
+        amount: body.amount ?? null,
+        used: body.used ?? null,
+        remaining: body.remaining ?? null,
+        beforeUsed,
+        afterUsed,
+        reason: body.reason.trim(),
+      });
+    }
+
+    const beforeRemaining = Math.max(0, creditsLimit - beforeUsed);
+    const afterRemaining = Math.max(0, creditsLimit - afterUsed);
+
+    // Notify agency members in-app when Super Admin grants credits.
+    if (body.operation === 'grant') {
+      const grantedCredits = Math.max(0, Number(body.amount ?? 0));
+      const reasonText = body.reason?.trim() ? body.reason.trim() : 'No reason provided.';
+      await prisma.notification.create({
+        data: {
+          agencyId: agency.id,
+          type: 'research_credits_granted',
+          title: `Research credits granted (+${grantedCredits})`,
+          message: `Super Admin granted ${grantedCredits} research credits. Reason: ${reasonText}`,
+          link: '/agency/dashboard',
+        },
+      }).catch((e) => console.warn('Create research credits notification failed:', e?.message));
+    }
+
+    return res.json({
+      message: 'Research credits updated',
+      agency: {
+        id: agency.id,
+        name: agency.name,
+      },
+      operation: body.operation,
+      creditsLimit,
+      before: {
+        used: beforeUsed,
+        remaining: beforeRemaining,
+      },
+      after: {
+        used: afterUsed,
+        remaining: afterRemaining,
+      },
+      resetAt: effectiveResetAt,
+    });
+  } catch (error: any) {
+    if (error?.name === 'ZodError') {
+      return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+    }
+    console.error('Adjust research credits error:', error);
+    return res.status(500).json({ message: 'Internal server error' });
   }
 });
 

@@ -24,6 +24,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
 import { useNavigate } from "react-router-dom";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 interface Report {
   id: string;
@@ -87,6 +88,7 @@ const ReportsPage: React.FC = () => {
   const [shareLink, setShareLink] = useState("");
   const [selectedReportForShare, setSelectedReportForShare] = useState<Report | null>(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showCampaignWinsModal, setShowCampaignWinsModal] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showSendModal, setShowSendModal] = useState(false);
   const [selectedReportForSend, setSelectedReportForSend] = useState<Report | null>(null);
@@ -94,6 +96,15 @@ const ReportsPage: React.FC = () => {
   const [schedules, setSchedules] = useState<ReportSchedule[]>([]);
   const [campaignWinsByClient, setCampaignWinsByClient] = useState<Record<string, CampaignWinsSettings>>({});
   const [campaignWinsDrafts, setCampaignWinsDrafts] = useState<Record<string, { enabled: boolean; recipients: string }>>({});
+  const [removeCampaignWinsConfirm, setRemoveCampaignWinsConfirm] = useState<{
+    isOpen: boolean;
+    clientId: string | null;
+    clientName: string | null;
+  }>({
+    isOpen: false,
+    clientId: null,
+    clientName: null,
+  });
   const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [filterClientId, setFilterClientId] = useState<string>("all");
   const [cardFilter, setCardFilter] = useState<"total" | "active" | "sent" | "scheduled" | "draft">("active");
@@ -393,14 +404,30 @@ const ReportsPage: React.FC = () => {
   };
 
   const handleDeleteCampaignWins = async (clientId: string) => {
-    if (!confirm("Disable Campaign Wins report for this client?")) return;
     try {
       await api.delete(`/seo/reports/${clientId}/campaign-wins`);
-      toast.success("Campaign Wins disabled");
+      const clientName = clients.find((c) => c.id === clientId)?.name || "Client";
+      setCampaignWinsByClient((prev) => {
+        const next = { ...prev };
+        delete next[clientId];
+        return next;
+      });
+      setCampaignWinsDrafts((prev) => {
+        const next = { ...prev };
+        delete next[clientId];
+        return next;
+      });
+      toast.success(`Campaign Wins removed for ${clientName}`);
       fetchCampaignWinsSettings();
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to disable Campaign Wins");
     }
+  };
+
+  const confirmDeleteCampaignWins = async () => {
+    if (!removeCampaignWinsConfirm.clientId) return;
+    await handleDeleteCampaignWins(removeCampaignWinsConfirm.clientId);
+    setRemoveCampaignWinsConfirm({ isOpen: false, clientId: null, clientName: null });
   };
 
   const handleTriggerSchedule = async (scheduleId: string) => {
@@ -473,6 +500,15 @@ const ReportsPage: React.FC = () => {
             >
               <Calendar className="h-5 w-5" />
               <span>Schedule Report</span>
+            </button>
+            <button
+              onClick={() => {
+                setShowCampaignWinsModal(true);
+              }}
+              className="flex items-center gap-2 rounded-lg bg-white/20 px-5 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+            >
+              <Settings className="h-5 w-5" />
+              <span>Campaign Wins Report</span>
             </button>
           </div>
         </div>
@@ -777,6 +813,16 @@ const ReportsPage: React.FC = () => {
           }}
         />
       )}
+      {showCampaignWinsModal && (
+        <CampaignWinsReportModal
+          clients={clients}
+          onClose={() => setShowCampaignWinsModal(false)}
+          onSuccess={() => {
+            setShowCampaignWinsModal(false);
+            fetchCampaignWinsSettings();
+          }}
+        />
+      )}
 
       {/* Share Modal */}
       {showShareModal && (
@@ -931,7 +977,14 @@ const ReportsPage: React.FC = () => {
           </p>
         </div>
         <div className="p-6 space-y-4">
-          {clients.map((client) => {
+          {clients.filter((client) => Boolean(campaignWinsByClient[client.id])).length === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-600 bg-gray-50">
+              No Campaign Wins items configured.
+            </div>
+          )}
+          {clients
+            .filter((client) => Boolean(campaignWinsByClient[client.id]))
+            .map((client) => {
             const settings = campaignWinsByClient[client.id] || { enabled: false, recipients: [], lastSent: null };
             const draft = campaignWinsDrafts[client.id] || { enabled: settings.enabled, recipients: settings.recipients.join(", ") };
             return (
@@ -988,7 +1041,13 @@ const ReportsPage: React.FC = () => {
                 </div>
                 <div className="flex justify-end gap-2 mt-3">
                   <button
-                    onClick={() => handleDeleteCampaignWins(client.id)}
+                    onClick={() =>
+                      setRemoveCampaignWinsConfirm({
+                        isOpen: true,
+                        clientId: client.id,
+                        clientName: client.name,
+                      })
+                    }
                     className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
                   >
                     Delete
@@ -1005,6 +1064,15 @@ const ReportsPage: React.FC = () => {
           })}
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={removeCampaignWinsConfirm.isOpen}
+        onClose={() => setRemoveCampaignWinsConfirm({ isOpen: false, clientId: null, clientName: null })}
+        onConfirm={confirmDeleteCampaignWins}
+        title="Remove Campaign Wins"
+        message={`Are you sure you want to remove Campaign Wins for "${removeCampaignWinsConfirm.clientName || "this client"}"?`}
+        confirmText="Remove"
+        variant="warning"
+      />
     </div>
   );
 };
@@ -1016,7 +1084,7 @@ const ScheduleReportModal: React.FC<{
   onSuccess: () => void;
 }> = ({ clients, onClose, onSuccess }) => {
   const [clientId, setClientId] = useState("");
-  const [reportType, setReportType] = useState<"weekly" | "biweekly" | "monthly" | "campaign_wins">("weekly");
+  const [reportType, setReportType] = useState<"weekly" | "biweekly" | "monthly">("weekly");
   const [dayOfWeek, setDayOfWeek] = useState(1); // Monday
   const [dayOfMonth, setDayOfMonth] = useState(1);
   const [timeOfDay, setTimeOfDay] = useState("09:00");
@@ -1039,24 +1107,16 @@ const ScheduleReportModal: React.FC<{
 
     setLoading(true);
     try {
-      if (reportType === "campaign_wins") {
-        await api.post(`/seo/reports/${clientId}/campaign-wins`, {
-          enabled: true,
-          recipients: recipientsList,
-        });
-        toast.success("Campaign Wins report enabled successfully!");
-      } else {
-        await api.post(`/seo/reports/${clientId}/schedule`, {
-          frequency: reportType,
-          dayOfWeek: reportType !== "monthly" ? dayOfWeek : undefined,
-          dayOfMonth: reportType === "monthly" ? dayOfMonth : undefined,
-          timeOfDay,
-          recipients: recipientsList,
-          emailSubject: emailSubject || undefined,
-          isActive: true,
-        });
-        toast.success("Report schedule created successfully!");
-      }
+      await api.post(`/seo/reports/${clientId}/schedule`, {
+        frequency: reportType,
+        dayOfWeek: reportType !== "monthly" ? dayOfWeek : undefined,
+        dayOfMonth: reportType === "monthly" ? dayOfMonth : undefined,
+        timeOfDay,
+        recipients: recipientsList,
+        emailSubject: emailSubject || undefined,
+        isActive: true,
+      });
+      toast.success("Report schedule created successfully!");
       onSuccess();
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to create schedule");
@@ -1118,27 +1178,15 @@ const ScheduleReportModal: React.FC<{
                   <label className="block text-sm font-medium text-gray-700 mb-2">Report Type</label>
                   <select
                     value={reportType}
-                    onChange={(e) => setReportType(e.target.value as "weekly" | "biweekly" | "monthly" | "campaign_wins")}
+                    onChange={(e) => setReportType(e.target.value as "weekly" | "biweekly" | "monthly")}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     required
                   >
                     <option value="weekly">Weekly</option>
                     <option value="biweekly">Biweekly</option>
                     <option value="monthly">Monthly</option>
-                    <option value="campaign_wins">Campaign Wins Report</option>
                   </select>
                 </div>
-                {reportType === "campaign_wins" && (
-                  <div className="rounded-lg bg-white border border-emerald-200 p-3 text-sm text-emerald-800">
-                    <p className="font-semibold mb-1">Campaign Wins Report</p>
-                    <p>
-                      Campaign Wins reports are sent automatically when meaningful milestones are reached — new page 1 rankings,
-                      traffic growth, work completed, and more. We&apos;ll never send the same win twice, and nothing goes out if there&apos;s nothing to celebrate.
-                    </p>
-                  </div>
-                )}
-                {reportType !== "campaign_wins" && (
-                  <>
                 {reportType !== "monthly" ? (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Day of Week</label>
@@ -1179,8 +1227,6 @@ const ScheduleReportModal: React.FC<{
                     required
                   />
                 </div>
-                  </>
-                )}
               </div>
             </div>
             <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
@@ -1202,7 +1248,6 @@ const ScheduleReportModal: React.FC<{
                     required
                   />
                 </div>
-                {reportType !== "campaign_wins" && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Email Subject (optional)</label>
                   <input
@@ -1213,7 +1258,6 @@ const ScheduleReportModal: React.FC<{
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
-                )}
               </div>
             </div>
           </div>
@@ -1231,6 +1275,131 @@ const ScheduleReportModal: React.FC<{
               className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
             >
               {loading ? "Creating..." : "Create Schedule"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const CampaignWinsReportModal: React.FC<{
+  clients: Array<{ id: string; name: string }>;
+  onClose: () => void;
+  onSuccess: () => void;
+}> = ({ clients, onClose, onSuccess }) => {
+  const [clientId, setClientId] = useState("");
+  const [recipients, setRecipients] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clientId) {
+      toast.error("Please select a client");
+      return;
+    }
+
+    const recipientsList = recipients.split(",").map((email) => email.trim()).filter(Boolean);
+    if (recipientsList.length === 0) {
+      toast.error("Please enter at least one recipient email");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await api.post(`/seo/reports/${clientId}/campaign-wins`, {
+        enabled: true,
+        recipients: recipientsList,
+      });
+      toast.success("Campaign Wins report enabled successfully!");
+      onSuccess();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to enable Campaign Wins report");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 max-w-lg w-full mx-4 overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white rounded-t-2xl shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
+              <Settings className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Campaign Wins Report</h2>
+              <p className="text-sm text-white/90">Enable automatic milestone emails</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 bg-gray-50/50 space-y-5">
+          <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
+            <h3 className="text-sm font-semibold text-emerald-900 mb-2 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              Report type
+            </h3>
+            <p className="text-sm font-medium text-gray-900">Campaign Wins Report</p>
+            <p className="mt-2 text-sm text-emerald-900">
+              Campaign Wins reports are sent automatically when meaningful milestones are reached — new page 1 rankings,
+              traffic growth, work completed, and more. We&apos;ll never send the same win twice, and nothing goes out if there&apos;s nothing to celebrate.
+            </p>
+          </div>
+
+          <div className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
+            <h3 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+              Client
+            </h3>
+            <select
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              required
+            >
+              <option value="">Select a client</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
+            <h3 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              Recipient emails
+            </h3>
+            <input
+              type="text"
+              value={recipients}
+              onChange={(e) => setRecipients(e.target.value)}
+              placeholder="email1@example.com, email2@example.com"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              required
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2.5 border border-gray-300 bg-white text-gray-700 rounded-xl hover:bg-gray-50 font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-5 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
+            >
+              {loading ? "Saving..." : "Save"}
             </button>
           </div>
         </form>

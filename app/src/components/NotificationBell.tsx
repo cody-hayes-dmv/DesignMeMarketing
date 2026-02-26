@@ -96,6 +96,12 @@ const NotificationBell: React.FC = () => {
       }
     }
     setOpen(false);
+    // Agency panel requirement: reading a notification should always
+    // land on Agency Dashboard with a fresh reload.
+    if (!isSuperOrAdmin) {
+      window.location.assign("/agency/dashboard");
+      return;
+    }
     navigate(item.link);
   };
 

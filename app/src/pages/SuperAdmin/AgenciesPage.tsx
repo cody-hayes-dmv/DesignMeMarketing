@@ -92,13 +92,16 @@ interface AgencyClient {
 
 const AgenciesPage = () => {
     const dispatch = useDispatch();
+    const { user } = useSelector((state: RootState) => state.auth);
     const { agencies, loading } = useSelector((state: RootState) => state.agency);
+    const isSuperAdmin = user?.role === "SUPER_ADMIN";
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [createModalStep, setCreateModalStep] = useState(1);
     useEffect(() => {
         if (showCreateModal) setCreateModalStep(1);
     }, [showCreateModal]);
     const [showEditAgencyModal, setShowEditAgencyModal] = useState(false);
+    const [showResearchCreditsModal, setShowResearchCreditsModal] = useState(false);
     const [editModalStep, setEditModalStep] = useState(1);
     useEffect(() => {
         if (showEditAgencyModal) setEditModalStep(1);
@@ -211,6 +214,10 @@ const AgenciesPage = () => {
     };
     const [editForm, setEditForm] = useState(initialEditForm);
     const [loadingEditAgency, setLoadingEditAgency] = useState(false);
+    const [researchCreditsAgency, setResearchCreditsAgency] = useState<{ id: string; name: string } | null>(null);
+    const [grantResearchCreditsAmount, setGrantResearchCreditsAmount] = useState<string>("40");
+    const [grantResearchCreditsReason, setGrantResearchCreditsReason] = useState("");
+    const [grantingResearchCredits, setGrantingResearchCredits] = useState(false);
     const [setupIntentClientSecret, setSetupIntentClientSecret] = useState<string | null>(null);
     const [editSetupIntentClientSecret, setEditSetupIntentClientSecret] = useState<string | null>(null);
     const stripePaymentRef = useRef<StripePaymentHandle>(null);
@@ -540,6 +547,14 @@ const AgenciesPage = () => {
         }
     };
 
+    const handleOpenResearchCreditsModal = (agencyId: string, agencyName: string) => {
+        if (!isSuperAdmin) return;
+        setResearchCreditsAgency({ id: agencyId, name: agencyName });
+        setGrantResearchCreditsAmount("40");
+        setGrantResearchCreditsReason("");
+        setShowResearchCreditsModal(true);
+    };
+
     const handleUpdateAgency = async (e?: React.FormEvent) => {
         e?.preventDefault();
         if (!editingAgency) return;
@@ -628,6 +643,36 @@ const AgenciesPage = () => {
             dispatch(fetchAgencies() as any);
         } catch (error: any) {
             toast.error(error?.message ?? error?.response?.data?.message ?? "Failed to update agency");
+        }
+    };
+
+    const handleGrantResearchCredits = async () => {
+        if (!researchCreditsAgency) return;
+        const amount = Number(grantResearchCreditsAmount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            toast.error("Enter a valid credit amount greater than 0.");
+            return;
+        }
+        setGrantingResearchCredits(true);
+        try {
+            const response = await api.post(`/agencies/${researchCreditsAgency.id}/research-credits/adjust`, {
+                operation: "grant",
+                amount: Math.floor(amount),
+                reason: grantResearchCreditsReason.trim() || undefined,
+            });
+            const afterRemaining = response?.data?.after?.remaining;
+            const agencyNameForToast =
+                response?.data?.agency?.name || researchCreditsAgency.name || "Agency";
+            toast.success(
+                typeof afterRemaining === "number"
+                    ? `${agencyNameForToast}: Granted ${Math.floor(amount)} credits. Remaining now: ${afterRemaining}.`
+                    : `${agencyNameForToast}: Granted ${Math.floor(amount)} research credits.`
+            );
+            setGrantResearchCreditsReason("");
+        } catch (error: any) {
+            toast.error(error?.response?.data?.message || "Failed to adjust research credits.");
+        } finally {
+            setGrantingResearchCredits(false);
         }
     };
 
@@ -1222,6 +1267,18 @@ const AgenciesPage = () => {
                                                 >
                                                     <Edit className="h-4 w-4" />
                                                 </button>
+                                                {isSuperAdmin && (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleOpenResearchCreditsModal(agency.id, agency.name);
+                                                        }}
+                                                        className="p-2 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                                        title="Research Credits"
+                                                    >
+                                                        <Plus className="h-4 w-4" />
+                                                    </button>
+                                                )}
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -2227,6 +2284,87 @@ const AgenciesPage = () => {
                             </div>
                         </form>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* Research Credits Modal */}
+            {isSuperAdmin && showResearchCreditsModal && researchCreditsAgency && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-xl mx-4 overflow-hidden">
+                        <div className="flex justify-between items-center px-6 py-5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white">
+                            <div>
+                                <h2 className="text-xl font-bold">Research Credits</h2>
+                                <p className="text-sm text-white/90">{researchCreditsAgency.name}</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowResearchCreditsModal(false);
+                                    setResearchCreditsAgency(null);
+                                }}
+                                className="p-2 rounded-lg text-white/90 hover:bg-white/20 hover:text-white transition-colors"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4 bg-gray-50/40">
+                            <p className="text-sm text-gray-600">
+                                Grant one-time research credits to this agency.
+                            </p>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Credits to grant</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={grantResearchCreditsAmount}
+                                    onChange={(e) => setGrantResearchCreditsAmount(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="40"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Reason (optional)</label>
+                                <input
+                                    type="text"
+                                    value={grantResearchCreditsReason}
+                                    onChange={(e) => setGrantResearchCreditsReason(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="Support credit for outage"
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setGrantResearchCreditsAmount("20")}
+                                    className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+                                >
+                                    +20
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setGrantResearchCreditsAmount("40")}
+                                    className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+                                >
+                                    +40
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setGrantResearchCreditsAmount("100")}
+                                    className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+                                >
+                                    +100
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleGrantResearchCredits}
+                                    disabled={grantingResearchCredits}
+                                    className="ml-auto px-4 py-2 rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {grantingResearchCredits ? "Granting..." : "Grant Credits"}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

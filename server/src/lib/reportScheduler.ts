@@ -1105,66 +1105,197 @@ async function upsertCampaignWinEvent(input: {
   });
 }
 
+type KeywordWinLevel = "POSITION1" | "TOP3" | "PAGE1";
+
+function toUtcStartOfDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+}
+
+function isSameUtcDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
+function getKeywordWinThresholdMeta(level: KeywordWinLevel, keywordText: string): {
+  suffix: "position1" | "top3" | "page1";
+  detail: string;
+} {
+  if (level === "POSITION1") {
+    return {
+      suffix: "position1",
+      detail: `"${keywordText}" is holding the #1 position on Google.`,
+    };
+  }
+  if (level === "TOP3") {
+    return {
+      suffix: "top3",
+      detail: `"${keywordText}" is ranking in the top 3 Google results.`,
+    };
+  }
+  return {
+    suffix: "page1",
+    detail: `"${keywordText}" is holding page 1 visibility on Google.`,
+  };
+}
+
+async function evaluateKeywordWinThreshold(params: {
+  clientId: string;
+  keywordId: string;
+  keywordText: string;
+  level: KeywordWinLevel;
+  isAbove: boolean;
+  now: Date;
+}): Promise<void> {
+  const { clientId, keywordId, keywordText, level, isAbove, now } = params;
+  const meta = getKeywordWinThresholdMeta(level, keywordText);
+  const thresholdKey = `keyword_${keywordId}_${meta.suffix}`;
+  const today = toUtcStartOfDay(now);
+
+  const state = await (prisma as any).campaignWinKeywordState.findUnique({
+    where: { clientId_keywordId_level: { clientId, keywordId, level } },
+    select: {
+      id: true,
+      isAbove: true,
+      aboveStreak: true,
+      belowStreak: true,
+      lastEvaluatedAt: true,
+    },
+  });
+
+  const alreadyEvaluatedToday =
+    state?.lastEvaluatedAt instanceof Date && isSameUtcDay(state.lastEvaluatedAt, today);
+
+  let wasAboveBefore = Boolean(state?.isAbove);
+  let belowStreakBefore = Number(state?.belowStreak ?? 0);
+  let aboveStreakAfter = Number(state?.aboveStreak ?? 0);
+  let belowStreakAfter = Number(state?.belowStreak ?? 0);
+
+  if (!state) {
+    await (prisma as any).campaignWinKeywordState.create({
+      data: {
+        clientId,
+        keywordId,
+        level,
+        isAbove,
+        aboveStreak: isAbove ? 1 : 0,
+        belowStreak: isAbove ? 0 : 1,
+        lastEvaluatedAt: today,
+      },
+    });
+    wasAboveBefore = false;
+    belowStreakBefore = 0;
+    aboveStreakAfter = isAbove ? 1 : 0;
+    belowStreakAfter = isAbove ? 0 : 1;
+  } else if (!alreadyEvaluatedToday) {
+    aboveStreakAfter = isAbove ? (state.isAbove ? state.aboveStreak + 1 : 1) : 0;
+    belowStreakAfter = isAbove ? 0 : (state.isAbove ? 1 : state.belowStreak + 1);
+    await (prisma as any).campaignWinKeywordState.update({
+      where: { id: state.id },
+      data: {
+        isAbove,
+        aboveStreak: aboveStreakAfter,
+        belowStreak: belowStreakAfter,
+        lastEvaluatedAt: today,
+      },
+    });
+  }
+
+  if (!isAbove) return;
+
+  const event = await prisma.campaignWinEvent.findUnique({
+    where: { clientId_thresholdKey: { clientId, thresholdKey } },
+    select: { id: true, notifiedAt: true, cooldownUntil: true },
+  });
+
+  if (!event) {
+    if (aboveStreakAfter < 7) return;
+    await prisma.campaignWinEvent.create({
+      data: {
+        clientId,
+        eventType: "KEYWORD_WIN",
+        thresholdKey,
+        eventDetail: meta.detail,
+        triggeredAt: now,
+      },
+    });
+    return;
+  }
+
+  if (event.cooldownUntil && event.cooldownUntil > now) return;
+
+  // Re-fire rule: keyword must be below threshold for 14+ consecutive days,
+  // then return above threshold.
+  const justReturned = !wasAboveBefore && isAbove;
+  const rearmed = justReturned && belowStreakBefore >= 14;
+
+  if (event.notifiedAt) {
+    if (!rearmed) return;
+    if (aboveStreakAfter < 7) return;
+    await prisma.campaignWinEvent.update({
+      where: { id: event.id },
+      data: {
+        eventType: "KEYWORD_WIN",
+        eventDetail: meta.detail,
+        triggeredAt: now,
+        notifiedAt: null,
+        cooldownUntil: null,
+      },
+    });
+    return;
+  }
+
+  if (aboveStreakAfter >= 7) {
+    await prisma.campaignWinEvent.update({
+      where: { id: event.id },
+      data: {
+        eventType: "KEYWORD_WIN",
+        eventDetail: meta.detail,
+        triggeredAt: now,
+      },
+    });
+  }
+}
+
 async function detectKeywordWins(clientId: string): Promise<void> {
   const now = new Date();
   const keywords = await prisma.keyword.findMany({
     where: { clientId },
-    select: { id: true, keyword: true, currentPosition: true, previousPosition: true },
+    select: { id: true, keyword: true, currentPosition: true },
     take: 1000,
   });
 
   for (const kw of keywords) {
     const pos = typeof kw.currentPosition === "number" ? kw.currentPosition : null;
-    if (!pos || pos > 10) continue;
+    const isPosition1 = pos === 1;
+    const isTop3 = !!pos && pos >= 1 && pos <= 3;
+    const isPage1 = !!pos && pos >= 1 && pos <= 10;
 
-    const level = pos === 1 ? "position1" : pos <= 3 ? "top3" : "page1";
-    const thresholdKey = `keyword_${kw.id}_${level}`;
-    const eventDetail =
-      pos === 1
-        ? `"${kw.keyword}" is holding the #1 position on Google.`
-        : pos <= 3
-        ? `"${kw.keyword}" is ranking in the top 3 Google results.`
-        : `"${kw.keyword}" is holding page 1 visibility on Google.`;
-
-    const existing = await prisma.campaignWinEvent.findUnique({
-      where: { clientId_thresholdKey: { clientId, thresholdKey } },
-      select: { id: true, notifiedAt: true, cooldownUntil: true, triggeredAt: true },
+    await evaluateKeywordWinThreshold({
+      clientId,
+      keywordId: kw.id,
+      keywordText: kw.keyword,
+      level: "POSITION1",
+      isAbove: isPosition1,
+      now,
     });
-
-    if (!existing) {
-      await prisma.campaignWinEvent.create({
-        data: {
-          clientId,
-          eventType: "KEYWORD_WIN",
-          thresholdKey,
-          eventDetail,
-          triggeredAt: now,
-        },
-      });
-      continue;
-    }
-
-    if (existing.cooldownUntil && existing.cooldownUntil > now) continue;
-
-    // Re-arm approximation: require a meaningful return move before refiring.
-    if (existing.notifiedAt) {
-      const droppedAndReturned = (kw.previousPosition ?? 999) > 10;
-      if (!droppedAndReturned) continue;
-      await prisma.campaignWinEvent.update({
-        where: { id: existing.id },
-        data: {
-          eventType: "KEYWORD_WIN",
-          eventDetail,
-          triggeredAt: now,
-          notifiedAt: null,
-        },
-      });
-      continue;
-    }
-
-    await prisma.campaignWinEvent.update({
-      where: { id: existing.id },
-      data: { eventDetail },
+    await evaluateKeywordWinThreshold({
+      clientId,
+      keywordId: kw.id,
+      keywordText: kw.keyword,
+      level: "TOP3",
+      isAbove: isTop3,
+      now,
+    });
+    await evaluateKeywordWinThreshold({
+      clientId,
+      keywordId: kw.id,
+      keywordText: kw.keyword,
+      level: "PAGE1",
+      isAbove: isPage1,
+      now,
     });
   }
 }
@@ -1363,7 +1494,10 @@ async function processCampaignWinsForClient(client: {
       .map((e) => e.notifiedAt?.toISOString())
       .filter((v): v is string => Boolean(v))
   );
-  if (sendStamps.size >= 2) return;
+  const lastSentThisWeek =
+    client.campaignWinsLastSent != null && client.campaignWinsLastSent >= weekStart;
+  const estimatedSendsThisWeek = Math.max(sendStamps.size, lastSentThisWeek ? 1 : 0);
+  if (estimatedSendsThisWeek >= 2) return;
 
   const pendingEvents = await prisma.campaignWinEvent.findMany({
     where: {
@@ -1385,13 +1519,31 @@ async function processCampaignWinsForClient(client: {
   ).slice(0, 3);
   if (queue.length === 0) return;
 
+  // Safety dedupe before sending: never send an event if it has already been
+  // notified or is still in cooldown.
+  const safeQueue = (
+    await Promise.all(
+      queue.map(async (event) => {
+        const latest = await prisma.campaignWinEvent.findUnique({
+          where: { id: event.id },
+          select: { id: true, notifiedAt: true, cooldownUntil: true },
+        });
+        if (!latest) return null;
+        if (latest.notifiedAt) return null;
+        if (latest.cooldownUntil && latest.cooldownUntil > now) return null;
+        return event;
+      })
+    )
+  ).filter((e): e is (typeof queue)[number] => Boolean(e));
+  if (safeQueue.length === 0) return;
+
   const shareUrl = await buildShareDashboardUrl(client.id).catch(() => null);
   const clientFirstName = String(client.user?.name || "").trim().split(/\s+/)[0] || "there";
   const subject = `Campaign Update — ${client.name}`;
   const html = campaignWinsEmailHtml({
     clientName: client.name,
     clientFirstName,
-    eventDetails: queue.map((e) => e.eventDetail),
+    eventDetails: safeQueue.map((e) => e.eventDetail),
     dashboardUrl: shareUrl,
   });
 
@@ -1405,12 +1557,11 @@ async function processCampaignWinsForClient(client: {
     )
   );
 
-  for (const event of queue) {
-    const cooldownDays = cooldownDaysForEventType(event.eventType as CampaignWinPriority);
-    const cooldownUntil =
-      cooldownDays == null
-        ? null
-        : new Date(now.getTime() + cooldownDays * 24 * 60 * 60 * 1000);
+  for (const event of safeQueue) {
+    // Queue/send rule safety: apply 30-day cooldown on fired events.
+    // Weekly-dedup events also use week-based threshold keys, so this does not
+    // block next week's distinct keys.
+    const cooldownUntil = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     await prisma.campaignWinEvent.update({
       where: { id: event.id },
       data: {
