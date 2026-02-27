@@ -137,10 +137,23 @@ test("specialist status update notifies agency creator", () => {
   assert.equal(recipient, "agency-1");
 });
 
-test("status update does not notify when actor is not specialist or status unchanged", () => {
-  const wrongActor = selectTaskStatusCreatorRecipientId({
+test("admin status update notifies super admin creator", () => {
+  const recipient = selectTaskStatusCreatorRecipientId({
     actorRole: "ADMIN",
     actorId: "admin-1",
+    createdById: "super-admin-1",
+    createdByRole: "SUPER_ADMIN",
+    fromStatus: "TODO",
+    toStatus: "IN_PROGRESS",
+  });
+
+  assert.equal(recipient, "super-admin-1");
+});
+
+test("status update does not notify when actor is not eligible or status unchanged", () => {
+  const wrongActor = selectTaskStatusCreatorRecipientId({
+    actorRole: "AGENCY",
+    actorId: "agency-1",
     createdById: "super-admin-1",
     createdByRole: "SUPER_ADMIN",
     fromStatus: "TODO",

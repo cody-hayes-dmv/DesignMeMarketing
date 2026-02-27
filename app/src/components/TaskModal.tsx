@@ -81,6 +81,11 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const isSpecialistView = user?.role === "SPECIALIST";
     const isClientUser = user?.role === "USER";
     const isNotOwner = (user?.role === "ADMIN" || user?.role === "AGENCY") && Number(mode) === 1 && task?.createdBy?.id !== user?.id;
+    const isAdminAssigneeStatusEditor =
+        user?.role === "ADMIN" &&
+        Number(mode) === 1 &&
+        task?.createdBy?.id !== user?.id &&
+        task?.assignee?.id === user?.id;
     const formReadOnly = isSpecialistView || isClientUser || isNotOwner;
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
     const [assignableLoading, setAssignableLoading] = useState(false);
@@ -226,7 +231,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                 await dispatch(createTask(payload) as any);
                 toast.success("Task created successfully!");
             } else if (mode === 1 && task) {
-                if (isSpecialistView) {
+                if (isSpecialistView || isAdminAssigneeStatusEditor) {
                     await dispatch(patchTaskStatus({ id: task.id, status: form.status }) as any);
                     toast.success("Status updated successfully!");
                 } else {
@@ -979,16 +984,16 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <button
                                 type="button"
                                 onClick={handleCancel}
-                                className={`${isClientUser || isNotOwner ? "w-full" : "w-full sm:flex-1"} border border-gray-300 bg-white text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-50 font-medium transition-colors`}
+                                className={`${isClientUser || (isNotOwner && !isAdminAssigneeStatusEditor) ? "w-full" : "w-full sm:flex-1"} border border-gray-300 bg-white text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-50 font-medium transition-colors`}
                             >
-                                {isClientUser || isNotOwner ? "Close" : "Cancel"}
+                                {isClientUser || (isNotOwner && !isAdminAssigneeStatusEditor) ? "Close" : "Cancel"}
                             </button>
-                            {!isClientUser && !isNotOwner && (
+                            {!isClientUser && (!isNotOwner || isAdminAssigneeStatusEditor) && (
                                 <button
                                     type="submit"
                                     className="w-full sm:flex-1 py-3 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
                                 >
-                                    {mode === 0 ? "Create" : "Save"}
+                                    {mode === 0 ? "Create" : isAdminAssigneeStatusEditor ? "Save Status" : "Save"}
                                 </button>
                             )}
                         </div>

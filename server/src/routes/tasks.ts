@@ -265,7 +265,7 @@ export function selectTaskStatusCreatorRecipientId(params: {
 }): string | null {
   const { actorRole, actorId, createdById, createdByRole, fromStatus, toStatus } = params;
 
-  if (actorRole !== "SPECIALIST") return null;
+  if (actorRole !== "SPECIALIST" && actorRole !== "ADMIN") return null;
   if (!createdById || createdById === actorId) return null;
   if (!createdByRole || !["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(createdByRole)) return null;
   if (!fromStatus || !toStatus || fromStatus === toStatus) return null;
