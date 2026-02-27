@@ -474,6 +474,47 @@ async function notifyClientUsersTaskNeedsApproval(
   }
 }
 
+async function notifyClientUsersTaskStatusChanged(
+  task: { id: string; title: string; clientId?: string | null },
+  fromStatus: TaskStatus,
+  toStatus: TaskStatus,
+  updatedByName: string,
+  updatedByUserId: string
+): Promise<void> {
+  if (!task.clientId) return;
+  if (fromStatus === toStatus) return;
+
+  const recipients = await prisma.clientUser.findMany({
+    where: { clientId: task.clientId, status: "ACTIVE" },
+    select: { userId: true },
+  });
+
+  const recipientUserIds = recipients
+    .map((r) => r.userId)
+    .filter((userId) => userId !== updatedByUserId);
+
+  if (recipientUserIds.length === 0) return;
+
+  const statusLabel = (status: TaskStatus): string => {
+    if (status === "TODO") return "To Do";
+    if (status === "IN_PROGRESS") return "In Progress";
+    if (status === "NEEDS_APPROVAL") return "Needs Approval";
+    return status.charAt(0) + status.slice(1).toLowerCase();
+  };
+
+  await prisma.notification
+    .createMany({
+      data: recipientUserIds.map((userId) => ({
+        userId,
+        type: "task_activity",
+        title: `${updatedByName} updated "${task.title}" status`,
+        message: `Status changed from ${statusLabel(fromStatus)} to ${statusLabel(toStatus)}.`,
+        link: `/client/tasks?taskId=${task.id}`,
+      })),
+    })
+    .catch((e) => console.warn("[Task] Client status-change notifications failed", e?.message));
+}
+
 /** Advance nextRunAt by one interval based on frequency and day settings */
 function addRecurrenceInterval(from: Date, frequency: string, dayOfWeek: number | null, dayOfMonth: number | null): Date {
   const next = new Date(from);
@@ -1459,6 +1500,8 @@ router.put("/:id", authenticateToken, async (req, res) => {
       select: { name: true, email: true },
     });
     const actorName = actor?.name || actor?.email || "A user";
+    const isInternalStatusActor = ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(req.user.role);
+    const didStatusChange = (task.status as TaskStatus) !== (updatedTask.status as TaskStatus);
 
     if (updatedTask.status === "NEEDS_APPROVAL" && (updates.approvalNotifyUserIds?.length ?? 0) > 0) {
       sendTaskApprovalRequestEmails(
@@ -1473,6 +1516,15 @@ router.put("/:id", authenticateToken, async (req, res) => {
         actorName,
         req.user.userId
       ).catch((e) => console.warn("[Task] Client NEEDS_APPROVAL notifications failed", e?.message));
+    }
+    if (isInternalStatusActor && didStatusChange && updatedTask.status !== "NEEDS_APPROVAL") {
+      notifyClientUsersTaskStatusChanged(
+        { id: updatedTask.id, title: updatedTask.title, clientId: updatedTask.clientId },
+        task.status as TaskStatus,
+        updatedTask.status as TaskStatus,
+        actorName,
+        req.user.userId
+      ).catch((e) => console.warn("[Task] Client status-change notifications failed", e?.message));
     }
     if (updatedTask.status === "DONE") {
       sendTaskCompletedEmails(
@@ -1534,6 +1586,8 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
       select: { name: true, email: true },
     });
     const actorName = actor?.name || actor?.email || "A user";
+    const isInternalStatusActor = ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(req.user.role);
+    const didStatusChange = (task.status as TaskStatus) !== (updated.status as TaskStatus);
 
     const statusRecipientUserId = selectTaskStatusCreatorRecipientId({
       actorRole: req.user.role as Role | null | undefined,
@@ -1571,6 +1625,15 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
         actorName,
         req.user.userId
       ).catch((e) => console.warn("[Task] Client NEEDS_APPROVAL notifications failed", e?.message));
+    }
+    if (isInternalStatusActor && didStatusChange && updated.status !== "NEEDS_APPROVAL") {
+      notifyClientUsersTaskStatusChanged(
+        { id: updated.id, title: updated.title, clientId: updated.clientId },
+        task.status as TaskStatus,
+        updated.status as TaskStatus,
+        actorName,
+        req.user.userId
+      ).catch((e) => console.warn("[Task] Client status-change notifications failed", e?.message));
     }
     if (updated.status === "DONE") {
       sendTaskCompletedEmails(

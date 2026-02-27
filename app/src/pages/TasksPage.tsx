@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
@@ -53,10 +53,11 @@ const TASKS_PAGE_SIZES = [25, 50, 100, 250] as const;
 
 const TasksPage = () => {
     const dispatch = useDispatch();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [open, setOpen] = useState(false);
     const [mode, setMode] = useState<Number>(0);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+    const lastAutoOpenedTaskIdRef = useRef<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [enabled, setEnabled] = useState(false);
     const [showCredentials, setShowCredentials] = useState<Record<string, boolean>>({});
@@ -119,18 +120,66 @@ const TasksPage = () => {
         }
     }, [searchParams, user?.id]);
 
-    // Auto-open task modal from notification link (?taskId=xxx)
+    // Auto-open task modal from notification link (?taskId=xxx).
+    // Fetch directly by id with a cache-busting param so we never open stale task content.
     useEffect(() => {
         const taskId = searchParams.get("taskId");
-        if (taskId && tasks.length > 0) {
-            const found = tasks.find((t) => t.id === taskId);
-            if (found) {
-                setSelectedTask(found);
-                setMode(1);
-                setOpen(true);
-            }
+        if (!taskId) {
+            lastAutoOpenedTaskIdRef.current = null;
+            return;
         }
-    }, [searchParams, tasks]);
+        if (lastAutoOpenedTaskIdRef.current === taskId) return;
+        lastAutoOpenedTaskIdRef.current = taskId;
+
+        // Refresh list in background so modal/task list converge to latest server state.
+        void dispatch(fetchTasks() as any);
+
+        const localTask = tasks.find((t) => t.id === taskId);
+        if (localTask) {
+            setSelectedTask(localTask);
+            setMode(1);
+            setOpen(true);
+        }
+
+        let cancelled = false;
+        api
+            .get(`/tasks/${taskId}`, {
+                _silent: true,
+                params: { _ts: Date.now() },
+            } as any)
+            .then((res) => {
+                if (cancelled) return;
+                if (res?.data?.id) {
+                    setSelectedTask(res.data);
+                    setMode(1);
+                    setOpen(true);
+                    // Keep list/table in sync with the task opened from notification.
+                    void dispatch(fetchTasks() as any);
+                }
+            })
+            .catch(() => {
+                // If direct fetch fails but local task exists, modal already opened above.
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [searchParams, tasks, dispatch]);
+
+    // Keep an opened client task modal synced with freshest task entity from store.
+    useEffect(() => {
+        if (!open || user?.role !== "USER" || !selectedTask?.id) return;
+        const latest = tasks.find((t) => t.id === selectedTask.id);
+        if (!latest) return;
+        const stale =
+            latest.status !== selectedTask.status ||
+            (latest.updatedAt ?? null) !== (selectedTask.updatedAt ?? null) ||
+            (latest.description ?? null) !== (selectedTask.description ?? null) ||
+            (latest.title ?? null) !== (selectedTask.title ?? null);
+        if (stale) {
+            setSelectedTask(latest);
+        }
+    }, [open, user?.role, selectedTask, tasks]);
 
     // Fetch unread activity counts per task from notifications feed.
     // This avoids depending on /tasks/unread-counts, which may not exist on older production backends.
@@ -468,6 +517,19 @@ const TasksPage = () => {
         if (f === "QUARTERLY") return "Quarterly";
         if (f === "SEMIANNUAL") return "Every 6 months";
         return f;
+    };
+
+    const handleTaskModalOpenChange = (isOpen: boolean) => {
+        setOpen(isOpen);
+        if (!isOpen) {
+            lastAutoOpenedTaskIdRef.current = null;
+            const next = new URLSearchParams(searchParams);
+            if (next.has("taskId")) {
+                next.delete("taskId");
+                setSearchParams(next, { replace: true });
+            }
+            fetchUnreadCounts();
+        }
     };
 
     return (
@@ -1164,7 +1226,7 @@ const TasksPage = () => {
                 mode={mode}
                 title={mode === 0 ? "Create Task" : "Edit Task"}
                 open={open}
-                setOpen={(v) => { setOpen(v); if (!v) fetchUnreadCounts(); }}
+                setOpen={handleTaskModalOpenChange}
                 task={selectedTask ?? undefined}
             />
 

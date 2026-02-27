@@ -123,6 +123,37 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const [revisionComment, setRevisionComment] = useState("");
     const [showRevisionInput, setShowRevisionInput] = useState(false);
 
+    const hydrateFromTask = React.useCallback((taskData: Task) => {
+        const assignee = taskData.assignee;
+        setForm({
+            title: taskData.title ?? "",
+            description: taskData.description ?? "",
+            category: taskData.category ?? "",
+            status: taskData.status,
+            dueDate: taskData.dueDate ? new Date(taskData.dueDate) : null,
+            assigneeId: assignee?.id ?? "",
+            clientId: taskData.client?.id ?? "",
+            priority: (taskData as any).priority ?? "",
+            estimatedHours: (taskData as any).estimatedHours?.toString() ?? "",
+        });
+        setAssigneeDisplay(assignee ? (assignee.name || assignee.email || "") : "");
+        setAssignableSearch("");
+        setAssignToOpen(false);
+        setProof((() => {
+            const p = taskData.proof;
+            if (Array.isArray(p)) return p as ProofItem[];
+            if (typeof p === "string") {
+                try {
+                    const parsed = JSON.parse(p);
+                    return Array.isArray(parsed) ? (parsed as ProofItem[]) : [];
+                } catch {
+                    return [];
+                }
+            }
+            return [];
+        })());
+    }, []);
+
     useEffect(() => {
         if (open && clients.length === 0 && user?.role !== "USER" && user?.role !== "SPECIALIST") {
             dispatch(fetchClients() as any);
@@ -264,34 +295,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     React.useEffect(() => {
         if (open) {
             if (mode === 1 && task) {
-                const assignee = task.assignee;
-                setForm({
-                    title: task.title ?? "",
-                    description: task.description ?? "",
-                    category: task.category ?? "",
-                    status: task.status,
-                    dueDate: task.dueDate ? new Date(task.dueDate) : null,
-                    assigneeId: assignee?.id ?? "",
-                    clientId: task.client?.id ?? "",
-                    priority: (task as any).priority ?? "",
-                    estimatedHours: (task as any).estimatedHours?.toString() ?? "",
-                });
-                setAssigneeDisplay(assignee ? (assignee.name || assignee.email || "") : "");
-                setAssignableSearch("");
-                setAssignToOpen(false);
-                setProof((() => {
-                    const p = task.proof;
-                    if (Array.isArray(p)) return p as ProofItem[];
-                    if (typeof p === "string") {
-                        try {
-                            const parsed = JSON.parse(p);
-                            return Array.isArray(parsed) ? (parsed as ProofItem[]) : [];
-                        } catch {
-                            return [];
-                        }
-                    }
-                    return [];
-                })());
+                hydrateFromTask(task);
             } else {
                 setForm({
                     title: "",
@@ -315,7 +319,28 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             setShowRevisionInput(false);
             setRevisionComment("");
         }
-    }, [open, mode, task]);
+    }, [open, mode, task, hydrateFromTask]);
+
+    // Force-load the latest task payload when opening an existing task.
+    // This ensures notification deep-links always show server-fresh status/content.
+    useEffect(() => {
+        if (!open || mode !== 1 || !task?.id) return;
+        let cancelled = false;
+        api.get(`/tasks/${task.id}`, {
+            _silent: true,
+            params: { _ts: Date.now() },
+        } as any)
+            .then((res) => {
+                if (cancelled) return;
+                if (res?.data?.id) hydrateFromTask(res.data as Task);
+            })
+            .catch(() => {
+                // Keep current task data if refresh fails.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, mode, task?.id, hydrateFromTask]);
 
     const canComment = Boolean(user);
     const canApprove = isClientUser && task?.status === "NEEDS_APPROVAL";
