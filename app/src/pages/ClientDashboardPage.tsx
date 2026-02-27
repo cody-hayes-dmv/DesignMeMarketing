@@ -49,6 +49,13 @@ import {
   BookOpen,
 } from "lucide-react";
 import api, { getUploadFileUrl } from "@/lib/api";
+import {
+  AccuracyEnvelope,
+  formatUnavailableReason,
+  formatUnavailableSource,
+  getUnavailableMetricInfo,
+  normalizeDashboardSummaryPayload,
+} from "@/lib/metricAccuracy";
 import { Client, updateClient } from "@/store/slices/clientSlice";
 import { clientToFormState, formStateToUpdatePayload } from "@/lib/clientAccountForm";
 import ClientAccountFormModal, { EMPTY_CLIENT_FORM } from "@/components/ClientAccountFormModal";
@@ -223,6 +230,7 @@ interface DashboardSummary {
   }> | null;
   ga4LastUpdated?: string | null;
   dataForSeoLastUpdated?: string | null;
+  accuracy?: AccuracyEnvelope;
 }
 
 const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
@@ -233,22 +241,6 @@ const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
   Other: "#6366F1",
 };
 
-
-const parseNumericValue = (value: any): number | null => {
-  if (value === undefined || value === null) return null;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-};
-
-const normalizeTrendPoints = (trend: any): TrendPoint[] => {
-  if (!Array.isArray(trend)) return [];
-  return trend
-    .map((point) => ({
-      date: typeof point?.date === "string" ? point.date : "",
-      value: Number(point?.value ?? 0) || 0,
-    }))
-    .filter((point) => Boolean(point.date));
-};
 
 /** Format ISO date as "Last updated X hours ago" for DataForSEO/GA4 timestamps */
 const formatLastUpdatedHours = (iso: string | null | undefined): string | null => {
@@ -270,26 +262,8 @@ const formatPercentChange = (current: number, previous: number): { text: string;
   return { text, isPositive };
 };
 
-const formatDashboardSummary = (payload: any): DashboardSummary => ({
-  ...payload,
-  totalSessions: parseNumericValue(payload?.totalSessions),
-  organicSessions: parseNumericValue(payload?.organicSessions),
-  averagePosition: parseNumericValue(payload?.averagePosition),
-  conversions: parseNumericValue(payload?.conversions),
-  // New GA4 metrics
-  activeUsers: parseNumericValue(payload?.activeUsers),
-  eventCount: parseNumericValue(payload?.eventCount),
-  newUsers: parseNumericValue(payload?.newUsers),
-  keyEvents: parseNumericValue(payload?.keyEvents),
-  activeUsersTrend: normalizeTrendPoints(payload?.activeUsersTrend),
-  // Backward compatibility
-  totalUsers: parseNumericValue(payload?.totalUsers ?? payload?.activeUsers),
-  firstTimeVisitors: parseNumericValue(payload?.firstTimeVisitors ?? payload?.newUsers),
-  // Engaged Visitors should reflect GA4 engaged sessions (NOT key events / conversions)
-  engagedVisitors: parseNumericValue(payload?.engagedVisitors ?? payload?.engagedSessions),
-  newUsersTrend: normalizeTrendPoints(payload?.newUsersTrend),
-  totalUsersTrend: normalizeTrendPoints(payload?.totalUsersTrend ?? payload?.activeUsersTrend),
-});
+const formatDashboardSummary = (payload: any): DashboardSummary =>
+  normalizeDashboardSummaryPayload(payload) as DashboardSummary;
 
 const workLogActivityConfig: Record<ActivityType, { label: string; color: string; bg: string; border: string }> = {
   COMMENT: { label: "Comment", color: "text-slate-700", bg: "bg-slate-50", border: "border-slate-200" },
@@ -527,6 +501,7 @@ const ClientDashboardPage: React.FC = () => {
       hasCompetitorData?: boolean;
       searchMentionsItemCount?: number;
       kpiVolumeFromTrend?: boolean;
+      hasAiMentions?: boolean;
     };
   } | null>(null);
   const [aiIntelligenceLoading, setAiIntelligenceLoading] = useState(false);
@@ -1744,6 +1719,7 @@ const ClientDashboardPage: React.FC = () => {
       // Refetch dashboard data (this will get fresh DataForSEO and GA4 data)
       const res = await api.get(buildDashboardUrl(clientId), { timeout: DASHBOARD_REQUEST_TIMEOUT_MS });
       const payload = res.data || {};
+      const payloadSummary = formatDashboardSummary(payload);
       const isGA4Connected = payload?.isGA4Connected || false;
       const dataSource = payload?.dataSources?.traffic || "none";
       
@@ -1757,31 +1733,30 @@ const ClientDashboardPage: React.FC = () => {
           
           if (!actualStatus) {
             setGa4ConnectionError("GA4 connection appears to be invalid. Please reconnect GA4 to get fresh data.");
-            // Clear GA4 data
-            const summary = formatDashboardSummary(payload);
-            summary.activeUsers = null;
-            summary.eventCount = null;
-            summary.newUsers = null;
-            summary.keyEvents = null;
-            summary.activeUsersTrend = [];
-            summary.newUsersTrend = [];
-            summary.totalUsers = null;
-            summary.firstTimeVisitors = null;
-            summary.engagedVisitors = null;
-            summary.totalUsersTrend = [];
-            summary.ga4Events = null;
-            setDashboardSummary(summary);
+            // Keep last known values on transient status mismatch to avoid flashing 0/empty.
+            setDashboardSummary((prev) => prev ?? payloadSummary);
           } else {
-            setDashboardSummary(formatDashboardSummary(payload));
+            setDashboardSummary((prev) => {
+              const payloadWebVisitors = Number(payloadSummary.totalUsers ?? payloadSummary.activeUsers ?? 0) || 0;
+              const payloadLooksEmpty =
+                payloadWebVisitors === 0 &&
+                (Number(payloadSummary.newUsers ?? 0) || 0) === 0 &&
+                (Number(payloadSummary.eventCount ?? 0) || 0) === 0 &&
+                (Number(payloadSummary.totalSessions ?? 0) || 0) === 0;
+              const prevWebVisitors = Number(prev?.totalUsers ?? prev?.activeUsers ?? 0) || 0;
+              if (payloadLooksEmpty && prevWebVisitors > 0) return prev;
+              return payloadSummary;
+            });
           }
         } catch (statusError) {
           console.warn("Failed to refresh GA4 status:", statusError);
-          setGa4Connected(false);
-          setGa4ConnectionError("Unable to verify GA4 connection. Please reconnect GA4.");
+          // Keep current GA4 state + metrics if status check fails transiently.
+          setGa4ConnectionError(null);
+          setDashboardSummary((prev) => prev ?? payloadSummary);
         }
       } else {
         setGa4Connected(isGA4Connected);
-        setDashboardSummary(formatDashboardSummary(payload));
+        setDashboardSummary(payloadSummary);
       }
       
       // Refetch top events and visitor sources from database
@@ -2367,6 +2342,7 @@ const ClientDashboardPage: React.FC = () => {
         const autoRefreshKey = `${clientId}:${dateRange}:${customStartDate ?? ""}:${customEndDate ?? ""}`;
 
         let payload = await fetchDashboardPayload();
+        const payloadSummary = () => formatDashboardSummary(payload);
         let isGA4Connected = Boolean(payload?.isGA4Connected);
         let dataSource = payload?.dataSources?.traffic || "none";
 
@@ -2424,55 +2400,36 @@ const ClientDashboardPage: React.FC = () => {
               // GA4 connection is actually invalid - clear GA4 data and show warning
               setGa4Connected(false);
               setGa4ConnectionError("GA4 connection appears to be invalid. Please reconnect GA4 to get fresh data.");
-              
-              // Clear GA4-specific metrics from dashboard summary
-              const summary = formatDashboardSummary(payload);
-              summary.activeUsers = null;
-              summary.eventCount = null;
-              summary.newUsers = null;
-              summary.keyEvents = null;
-              summary.activeUsersTrend = [];
-              summary.newUsersTrend = [];
-              summary.totalUsers = null;
-              summary.firstTimeVisitors = null;
-              summary.engagedVisitors = null;
-              summary.totalUsersTrend = [];
-              summary.ga4Events = null;
-              setDashboardSummary(summary);
-              
+
+              // Keep last known values to avoid 0-flash on reload while reconnect is being resolved.
+              setDashboardSummary((prev) => prev ?? payloadSummary());
               toast.error("GA4 connection is invalid. Please reconnect to get fresh data.", { duration: 5000 });
             } else {
               // Status is OK but data source is not GA4 - might be using cached data
               setGa4Connected(true);
-              setDashboardSummary(formatDashboardSummary(payload));
+              setDashboardSummary((prev) => {
+                const summary = payloadSummary();
+                const payloadWebVisitors = Number(summary.totalUsers ?? summary.activeUsers ?? 0) || 0;
+                const payloadLooksEmpty =
+                  payloadWebVisitors === 0 &&
+                  (Number(summary.newUsers ?? 0) || 0) === 0 &&
+                  (Number(summary.eventCount ?? 0) || 0) === 0 &&
+                  (Number(summary.totalSessions ?? 0) || 0) === 0;
+                const prevWebVisitors = Number(prev?.totalUsers ?? prev?.activeUsers ?? 0) || 0;
+                if (payloadLooksEmpty && prevWebVisitors > 0) return prev;
+                return summary;
+              });
             }
           } catch (statusError: any) {
-            // Status check failed - connection is likely invalid
+            // Status check can fail transiently during reload; keep current values.
             console.error("GA4 status check failed:", statusError);
-            setGa4Connected(false);
-            setGa4ConnectionError("Unable to verify GA4 connection. Please reconnect GA4.");
-            
-            // Clear GA4-specific metrics
-            const summary = formatDashboardSummary(payload);
-            summary.activeUsers = null;
-            summary.eventCount = null;
-            summary.newUsers = null;
-            summary.keyEvents = null;
-            summary.activeUsersTrend = [];
-            summary.newUsersTrend = [];
-            summary.totalUsers = null;
-            summary.firstTimeVisitors = null;
-            summary.engagedVisitors = null;
-            summary.totalUsersTrend = [];
-            summary.ga4Events = null;
-            setDashboardSummary(summary);
-            
-            toast.error("GA4 connection verification failed. Please reconnect GA4.", { duration: 5000 });
+            setGa4ConnectionError(null);
+            setDashboardSummary((prev) => prev ?? payloadSummary());
           }
         } else {
           // Normal case: either GA4 is connected and data is from GA4, or GA4 is not connected
           setGa4Connected(isGA4Connected);
-          setDashboardSummary(formatDashboardSummary(payload));
+          setDashboardSummary(payloadSummary());
         }
       } catch (error: any) {
         console.warn("Failed to fetch dashboard summary", error);
@@ -3924,7 +3881,7 @@ const ClientDashboardPage: React.FC = () => {
   const websiteVisitorsDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (ga4Connected !== true) return "—";
-    const value = dashboardSummary?.totalUsers ?? dashboardSummary?.activeUsers;
+    const value = dashboardSummary?.totalUsers;
     if (value !== null && value !== undefined) {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
@@ -3975,6 +3932,31 @@ const ClientDashboardPage: React.FC = () => {
     }
     return "—";
   }, [dashboardSummary?.engagedVisitors, fetchingSummary, ga4Connected]);
+
+  const getUnavailableText = useCallback(
+    (metric: string | string[]) => {
+      const info = getUnavailableMetricInfo(dashboardSummary?.accuracy, metric);
+      if (!info) return null;
+      return `Unavailable (${formatUnavailableReason(info.reason)} from ${formatUnavailableSource(info.source)})`;
+    },
+    [dashboardSummary?.accuracy]
+  );
+  const webVisitorsUnavailableText = getUnavailableText(["totalUsers", "activeUsers"]);
+  const organicTrafficUnavailableText = getUnavailableText("organicSearchEngagedSessions");
+  const firstTimeVisitorsUnavailableText = getUnavailableText(["firstTimeVisitors", "newUsers"]);
+  const engagedVisitorsUnavailableText = getUnavailableText("engagedVisitors");
+  const aiIntelligenceDataStatus = useMemo(() => {
+    const meta = aiIntelligence?.meta;
+    if (!meta) return null;
+    const status = String(meta.apiResponseStatus || "").toLowerCase();
+    if (status === "success" && meta.dataForSeoConnected && meta.hasAiMentions) {
+      return { label: "Live data", className: "bg-emerald-100 text-emerald-800" };
+    }
+    if (status === "no_data_or_error" || !meta.dataForSeoConnected) {
+      return { label: "No data", className: "bg-rose-100 text-rose-800" };
+    }
+    return { label: "Partial data", className: "bg-amber-100 text-amber-800" };
+  }, [aiIntelligence?.meta]);
 
   const newUsersTrendData = useMemo(() => {
     if (!dashboardSummary?.newUsersTrend?.length) return [];
@@ -4770,17 +4752,6 @@ const ClientDashboardPage: React.FC = () => {
                                   setCompareStartDate(compareStartStr);
                                   setCompareEndDate(compareEndStr);
                                   setCalendarModalOpen(false);
-                                  try {
-                                    setFetchingSummary(true);
-                                    const res = await api.get(buildDashboardUrl(clientId!), { timeout: DASHBOARD_REQUEST_TIMEOUT_MS });
-                                    const payload = res.data || {};
-                                    setDashboardSummary(formatDashboardSummary(payload));
-                                  } catch (error: any) {
-                                    console.error("Failed to fetch dashboard summary", error);
-                                    setDashboardSummary(null);
-                                  } finally {
-                                    setFetchingSummary(false);
-                                  }
                                 }}
                                 className="flex-1 px-4 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 font-medium"
                               >
@@ -4906,9 +4877,12 @@ const ClientDashboardPage: React.FC = () => {
                         <InfoTooltip content="Total number of people who visited your website this month." className="ml-1.5 inline-flex align-middle" />
                       </p>
                       <p className="text-2xl font-bold text-gray-900">{websiteVisitorsDisplay}</p>
+                      {webVisitorsUnavailableText && (
+                        <p className="mt-1 text-xs font-medium text-amber-700">{webVisitorsUnavailableText}</p>
+                      )}
                       {dashboardSummaryCompare != null && (() => {
-                        const curr = Number(dashboardSummary?.totalUsers ?? dashboardSummary?.activeUsers ?? 0);
-                        const prev = Number(dashboardSummaryCompare?.totalUsers ?? dashboardSummaryCompare?.activeUsers ?? 0);
+                        const curr = Number(dashboardSummary?.totalUsers ?? 0);
+                        const prev = Number(dashboardSummaryCompare?.totalUsers ?? 0);
                         if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
                         const { text, isPositive } = formatPercentChange(curr, prev);
                         return (
@@ -4946,6 +4920,9 @@ const ClientDashboardPage: React.FC = () => {
                         <InfoTooltip content="Visitors who found you through Google search (not paid ads). This shows how well your SEO is working." className="ml-1.5 inline-flex align-middle" />
                       </p>
                       <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
+                      {organicTrafficUnavailableText && (
+                        <p className="mt-1 text-xs font-medium text-amber-700">{organicTrafficUnavailableText}</p>
+                      )}
                       {dashboardSummaryCompare != null && (() => {
                         const curr = Number(dashboardSummary?.organicSearchEngagedSessions ?? 0);
                         const prev = Number(dashboardSummaryCompare?.organicSearchEngagedSessions ?? 0);
@@ -4986,6 +4963,9 @@ const ClientDashboardPage: React.FC = () => {
                         <InfoTooltip content="Number of people visiting your website for the very first time this month." className="ml-1.5 inline-flex align-middle" />
                       </p>
                       <p className="text-2xl font-bold text-gray-900">{firstTimeVisitorsDisplay}</p>
+                      {firstTimeVisitorsUnavailableText && (
+                        <p className="mt-1 text-xs font-medium text-amber-700">{firstTimeVisitorsUnavailableText}</p>
+                      )}
                       {dashboardSummaryCompare != null && (() => {
                         const curr = Number(dashboardSummary?.newUsers ?? 0);
                         const prev = Number(dashboardSummaryCompare?.newUsers ?? 0);
@@ -5026,6 +5006,9 @@ const ClientDashboardPage: React.FC = () => {
                         <InfoTooltip content="Visitors who actively interacted with your site (spent time reading, clicked links, scrolled through pages)." className="ml-1.5 inline-flex align-middle" />
                       </p>
                       <p className="text-2xl font-bold text-gray-900">{engagedVisitorsDisplay}</p>
+                      {engagedVisitorsUnavailableText && (
+                        <p className="mt-1 text-xs font-medium text-amber-700">{engagedVisitorsUnavailableText}</p>
+                      )}
                       {dashboardSummaryCompare != null && (() => {
                         const curr = Number(dashboardSummary?.engagedVisitors ?? 0);
                         const prev = Number(dashboardSummaryCompare?.engagedVisitors ?? 0);
@@ -5738,6 +5721,11 @@ const ClientDashboardPage: React.FC = () => {
                         <p className="text-sm text-gray-500 mt-0.5">
                           Track your visibility across ChatGPT, Google AI, Perplexity, and emerging AI platforms. Data source: DataForSEO.
                         </p>
+                        {aiIntelligenceDataStatus && (
+                          <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${aiIntelligenceDataStatus.className}`}>
+                            {aiIntelligenceDataStatus.label}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -7801,15 +7789,6 @@ const ClientDashboardPage: React.FC = () => {
                     </div>
 
 <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
-                  {!reportOnly && !clientPortalMode && workLogModalMode !== "create" && selectedWorkLogTaskId && canEditSelectedWorkLog && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
-                      className="mr-auto px-5 py-2.5 rounded-xl bg-red-50 text-red-700 font-medium hover:bg-red-100 border border-red-200 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => setWorkLogModalOpen(false)}
@@ -9839,15 +9818,6 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
 
                 <div className="flex-shrink-0 px-6 py-4 border-t-2 border-gray-200 flex items-center justify-end gap-3 bg-gradient-to-r from-gray-50 to-slate-50">
-                  {!reportOnly && !clientPortalMode && workLogModalMode !== "create" && selectedWorkLogTaskId && canEditSelectedWorkLog && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteWorkLog(selectedWorkLogTaskId, workLogForm.description)}
-                      className="mr-auto px-5 py-2.5 rounded-lg bg-red-50 text-red-700 font-medium hover:bg-red-100 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => setWorkLogModalOpen(false)}

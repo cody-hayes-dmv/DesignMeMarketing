@@ -16,6 +16,7 @@ import financialRoutes from "./routes/financial.js";
 import aiCommandRoutes from "./routes/aiCommands.js";
 import stripeWebhookRoutes from "./routes/stripeWebhook.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { resolveAgencyDomainContext } from "./middleware/resolveAgencyDomainContext.js";
 
 // Load .env file from server directory
 const __filename = fileURLToPath(import.meta.url);
@@ -68,6 +69,7 @@ app.use(
 // Stripe webhook needs raw body for signature verification (must be before express.json())
 app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }), stripeWebhookRoutes);
 app.use(express.json());
+app.use(resolveAgencyDomainContext);
 
 // Routes
 app.use("/api/auth", authRoutes);

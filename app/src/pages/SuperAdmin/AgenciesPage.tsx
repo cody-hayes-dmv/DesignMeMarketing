@@ -2927,7 +2927,7 @@ const AgenciesPage = () => {
                                                     const sd = agency.subdomain != null ? String(agency.subdomain).trim() : "";
                                                     const hasSubdomain = sd && sd.toLowerCase() !== "null";
                                                     return hasSubdomain ? (
-                                                        <div className="text-sm text-gray-500">{sd}.yourseodashboard.com</div>
+                                                        <div className="text-sm text-gray-500">{sd}.yourmarketingdashboard.ai</div>
                                                     ) : null;
                                                 })()}
                                             </button>

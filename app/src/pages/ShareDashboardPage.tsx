@@ -1,29 +1,28 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, BarChart, Bar } from "recharts";
 import { Download, TrendingUp, TrendingDown, Search, Users, Loader2, UserPlus, Activity, ChevronDown, ChevronRight, Plus } from "lucide-react";
 import RankedKeywordsOverview from "@/components/RankedKeywordsOverview";
 import TargetKeywordsOverview from "@/components/TargetKeywordsOverview";
 import api from "@/lib/api";
+import {
+  AccuracyEnvelope,
+  formatUnavailableReason,
+  formatUnavailableSource,
+  getUnavailableMetricInfo,
+  normalizeDashboardSummaryPayload,
+} from "@/lib/metricAccuracy";
 import { endOfWeek, format, startOfWeek } from "date-fns";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
-import { createNonOverlappingPieValueLabel } from "@/utils/recharts";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 interface TrafficSourceSlice {
   name: string;
   value: number;
   color: string;
   [key: string]: string | number;
-}
-
-interface BacklinkTimeseriesItem {
-  date: string;
-  newBacklinks: number;
-  lostBacklinks: number;
-  newReferringDomains: number;
-  lostReferringDomains: number;
 }
 
 type BacklinkRow = {
@@ -102,6 +101,7 @@ interface DashboardSummary {
     averageRank: number | null;
     rankSampleSize: number;
   } | null;
+  accuracy?: AccuracyEnvelope;
 }
 
 const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
@@ -110,6 +110,23 @@ const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
   Referral: "#F59E0B",
   Paid: "#EF4444",
   Other: "#6366F1",
+};
+
+const toRgb = (hex: string) => {
+  const cleaned = hex.replace("#", "").trim();
+  const normalized =
+    cleaned.length === 3
+      ? cleaned
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : cleaned;
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return { r: 79, g: 70, b: 229 };
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
 };
 
 /** Catches chart/render errors (e.g. Recharts removeChild) and shows a fallback instead of breaking the page */
@@ -143,6 +160,7 @@ class ShareDashboardErrorBoundary extends React.Component<
 
 const ShareDashboardPage: React.FC = () => {
   const { token } = useParams();
+  const { brandName, primaryColor } = usePublicBranding();
   const [loading, setLoading] = useState(true);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [fetchingSummary, setFetchingSummary] = useState(false);
@@ -172,7 +190,7 @@ const ShareDashboardPage: React.FC = () => {
   const [loadingPageKeywords, setLoadingPageKeywords] = useState<Record<string, boolean>>({});
   const [exportingPdf, setExportingPdf] = useState(false);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
-  const [dateRange, setDateRange] = useState("30");
+  const dateRange: string = "30";
   // Defer mounting charts/content to avoid Recharts removeChild errors (DOM must be stable)
   const [contentMounted, setContentMounted] = useState(false);
   useEffect(() => {
@@ -204,14 +222,20 @@ const ShareDashboardPage: React.FC = () => {
         return;
       }
 
-      const ignoreFilter = (el: Element) => el.getAttribute?.("data-pdf-hide") === "true";
+      const ignoreFilter = (el: Element) => {
+        if (el.getAttribute?.("data-pdf-hide") === "true") return true;
+        if (el.classList?.contains?.("cursor-help")) return true;
+        return false;
+      };
+
       const sectionCanvases: HTMLCanvasElement[] = [];
       for (const sec of sections) {
         const cvs = await html2canvas(sec, {
           scale: 2,
           useCORS: true,
-          scrollY: -window.scrollY,
-          scrollX: -window.scrollX,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
           backgroundColor: "#FFFFFF",
           ignoreElements: ignoreFilter,
         });
@@ -224,6 +248,7 @@ const ShareDashboardPage: React.FC = () => {
 
       const websiteName = dashboardSummary?.client?.name || dashboardSummary?.client?.domain || "Shared Dashboard";
       const domain = dashboardSummary?.client?.domain || "";
+      const brandRgb = toRgb(primaryColor);
       const generatedDate = format(new Date(), "MMMM d, yyyy");
       const periodLabel = dateRange === "7" ? "Last 7 Days" : dateRange === "90" ? "Last 90 Days" : dateRange === "365" ? "Last Year" : "Last 30 Days";
 
@@ -239,7 +264,7 @@ const ShareDashboardPage: React.FC = () => {
       const drawHeader = () => {
         pdf.setFillColor(15, 23, 42);
         pdf.rect(0, 0, pageWidth, headerH, "F");
-        pdf.setFillColor(59, 130, 246);
+        pdf.setFillColor(brandRgb.r, brandRgb.g, brandRgb.b);
         pdf.rect(0, headerH, pageWidth, 0.8, "F");
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(11);
@@ -276,7 +301,7 @@ const ShareDashboardPage: React.FC = () => {
       // ───── Cover page ─────
       pdf.setFillColor(15, 23, 42);
       pdf.rect(0, 0, pageWidth, pageHeight, "F");
-      pdf.setFillColor(59, 130, 246);
+      pdf.setFillColor(brandRgb.r, brandRgb.g, brandRgb.b);
       pdf.rect(0, 0, pageWidth, 3, "F");
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(11);
@@ -284,7 +309,7 @@ const ShareDashboardPage: React.FC = () => {
       const labelY = pageHeight * 0.32;
       pdf.text("SEO PERFORMANCE REPORT", pageWidth / 2, labelY, { align: "center" });
       const lineW = 50;
-      pdf.setDrawColor(59, 130, 246);
+      pdf.setDrawColor(brandRgb.r, brandRgb.g, brandRgb.b);
       pdf.setLineWidth(0.6);
       pdf.line(pageWidth / 2 - lineW / 2, labelY + 4, pageWidth / 2 + lineW / 2, labelY + 4);
       pdf.setFont("helvetica", "bold");
@@ -301,11 +326,11 @@ const ShareDashboardPage: React.FC = () => {
       pdf.setFontSize(10);
       pdf.setTextColor(100, 116, 139);
       pdf.text(`${periodLabel}  ·  ${generatedDate}`, pageWidth / 2, labelY + 42, { align: "center" });
-      pdf.setFillColor(59, 130, 246);
+      pdf.setFillColor(brandRgb.r, brandRgb.g, brandRgb.b);
       pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
 
       // ───── Section-based content pages ─────
-      // Pre-calculate section heights in mm, cap oversized sections to fit one page
+      // Match SEO Overview export behavior: cap oversized sections to one page.
       const sectionNaturalHeights = sectionCanvases.map((cvs) => (cvs.height * usableWidth) / cvs.width);
       const sectionHeights = sectionNaturalHeights.map((h) => Math.min(h, usableHeight));
       const sectionScales = sectionNaturalHeights.map((h) =>
@@ -374,7 +399,7 @@ const ShareDashboardPage: React.FC = () => {
       document.body.style.overflow = previousOverflow;
       setExportingPdf(false);
     }
-  }, [dashboardSummary?.client?.name, dashboardSummary?.client?.domain, dateRange]);
+  }, [dashboardSummary?.client?.name, dashboardSummary?.client?.domain, dateRange, primaryColor]);
 
   const formatNumber = (value: number) => {
     if (!Number.isFinite(value)) return "0";
@@ -394,50 +419,12 @@ const ShareDashboardPage: React.FC = () => {
           timeout: 30000,
         });
         const payload = res.data || {};
-        const normalizeTrendPoints = (trend: any): TrendPoint[] => {
-          if (!Array.isArray(trend)) return [];
-          return trend
-            .map((point) => ({
-              date: typeof point?.date === "string" ? point.date : "",
-              value: Number(point?.value ?? 0) || 0,
-            }))
-            .filter((point) => Boolean(point.date));
-        };
-
-        setDashboardSummary({
-          ...payload,
-          totalSessions:
-            payload?.totalSessions !== undefined && payload?.totalSessions !== null
-              ? Number(payload.totalSessions)
-              : null,
-          organicSessions:
-            payload?.organicSessions !== undefined && payload?.organicSessions !== null
-              ? Number(payload.organicSessions)
-              : null,
-          averagePosition:
-            payload?.averagePosition !== undefined && payload?.averagePosition !== null
-              ? Number(payload.averagePosition)
-              : null,
-          conversions:
-            payload?.conversions !== undefined && payload?.conversions !== null
-              ? Number(payload.conversions)
-              : null,
-          // GA4 metrics
-          activeUsers: payload?.activeUsers !== undefined && payload?.activeUsers !== null ? Number(payload.activeUsers) : null,
-          eventCount: payload?.eventCount !== undefined && payload?.eventCount !== null ? Number(payload.eventCount) : null,
-          newUsers: payload?.newUsers !== undefined && payload?.newUsers !== null ? Number(payload.newUsers) : null,
-          keyEvents: payload?.keyEvents !== undefined && payload?.keyEvents !== null ? Number(payload.keyEvents) : null,
-          // Backward-compatible names used by the main dashboard UI
-          totalUsers: payload?.totalUsers !== undefined && payload?.totalUsers !== null ? Number(payload.totalUsers) : null,
-          firstTimeVisitors:
-            payload?.firstTimeVisitors !== undefined && payload?.firstTimeVisitors !== null ? Number(payload.firstTimeVisitors) : null,
-          engagedVisitors:
-            payload?.engagedVisitors !== undefined && payload?.engagedVisitors !== null ? Number(payload.engagedVisitors) : null,
-          newUsersTrend: normalizeTrendPoints(payload?.newUsersTrend),
-          activeUsersTrend: normalizeTrendPoints(payload?.activeUsersTrend),
-          totalUsersTrend: normalizeTrendPoints(payload?.totalUsersTrend),
-          isGA4Connected: payload?.isGA4Connected || false,
-        });
+        setDashboardSummary(
+          normalizeDashboardSummaryPayload({
+            ...payload,
+            isGA4Connected: payload?.isGA4Connected || false,
+          }) as DashboardSummary
+        );
         setLoading(false);
       } catch (error: any) {
         console.error("Failed to fetch dashboard summary", error);
@@ -681,7 +668,7 @@ const ShareDashboardPage: React.FC = () => {
       setTopEventsLoading(true);
       setTopEventsError(null);
       const res = await api.get(`/seo/share/${encodeURIComponent(token)}/events/top`, {
-        params: { limit: 10, period: dateRange, type: "keyevents" },
+        params: { limit: 10, period: dateRange, type: "keyEvents" },
       });
       const data = Array.isArray(res.data) ? res.data : [];
       setTopEvents(
@@ -747,7 +734,7 @@ const ShareDashboardPage: React.FC = () => {
   const activeUsersDisplay = useMemo(() => {
     if (fetchingSummary) return "...";
     if (dashboardSummary?.isGA4Connected !== true) return "—";
-    const value = dashboardSummary?.totalUsers ?? dashboardSummary?.activeUsers;
+    const value = dashboardSummary?.totalUsers;
     if (value !== null && value !== undefined) {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
@@ -799,6 +786,19 @@ const ShareDashboardPage: React.FC = () => {
     return "—";
   }, [dashboardSummary?.engagedVisitors, fetchingSummary, dashboardSummary?.isGA4Connected]);
 
+  const getUnavailableText = useCallback(
+    (metric: string | string[]) => {
+      const info = getUnavailableMetricInfo(dashboardSummary?.accuracy, metric);
+      if (!info) return null;
+      return `Unavailable (${formatUnavailableReason(info.reason)} from ${formatUnavailableSource(info.source)})`;
+    },
+    [dashboardSummary?.accuracy]
+  );
+  const webVisitorsUnavailableText = getUnavailableText(["totalUsers", "activeUsers"]);
+  const organicTrafficUnavailableText = getUnavailableText("organicSearchEngagedSessions");
+  const firstTimeVisitorsUnavailableText = getUnavailableText(["firstTimeVisitors", "newUsers"]);
+  const engagedVisitorsUnavailableText = getUnavailableText("engagedVisitors");
+
   // Trend data processing
   const newUsersTrendData = useMemo(() => {
     if (!dashboardSummary?.newUsersTrend?.length) return [];
@@ -841,9 +841,13 @@ const ShareDashboardPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-gray-50 to-slate-100">
       {/* Top Navbar */}
-      <nav className="bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 border-b-2 border-primary-500/50 px-8 py-4 shadow-lg">
+      <nav
+        className="border-b-2 border-primary-500/50 px-8 py-4 shadow-lg"
+        style={{ backgroundImage: `linear-gradient(to right, ${primaryColor}, #2563eb, #4f46e5)` }}
+      >
         <div className="flex items-center justify-between">
           <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/80">{brandName}</p>
             <h1 className="text-xl font-bold text-white drop-shadow-sm">
               {dashboardSummary?.client?.name || "Shared Dashboard"}
             </h1>
@@ -862,16 +866,6 @@ const ShareDashboardPage: React.FC = () => {
             )}
           </div>
           <div className="flex items-center space-x-3" data-pdf-hide="true">
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              className="border-2 border-white/30 bg-white/15 text-white rounded-xl px-4 py-2 focus:ring-2 focus:ring-white/40 focus:border-white/50 focus:outline-none [&>option]:text-gray-900"
-            >
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-              <option value="365">Last year</option>
-            </select>
             <button
               type="button"
               onClick={handleExportPdf}
@@ -917,6 +911,9 @@ const ShareDashboardPage: React.FC = () => {
                   <div>
                     <p className="text-sm font-semibold text-blue-900">Web Visitors</p>
                     <p className="text-2xl font-bold text-gray-900">{activeUsersDisplay}</p>
+                    {webVisitorsUnavailableText && (
+                      <p className="mt-1 text-xs font-medium text-amber-700">{webVisitorsUnavailableText}</p>
+                    )}
                   </div>
                   <Users className="h-8 w-8 text-blue-600" />
                 </div>
@@ -937,6 +934,9 @@ const ShareDashboardPage: React.FC = () => {
                   <div>
                     <p className="text-sm font-semibold text-emerald-900">Organic Traffic</p>
                     <p className="text-2xl font-bold text-gray-900">{organicTrafficDisplay}</p>
+                    {organicTrafficUnavailableText && (
+                      <p className="mt-1 text-xs font-medium text-amber-700">{organicTrafficUnavailableText}</p>
+                    )}
                   </div>
                   <Search className="h-8 w-8 text-emerald-600" />
                 </div>
@@ -957,6 +957,9 @@ const ShareDashboardPage: React.FC = () => {
                   <div>
                     <p className="text-sm font-semibold text-violet-900">First Time Visitors</p>
                     <p className="text-2xl font-bold text-gray-900">{newUsersDisplay}</p>
+                    {firstTimeVisitorsUnavailableText && (
+                      <p className="mt-1 text-xs font-medium text-amber-700">{firstTimeVisitorsUnavailableText}</p>
+                    )}
                   </div>
                   <UserPlus className="h-8 w-8 text-violet-600" />
                 </div>
@@ -977,6 +980,9 @@ const ShareDashboardPage: React.FC = () => {
                   <div>
                     <p className="text-sm font-semibold text-amber-900">Engaged Visitors</p>
                     <p className="text-2xl font-bold text-gray-900">{keyEventsDisplay}</p>
+                    {engagedVisitorsUnavailableText && (
+                      <p className="mt-1 text-xs font-medium text-amber-700">{engagedVisitorsUnavailableText}</p>
+                    )}
                   </div>
                   <Activity className="h-8 w-8 text-amber-600" />
                 </div>
@@ -1118,7 +1124,7 @@ const ShareDashboardPage: React.FC = () => {
                         />
                         <Tooltip 
                           isAnimationActive={false}
-                          formatter={(value: number) => value.toLocaleString()}
+                          formatter={(value: number | string | undefined) => Number(value ?? 0).toLocaleString()}
                           contentStyle={{ pointerEvents: "none", backgroundColor: "#fff", border: "1px solid #ccc", borderRadius: "4px" }}
                         />
                         <Bar 

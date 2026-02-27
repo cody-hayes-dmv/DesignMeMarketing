@@ -16,6 +16,9 @@ const Layout: React.FC<LayoutProps> = ({ children, title }) => {
   const navigate = useNavigate();
   const { user } = useSelector((state: RootState) => state.auth);
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
+  const brandName = user?.agencyBranding?.brandDisplayName || "YourSEODashboard";
+  const brandLogo = user?.agencyBranding?.logoUrl || null;
+  const brandColor = user?.agencyBranding?.primaryColor || "#4f46e5";
 
   const handleLogout = () => {
     dispatch(logout() as any);
@@ -41,13 +44,19 @@ const Layout: React.FC<LayoutProps> = ({ children, title }) => {
                   alt="Zoesi"
                   className="h-10 w-auto max-w-[200px] object-contain"
                 />
+              ) : brandLogo ? (
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-10 w-auto max-w-[200px] object-contain"
+                />
               ) : (
-                <BarChart3 className="h-8 w-8 text-primary-600" />
+                <BarChart3 className="h-8 w-8" style={{ color: brandColor }} />
               )}
               <div>
                 {!isSuperAdmin && (
                   <h1 className="text-xl font-bold text-gray-900">
-                    YourSEODashboard
+                    {brandName}
                   </h1>
                 )}
                 <p className="text-sm text-gray-600">{title}</p>

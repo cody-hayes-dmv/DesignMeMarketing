@@ -134,13 +134,13 @@ const AdminDashboard = () => {
                         className="text-sm text-gray-600 underline"
                         href={
                           agency.subdomain
-                            ? `https://${agency.subdomain}.yourseodashboard.com`
+                            ? `https://${agency.subdomain}.yourmarketingdashboard.ai`
                             : "-"
                         }
                         target="_blank" rel="noopener noreferrer"
                       >
                         {agency.subdomain
-                          ? `${agency.subdomain}.yourseodashboard.com`
+                          ? `${agency.subdomain}.yourmarketingdashboard.ai`
                           : "-"}
                       </a>
                     </td>

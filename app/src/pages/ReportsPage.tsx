@@ -17,6 +17,7 @@ import {
   Trash2,
   Send,
   Settings,
+  Check,
 } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
@@ -51,6 +52,7 @@ interface Report {
   averageCtr: number;
   averagePosition: number;
   recipients?: string[];
+  scheduleRecipients?: string[];
   createdAt: string;
 }
 
@@ -77,6 +79,7 @@ interface CampaignWinsSettings {
 const ReportsPage: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const { user } = useSelector((state: RootState) => state.auth);
   const { clients } = useSelector((state: RootState) => state.client);
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,7 +95,31 @@ const ReportsPage: React.FC = () => {
   const [schedules, setSchedules] = useState<ReportSchedule[]>([]);
   const [campaignWinsByClient, setCampaignWinsByClient] = useState<Record<string, CampaignWinsSettings>>({});
   const [campaignWinsDrafts, setCampaignWinsDrafts] = useState<Record<string, { enabled: boolean; recipients: string }>>({});
+  const [instantSendingCampaignWins, setInstantSendingCampaignWins] = useState<Record<string, boolean>>({});
+  const [previewingCampaignWins, setPreviewingCampaignWins] = useState<Record<string, boolean>>({});
+  const [campaignWinsPreviewModal, setCampaignWinsPreviewModal] = useState<{
+    open: boolean;
+    clientName: string;
+    subject: string;
+    recipients: string[];
+    html: string;
+  }>({
+    open: false,
+    clientName: "",
+    subject: "",
+    recipients: [],
+    html: "",
+  });
   const [removeCampaignWinsConfirm, setRemoveCampaignWinsConfirm] = useState<{
+    isOpen: boolean;
+    clientId: string | null;
+    clientName: string | null;
+  }>({
+    isOpen: false,
+    clientId: null,
+    clientName: null,
+  });
+  const [instantSendCampaignWinsConfirm, setInstantSendCampaignWinsConfirm] = useState<{
     isOpen: boolean;
     clientId: string | null;
     clientName: string | null;
@@ -191,6 +218,12 @@ const ReportsPage: React.FC = () => {
           
           allReports.push({
             ...report,
+            recipients:
+              Array.isArray(report.recipients) && report.recipients.length > 0
+                ? report.recipients
+                : Array.isArray(report.scheduleRecipients)
+                  ? report.scheduleRecipients
+                  : [],
             status: displayStatus,
             client: client ? {
               id: client.id,
@@ -426,6 +459,73 @@ const ReportsPage: React.FC = () => {
     setRemoveCampaignWinsConfirm({ isOpen: false, clientId: null, clientName: null });
   };
 
+  const handleInstantSendCampaignWins = async (clientId: string) => {
+    const draft = campaignWinsDrafts[clientId];
+    const isEnabled = draft?.enabled ?? campaignWinsByClient[clientId]?.enabled ?? false;
+    if (!isEnabled) {
+      toast.error("Campaign Wins is inactive for this client");
+      return;
+    }
+
+    setInstantSendingCampaignWins((prev) => ({ ...prev, [clientId]: true }));
+    try {
+      const res = await api.post(`/seo/reports/${clientId}/campaign-wins/instant-send`);
+      const sentTo = Array.isArray(res?.data?.recipients) ? res.data.recipients.length : 0;
+      toast.success(sentTo > 0 ? `Preview sent to ${sentTo} recipient${sentTo === 1 ? "" : "s"}` : "Campaign Wins preview sent");
+      fetchCampaignWinsSettings();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to send Campaign Wins preview");
+    } finally {
+      setInstantSendingCampaignWins((prev) => ({ ...prev, [clientId]: false }));
+    }
+  };
+
+  const openInstantSendCampaignWinsConfirm = (clientId: string, clientName: string) => {
+    const draft = campaignWinsDrafts[clientId];
+    const isEnabled = draft?.enabled ?? campaignWinsByClient[clientId]?.enabled ?? false;
+    if (!isEnabled) {
+      toast.error("Campaign Wins is inactive for this client");
+      return;
+    }
+    setInstantSendCampaignWinsConfirm({
+      isOpen: true,
+      clientId,
+      clientName,
+    });
+  };
+
+  const confirmInstantSendCampaignWins = async () => {
+    if (!instantSendCampaignWinsConfirm.clientId) return;
+    const clientId = instantSendCampaignWinsConfirm.clientId;
+    setInstantSendCampaignWinsConfirm({ isOpen: false, clientId: null, clientName: null });
+    await handleInstantSendCampaignWins(clientId);
+  };
+
+  const handlePreviewCampaignWins = async (clientId: string, clientName: string) => {
+    const draft = campaignWinsDrafts[clientId];
+    const isEnabled = draft?.enabled ?? campaignWinsByClient[clientId]?.enabled ?? false;
+    if (!isEnabled) {
+      toast.error("Campaign Wins is inactive for this client");
+      return;
+    }
+
+    setPreviewingCampaignWins((prev) => ({ ...prev, [clientId]: true }));
+    try {
+      const res = await api.get(`/seo/reports/${clientId}/campaign-wins/preview`);
+      setCampaignWinsPreviewModal({
+        open: true,
+        clientName,
+        subject: String(res?.data?.subject || ""),
+        recipients: Array.isArray(res?.data?.recipients) ? res.data.recipients : [],
+        html: String(res?.data?.html || ""),
+      });
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to load Campaign Wins preview");
+    } finally {
+      setPreviewingCampaignWins((prev) => ({ ...prev, [clientId]: false }));
+    }
+  };
+
   const handleTriggerSchedule = async (scheduleId: string) => {
     if (!confirm("This will generate and send the report immediately. Continue?")) return;
     try {
@@ -466,15 +566,31 @@ const ReportsPage: React.FC = () => {
   const filteredReports = reportsForView.filter(
     (report) => filterClientId === "all" || report.clientId === filterClientId
   );
+  const brandName = user?.agencyBranding?.brandDisplayName || "Your Marketing Dashboard";
+  const brandColor = user?.agencyBranding?.primaryColor || "#e11d48";
+  const brandLogo = user?.agencyBranding?.logoUrl || null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-rose-50/30 p-8 space-y-8">
-      <div className="relative mb-2 overflow-hidden rounded-2xl bg-gradient-to-r from-rose-600 via-pink-600 to-red-500 p-8 shadow-lg">
+      <div
+        className="relative mb-2 overflow-hidden rounded-2xl p-8 shadow-lg"
+        style={{ backgroundImage: `linear-gradient(to right, ${brandColor}, #db2777, #ef4444)` }}
+      >
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
-          <div>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 overflow-hidden rounded-lg bg-white/20 flex items-center justify-center">
+              {brandLogo ? (
+                <img src={brandLogo} alt={brandName} className="h-full w-full object-cover" />
+              ) : (
+                <FileText className="h-5 w-5 text-white" />
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/80">{brandName}</p>
             <h1 className="text-2xl font-bold text-white md:text-3xl">Reports</h1>
             <p className="mt-2 text-rose-100 text-sm md:text-base">View all generated reports across your clients.</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -966,7 +1082,7 @@ const ReportsPage: React.FC = () => {
 
       <ReportSection
         title="Campaign Wins Report"
-        subtitle="Automatically sends positive milestone updates only. No manual send."
+        subtitle="Automatically sends positive milestone updates. You can also send an instant preview email."
         className="mt-8"
       >
         <div className="space-y-4">
@@ -1030,6 +1146,24 @@ const ReportsPage: React.FC = () => {
                 </div>
                 <div className="flex justify-end gap-2 mt-3">
                   <button
+                    onClick={() => handlePreviewCampaignWins(client.id, client.name)}
+                    disabled={Boolean(previewingCampaignWins[client.id]) || !draft.enabled}
+                    className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 inline-flex items-center justify-center"
+                    title="View HTML"
+                    aria-label="View HTML"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => openInstantSendCampaignWinsConfirm(client.id, client.name)}
+                    disabled={Boolean(instantSendingCampaignWins[client.id]) || !draft.enabled}
+                    className="p-2 rounded-lg border border-primary-200 text-primary-700 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-60 inline-flex items-center justify-center"
+                    title="Instant Send"
+                    aria-label="Instant Send"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                  <button
                     onClick={() =>
                       setRemoveCampaignWinsConfirm({
                         isOpen: true,
@@ -1037,15 +1171,19 @@ const ReportsPage: React.FC = () => {
                         clientName: client.name,
                       })
                     }
-                    className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                    className="p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 inline-flex items-center justify-center"
+                    title="Delete"
+                    aria-label="Delete"
                   >
-                    Delete
+                    <Trash2 className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => handleSaveCampaignWins(client.id, draft.recipients, draft.enabled)}
-                    className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                    className="p-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 inline-flex items-center justify-center"
+                    title="Save"
+                    aria-label="Save"
                   >
-                    Save
+                    <Check className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -1053,6 +1191,72 @@ const ReportsPage: React.FC = () => {
           })}
         </div>
       </ReportSection>
+      {campaignWinsPreviewModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Campaign Wins Email Preview</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  {campaignWinsPreviewModal.clientName}
+                </p>
+                <p className="text-sm text-gray-700 mt-2">
+                  <span className="font-medium">Subject:</span> {campaignWinsPreviewModal.subject || "N/A"}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  To: {campaignWinsPreviewModal.recipients.length > 0 ? campaignWinsPreviewModal.recipients.join(", ") : "No recipients"}
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setCampaignWinsPreviewModal({
+                    open: false,
+                    clientName: "",
+                    subject: "",
+                    recipients: [],
+                    html: "",
+                  })
+                }
+                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                title="Close preview"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 bg-gray-50 flex-1 overflow-auto">
+              <iframe
+                title="Campaign Wins email HTML preview"
+                srcDoc={campaignWinsPreviewModal.html}
+                className="w-full h-[65vh] rounded-lg border border-gray-200 bg-white"
+              />
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() =>
+                  setCampaignWinsPreviewModal({
+                    open: false,
+                    clientName: "",
+                    subject: "",
+                    recipients: [],
+                    html: "",
+                  })
+                }
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <ConfirmDialog
+        isOpen={instantSendCampaignWinsConfirm.isOpen}
+        onClose={() => setInstantSendCampaignWinsConfirm({ isOpen: false, clientId: null, clientName: null })}
+        onConfirm={confirmInstantSendCampaignWins}
+        title="Instant Send Campaign Wins"
+        message={`Send a Campaign Wins preview email now for "${instantSendCampaignWinsConfirm.clientName || "this client"}"?`}
+        confirmText="Send now"
+      />
       <ConfirmDialog
         isOpen={removeCampaignWinsConfirm.isOpen}
         onClose={() => setRemoveCampaignWinsConfirm({ isOpen: false, clientId: null, clientName: null })}

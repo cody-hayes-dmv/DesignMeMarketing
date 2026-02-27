@@ -4,11 +4,13 @@ import { Mail } from "lucide-react";
 import zoesiLogo from "@/assets/zoesi-blue.png";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 const ForgotPasswordPage = () => {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const { brandName, logoUrl, primaryColor } = usePublicBranding();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,7 +33,7 @@ const ForgotPasswordPage = () => {
         <div className="max-w-md w-full">
           <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
             <div className="flex justify-center mb-4">
-              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
+              <img src={logoUrl || zoesiLogo} alt={brandName} className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Check your email</h1>
             <p className="text-gray-600 mb-6">
@@ -56,7 +58,7 @@ const ForgotPasswordPage = () => {
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
+              <img src={logoUrl || zoesiLogo} alt={brandName} className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Forgot your password?</h1>
             <p className="text-gray-600">
@@ -88,6 +90,7 @@ const ForgotPasswordPage = () => {
               type="submit"
               disabled={loading}
               className="w-full bg-primary-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: primaryColor }}
             >
               {loading ? "Sending…" : "Send reset link"}
             </button>

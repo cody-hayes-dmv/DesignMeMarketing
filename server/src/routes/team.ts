@@ -366,9 +366,9 @@ router.post('/invite', authenticateToken, async (req, res) => {
                 console.log('[Team invite] Sending invitation email to', email);
                 await sendEmail({
                     to: email,
-                    subject: `You've been invited to join ${teamLabel}`,
+                    subject: `You're invited to join ${companyName}`,
                     html: `
-          <h1>You've been invited!</h1>
+          <h1>You're invited to ${escapeHtml(companyName)}!</h1>
           <p>Hi ${escapeHtml(name)},</p>
           <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(teamLabel)} as a ${role === 'ADMIN' ? 'Admin' : 'Specialist'}.</p>
           <p>Click the link below to set your password and access your dashboard:</p>
@@ -469,9 +469,9 @@ router.post('/:id/resend-invite', authenticateToken, async (req, res) => {
             console.log('[Team resend invite] Sending to', targetUser.email);
             await sendEmail({
                 to: targetUser.email,
-                subject: `You've been invited to join ${companyName}'s team`,
+                subject: `You're invited to join ${companyName}`,
                 html: `
-          <h1>You've been invited!</h1>
+          <h1>You're invited to ${escapeHtml(companyName)}!</h1>
           <p>Hi ${escapeHtml(targetUser.name || 'there')},</p>
           <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(companyName)} team.</p>
           <p>Click the link below to set your password and access your dashboard (link expires in 7 days):</p>

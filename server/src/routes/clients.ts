@@ -723,10 +723,10 @@ router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => 
             const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
             await sendEmail({
                 to: membership.user.email,
-                subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
+                subject: `You're invited to join ${BRAND_DISPLAY_NAME}`,
                 html: `
                   <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                    <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
+                    <h2>You're invited to join ${BRAND_DISPLAY_NAME}.</h2>
                     <p>Hi there,</p>
                     <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
                     <p>
@@ -746,10 +746,10 @@ router.put('/:id/users/:userId/profile', authenticateToken, async (req, res) => 
             }
             await sendEmail({
                 to: membership.user.email,
-                subject: 'Your Client Dashboard login details',
+                subject: `${BRAND_DISPLAY_NAME} login details`,
                 html: `
                   <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                    <h2>Your Client Dashboard login details</h2>
+                    <h2>${BRAND_DISPLAY_NAME} login details</h2>
                     <p>Hi ${nextName || membership.user.name || ''},</p>
                     <p>Here are your login credentials:</p>
                     <p><b>Email:</b> ${membership.user.email}</p>
@@ -816,10 +816,10 @@ router.post('/:id/users/:userId/invite', authenticateToken, async (req, res) => 
         const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
         await sendEmail({
             to: membership.user.email,
-            subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
+            subject: `You're invited to join ${BRAND_DISPLAY_NAME}`,
             html: `
               <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
+                <h2>You're invited to join ${BRAND_DISPLAY_NAME}.</h2>
                 <p>Hi there,</p>
                 <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
                 <p>
@@ -1008,10 +1008,10 @@ router.post('/users/invite', authenticateToken, async (req, res) => {
                     .join('');
                 await sendEmail({
                     to: email,
-                    subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
+                    subject: `You're invited to join ${BRAND_DISPLAY_NAME}`,
                     html: `
                       <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                        <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
+                        <h2>You're invited to join ${BRAND_DISPLAY_NAME}.</h2>
                         <p>Hi there,</p>
                         <p>You will be granted access to these client dashboards:</p>
                         <ul>${listHtml}</ul>
@@ -1119,10 +1119,10 @@ router.post('/:id/users/invite', authenticateToken, async (req, res) => {
                 const acceptUrl = `${process.env.FRONTEND_URL}/invite?token=${encodeURIComponent(inviteToken)}`;
                 await sendEmail({
                     to: email,
-                    subject: `${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.`,
+                    subject: `You're invited to join ${BRAND_DISPLAY_NAME}`,
                     html: `
                       <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-                        <h2>${BRAND_DISPLAY_NAME} has invited you to set up your Client Dashboard.</h2>
+                        <h2>You're invited to join ${BRAND_DISPLAY_NAME}.</h2>
                         <p>Hi there,</p>
                         <p>You can complete your account activation below by clicking the link and finishing the registration.</p>
                         <p>

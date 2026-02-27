@@ -72,18 +72,22 @@ interface RankedKeywordsOverviewProps {
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const toFiniteNumber = (value: unknown, fallback = 0): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 
 const formatHistory = (history: RankedKeywordsHistoryPoint[]): ChartDatum[] => {
   return history
     .map((item) => ({
       month: `${monthNames[item.month - 1]} ${item.year}`,
-      total: Number(item.totalKeywords ?? 0),
-      top3: Number(item.top3 ?? 0),
-      top10: Number(item.top10 ?? 0),
-      page2: Number(item.page2 ?? 0),
-      pos21_30: Number(item.pos21_30 ?? 0),
-      pos31_50: Number(item.pos31_50 ?? 0),
-      pos51Plus: Number(item.pos51Plus ?? 0),
+      total: toFiniteNumber(item.totalKeywords),
+      top3: toFiniteNumber(item.top3),
+      top10: toFiniteNumber(item.top10),
+      page2: toFiniteNumber(item.page2),
+      pos21_30: toFiniteNumber(item.pos21_30),
+      pos31_50: toFiniteNumber(item.pos31_50),
+      pos51Plus: toFiniteNumber(item.pos51Plus),
       sortKey: item.year * 100 + item.month,
     }))
     .sort((a, b) => a.sortKey - b.sortKey)

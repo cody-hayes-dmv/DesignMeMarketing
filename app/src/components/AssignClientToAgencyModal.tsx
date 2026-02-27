@@ -134,7 +134,7 @@ export default function AssignClientToAgencyModal({
                           <div className="font-semibold text-gray-900">{agency.name}</div>
                           {agency.subdomain && (
                             <div className="text-sm text-emerald-700/90 mt-0.5">
-                              {agency.subdomain}.yourseodashboard.com
+                              {agency.subdomain}.yourmarketingdashboard.ai
                             </div>
                           )}
                           <div className="text-xs text-gray-500 mt-1">

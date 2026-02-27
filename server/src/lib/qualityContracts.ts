@@ -5,6 +5,8 @@ const LEGACY_BRAND_PATTERNS: Array<[RegExp, string]> = [
   [/Design ME Dashboard/gi, "Your Marketing Dashboard"],
   [/Design ME Marketing/gi, "Your Marketing Dashboard"],
   [/ZOESI/gi, "Your Marketing Dashboard"],
+  [/Client Dashboard/gi, "Your Marketing Dashboard"],
+  [/Agency Dashboard/gi, "Your Marketing Dashboard"],
 ];
 
 export const BRAND_DISPLAY_NAME = "Your Marketing Dashboard";
@@ -39,8 +41,10 @@ export function normalizeWhitelabelText(value: unknown): string {
 export function getWhitelabelFromAddress(): string {
   const rawFrom = String(process.env.SMTP_FROM || "").trim();
   const emailMatch = rawFrom.match(/<([^>]+)>/);
-  const fromEmail =
-    (emailMatch?.[1] || rawFrom || process.env.SMTP_USER || BRAND_DEFAULT_FROM_EMAIL).trim();
+  const configuredFromEmail = (emailMatch?.[1] || rawFrom).trim().toLowerCase();
+  const fromEmail = configuredFromEmail.endsWith("@yourmarketingdashboard.com")
+    ? configuredFromEmail
+    : BRAND_DEFAULT_FROM_EMAIL;
   return `"${BRAND_DISPLAY_NAME}" <${fromEmail}>`;
 }
 

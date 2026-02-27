@@ -5,6 +5,7 @@ import { RootState } from "@/store";
 import { login, clearError } from "@/store/slices/authSlice";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import zoesiLogo from "@/assets/zoesi-blue.png";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 const LoginPage = () => {
   const dispatch = useDispatch();
@@ -16,6 +17,7 @@ const LoginPage = () => {
     password: "",
   });
   const [showPassword, setShowPassword] = useState(false);
+  const { brandName, logoUrl, primaryColor } = usePublicBranding();
 
   const loginAs = (searchParams.get("as") || "").toUpperCase();
   const loginSubtitle = useMemo(() => {
@@ -67,10 +69,10 @@ const LoginPage = () => {
           <div className="p-8 pt-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
+              <img src={logoUrl || zoesiLogo} alt={brandName} className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              ZOESI
+              {brandName}
             </h1>
             <p className="text-gray-600">
               {loginSubtitle}
@@ -143,6 +145,7 @@ const LoginPage = () => {
               type="submit"
               disabled={loading}
               className="w-full bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-primary-700 hover:via-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] active:scale-[0.98] shadow-md"
+              style={{ backgroundImage: `linear-gradient(to right, ${primaryColor}, #2563eb, #4f46e5)` }}
             >
               {loading ? (
                 <div className="flex items-center justify-center space-x-2">

@@ -4,6 +4,7 @@ import { useDispatch } from "react-redux";
 import { CheckCircle, XCircle } from "lucide-react";
 import api from "@/lib/api";
 import { login } from "@/store/slices/authSlice";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 const getRedirectUrl = (role: string) => {
   switch (role) {
@@ -24,6 +25,7 @@ const VerifyPage = () => {
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [message, setMessage] = useState("");
+  const { brandName, primaryColor } = usePublicBranding();
 
   useEffect(() => {
     if (!token) {
@@ -63,10 +65,11 @@ const VerifyPage = () => {
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-4">{brandName}</p>
           {status === "loading" && (
             <>
               <div className="flex justify-center mb-6">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderBottomColor: primaryColor }} />
               </div>
               <h1 className="text-xl font-bold text-gray-900 mb-2">Verifying your email...</h1>
               <p className="text-gray-600">Please wait.</p>
@@ -84,7 +87,8 @@ const VerifyPage = () => {
               <p className="text-gray-600 mb-6">{message}</p>
               <Link
                 to="/login"
-                className="inline-flex items-center justify-center w-full py-3 px-6 rounded-lg font-semibold bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+                className="inline-flex items-center justify-center w-full py-3 px-6 rounded-lg font-semibold text-white transition-colors"
+                style={{ backgroundColor: primaryColor }}
               >
                 Sign in
               </Link>
@@ -102,7 +106,8 @@ const VerifyPage = () => {
               <p className="text-gray-600 mb-6">{message}</p>
               <Link
                 to="/login"
-                className="inline-flex items-center justify-center w-full py-3 px-6 rounded-lg font-semibold border-2 border-primary-600 text-primary-600 hover:bg-primary-50 transition-colors"
+                className="inline-flex items-center justify-center w-full py-3 px-6 rounded-lg font-semibold border-2 transition-colors"
+                style={{ borderColor: primaryColor, color: primaryColor }}
               >
                 Back to Sign in
               </Link>

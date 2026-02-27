@@ -28,6 +28,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agencyMe, setAgencyMe] = useState<AgencyMe | null>(null);
   const { user } = useSelector((state: RootState) => state.auth);
+  const brandName = user?.agencyBranding?.brandDisplayName || "SEO Dashboard";
+  const brandColor = user?.agencyBranding?.primaryColor || "#4f46e5";
+  const brandLogo = user?.agencyBranding?.logoUrl || null;
+  const showBrandedHeader = user?.role === "AGENCY" || user?.role === "USER";
   const isClientPortal = location.pathname.startsWith("/client/");
   const isAgencyRoute = location.pathname.startsWith("/agency/");
 
@@ -123,8 +127,17 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
           </div>
 
           <div className={`${sidebarCollapsed ? "px-3 py-5" : "px-4 py-6"} border-b border-gray-700 transition-all duration-300 flex flex-col items-center justify-center text-center`}>
-            <div className={`${sidebarCollapsed ? "h-8 w-8" : "h-14 w-14"} rounded-full bg-primary-600/90 flex items-center justify-center transition-all duration-300 overflow-hidden`}>
-              {user?.profileImageUrl ? (
+            <div
+              className={`${sidebarCollapsed ? "h-8 w-8" : "h-14 w-14"} rounded-full bg-primary-600/90 flex items-center justify-center transition-all duration-300 overflow-hidden`}
+              style={{ backgroundColor: brandColor }}
+            >
+              {brandLogo ? (
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-full w-full object-cover"
+                />
+              ) : user?.profileImageUrl ? (
                 <img
                   src={user.profileImageUrl}
                   alt="User avatar"
@@ -137,7 +150,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
               )}
             </div>
             {!sidebarCollapsed && (
-              <p className="mt-2 text-xs font-medium text-gray-400 tracking-wide">Client Panel</p>
+              <div className="mt-2">
+                <p className="text-xs font-semibold text-white truncate max-w-[180px]">{brandName}</p>
+                <p className="text-xs font-medium text-gray-400 tracking-wide">Client Panel</p>
+              </div>
             )}
           </div>
 
@@ -153,6 +169,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                       className={`w-full flex items-center ${sidebarCollapsed ? "justify-center px-2 py-3" : "space-x-3 px-4 py-3"} rounded-lg text-left transition-all duration-300 ${
                         isActive ? "bg-primary-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
                       } group relative`}
+                      style={isActive ? { backgroundColor: brandColor } : undefined}
                       title={sidebarCollapsed ? item.label : undefined}
                     >
                       <Icon className="h-5 w-5 transition-all duration-300" />
@@ -168,7 +185,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             <div
               className={`flex items-center ${sidebarCollapsed ? "justify-center mb-2" : "space-x-3 mb-4"} transition-all duration-300`}
             >
-              <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center overflow-hidden">
+              <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center overflow-hidden" style={{ backgroundColor: brandColor }}>
                 {user?.profileImageUrl ? (
                   <img
                     src={user.profileImageUrl}
@@ -203,8 +220,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         </div>
 
         <div className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}>
-          <div className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4">
-            <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
+          <div
+            className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4"
+            style={showBrandedHeader ? { borderTop: `3px solid ${brandColor}` } : undefined}
+          >
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
+              <p className="text-xs text-gray-500">{brandName}</p>
+            </div>
             <NotificationBell />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">{children}</div>
@@ -233,8 +256,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       <div
         className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}
       >
-        <div className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
+        <div
+          className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4"
+          style={showBrandedHeader ? { borderTop: `3px solid ${brandColor}` } : undefined}
+        >
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
+            {showBrandedHeader && <p className="text-xs text-gray-500">{brandName}</p>}
+          </div>
           {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY") && <NotificationBell />}
         </div>
         {trialExpired && (

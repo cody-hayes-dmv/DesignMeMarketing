@@ -6,6 +6,21 @@ import { prisma } from './prisma.js';
 const GA4_REVOKED_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const ga4RevokedClientCache = new Map<string, number>();
 
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function sanitizeTrendPoints(trend: unknown): TrendPoint[] {
+  if (!Array.isArray(trend)) return [];
+  return trend
+    .map((point: any) => ({
+      date: String(point?.date ?? ""),
+      value: toFiniteNumber(point?.value, 0),
+    }))
+    .filter((point) => point.date.length > 0);
+}
+
 function isGa4InvalidGrant(error: any): boolean {
   const msg = String(error?.message || "");
   const respErr = String(error?.response?.data?.error || "");
@@ -1110,6 +1125,39 @@ export async function saveGA4MetricsToDB(
   }
 ): Promise<void> {
   try {
+    const sanitizedTrafficData = {
+      ...trafficData,
+      totalSessions: toFiniteNumber(trafficData.totalSessions),
+      organicSessions: toFiniteNumber(trafficData.organicSessions),
+      directSessions: toFiniteNumber(trafficData.directSessions),
+      referralSessions: toFiniteNumber(trafficData.referralSessions),
+      paidSessions: toFiniteNumber(trafficData.paidSessions),
+      bounceRate: toFiniteNumber(trafficData.bounceRate),
+      avgSessionDuration: toFiniteNumber(trafficData.avgSessionDuration),
+      pagesPerSession: toFiniteNumber(trafficData.pagesPerSession),
+      conversions: toFiniteNumber(trafficData.conversions),
+      conversionRate: toFiniteNumber(trafficData.conversionRate),
+      activeUsers: toFiniteNumber(trafficData.activeUsers),
+      totalUsers: toFiniteNumber(trafficData.totalUsers),
+      eventCount: toFiniteNumber(trafficData.eventCount),
+      newUsers: toFiniteNumber(trafficData.newUsers),
+      keyEvents: toFiniteNumber(trafficData.keyEvents),
+      engagedSessions: toFiniteNumber(trafficData.engagedSessions),
+      engagementRate: toFiniteNumber(trafficData.engagementRate),
+      newUsersTrend: sanitizeTrendPoints(trafficData.newUsersTrend),
+      activeUsersTrend: sanitizeTrendPoints(trafficData.activeUsersTrend),
+    };
+
+    if (
+      sanitizedTrafficData.totalSessions !== trafficData.totalSessions ||
+      sanitizedTrafficData.totalUsers !== trafficData.totalUsers ||
+      sanitizedTrafficData.activeUsers !== trafficData.activeUsers
+    ) {
+      console.warn("[GA4] Sanitized non-finite metrics before persistence", {
+        clientId,
+      });
+    }
+
     // Upsert GA4 metrics (update if exists for client, otherwise create)
     // Note: Schema has clientId @unique, so only one record per client
     await prisma.ga4Metrics.upsert({
@@ -1119,22 +1167,22 @@ export async function saveGA4MetricsToDB(
       update: {
         startDate,
         endDate,
-        activeUsers: trafficData.activeUsers,
-        eventCount: trafficData.eventCount,
-        newUsers: trafficData.newUsers,
-        keyEvents: trafficData.keyEvents,
-        totalSessions: trafficData.totalSessions,
-        organicSessions: trafficData.organicSessions,
-        directSessions: trafficData.directSessions,
-        referralSessions: trafficData.referralSessions,
-        paidSessions: trafficData.paidSessions,
-        bounceRate: trafficData.bounceRate,
-        avgSessionDuration: trafficData.avgSessionDuration,
-        pagesPerSession: trafficData.pagesPerSession,
-        conversions: trafficData.conversions,
-        conversionRate: trafficData.conversionRate,
-        newUsersTrend: trafficData.newUsersTrend.length > 0 ? JSON.stringify(trafficData.newUsersTrend) : undefined,
-        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? JSON.stringify(trafficData.activeUsersTrend) : undefined,
+        activeUsers: sanitizedTrafficData.activeUsers,
+        eventCount: sanitizedTrafficData.eventCount,
+        newUsers: sanitizedTrafficData.newUsers,
+        keyEvents: sanitizedTrafficData.keyEvents,
+        totalSessions: sanitizedTrafficData.totalSessions,
+        organicSessions: sanitizedTrafficData.organicSessions,
+        directSessions: sanitizedTrafficData.directSessions,
+        referralSessions: sanitizedTrafficData.referralSessions,
+        paidSessions: sanitizedTrafficData.paidSessions,
+        bounceRate: sanitizedTrafficData.bounceRate,
+        avgSessionDuration: sanitizedTrafficData.avgSessionDuration,
+        pagesPerSession: sanitizedTrafficData.pagesPerSession,
+        conversions: sanitizedTrafficData.conversions,
+        conversionRate: sanitizedTrafficData.conversionRate,
+        newUsersTrend: sanitizedTrafficData.newUsersTrend.length > 0 ? JSON.stringify(sanitizedTrafficData.newUsersTrend) : undefined,
+        activeUsersTrend: sanitizedTrafficData.activeUsersTrend.length > 0 ? JSON.stringify(sanitizedTrafficData.activeUsersTrend) : undefined,
         events: eventsData?.events && eventsData.events.length > 0 ? JSON.stringify(eventsData.events) : undefined,
         // engagementRate: trafficData.engagementRate ?? undefined,
       },
@@ -1142,22 +1190,22 @@ export async function saveGA4MetricsToDB(
         clientId,
         startDate,
         endDate,
-        activeUsers: trafficData.activeUsers,
-        eventCount: trafficData.eventCount,
-        newUsers: trafficData.newUsers,
-        keyEvents: trafficData.keyEvents,
-        totalSessions: trafficData.totalSessions,
-        organicSessions: trafficData.organicSessions,
-        directSessions: trafficData.directSessions,
-        referralSessions: trafficData.referralSessions,
-        paidSessions: trafficData.paidSessions,
-        bounceRate: trafficData.bounceRate,
-        avgSessionDuration: trafficData.avgSessionDuration,
-        pagesPerSession: trafficData.pagesPerSession,
-        conversions: trafficData.conversions,
-        conversionRate: trafficData.conversionRate,
-        newUsersTrend: trafficData.newUsersTrend.length > 0 ? JSON.stringify(trafficData.newUsersTrend) : undefined,
-        activeUsersTrend: trafficData.activeUsersTrend.length > 0 ? JSON.stringify(trafficData.activeUsersTrend) : undefined,
+        activeUsers: sanitizedTrafficData.activeUsers,
+        eventCount: sanitizedTrafficData.eventCount,
+        newUsers: sanitizedTrafficData.newUsers,
+        keyEvents: sanitizedTrafficData.keyEvents,
+        totalSessions: sanitizedTrafficData.totalSessions,
+        organicSessions: sanitizedTrafficData.organicSessions,
+        directSessions: sanitizedTrafficData.directSessions,
+        referralSessions: sanitizedTrafficData.referralSessions,
+        paidSessions: sanitizedTrafficData.paidSessions,
+        bounceRate: sanitizedTrafficData.bounceRate,
+        avgSessionDuration: sanitizedTrafficData.avgSessionDuration,
+        pagesPerSession: sanitizedTrafficData.pagesPerSession,
+        conversions: sanitizedTrafficData.conversions,
+        conversionRate: sanitizedTrafficData.conversionRate,
+        newUsersTrend: sanitizedTrafficData.newUsersTrend.length > 0 ? JSON.stringify(sanitizedTrafficData.newUsersTrend) : undefined,
+        activeUsersTrend: sanitizedTrafficData.activeUsersTrend.length > 0 ? JSON.stringify(sanitizedTrafficData.activeUsersTrend) : undefined,
         // totalUsersTrend: trafficData.totalUsersTrend?.length > 0 ? trafficData.totalUsersTrend : undefined,
         events: eventsData?.events && eventsData.events.length > 0 ? JSON.stringify(eventsData.events) : undefined,
         // engagementRate: trafficData.engagementRate ?? undefined,
@@ -1180,7 +1228,7 @@ export async function saveGA4MetricsToDB(
       if (hasTotalUsers) {
         await prisma.$executeRaw`
           UPDATE ga4_metrics
-          SET totalUsers = ${trafficData.totalUsers}
+          SET totalUsers = ${sanitizedTrafficData.totalUsers}
           WHERE clientId = ${clientId}
         `;
       }
@@ -1188,7 +1236,7 @@ export async function saveGA4MetricsToDB(
       if (hasEngagedSessions) {
         await prisma.$executeRaw`
           UPDATE ga4_metrics
-          SET engagedSessions = ${trafficData.engagedSessions}
+          SET engagedSessions = ${sanitizedTrafficData.engagedSessions}
           WHERE clientId = ${clientId}
         `;
       }
@@ -1228,7 +1276,7 @@ export async function getGA4MetricsFromDB(
   keyEvents: number;
   newUsersTrend: TrendPoint[];
   activeUsersTrend: TrendPoint[];
-  totalUsers: number;
+  totalUsers: number | null;
   engagedSessions: number;
   engagementRate: number | null;
   events: Array<{
@@ -1351,27 +1399,33 @@ export async function getGA4MetricsFromDB(
       ? (Array.isArray(metric.events) ? metric.events : (typeof metric.events === 'string' ? JSON.parse(metric.events) : metric.events)) as Array<{ name: string; count: number; change?: string }>
       : null;
     return {
-      totalSessions: Number(metric.totalSessions),
-      organicSessions: Number(metric.organicSessions),
-      directSessions: Number(metric.directSessions),
-      referralSessions: Number(metric.referralSessions),
-      paidSessions: Number(metric.paidSessions),
-      bounceRate: Number(metric.bounceRate),
-      avgSessionDuration: Number(metric.avgSessionDuration),
-      pagesPerSession: Number(metric.pagesPerSession),
-      conversions: Number(metric.conversions),
-      conversionRate: Number(metric.conversionRate),
-      activeUsers: Number(metric.activeUsers),
-      eventCount: Number(metric.eventCount),
-      newUsers: Number(metric.newUsers),
-      keyEvents: Number(metric.keyEvents),
+      totalSessions: toFiniteNumber(metric.totalSessions),
+      organicSessions: toFiniteNumber(metric.organicSessions),
+      directSessions: toFiniteNumber(metric.directSessions),
+      referralSessions: toFiniteNumber(metric.referralSessions),
+      paidSessions: toFiniteNumber(metric.paidSessions),
+      bounceRate: toFiniteNumber(metric.bounceRate),
+      avgSessionDuration: toFiniteNumber(metric.avgSessionDuration),
+      pagesPerSession: toFiniteNumber(metric.pagesPerSession),
+      conversions: toFiniteNumber(metric.conversions),
+      conversionRate: toFiniteNumber(metric.conversionRate),
+      activeUsers: toFiniteNumber(metric.activeUsers),
+      eventCount: toFiniteNumber(metric.eventCount),
+      newUsers: toFiniteNumber(metric.newUsers),
+      keyEvents: toFiniteNumber(metric.keyEvents),
       newUsersTrend,
       activeUsersTrend,
       events,
       visitorSources: null,
-      // Accuracy-first fallbacks: do not remap semantically different GA4 metrics.
-      totalUsers: totalUsersFromDb !== null ? totalUsersFromDb : 0,
-      engagedSessions: engagedSessionsFromDb !== null ? engagedSessionsFromDb : 0,
+      // Strict semantics: Web Visitors must come from GA4 totalUsers only.
+      totalUsers:
+        totalUsersFromDb !== null && Number.isFinite(totalUsersFromDb)
+          ? totalUsersFromDb
+          : null,
+      engagedSessions:
+        engagedSessionsFromDb !== null && Number.isFinite(engagedSessionsFromDb)
+          ? engagedSessionsFromDb
+          : 0,
       engagementRate: null,
     };
   } catch (error: any) {

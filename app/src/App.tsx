@@ -34,6 +34,7 @@ import ClientReportIndexPage from "./pages/ClientReportIndexPage";
 import InvitePage from "./pages/InvitePage";
 import ClientUsersPage from "./pages/ClientUsersPage";
 import FinancialOverviewPage from "./pages/FinancialOverviewPage";
+import AuthLandingPage from "./pages/AuthLandingPage";
 
 function App() {
   const dispatch = useDispatch();
@@ -182,6 +183,8 @@ function App() {
       <Route path="/share/:token" element={<ShareDashboardPage />} />
       {/* Public invite accept route - no auth required */}
       <Route path="/invite" element={<InvitePage />} />
+      {/* Public auth landing */}
+      <Route path="/auth" element={<AuthLandingPage />} />
       {/* Backwards-compatible alias: redirect old portal entry to login */}
       <Route path="/portal" element={<Navigate to="/login" replace />} />
       {/* Auth routes - only redirect if user is authenticated and verified */}
@@ -399,7 +402,7 @@ function App() {
           user && user.verified ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
-            <Navigate to="/login" replace />
+            <Navigate to="/auth" replace />
           )
         }
       />

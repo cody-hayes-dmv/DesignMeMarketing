@@ -7,6 +7,7 @@ import { prisma } from "../lib/prisma.js";
 import { sendEmail } from "../lib/email.js";
 import { BRAND_DISPLAY_NAME } from "../lib/qualityContracts.js";
 import { authenticateToken, getJwtSecret } from "../middleware/auth.js";
+import { normalizeDomainHost } from "../lib/domainProvisioning.js";
 
 const router = express.Router();
 
@@ -22,6 +23,98 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string(),
 });
+
+const domainStatusOrder = [
+  "NONE",
+  "PENDING_VERIFICATION",
+  "VERIFIED",
+  "SSL_PENDING",
+  "ACTIVE",
+  "FAILED",
+] as const;
+
+type DomainStatus = (typeof domainStatusOrder)[number];
+
+const toDomainStatus = (value: string | null | undefined): DomainStatus => {
+  if (!value) return "NONE";
+  const upper = value.toUpperCase();
+  return (domainStatusOrder as readonly string[]).includes(upper) ? (upper as DomainStatus) : "NONE";
+};
+
+const mapAgencyBranding = (agency: any) =>
+  agency
+    ? {
+      agencyId: agency.id,
+      brandDisplayName: agency.brandDisplayName ?? agency.name ?? null,
+      logoUrl: agency.logoUrl ?? null,
+      primaryColor: agency.primaryColor ?? null,
+      subdomain: agency.subdomain ?? null,
+      customDomain: agency.customDomain ?? null,
+      domainStatus: toDomainStatus(agency.domainStatus),
+      domainVerifiedAt: agency.domainVerifiedAt ? new Date(agency.domainVerifiedAt).toISOString() : null,
+      sslIssuedAt: agency.sslIssuedAt ? new Date(agency.sslIssuedAt).toISOString() : null,
+    }
+    : null;
+
+const defaultBranding = {
+  brandDisplayName: "Your Marketing Dashboard",
+  logoUrl: null as string | null,
+  primaryColor: "#4f46e5",
+};
+
+function resolveHost(req: express.Request): string | null {
+  const rawHost = String(req.headers["x-forwarded-host"] || req.headers.host || "")
+    .split(",")[0]
+    .trim()
+    .split(":")[0]
+    .trim();
+  if (!rawHost) return null;
+  return normalizeDomainHost(rawHost) || rawHost.toLowerCase();
+}
+
+async function resolveAgencyBrandingForHost(host: string | null) {
+  if (!host) return null;
+  if (host === "localhost" || host === "127.0.0.1") return null;
+
+  // 1) Exact custom domain match (only active).
+  const byCustomDomain = await prisma.agency.findFirst({
+    where: { customDomain: host, domainStatus: "ACTIVE" as any },
+    select: {
+      id: true,
+      name: true,
+      brandDisplayName: true,
+      logoUrl: true,
+      primaryColor: true,
+      subdomain: true,
+      customDomain: true,
+      domainStatus: true,
+    },
+  });
+  if (byCustomDomain) return mapAgencyBranding(byCustomDomain);
+
+  // 2) Subdomain under primary platform domain.
+  const primaryDomain = String(process.env.APP_PRIMARY_DOMAIN || "yourmarketingdashboard.ai").toLowerCase();
+  if (host.endsWith(`.${primaryDomain}`)) {
+    const subdomain = host.slice(0, host.length - (primaryDomain.length + 1)).trim().toLowerCase();
+    if (subdomain && subdomain !== "www" && subdomain !== "app") {
+      const bySubdomain = await prisma.agency.findUnique({
+        where: { subdomain },
+        select: {
+          id: true,
+          name: true,
+          brandDisplayName: true,
+          logoUrl: true,
+          primaryColor: true,
+          subdomain: true,
+          customDomain: true,
+          domainStatus: true,
+        },
+      });
+      if (bySubdomain) return mapAgencyBranding(bySubdomain);
+    }
+  }
+  return null;
+}
 
 // Register
 router.post("/register", async (req, res) => {
@@ -70,9 +163,9 @@ router.post("/register", async (req, res) => {
     // Send verification email
     // await sendEmail({
     //   to: email,
-    //   subject: "Verify your email - YourSEODashboard",
+    //   subject: "Verify your email - Your Marketing Dashboard",
     //   html: `
-    //     <h1>Welcome to YourSEODashboard!</h1>
+    //     <h1>Welcome to Your Marketing Dashboard!</h1>
     //     <p>Please verify your email by clicking the link below:</p>
     //     <a href="${process.env.FRONTEND_URL}/verify?token=${verificationToken}">Verify Email</a>
     //   `,
@@ -165,6 +258,7 @@ router.post("/login", async (req, res) => {
       getJwtSecret(),
       { expiresIn: "7d" }
     );
+    const primaryAgency = user.memberships?.[0]?.agency ?? null;
     res.json({
       token,
       user: {
@@ -182,6 +276,7 @@ router.post("/login", async (req, res) => {
             status: c.status,
           })),
         },
+        agencyBranding: mapAgencyBranding(primaryAgency),
       },
     });
   } catch (error: any) {
@@ -253,6 +348,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       }
     }
 
+    const primaryAgency = user.memberships?.[0]?.agency ?? null;
     res.json({
       id: user.id,
       email: user.email,
@@ -270,10 +366,31 @@ router.get("/me", authenticateToken, async (req, res) => {
           status: c.status,
         })),
       },
+      agencyBranding: mapAgencyBranding(primaryAgency),
     });
   } catch (error) {
     console.error("Get user error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Public branding resolved by host (custom domain or agency subdomain).
+router.get("/branding", async (req, res) => {
+  try {
+    const host = resolveHost(req);
+    const agencyBranding = await resolveAgencyBrandingForHost(host);
+    return res.json({
+      ...defaultBranding,
+      agencyBranding,
+      host: host || null,
+    });
+  } catch (error) {
+    console.error("Get public branding error:", error);
+    return res.json({
+      ...defaultBranding,
+      agencyBranding: null,
+      host: null,
+    });
   }
 });
 

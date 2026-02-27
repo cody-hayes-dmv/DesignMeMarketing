@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { checkAuth } from "@/store/slices/authSlice";
 import type { RootState } from "@/store";
 import toast from "react-hot-toast";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 type InviteInfo =
   | {
@@ -42,6 +43,7 @@ const InvitePage = () => {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { brandName, primaryColor } = usePublicBranding();
 
   const getAuthedRedirectPath = () => {
     if (!user) return "/login";
@@ -151,11 +153,13 @@ const InvitePage = () => {
           <div className="text-center text-gray-600">Loading invitation…</div>
         ) : error ? (
           <div className="text-center">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{brandName}</p>
             <h1 className="text-2xl font-bold text-gray-900">Invitation</h1>
             <p className="mt-2 text-sm text-rose-600">{error}</p>
             <div className="mt-6">
               <button
-                className="px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800"
+                className="px-4 py-2 rounded-lg text-white"
+                style={{ backgroundColor: primaryColor }}
                 onClick={() => navigate("/login")}
               >
                 Go to Login
@@ -164,6 +168,7 @@ const InvitePage = () => {
           </div>
         ) : invite?.kind === "TEAM_INVITE" ? (
           <>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 text-center">{brandName}</p>
             <h1 className="text-3xl font-bold text-gray-900 text-center">Join the team</h1>
             <p className="mt-3 text-sm text-gray-600 text-center">
               Set your name and password to activate your account and access the team dashboard.
@@ -217,7 +222,8 @@ const InvitePage = () => {
                 type="button"
                 onClick={() => void handleAccept()}
                 disabled={submitting}
-                className="px-6 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                className="px-6 py-2 rounded-lg text-white disabled:opacity-60"
+                style={{ backgroundColor: primaryColor }}
               >
                 {submitting ? "Submitting..." : "Accept & sign in"}
               </button>
@@ -225,6 +231,7 @@ const InvitePage = () => {
           </>
         ) : (
           <>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 text-center">{brandName}</p>
             <h1 className="text-3xl font-bold text-gray-900 text-center">Add Client User(s)</h1>
             <p className="mt-3 text-sm text-gray-600 text-center">
               Complete your account activation to access your invited client dashboards.
@@ -294,7 +301,8 @@ const InvitePage = () => {
                 type="button"
                 onClick={() => void handleAccept()}
                 disabled={submitting}
-                className="px-6 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                className="px-6 py-2 rounded-lg text-white disabled:opacity-60"
+                style={{ backgroundColor: primaryColor }}
               >
                 {submitting ? "Submitting..." : "Next"}
               </button>

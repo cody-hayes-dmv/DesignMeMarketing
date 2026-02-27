@@ -14,6 +14,13 @@ import {
   findBasePlanSubscriptionItem,
   syncAgencyTierFromStripe,
 } from '../lib/stripeTierSync.js';
+import {
+  generateDomainVerificationToken,
+  getDomainVerificationInstructions,
+  normalizeDomainHost,
+  requestSslProvisioning,
+  verifyCustomDomainViaDns,
+} from '../lib/domainProvisioning.js';
 
 const router = express.Router();
 
@@ -24,6 +31,33 @@ const inviteSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
 });
+
+const hexColorSchema = z.string().regex(/^#(?:[0-9a-fA-F]{3}){1,2}$/, "Primary color must be a valid hex value");
+const httpUrlSchema = z.string().url("Must be a valid URL").refine((value) => {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}, "Only http(s) URLs are allowed");
+
+const domainStatusOrder = [
+  "NONE",
+  "PENDING_VERIFICATION",
+  "VERIFIED",
+  "SSL_PENDING",
+  "ACTIVE",
+  "FAILED",
+] as const;
+
+type DomainStatus = (typeof domainStatusOrder)[number];
+
+const toDomainStatus = (value: string | null | undefined): DomainStatus => {
+  if (!value) return "NONE";
+  const upper = value.toUpperCase();
+  return (domainStatusOrder as readonly string[]).includes(upper) ? (upper as DomainStatus) : "NONE";
+};
 
 // Get all agencies (Admin only)
 router.get('/', authenticateToken, async (req, res) => {
@@ -94,6 +128,9 @@ router.get('/', authenticateToken, async (req, res) => {
         id: agency.id,
         name: agency.name,
         subdomain: agency.subdomain,
+        brandDisplayName: agency.brandDisplayName ?? null,
+        customDomain: agency.customDomain ?? null,
+        domainStatus: toDomainStatus(agency.domainStatus),
         createdAt: agency.createdAt,
         memberCount: agency._count.members,
         clientCount: clientCount,
@@ -498,9 +535,9 @@ router.post('/register-free-trial', async (req, res) => {
     try {
       await sendEmail({
         to: contactEmail,
-        subject: `Verify your email – ${agencyName}`,
+        subject: `Verify your email - ${BRAND_DISPLAY_NAME}`,
         html: `
-          <h1>Verify your agency account</h1>
+          <h1>Verify your ${BRAND_DISPLAY_NAME} account</h1>
           <p>Hi ${contactName},</p>
           <p>Thanks for signing up for your <strong>7-day free trial</strong>. Please verify your email by clicking the link below (expires in 24 hours):</p>
           <p><a href="${verifyUrl}">Verify my email</a></p>
@@ -858,9 +895,9 @@ router.post('/register', async (req, res) => {
     try {
       await sendEmail({
         to: contactEmail,
-        subject: `Verify your email – ${name}`,
+        subject: `Verify your email - ${BRAND_DISPLAY_NAME}`,
         html: `
-          <h1>Verify your agency account</h1>
+          <h1>Verify your ${BRAND_DISPLAY_NAME} account</h1>
           <p>Hi ${contactName || 'there'},</p>
           <p>Thanks for signing up <strong>${name}</strong>. Please verify your email by clicking the link below (expires in 24 hours):</p>
           <p><a href="${verifyUrl}">Verify my email</a></p>
@@ -1181,9 +1218,9 @@ router.post('/', authenticateToken, async (req, res) => {
       try {
         await sendEmail({
           to: contactEmail,
-          subject: `Set your password – ${name}`,
+          subject: `Set your password - ${BRAND_DISPLAY_NAME}`,
           html: `
-            <h1>Your agency account is ready</h1>
+            <h1>Your ${BRAND_DISPLAY_NAME} account is ready</h1>
             <p>Hi ${contactName || 'there'},</p>
             <p>An agency account for <strong>${name}</strong> has been created. Set your password using the link below (expires in 24 hours):</p>
             <p><a href="${inviteUrl}">Set your password</a></p>
@@ -1258,10 +1295,23 @@ router.get('/me', authenticateToken, async (req, res) => {
 
     const tierId = tierConfig?.id ?? null;
     const accountActivated = !!(membership.agency as { stripeCustomerId?: string | null }).stripeCustomerId;
+    const domainInstructions =
+      membership.agency.customDomain && membership.agency.domainVerificationToken
+        ? getDomainVerificationInstructions(membership.agency.customDomain, membership.agency.domainVerificationToken)
+        : null;
     res.json({
       id: membership.agency.id,
       name: membership.agency.name,
       subdomain: membership.agency.subdomain,
+      brandDisplayName: membership.agency.brandDisplayName ?? null,
+      logoUrl: membership.agency.logoUrl ?? null,
+      primaryColor: membership.agency.primaryColor ?? null,
+      customDomain: membership.agency.customDomain ?? null,
+      domainStatus: toDomainStatus(membership.agency.domainStatus),
+      domainVerifiedAt: membership.agency.domainVerifiedAt?.toISOString() ?? null,
+      sslIssuedAt: membership.agency.sslIssuedAt?.toISOString() ?? null,
+      sslError: membership.agency.sslError ?? null,
+      domainInstructions,
       createdAt: membership.agency.createdAt,
       agencyRole: membership.agencyRole,
       subscriptionTier: membership.agency.subscriptionTier ?? null,
@@ -1365,7 +1415,11 @@ router.post('/me/notifications/mark-read', authenticateToken, async (req, res) =
 // Update agency settings (current user's agency). Must be BEFORE /:agencyId.
 const updateAgencyMeSchema = z.object({
   name: z.string().min(1).optional(),
-  subdomain: z.string().optional(),
+  subdomain: z.string().optional().nullable(),
+  brandDisplayName: z.string().max(255).optional().nullable(),
+  logoUrl: z.union([httpUrlSchema, z.literal(""), z.null()]).optional(),
+  primaryColor: z.union([hexColorSchema, z.literal(""), z.null()]).optional(),
+  customDomain: z.string().max(255).optional().nullable(),
 });
 
 router.put('/me', authenticateToken, async (req, res) => {
@@ -1399,10 +1453,22 @@ router.put('/me', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. Only agency owners can update settings.' });
     }
 
+    const nextSubdomain =
+      updateData.subdomain === undefined
+        ? undefined
+        : (String(updateData.subdomain || "").trim() || null);
+    const normalizedCustomDomain =
+      updateData.customDomain === undefined
+        ? undefined
+        : normalizeDomainHost(updateData.customDomain);
+    if (updateData.customDomain !== undefined && updateData.customDomain !== null && !normalizedCustomDomain) {
+      return res.status(400).json({ message: "Custom domain must be a valid hostname (e.g. portal.example.com)" });
+    }
+
     // Check if subdomain is already taken (if being updated)
-    if (updateData.subdomain && updateData.subdomain !== membership.agency.subdomain) {
+    if (nextSubdomain && nextSubdomain !== membership.agency.subdomain) {
       const existingAgency = await prisma.agency.findUnique({
-        where: { subdomain: updateData.subdomain },
+        where: { subdomain: nextSubdomain },
       });
 
       if (existingAgency) {
@@ -1410,16 +1476,59 @@ router.put('/me', authenticateToken, async (req, res) => {
       }
     }
 
+    // Check if custom domain is already taken (if being updated)
+    if (normalizedCustomDomain && normalizedCustomDomain !== membership.agency.customDomain) {
+      const existingCustomDomain = await prisma.agency.findFirst({
+        where: { customDomain: normalizedCustomDomain },
+        select: { id: true },
+      });
+      if (existingCustomDomain) {
+        return res.status(400).json({ message: "Custom domain already taken" });
+      }
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (updateData.name !== undefined) payload.name = updateData.name.trim();
+    if (updateData.subdomain !== undefined) payload.subdomain = nextSubdomain;
+    if (updateData.brandDisplayName !== undefined) payload.brandDisplayName = updateData.brandDisplayName?.trim() || null;
+    if (updateData.logoUrl !== undefined) payload.logoUrl = updateData.logoUrl?.trim() || null;
+    if (updateData.primaryColor !== undefined) payload.primaryColor = updateData.primaryColor || null;
+    if (updateData.customDomain !== undefined) {
+      payload.customDomain = normalizedCustomDomain ?? null;
+
+      // Any domain change (including clear) resets verification/SSL state.
+      if ((normalizedCustomDomain ?? null) !== (membership.agency.customDomain ?? null)) {
+        payload.domainStatus = normalizedCustomDomain ? "PENDING_VERIFICATION" : "NONE";
+        payload.domainVerificationToken = normalizedCustomDomain ? generateDomainVerificationToken() : null;
+        payload.domainVerifiedAt = null;
+        payload.sslIssuedAt = null;
+        payload.sslError = null;
+      }
+    }
+
     // Update agency
     const updatedAgency = await prisma.agency.update({
       where: { id: membership.agency.id },
-      data: updateData,
+      data: payload,
     });
+    const domainInstructions =
+      updatedAgency.customDomain && updatedAgency.domainVerificationToken
+        ? getDomainVerificationInstructions(updatedAgency.customDomain, updatedAgency.domainVerificationToken)
+        : null;
 
     res.json({
       id: updatedAgency.id,
       name: updatedAgency.name,
       subdomain: updatedAgency.subdomain,
+      brandDisplayName: updatedAgency.brandDisplayName ?? null,
+      logoUrl: updatedAgency.logoUrl ?? null,
+      primaryColor: updatedAgency.primaryColor ?? null,
+      customDomain: updatedAgency.customDomain ?? null,
+      domainStatus: toDomainStatus(updatedAgency.domainStatus),
+      domainVerifiedAt: updatedAgency.domainVerifiedAt?.toISOString() ?? null,
+      sslIssuedAt: updatedAgency.sslIssuedAt?.toISOString() ?? null,
+      sslError: updatedAgency.sslError ?? null,
+      domainInstructions,
       createdAt: updatedAgency.createdAt,
     });
   } catch (error: any) {
@@ -1431,6 +1540,148 @@ router.put('/me', authenticateToken, async (req, res) => {
     }
     console.error('Update agency error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Verify custom domain ownership for current user's agency.
+router.post('/me/domain/verify', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'SUPER_ADMIN users cannot verify agency custom domains' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership) return res.status(404).json({ message: 'No agency found for user' });
+
+    const customDomain = membership.agency.customDomain;
+    if (!customDomain) {
+      return res.status(400).json({ message: 'Set a custom domain before running verification.' });
+    }
+
+    let verificationToken = membership.agency.domainVerificationToken;
+    if (!verificationToken) {
+      verificationToken = generateDomainVerificationToken();
+      await prisma.agency.update({
+        where: { id: membership.agency.id },
+        data: {
+          domainVerificationToken: verificationToken,
+          domainStatus: "PENDING_VERIFICATION",
+          domainVerifiedAt: null,
+          sslIssuedAt: null,
+          sslError: null,
+        },
+      });
+    }
+
+    const verification = await verifyCustomDomainViaDns(customDomain, verificationToken);
+    const instructions = getDomainVerificationInstructions(customDomain, verificationToken);
+    if (!verification.verified) {
+      const failed = await prisma.agency.update({
+        where: { id: membership.agency.id },
+        data: {
+          domainStatus: "PENDING_VERIFICATION",
+          sslError: verification.reason || "Domain verification failed",
+        },
+      });
+      return res.json({
+        verified: false,
+        message: verification.reason || 'Domain verification failed',
+        domainStatus: toDomainStatus(failed.domainStatus),
+        customDomain: failed.customDomain,
+        instructions,
+      });
+    }
+
+    const now = new Date();
+    const updated = await prisma.agency.update({
+      where: { id: membership.agency.id },
+      data: {
+        domainStatus: "VERIFIED",
+        domainVerifiedAt: now,
+        sslError: null,
+      },
+    });
+
+    return res.json({
+      verified: true,
+      message: 'Domain verified successfully.',
+      customDomain: updated.customDomain,
+      domainStatus: toDomainStatus(updated.domainStatus),
+      domainVerifiedAt: updated.domainVerifiedAt?.toISOString() ?? null,
+      instructions,
+    });
+  } catch (error: any) {
+    console.error('Verify custom domain error:', error);
+    return res.status(500).json({ message: error?.message || 'Failed to verify custom domain' });
+  }
+});
+
+// Request SSL provisioning after domain verification.
+router.post('/me/domain/provision-ssl', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'SUPER_ADMIN users cannot provision agency custom domains' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership) return res.status(404).json({ message: 'No agency found for user' });
+
+    const customDomain = membership.agency.customDomain;
+    if (!customDomain) {
+      return res.status(400).json({ message: 'Set a custom domain before provisioning SSL.' });
+    }
+    if (membership.agency.domainStatus !== "VERIFIED" && membership.agency.domainStatus !== "ACTIVE") {
+      return res.status(400).json({ message: 'Verify your custom domain before provisioning SSL.' });
+    }
+
+    await prisma.agency.update({
+      where: { id: membership.agency.id },
+      data: {
+        domainStatus: "SSL_PENDING",
+        sslError: null,
+      },
+    });
+
+    const provisioning = await requestSslProvisioning(customDomain);
+    if (!provisioning.accepted) {
+      const failed = await prisma.agency.update({
+        where: { id: membership.agency.id },
+        data: {
+          domainStatus: "FAILED",
+          sslError: provisioning.reason || "SSL provisioning failed",
+        },
+      });
+      return res.status(400).json({
+        message: provisioning.reason || 'SSL provisioning failed',
+        domainStatus: toDomainStatus(failed.domainStatus),
+      });
+    }
+
+    const now = new Date();
+    const updated = await prisma.agency.update({
+      where: { id: membership.agency.id },
+      data: {
+        domainStatus: "ACTIVE",
+        sslIssuedAt: now,
+        sslError: null,
+      },
+    });
+
+    return res.json({
+      message: 'SSL provisioned successfully.',
+      customDomain: updated.customDomain,
+      domainStatus: toDomainStatus(updated.domainStatus),
+      sslIssuedAt: updated.sslIssuedAt?.toISOString() ?? null,
+    });
+  } catch (error: any) {
+    console.error('Provision SSL error:', error);
+    return res.status(500).json({ message: error?.message || 'Failed to provision SSL' });
   }
 });
 
@@ -1763,6 +2014,14 @@ router.get('/:agencyId', authenticateToken, async (req, res) => {
       id: agency.id,
       name: agency.name,
       subdomain: agency.subdomain,
+      brandDisplayName: agency.brandDisplayName ?? null,
+      logoUrl: agency.logoUrl ?? null,
+      primaryColor: agency.primaryColor ?? null,
+      customDomain: agency.customDomain ?? null,
+      domainStatus: toDomainStatus(agency.domainStatus),
+      domainVerifiedAt: agency.domainVerifiedAt?.toISOString() ?? null,
+      sslIssuedAt: agency.sslIssuedAt?.toISOString() ?? null,
+      sslError: agency.sslError ?? null,
       website: agency.website,
       industry: agency.industry,
       agencySize: agency.agencySize,
@@ -1818,6 +2077,11 @@ const updateAgencySuperAdminSchema = z.object({
   enterpriseKeywordsTotal: z.coerce.number().int().min(1).optional().nullable(),
   enterpriseCreditsPerMonth: z.coerce.number().int().min(0).optional().nullable(),
   enterpriseMaxTeamUsers: z.coerce.number().int().min(1).optional().nullable(),
+  brandDisplayName: z.string().max(255).optional().nullable(),
+  logoUrl: z.union([httpUrlSchema, z.literal(''), z.null()]).optional(),
+  primaryColor: z.union([hexColorSchema, z.literal(''), z.null()]).optional(),
+  customDomain: z.string().max(255).optional().nullable(),
+  domainStatus: z.enum(domainStatusOrder).optional(),
   paymentMethodId: z.string().optional(), // required when billingType is paid or custom and agency has no Stripe customer
   resetPassword: z.string().min(6, 'Password must be at least 6 characters').optional(),
   resetPasswordConfirm: z.string().optional(),
@@ -1855,12 +2119,31 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
       updateData.subdomain === undefined
         ? undefined
         : (String(updateData.subdomain).trim() || null);
+    const normalizedCustomDomain =
+      updateData.customDomain === undefined
+        ? undefined
+        : normalizeDomainHost(updateData.customDomain);
+    if (updateData.customDomain !== undefined && updateData.customDomain !== null && !normalizedCustomDomain) {
+      return res.status(400).json({ message: 'Custom domain must be a valid hostname (e.g. portal.example.com)' });
+    }
     if (newSubdomain !== undefined && newSubdomain !== agency.subdomain && newSubdomain) {
       const existing = await prisma.agency.findFirst({
         where: { subdomain: newSubdomain },
       });
       if (existing) {
         return res.status(400).json({ message: 'Subdomain already taken' });
+      }
+    }
+    if (normalizedCustomDomain !== undefined && normalizedCustomDomain !== agency.customDomain && normalizedCustomDomain) {
+      const existingCustomDomain = await prisma.agency.findFirst({
+        where: {
+          customDomain: normalizedCustomDomain,
+          id: { not: agencyId },
+        },
+        select: { id: true },
+      });
+      if (existingCustomDomain) {
+        return res.status(400).json({ message: 'Custom domain already taken' });
       }
     }
 
@@ -1935,6 +2218,36 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
     if (updateData.zip !== undefined) payload.zip = updateData.zip;
     if (updateData.country !== undefined) payload.country = updateData.country;
     if (updateData.subdomain !== undefined) payload.subdomain = newSubdomain ?? null;
+    if (updateData.brandDisplayName !== undefined) payload.brandDisplayName = updateData.brandDisplayName?.trim() || null;
+    if (updateData.logoUrl !== undefined) payload.logoUrl = updateData.logoUrl?.trim() || null;
+    if (updateData.primaryColor !== undefined) payload.primaryColor = updateData.primaryColor || null;
+    if (updateData.customDomain !== undefined) {
+      payload.customDomain = normalizedCustomDomain ?? null;
+      if ((normalizedCustomDomain ?? null) !== (agency.customDomain ?? null)) {
+        payload.domainStatus = normalizedCustomDomain ? "PENDING_VERIFICATION" : "NONE";
+        payload.domainVerificationToken = normalizedCustomDomain ? generateDomainVerificationToken() : null;
+        payload.domainVerifiedAt = null;
+        payload.sslIssuedAt = null;
+        payload.sslError = null;
+      }
+    }
+    if (updateData.domainStatus !== undefined) {
+      payload.domainStatus = updateData.domainStatus;
+      if (updateData.domainStatus === "NONE") {
+        payload.customDomain = null;
+        payload.domainVerificationToken = null;
+        payload.domainVerifiedAt = null;
+        payload.sslIssuedAt = null;
+        payload.sslError = null;
+      } else if (updateData.domainStatus === "VERIFIED") {
+        payload.domainVerifiedAt = new Date();
+        payload.sslError = null;
+      } else if (updateData.domainStatus === "ACTIVE") {
+        payload.domainVerifiedAt = agency.domainVerifiedAt ?? new Date();
+        payload.sslIssuedAt = new Date();
+        payload.sslError = null;
+      }
+    }
     if (updateData.billingType !== undefined) {
       payload.billingType = updateData.billingType;
       // When switching to trial: set trialEndsAt to 7 days from now if null or expired
@@ -2019,6 +2332,14 @@ router.put('/:agencyId', authenticateToken, async (req, res) => {
       id: updated.id,
       name: updated.name,
       subdomain: updated.subdomain,
+      brandDisplayName: updated.brandDisplayName ?? null,
+      logoUrl: updated.logoUrl ?? null,
+      primaryColor: updated.primaryColor ?? null,
+      customDomain: updated.customDomain ?? null,
+      domainStatus: toDomainStatus(updated.domainStatus),
+      domainVerifiedAt: updated.domainVerifiedAt?.toISOString() ?? null,
+      sslIssuedAt: updated.sslIssuedAt?.toISOString() ?? null,
+      sslError: updated.sslError ?? null,
       website: updated.website,
       industry: updated.industry,
       agencySize: updated.agencySize,
@@ -2153,7 +2474,7 @@ router.post('/invite', authenticateToken, async (req, res) => {
       to: email,
       subject: `You're invited to ${BRAND_DISPLAY_NAME}`,
       html: `
-        <h1>You've been invited to join ${BRAND_DISPLAY_NAME}!</h1>
+        <h1>You're invited to join ${BRAND_DISPLAY_NAME}!</h1>
         <p>You've been invited to create an agency account: <strong>${name}</strong></p>
         <p>Click the link below to accept the invitation:</p>
         <a href="${process.env.FRONTEND_URL}/invite?token=${inviteToken}">Accept Invitation</a>
@@ -2212,7 +2533,8 @@ router.post('/:agencyId/invite-specialist', authenticateToken, async (req, res) 
       to: email,
       subject: `You're invited to join an agency on ${BRAND_DISPLAY_NAME}`,
       html: `
-        <h1>You've been invited to join ${membership?.agency.name || 'an agency'}!</h1>
+        <h1>You're invited to join ${BRAND_DISPLAY_NAME}!</h1>
+        <p>You've been invited to join <strong>${membership?.agency.name || 'an agency'}</strong>.</p>
         <p>Click the link below to accept the invitation:</p>
         <a href="${process.env.FRONTEND_URL}/invite?token=${inviteToken}">Accept Invitation</a>
         <p>This invitation expires in 7 days.</p>

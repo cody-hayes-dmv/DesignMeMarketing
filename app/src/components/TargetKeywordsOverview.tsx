@@ -212,12 +212,12 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   }, [clientId, user?.role, fetchKeywords, isReadOnly]);
 
   const formatNumber = (num: number | null | undefined) => {
-    if (num === null || num === undefined) return "—";
+    if (num === null || num === undefined || !Number.isFinite(num)) return "—";
     return num.toLocaleString();
   };
 
   const formatCurrency = (num: number | null | undefined) => {
-    if (num === null || num === undefined) return "—";
+    if (num === null || num === undefined || !Number.isFinite(num)) return "—";
     return `$${num.toFixed(2)}`;
   };
 

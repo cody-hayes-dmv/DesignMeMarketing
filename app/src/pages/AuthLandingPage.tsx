@@ -1,22 +1,9 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import zoesiBlueLogoUrl from "@/assets/zoesi-blue.png";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 type LoginRole = "SUPER_ADMIN" | "ADMIN" | "AGENCY" | "USER" | "SPECIALIST";
-
-const getBrandName = () => {
-  const host = window.location.hostname;
-  // localhost / IPs: keep generic
-  if (host === "localhost" || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return "Your Dashboard";
-
-  // simple subdomain-based brand (white-label friendly)
-  const parts = host.split(".");
-  if (parts.length >= 3) {
-    const sub = parts[0];
-    if (sub && sub !== "www") return sub.replace(/-/g, " ");
-  }
-  return "Your Dashboard";
-};
 
 const roleCards: Array<{
   role: LoginRole;
@@ -33,7 +20,7 @@ const roleCards: Array<{
 const AuthLandingPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const brandName = getBrandName();
+  const { brandName, logoUrl, primaryColor } = usePublicBranding();
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -41,7 +28,7 @@ const AuthLandingPage: React.FC = () => {
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
             <img
-              src={zoesiBlueLogoUrl}
+              src={logoUrl || zoesiBlueLogoUrl}
               alt={brandName}
               className="h-12 w-auto object-contain"
             />
@@ -63,7 +50,7 @@ const AuthLandingPage: React.FC = () => {
                   <p className="text-lg font-semibold text-gray-900">{card.title}</p>
                   <p className="text-sm text-gray-600 mt-1">{card.subtitle}</p>
                 </div>
-                <span className="text-sm text-primary-600 font-medium">Continue</span>
+                <span className="text-sm font-medium" style={{ color: primaryColor }}>Continue</span>
               </div>
             </button>
           ))}

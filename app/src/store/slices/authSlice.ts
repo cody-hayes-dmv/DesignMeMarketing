@@ -9,6 +9,18 @@ export interface NotificationPreferences {
   teamUpdates: boolean;
 }
 
+export interface AgencyBranding {
+  agencyId: string;
+  brandDisplayName?: string | null;
+  logoUrl?: string | null;
+  primaryColor?: string | null;
+  subdomain?: string | null;
+  customDomain?: string | null;
+  domainStatus?: "NONE" | "PENDING_VERIFICATION" | "VERIFIED" | "SSL_PENDING" | "ACTIVE" | "FAILED";
+  domainVerifiedAt?: string | null;
+  sslIssuedAt?: string | null;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -19,6 +31,7 @@ export interface User {
   invited: boolean;
   notificationPreferences?: NotificationPreferences;
   specialties?: string[];
+  agencyBranding?: AgencyBranding | null;
   clientAccess?: {
     clients: Array<{ clientId: string; role: string; status: string }>;
   };

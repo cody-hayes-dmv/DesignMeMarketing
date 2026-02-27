@@ -16,6 +16,12 @@ import {
   parsePeriodDays,
   REPORT_SECTION_ORDER,
 } from "../lib/qualityContracts.js";
+import {
+  enforceAiIntelligenceAccuracy,
+  enforceAiVisibilityAccuracy,
+  enforceDashboardMetricAccuracy,
+  enforceDomainOverviewAccuracy,
+} from "../lib/metricAccuracy.js";
 
 const router = express.Router();
 
@@ -95,6 +101,26 @@ function parseDateInput(value: string): Date {
     return new Date(year, month - 1, day, 0, 0, 0, 0);
   }
   return new Date(trimmed);
+}
+
+function isLikelyEmptyGa4Snapshot(data: any): boolean {
+  if (!data) return true;
+  const totalSessions = Number(data?.totalSessions ?? 0) || 0;
+  const activeUsers = Number(data?.activeUsers ?? 0) || 0;
+  const totalUsers = Number(data?.totalUsers ?? 0) || 0;
+  const newUsers = Number(data?.newUsers ?? 0) || 0;
+  const eventCount = Number(data?.eventCount ?? 0) || 0;
+  const trendPoints =
+    (Array.isArray(data?.activeUsersTrend) ? data.activeUsersTrend.length : 0) +
+    (Array.isArray(data?.newUsersTrend) ? data.newUsersTrend.length : 0);
+  return (
+    totalSessions === 0 &&
+    activeUsers === 0 &&
+    totalUsers === 0 &&
+    newUsers === 0 &&
+    eventCount === 0 &&
+    trendPoints === 0
+  );
 }
 
 async function dedupeInFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -2086,7 +2112,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
         
-        if (dbMetrics) {
+        if (dbMetrics && dbMetrics.totalUsers !== null && !isLikelyEmptyGa4Snapshot(dbMetrics)) {
           console.log(`[Share Dashboard] ✅ Using GA4 data from database for client ${clientId}`);
           ga4Data = {
             totalSessions: dbMetrics.totalSessions,
@@ -2133,6 +2159,9 @@ router.get("/share/:token/dashboard", async (req, res) => {
           trafficDataSource = "ga4";
         } else {
           // No data in database, fetch from API (but don't save to DB here - that's done by refresh/connect)
+          if (dbMetrics && (isLikelyEmptyGa4Snapshot(dbMetrics) || dbMetrics.totalUsers === null)) {
+            console.log(`[Share Dashboard] Ignoring incomplete/empty GA4 DB snapshot and fetching API data for client ${clientId}`);
+          }
           console.log(`[Share Dashboard] No GA4 data in database, fetching from API for client ${clientId}`);
           ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
           // Fetch events data in parallel
@@ -2279,7 +2308,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
       }
     });
 
-    res.json({
+    const shareDashboardPayload = {
       client,
       totalSessions,
       organicSessions,
@@ -2292,7 +2321,7 @@ router.get("/share/:token/dashboard", async (req, res) => {
       newUsers,
       keyEvents,
       // Backward-compatible names used by the main dashboard UI
-      totalUsers: ga4Data?.totalUsers ?? activeUsers,
+      totalUsers: ga4Data?.totalUsers ?? null,
       firstTimeVisitors: newUsers,
       engagedVisitors: ga4Data?.engagedSessions ?? null,
       newUsersTrend: ga4Data?.newUsersTrend || null,
@@ -2321,7 +2350,12 @@ router.get("/share/:token/dashboard", async (req, res) => {
       },
       topKeywords,
       ga4Events: ga4EventsData?.events || null
-    });
+    };
+    return res.json(
+      enforceDashboardMetricAccuracy(shareDashboardPayload, {
+        route: "share_dashboard",
+      })
+    );
   } catch (error) {
     console.error("Shared dashboard error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -2832,7 +2866,7 @@ router.get("/share/:token/ranked-keywords", async (req, res) => {
       ? (lastMonthData ? currentData.totalKeywords - lastMonthData.totalKeywords : null)
       : null;
 
-    res.json({
+    return res.json({
       current: currentData ? {
         totalKeywords: currentData.totalKeywords,
         month: currentData.month,
@@ -5271,7 +5305,7 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
       topCitedSources = [];
     }
 
-    return res.json({
+    const aiVisibilityPayload = {
       rows: [
         { name: "ChatGPT", visibility: chatgpt.visibility, mentions: chatgpt.sessions, citedPages: chatgpt.citedPages },
         { name: "AI Overview", visibility: aiOverviewVisibility, mentions: aiOverviewMentions, citedPages: aiOverviewCitedPages },
@@ -5299,7 +5333,8 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
             }
           : null,
       },
-    });
+    };
+    return res.json(enforceAiVisibilityAccuracy(aiVisibilityPayload, "ai_search_visibility"));
   } catch (error: any) {
     console.error("AI Search visibility error:", error);
     return res.status(500).json({ message: "Failed to fetch AI Search Visibility" });
@@ -6386,7 +6421,7 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
           })()
         : null;
 
-    return res.json({
+    const aiIntelligencePayload = {
       kpis: {
         aiVisibilityScore: Math.round(aiVisibilityScore),
         aiVisibilityScoreTrend: aiVisibilityScoreTrend,
@@ -6429,7 +6464,8 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
         hasCompetitorData: competitors.some((c) => !c.isYou),
         searchMentionsItemCount: searchMentions.length,
       },
-    });
+    };
+    return res.json(enforceAiIntelligenceAccuracy(aiIntelligencePayload, "ai_intelligence"));
   } catch (error: any) {
     console.error("AI Intelligence error:", error);
     return res.status(500).json({ message: "Failed to fetch AI Intelligence" });
@@ -6578,7 +6614,7 @@ router.get("/share/:token/ai-search-visibility", async (req, res) => {
       topCitedSources = [];
     }
 
-    return res.json({
+    const shareAiVisibilityPayload = {
       rows: [
         { name: "ChatGPT", visibility: chatgpt.visibility, mentions: chatgpt.sessions, citedPages: chatgpt.citedPages },
         { name: "AI Overview", visibility: aiOverviewVisibility, mentions: aiOverviewMentions, citedPages: aiOverviewCitedPages },
@@ -6607,7 +6643,8 @@ router.get("/share/:token/ai-search-visibility", async (req, res) => {
               }
             : null,
       },
-    });
+    };
+    return res.json(enforceAiVisibilityAccuracy(shareAiVisibilityPayload, "share_ai_search_visibility"));
   } catch (error: any) {
     console.error("Shared AI Search visibility error:", error);
     return res.status(500).json({ message: "Failed to fetch AI Search Visibility" });
@@ -6732,7 +6769,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
         // First, try to get data from database
         const dbMetrics = await getGA4MetricsFromDB(clientId, startDate, endDate);
         
-        if (dbMetrics) {
+        if (dbMetrics && dbMetrics.totalUsers !== null && !isLikelyEmptyGa4Snapshot(dbMetrics)) {
           console.log(`[Dashboard] ✅ Using GA4 data from database for client ${clientId}`);
           ga4Data = {
             totalSessions: dbMetrics.totalSessions,
@@ -6779,6 +6816,9 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
           trafficDataSource = "ga4";
         } else {
           // No data in database, fetch from API (but don't save to DB here - that's done by refresh/connect)
+          if (dbMetrics && (isLikelyEmptyGa4Snapshot(dbMetrics) || dbMetrics.totalUsers === null)) {
+            console.log(`[Dashboard] Ignoring incomplete/empty GA4 DB snapshot and fetching API data for client ${clientId}`);
+          }
           console.log(`[Dashboard] No GA4 data in database, fetching from API for client ${clientId}`);
           ga4Data = await fetchGA4TrafficData(clientId, startDate, endDate);
           // Fetch events data in parallel
@@ -6963,7 +7003,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     const activeUsersTrend = ga4Data?.activeUsersTrend ?? [];
     
     // Keep backward compatibility (for other parts of the system)
-    const totalUsers = ga4Data?.totalUsers ?? activeUsers;
+    const totalUsers = ga4Data?.totalUsers ?? null;
     const firstTimeVisitors = newUsers; // Map newUsers to firstTimeVisitors for compatibility
     // Engaged Visitors is the same as Engaged Sessions from GA4
     const engagedVisitors = ga4Data?.engagedSessions ?? null;
@@ -6987,7 +7027,7 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     const dataForSeoDates = [trafficUpdatedAt, rankedUpdatedAt, backlinksUpdatedAt, topPagesUpdatedAt].filter(Boolean) as Date[];
     const dataForSeoLastUpdatedAt = dataForSeoDates.length > 0 ? new Date(Math.max(...dataForSeoDates.map((d) => d.getTime()))) : null;
 
-    res.json({
+    const dashboardPayload = {
       totalSessions,
       organicSessions,
       organicSearchEngagedSessions: ga4Data?.organicSearchEngagedSessions ?? null,
@@ -7030,7 +7070,12 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       ga4Events: ga4EventsData?.events || null,
       ga4LastUpdated: ga4LastUpdatedAt?.toISOString() ?? null,
       dataForSeoLastUpdated: dataForSeoLastUpdatedAt?.toISOString() ?? null,
-    });
+    };
+    return res.json(
+      enforceDashboardMetricAccuracy(dashboardPayload, {
+        route: "dashboard",
+      })
+    );
   } catch (error) {
     console.error("Fetch SEO dashboard error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -7356,9 +7401,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       keyword: k.keyword,
       position: k.currentPosition ?? 0,
       trafficPercent: k.ctr != null ? k.ctr * 100 : null,
-      traffic: !strictAccuracy && k.ctr != null
-        ? Math.round(k.ctr * organicTraffic)
-        : null,
+      // Measured-only policy: do not derive per-keyword traffic from aggregate traffic.
+      traffic: null,
       volume: k.searchVolume ?? null,
       url: k.googleUrl ?? null,
       cpc: k.cpc ?? null,
@@ -7598,27 +7642,18 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       indexedPages,
       referringDomainsByTld,
       referringDomainsByCountry: [],
-      totalCompetitorsCount: strictAccuracy ? 0 : referringDomains.length,
-      organicCompetitors: strictAccuracy
-        ? []
-        : referringDomains.slice(0, 15).map((r) => {
-            const maxBacklinks = referringDomains[0]?.backlinks ?? 1;
-            return {
-              competitor: r.domain,
-              comLevel: Math.min(100, Math.round((r.backlinks / maxBacklinks) * 100)),
-              comKeywords: r.backlinks,
-              seKeywords: Math.round(r.backlinks * 2.5),
-            };
-          }),
+      totalCompetitorsCount: referringDomains.length,
+      organicCompetitors: referringDomains.slice(0, 15).map((r) => {
+        const maxBacklinks = referringDomains[0]?.backlinks ?? 1;
+        return {
+          competitor: r.domain,
+          comLevel: Math.min(100, Math.round((r.backlinks / maxBacklinks) * 100)),
+          // Measured-only: use observed backlink counts directly (no synthetic multipliers).
+          comKeywords: r.backlinks,
+          seKeywords: r.backlinks,
+        };
+      }),
       keywordsByIntent: (() => {
-        const total = organicKeywords || 0;
-        const traffic = Math.round(organicTraffic) || 0;
-        const fallbackRows = [
-          { intent: "Informational", pct: 32.4, keywords: Math.round(total * 0.324), traffic: Math.round(traffic * 0.38) },
-          { intent: "Navigational", pct: 1.5, keywords: Math.round(total * 0.015), traffic: Math.round(traffic * 0.01) },
-          { intent: "Commercial", pct: 63.4, keywords: Math.round(total * 0.634), traffic: Math.round(traffic * 0.35) },
-          { intent: "Transactional", pct: 2.8, keywords: Math.round(total * 0.028), traffic: Math.round(traffic * 0.02) },
-        ];
         const extractIntent = (info: string | null): string | null => {
           if (!info) return null;
           try {
@@ -7665,13 +7700,8 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
             pct: sumKw > 0 ? Math.round((r.keywords / sumKw) * 1000) / 10 : r.pct,
           }));
         }
-        // Strict accuracy: do not return synthetic/fallback intent split.
-        if (strictAccuracy) return [];
-        const sumKw = fallbackRows.reduce((s, r) => s + r.keywords, 0);
-        return fallbackRows.map((r) => ({
-          ...r,
-          pct: sumKw > 0 ? Math.round((r.keywords / sumKw) * 1000) / 10 : r.pct,
-        }));
+        // Measured-only policy: no synthetic intent fallback rows.
+        return [];
       })(),
       topPaidKeywords,
       paidPositionDistribution: {
@@ -7688,8 +7718,9 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       totalPaidCompetitorsCount: mainPaidCompetitors.length,
     };
 
-    setCachedResearchResponse(domainOverviewClientCacheKey, response);
-    res.json(response);
+    const accurateDomainOverview = enforceDomainOverviewAccuracy(response, "domain_overview");
+    setCachedResearchResponse(domainOverviewClientCacheKey, accurateDomainOverview);
+    res.json(accurateDomainOverview);
   } catch (error: any) {
     console.error("Domain overview error:", error);
     res.status(500).json({ message: error?.message || "Internal server error" });
@@ -7956,15 +7987,50 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
     const totalPos = top3 + top10 + page2 + pos21_30 + pos31_50 + pos51Plus;
     const toPct = (n: number) => (totalPos > 0 ? Math.round((n / totalPos) * 100) : 0);
 
-    const totalKwForIntent = rankedKwData.totalCount || 0;
-    const keywordsByIntent = strictAccuracy
-      ? []
-      : [
-          { intent: "Informational", pct: 32.4, keywords: Math.round(totalKwForIntent * 0.324), traffic: Math.round(scaledTraffic * 0.38) },
-          { intent: "Navigational", pct: 1.5, keywords: Math.round(totalKwForIntent * 0.015), traffic: Math.round(scaledTraffic * 0.01) },
-          { intent: "Commercial", pct: 63.4, keywords: Math.round(totalKwForIntent * 0.634), traffic: Math.round(scaledTraffic * 0.35) },
-          { intent: "Transactional", pct: 2.8, keywords: Math.round(totalKwForIntent * 0.028), traffic: Math.round(scaledTraffic * 0.02) },
-        ];
+    const keywordsByIntent = (() => {
+      const intentBuckets: Record<"Informational" | "Navigational" | "Commercial" | "Transactional", { keywords: number; traffic: number }> = {
+        Informational: { keywords: 0, traffic: 0 },
+        Navigational: { keywords: 0, traffic: 0 },
+        Commercial: { keywords: 0, traffic: 0 },
+        Transactional: { keywords: 0, traffic: 0 },
+      };
+      const normalizeIntent = (raw: unknown): "Informational" | "Navigational" | "Commercial" | "Transactional" | null => {
+        const v = String(raw ?? "").toLowerCase();
+        if (v === "informational") return "Informational";
+        if (v === "navigational") return "Navigational";
+        if (v === "commercial") return "Commercial";
+        if (v === "transactional") return "Transactional";
+        return null;
+      };
+
+      for (const item of rankedKwData.items ?? []) {
+        const kd = item?.keyword_data || {};
+        const serpItem = item?.ranked_serp_element?.serp_item || {};
+        const intent =
+          normalizeIntent(kd?.search_intent_info?.main_intent) ??
+          normalizeIntent(kd?.keyword_info?.keyword_intent) ??
+          normalizeIntent(kd?.keyword_properties?.keyword_intent);
+        if (!intent) continue;
+        intentBuckets[intent].keywords += 1;
+        const etv = Number(serpItem?.etv ?? 0);
+        intentBuckets[intent].traffic += Number.isFinite(etv) ? Math.max(0, Math.round(etv)) : 0;
+      }
+
+      const rows = (["Informational", "Navigational", "Commercial", "Transactional"] as const)
+        .map((intent) => ({
+          intent,
+          keywords: intentBuckets[intent].keywords,
+          traffic: intentBuckets[intent].traffic,
+          pct: 0,
+        }))
+        .filter((row) => row.keywords > 0);
+
+      const totalKeywordsForPct = rows.reduce((s, r) => s + r.keywords, 0);
+      return rows.map((row) => ({
+        ...row,
+        pct: totalKeywordsForPct > 0 ? Math.round((row.keywords / totalKeywordsForPct) * 1000) / 10 : 0,
+      }));
+    })();
 
     const organicTrafficOverTime = strictAccuracy
       ? organicKeywordsOverTime.map((m) => {
@@ -7989,17 +8055,16 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
           }));
         })();
 
-    const organicCompetitors = strictAccuracy
-      ? []
-      : referringDomains.slice(0, 15).map((r) => {
-          const maxBl = referringDomains[0]?.backlinks ?? 1;
-          return {
-            competitor: r.domain,
-            comLevel: Math.min(100, Math.round((r.backlinks / maxBl) * 100)),
-            comKeywords: r.backlinks,
-            seKeywords: Math.round(r.backlinks * 2.5),
-          };
-        });
+    const organicCompetitors = referringDomains.slice(0, 15).map((r) => {
+      const maxBl = referringDomains[0]?.backlinks ?? 1;
+      return {
+        competitor: r.domain,
+        comLevel: Math.min(100, Math.round((r.backlinks / maxBl) * 100)),
+        // Measured-only: use observed backlink counts directly.
+        comKeywords: r.backlinks,
+        seKeywords: r.backlinks,
+      };
+    });
 
     const currentMonthKey = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
     const currentTrafficMeasured = monthlyTrafficByKey.get(currentMonthKey);
@@ -8065,8 +8130,9 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       await useResearchCredits(tierCtx.agencyId, 1, isFreeOnetime);
     }
 
-    setCachedResearchResponse(domainOverviewAnyCacheKey, result);
-    res.json(result);
+    const accurateDomainOverviewAny = enforceDomainOverviewAccuracy(result, "domain_overview_any");
+    setCachedResearchResponse(domainOverviewAnyCacheKey, accurateDomainOverviewAny);
+    res.json(accurateDomainOverviewAny);
   } catch (error: any) {
     console.error("Domain overview (any) error:", {
       userId: req.user?.userId,
@@ -8649,6 +8715,82 @@ router.post("/reports/:clientId/campaign-wins", authenticateToken, async (req, r
     });
   } catch (error: any) {
     console.error("Save campaign wins settings error:", error);
+    return res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Instant-send Campaign Wins email (preview)
+router.post("/reports/:clientId/campaign-wins/instant-send", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: { select: { agencyId: true } },
+          },
+        },
+      },
+    });
+    if (!client) return res.status(404).json({ message: "Client not found" });
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAgencyAccess) return res.status(403).json({ message: "Access denied" });
+
+    const { sendCampaignWinsInstantEmailForClient } = await import("../lib/reportScheduler.js");
+    const result = await sendCampaignWinsInstantEmailForClient(clientId);
+    return res.json({
+      message: "Campaign Wins preview email sent successfully",
+      ...result,
+    });
+  } catch (error: any) {
+    console.error("Instant-send campaign wins error:", error);
+    return res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Build Campaign Wins email preview (no send)
+router.get("/reports/:clientId/campaign-wins/preview", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: { select: { agencyId: true } },
+          },
+        },
+      },
+    });
+    if (!client) return res.status(404).json({ message: "Client not found" });
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+    if (!hasAgencyAccess) return res.status(403).json({ message: "Access denied" });
+
+    const { getCampaignWinsInstantPreviewForClient } = await import("../lib/reportScheduler.js");
+    const preview = await getCampaignWinsInstantPreviewForClient(clientId);
+    return res.json({
+      message: "Campaign Wins preview generated successfully",
+      ...preview,
+    });
+  } catch (error: any) {
+    console.error("Campaign wins preview generation error:", error);
     return res.status(500).json({ message: error.message || "Internal server error" });
   }
 });

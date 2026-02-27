@@ -42,7 +42,11 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean; trialExpired?: boolean } | null>(null);
   const [hasIncludedClients, setHasIncludedClients] = useState(false);
-  const showZoesiLogo = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY";
+  const showPlatformLogo = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
+  const isAgencyUser = user?.role === "AGENCY";
+  const agencyBranding = user?.agencyBranding;
+  const brandName = agencyBranding?.brandDisplayName || "SEO Dashboard";
+  const brandColor = agencyBranding?.primaryColor || "#4f46e5";
 
   const refetchAgencyMe = () => {
     if (user?.role === "AGENCY") {
@@ -317,7 +321,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
         className={`${collapsed ? "px-3 py-5" : "px-4 py-6"
           } border-b border-gray-700 transition-all duration-300 flex flex-col items-center justify-center text-center`}
       >
-        {showZoesiLogo ? (
+        {showPlatformLogo ? (
           <>
             <img
               src={logoUrl}
@@ -333,13 +337,21 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
           </>
         ) : (
           <>
-            <BarChart3
-              className={`${collapsed ? "h-8 w-8" : "h-10 w-10"
-                } text-primary-400 transition-all duration-300 shrink-0`}
-            />
+            {isAgencyUser && agencyBranding?.logoUrl ? (
+              <img
+                src={agencyBranding.logoUrl}
+                alt={brandName}
+                className={`${collapsed ? "h-8 w-8" : "h-14 w-auto max-w-[180px]"} object-contain transition-all duration-300`}
+              />
+            ) : (
+              <BarChart3
+                className={`${collapsed ? "h-8 w-8" : "h-10 w-10"} transition-all duration-300 shrink-0`}
+                style={{ color: brandColor }}
+              />
+            )}
             {!collapsed && (
               <div className="mt-2">
-                <h1 className="text-base font-bold text-white">SEO Dashboard</h1>
+                <h1 className="text-base font-bold text-white">{brandName}</h1>
                 <p className="text-xs text-gray-400 mt-0.5">{panelLabel}</p>
               </div>
             )}
@@ -378,6 +390,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
                       ? "bg-primary-600 text-white"
                       : "text-gray-300 hover:bg-gray-800 hover:text-white"
                     } group relative`}
+                  style={isActive && isAgencyUser ? { backgroundColor: brandColor } : undefined}
                   title={collapsed ? item.label : undefined}
                 >
                   <Icon
@@ -437,7 +450,10 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
           className={`flex items-center ${collapsed ? "justify-center mb-2" : "space-x-3 mb-4"
             } transition-all duration-300`}
         >
-          <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
+          <div
+            className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: isAgencyUser ? brandColor : undefined }}
+          >
             <span className="text-sm font-medium text-white">
               {user?.name?.charAt(0) || user?.email?.charAt(0)}
             </span>

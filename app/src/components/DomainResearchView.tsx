@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Loader2,
   Search,
@@ -40,6 +41,7 @@ import html2canvas from "html2canvas";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import { AccuracyEnvelope, isMetricUnavailable } from "@/lib/metricAccuracy";
 import { Client } from "@/store/slices/clientSlice";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
@@ -122,6 +124,7 @@ export interface DomainOverviewData {
   };
   mainPaidCompetitors?: Array<{ competitor: string; comLevel: number; comKeywords: number; seKeywords: number }>;
   totalPaidCompetitorsCount?: number;
+  accuracy?: AccuracyEnvelope;
 }
 
 export type AiSearchVisibilityRow = {
@@ -139,6 +142,7 @@ export interface AiSearchVisibilityData {
   meta?: { serpCache?: { updatedAt?: string; fetchedAt?: string } };
   kpis?: { aiVisibilityScore: number; totalAiMentions: number; aiSearchVolume: number };
   platforms?: Array<{ platform: string; mentions: number; aiSearchVol: number; impressions?: number }>;
+  accuracy?: AccuracyEnvelope;
 }
 
 const formatCompactNumber = (n: number): string => {
@@ -265,16 +269,27 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
   const selectedClient = clients.find((c) => c.id === selectedClientId) || null;
   const activeDomain = selectedClient?.domain || directDomain || null;
+  const hasUnavailableOverviewMetric = useCallback(
+    (metric: string | string[]) => isMetricUnavailable(overview?.accuracy, metric),
+    [overview?.accuracy]
+  );
+  const hasUnavailableAiSearchMetric = useCallback(
+    (metric: string | string[]) => isMetricUnavailable(aiSearch?.accuracy, metric),
+    [aiSearch?.accuracy]
+  );
 
   // Use GA4-comparable rows for top-line KPIs; AI Overview/Mode are keyword-level SERP metrics.
   const aiSearchKpis = React.useMemo(() => {
+    if (hasUnavailableAiSearchMetric("ai_visibility_rows")) {
+      return { aiVisibilityScore: null, totalAiMentions: null, worldwideVisibility: null };
+    }
     const rows = aiSearch?.rows ?? [];
     const ga4Rows = rows.filter((r) => r.name === "ChatGPT" || r.name === "Gemini");
     const totalAiMentions = ga4Rows.reduce((s, r) => s + (r.mentions ?? 0), 0);
     const aiVisibilityScore = Math.min(100, ga4Rows.reduce((s, r) => s + (r.visibility ?? 0), 0));
     const worldwideVisibility = totalAiMentions > 0 ? 100 : 0;
     return { aiVisibilityScore, totalAiMentions, worldwideVisibility };
-  }, [aiSearch?.rows]);
+  }, [aiSearch?.rows, hasUnavailableAiSearchMetric]);
 
   const aiSearchPlatforms = React.useMemo(() => {
     return (aiSearch?.rows ?? []).map((r) => ({
@@ -293,6 +308,24 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, []);
+
+  useEffect(() => {
+    if (!topKeywordsModalOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [topKeywordsModalOpen]);
+
+  useEffect(() => {
+    if (!backlinksModalOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [backlinksModalOpen]);
 
   // Normalize URL input to domain for matching (e.g. https://ablelockshop.com/ -> ablelockshop.com)
   const searchNormalized = (() => {
@@ -397,9 +430,15 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     setLoading(true);
     if (!silentError) setError(null);
     try {
-      const overviewRes = isDirect
-        ? await api.get<DomainOverviewData>(`/seo/domain-overview-any`, { params: { domain: clientIdOrDomain, live: "true" } })
-        : await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
+      const selectedClientForLive = !isDirect ? clients.find((c) => c.id === clientIdOrDomain) : null;
+      const selectedClientDomain = selectedClientForLive?.domain?.trim();
+      // Accuracy policy: prefer live endpoint for both direct domains and tracked clients.
+      const overviewRes =
+        isDirect || selectedClientDomain
+          ? await api.get<DomainOverviewData>(`/seo/domain-overview-any`, {
+              params: { domain: isDirect ? clientIdOrDomain : selectedClientDomain, live: "true" },
+            })
+          : await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
       setOverview(overviewRes.data);
       return true;
     } catch (err: any) {
@@ -411,7 +450,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clients]);
 
   const fetchAiSearch = useCallback(async (clientId: string, timeRange: "1M" | "6M" | "1Y" | "2Y" | "All") => {
     if (directDomain && !selectedClientId) return;
@@ -993,17 +1032,23 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </div>
                     <div className="min-w-0">
                       <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">AI Visibility</p>
-                      <p className="text-xl font-bold text-blue-600 tabular-nums">{aiSearchKpis.aiVisibilityScore}</p>
+                      <p className="text-xl font-bold text-blue-600 tabular-nums">
+                        {aiSearchKpis.aiVisibilityScore == null ? "Unavailable" : aiSearchKpis.aiVisibilityScore}
+                      </p>
                     </div>
                   </div>
                   <div className="p-3 rounded-lg bg-gray-50/80">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Mentions</p>
-                    <p className="mt-1 text-xl font-bold text-blue-600 tabular-nums">{formatCompactNumber(aiSearchKpis.totalAiMentions)}</p>
+                    <p className="mt-1 text-xl font-bold text-blue-600 tabular-nums">
+                      {aiSearchKpis.totalAiMentions == null ? "Unavailable" : formatCompactNumber(aiSearchKpis.totalAiMentions)}
+                    </p>
                   </div>
                   <div className="p-3 rounded-lg bg-gray-50/80">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Cited Pages</p>
                     <p className="mt-1 text-xl font-bold text-blue-600 tabular-nums">
-                      {formatCompactNumber(aiSearchPlatforms.reduce((s, p) => s + p.aiSearchVol, 0))}
+                      {hasUnavailableAiSearchMetric("ai_visibility_rows")
+                        ? "Unavailable"
+                        : formatCompactNumber(aiSearchPlatforms.reduce((s, p) => s + p.aiSearchVol, 0))}
                     </p>
                   </div>
                 </div>
@@ -1060,14 +1105,14 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               </div>
               <div className="p-5 grid grid-cols-4 gap-4">
                 {[
-                  { label: "Authority Score", value: overview.metrics.authorityScore ?? "—", format: (v: number | string) => (typeof v === "number" ? String(v) : v), tooltip: "Domain authority based on backlink profile" },
-                  { label: "Organic Traffic", value: overview.metrics.organicSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: "Estimated organic search traffic" },
-                  { label: "Paid Traffic", value: overview.metrics.paidSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: "Paid search traffic" },
-                  { label: "Ref. Domains", value: overview.metrics.backlinks.referringDomains, format: (v: number) => formatCompactNumber(v), tooltip: "Number of referring domains" },
-                  { label: "Traffic Share", value: overview.metrics.trafficShare, format: (v: number | null | undefined) => (v != null ? `${v}%` : "—"), tooltip: "Organic traffic as % of total", icon: true },
-                  { label: "Organic Keywords", value: overview.metrics.organicSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: "Organic keywords ranking" },
-                  { label: "Paid Keywords", value: overview.metrics.paidSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: "Paid keywords" },
-                  { label: "Backlinks", value: overview.metrics.backlinks.totalBacklinks, format: (v: number) => formatCompactNumber(v), tooltip: "Total backlinks" },
+                  { label: "Authority Score", value: overview.metrics.authorityScore ?? "—", format: (v: number | string) => (typeof v === "number" ? String(v) : v), tooltip: "Domain authority based on backlink profile", unavailable: hasUnavailableOverviewMetric("authorityScore") },
+                  { label: "Organic Traffic", value: overview.metrics.organicSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: "Estimated organic search traffic", unavailable: hasUnavailableOverviewMetric("organicSearch.traffic") },
+                  { label: "Paid Traffic", value: overview.metrics.paidSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: "Paid search traffic", unavailable: false },
+                  { label: "Ref. Domains", value: overview.metrics.backlinks.referringDomains, format: (v: number) => formatCompactNumber(v), tooltip: "Number of referring domains", unavailable: false },
+                  { label: "Traffic Share", value: overview.metrics.trafficShare, format: (v: number | null | undefined) => (v != null ? `${v}%` : "—"), tooltip: "Organic traffic as % of total", icon: true, unavailable: false },
+                  { label: "Organic Keywords", value: overview.metrics.organicSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: "Organic keywords ranking", unavailable: hasUnavailableOverviewMetric("organicSearch.keywords") },
+                  { label: "Paid Keywords", value: overview.metrics.paidSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: "Paid keywords", unavailable: false },
+                  { label: "Backlinks", value: overview.metrics.backlinks.totalBacklinks, format: (v: number) => formatCompactNumber(v), tooltip: "Total backlinks", unavailable: false },
                 ].map((m, i) => (
                   <div key={m.label} className={`flex flex-col p-3 rounded-lg bg-gray-50/80 ${i % 4 < 3 ? "border-r-0" : ""}`}>
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider inline-flex items-center gap-1">
@@ -1076,7 +1121,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       {m.icon && <PieChartIcon className="h-3 w-3 text-gray-400 flex-shrink-0" aria-hidden />}
                     </p>
                     <p className="mt-1.5 text-lg font-bold text-blue-600 tabular-nums">
-                      {m.format(m.value as any)}
+                      {m.unavailable ? "Unavailable" : m.format(m.value as any)}
                     </p>
                   </div>
                 ))}
@@ -1223,7 +1268,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   <div className="h-48 flex items-center justify-center">
                     {(() => {
                       const organic = (overview.positionDistribution?.top3 ?? 0) + (overview.positionDistribution?.top10 ?? 0) + (overview.positionDistribution?.page2 ?? 0) + (overview.positionDistribution?.pos21_30 ?? 0) + (overview.positionDistribution?.pos31_50 ?? 0) + (overview.positionDistribution?.pos51Plus ?? 0);
-                      const ai = aiSearchKpis.totalAiMentions;
+                      const ai = aiSearchKpis.totalAiMentions ?? 0;
                       const otherSerpCheck = aiSearch?.otherSerpFeaturesCount ?? 0;
                       if (organic === 0 && ai === 0 && otherSerpCheck === 0) {
                         return (
@@ -1234,7 +1279,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                         );
                       }
                       const otherSerp = aiSearch?.otherSerpFeaturesCount ?? 0;
-                      const serpPieData = [
+                      const serpPieData: Array<{ name: string; value: number; fill: string }> = [
                         { name: "Organic", value: organic || 1, fill: "#3B82F6" },
                         ...(ai > 0 ? [{ name: "AI Overviews", value: ai, fill: "#8B5CF6" }] : []),
                         ...(otherSerp > 0 ? [{ name: "Other SERP Features", value: otherSerp, fill: "#22C55E" }] : []),
@@ -2182,70 +2227,106 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       )}
 
       {/* Backlinks modal */}
-      {backlinksModalOpen && overview && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setBacklinksModalOpen(false)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Backlinks ({(overview.backlinksList?.length ?? 0).toLocaleString()})</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => exportBacklinksToCsv(overview.backlinksList ?? [], overview.client?.domain ?? "export")}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  <Upload className="h-4 w-4" />
-                  Export
-                </button>
-                <button type="button" onClick={() => setBacklinksModalOpen(false)} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700">
-                  <X className="h-5 w-5" />
-                </button>
+      {backlinksModalOpen &&
+        overview &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] bg-black/50 p-4" onClick={() => setBacklinksModalOpen(false)}>
+            <div
+              className="mx-auto mt-10 max-w-5xl rounded-xl bg-white shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Backlinks ({(overview.backlinksList?.length ?? 0).toLocaleString()})
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => exportBacklinksToCsv(overview.backlinksList ?? [], overview.client?.domain ?? "export")}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Export
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBacklinksModalOpen(false)}
+                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-[75vh] overflow-auto p-6">
+                {(overview.backlinksList?.length ?? 0) === 0 ? (
+                  <p className="py-8 text-center text-gray-500">No backlinks data</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="sticky top-0 bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">
+                            Referring Page Title / Referring Page URL
+                          </th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">
+                            Anchor Text / Link URL
+                          </th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">Type</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {(overview.backlinksList ?? []).map((b, i) => (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-4 py-2">
+                              <div className="flex flex-col">
+                                <span className="max-w-[280px] truncate text-gray-700">
+                                  {b.referringPageTitle || getDomainFromUrl(b.referringPageUrl || "")}
+                                </span>
+                                <a
+                                  href={b.referringPageUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-0.5 max-w-[280px] truncate text-xs text-blue-600 hover:underline"
+                                  title={b.referringPageUrl}
+                                >
+                                  {b.referringPageUrl}
+                                </a>
+                              </div>
+                            </td>
+                            <td className="px-4 py-2">
+                              <div className="flex flex-col">
+                                <span className="text-gray-900">{b.anchorText || "(empty)"}</span>
+                                <a
+                                  href={b.linkUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-0.5 max-w-[240px] truncate text-xs text-blue-600 hover:underline"
+                                  title={b.linkUrl}
+                                >
+                                  {b.linkUrl}
+                                </a>
+                              </div>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                                  b.type === "follow" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {b.type}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-6">
-              {(overview.backlinksList?.length ?? 0) === 0 ? (
-                <p className="text-center text-gray-500 py-8">No backlinks data</p>
-              ) : (
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Referring Page Title / Referring Page URL</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Anchor Text / Link URL</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Type</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {(overview.backlinksList ?? []).map((b, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-4 py-2">
-                          <div className="flex flex-col">
-                            <span className="text-gray-700 truncate max-w-[280px]">{b.referringPageTitle || getDomainFromUrl(b.referringPageUrl || "")}</span>
-                            <a href={b.referringPageUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-[280px] text-xs mt-0.5" title={b.referringPageUrl}>
-                              {b.referringPageUrl}
-                            </a>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2">
-                          <div className="flex flex-col">
-                            <span className="text-gray-900">{b.anchorText || "(empty)"}</span>
-                            <a href={b.linkUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-[240px] text-xs mt-0.5" title={b.linkUrl}>
-                              {b.linkUrl}
-                            </a>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${b.type === "follow" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"}`}>
-                            {b.type}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* Main Organic Competitors modal */}
       {competitorsModalOpen && overview && (
@@ -2301,61 +2382,93 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       )}
 
       {/* Top Organic Keywords modal */}
-      {topKeywordsModalOpen && overview && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setTopKeywordsModalOpen(false)}>
-          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Top Organic Keywords ({overview.topOrganicKeywords.length})</h3>
-              <button type="button" onClick={() => setTopKeywordsModalOpen(false)} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700">
-                <X className="h-5 w-5" />
-              </button>
+      {topKeywordsModalOpen &&
+        overview &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] bg-black/50 p-4" onClick={() => setTopKeywordsModalOpen(false)}>
+            <div
+              className="mx-auto mt-10 max-w-5xl rounded-xl bg-white shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Top Organic Keywords ({overview.topOrganicKeywords.length})
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setTopKeywordsModalOpen(false)}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="max-h-[75vh] overflow-auto p-6">
+                {overview.topOrganicKeywords.length === 0 ? (
+                  <p className="py-8 text-center text-gray-500">No keywords yet</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="sticky top-0 bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">Keyword</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">Intent</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">Pos.</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">Volume</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">CPC (USD)</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-700">Traffic</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {overview.topOrganicKeywords.map((k, i) => (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-4 py-2">
+                              <a
+                                href={
+                                  k.url
+                                    ? k.url.startsWith("http")
+                                      ? k.url
+                                      : `https://${k.url}`
+                                    : `https://www.google.com/search?q=${encodeURIComponent(k.keyword)}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex max-w-[320px] items-center gap-1.5 truncate text-blue-600 hover:text-blue-700 hover:underline"
+                                title={k.keyword}
+                              >
+                                <FileText className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                                <span className="truncate">{k.keyword}</span>
+                              </a>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-gray-100 text-xs font-medium text-gray-500">
+                                —
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 tabular-nums text-gray-600">{k.position}</td>
+                            <td className="px-4 py-2 tabular-nums text-gray-600">
+                              {k.volume != null ? formatCompactNumber(k.volume) : "—"}
+                            </td>
+                            <td className="px-4 py-2 tabular-nums text-gray-600">
+                              {k.cpc != null ? k.cpc.toFixed(2) : "—"}
+                            </td>
+                            <td className="px-4 py-2 tabular-nums text-gray-600">
+                              {k.traffic != null
+                                ? formatCompactNumber(k.traffic)
+                                : k.trafficPercent != null
+                                  ? `${k.trafficPercent.toFixed(2)}%`
+                                  : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex-1 overflow-auto p-6">
-              {overview.topOrganicKeywords.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No keywords yet</p>
-              ) : (
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Keyword</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Intent</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Pos.</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Volume</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">CPC (U...)</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Traffic</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {overview.topOrganicKeywords.map((k, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-4 py-2">
-                          <a
-                            href={k.url ? (k.url.startsWith("http") ? k.url : `https://${k.url}`) : `https://www.google.com/search?q=${encodeURIComponent(k.keyword)}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline truncate max-w-[280px]"
-                            title={k.keyword}
-                          >
-                            <FileText className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
-                            <span className="truncate">{k.keyword}</span>
-                          </a>
-                        </td>
-                        <td className="px-4 py-2">
-                          <span className="inline-flex w-6 h-6 items-center justify-center rounded bg-gray-100 text-xs font-medium text-gray-500">—</span>
-                        </td>
-                        <td className="px-4 py-2 text-gray-600 tabular-nums">{k.position}</td>
-                        <td className="px-4 py-2 text-gray-600 tabular-nums">{k.volume != null ? formatCompactNumber(k.volume) : "—"}</td>
-                        <td className="px-4 py-2 text-gray-600 tabular-nums">{k.cpc != null ? k.cpc.toFixed(2) : "0.00"}</td>
-                        <td className="px-4 py-2 text-gray-600 tabular-nums">{k.trafficPercent != null ? k.trafficPercent.toFixed(2) : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

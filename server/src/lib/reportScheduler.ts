@@ -532,7 +532,7 @@ export async function generateReportPDFBuffer(
   opts?: { targetKeywords?: ReportTargetKeywordRow[]; shareUrl?: string | null }
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 40 });
+    const doc = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
     const chunks: Buffer[] = [];
 
     // doc.on('data', (chunk) => chunks.push(chunk));
@@ -547,50 +547,140 @@ export async function generateReportPDFBuffer(
     const shareUrl = opts?.shareUrl || null;
     const targetKeywords = opts?.targetKeywords || [];
     const defaultMargin = 40;
+    const brandColor = "#4f46e5";
+    const generatedAt = new Date().toLocaleString();
+    const footerReserved = 42;
 
-    doc.fontSize(20).text(`SEO Analytics Report`, { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(14).text(`${periodLabel} report for ${client.name}`, { align: 'center' });
-    doc.moveDown();
+    const ensurePageSpace = (requiredHeight = 28) => {
+      const pageHeight = safeNumber((doc as any)?.page?.height, 842);
+      if (doc.y + requiredHeight > pageHeight - footerReserved) {
+        doc.addPage();
+      }
+    };
 
-    doc.fontSize(12).text(`Client: ${client.name}`);
+    const drawSectionHeader = (title: string) => {
+      ensurePageSpace(36);
+      const pageLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
+      const pageRight =
+        safeNumber((doc as any)?.page?.width, 595) - safeNumber((doc as any)?.page?.margins?.right, defaultMargin);
+      const sectionWidth = Math.max(1, pageRight - pageLeft);
+      const y = doc.y;
+      doc.save();
+      doc.roundedRect(pageLeft, y, sectionWidth, 24, 4).fill("#f8fafc");
+      doc.rect(pageLeft, y, 4, 24).fill(brandColor);
+      doc.restore();
+      doc
+        .fontSize(7.5)
+        .fillColor("#64748b")
+        .text("SECTION", pageLeft + 10, y + 4.5, { width: sectionWidth - 14, align: "left" });
+      doc
+        .fontSize(10.5)
+        .fillColor("#0f172a")
+        .text(title, pageLeft + 10, y + 11, { width: sectionWidth - 14, align: "left" });
+      doc.moveDown(1.8);
+      doc.fillColor("#000000");
+    };
+
+    const drawMetricRow = (label: string, value: string | number) => {
+      ensurePageSpace(20);
+      const pageLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
+      const pageRight =
+        safeNumber((doc as any)?.page?.width, 595) - safeNumber((doc as any)?.page?.margins?.right, defaultMargin);
+      const rowWidth = Math.max(1, pageRight - pageLeft);
+      const y = doc.y;
+      doc
+        .fontSize(11)
+        .fillColor("#475569")
+        .text(String(label), pageLeft, y, { width: rowWidth * 0.58, align: "left" });
+      doc
+        .fontSize(11)
+        .fillColor("#0f172a")
+        .text(String(value), pageLeft, y, { width: rowWidth, align: "right" });
+      doc
+        .strokeColor("#e2e8f0")
+        .lineWidth(1)
+        .moveTo(pageLeft, y + 15)
+        .lineTo(pageRight, y + 15)
+        .stroke();
+      doc.moveDown(0.7);
+      doc.fillColor("#000000");
+    };
+
+    const drawPageChrome = (pageIndex: number, totalPages: number) => {
+      doc.switchToPage(pageIndex);
+      const pageWidth = safeNumber((doc as any)?.page?.width, 595);
+      const pageHeight = safeNumber((doc as any)?.page?.height, 842);
+      const marginLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
+      const marginRight = safeNumber((doc as any)?.page?.margins?.right, defaultMargin);
+
+      doc.save();
+      doc.rect(0, 0, pageWidth, 4).fill(brandColor);
+      doc.restore();
+
+      doc
+        .fontSize(8)
+        .fillColor("#64748b")
+        .text(BRAND_DISPLAY_NAME, marginLeft, 14, {
+          width: pageWidth - marginLeft - marginRight,
+          align: "left",
+        })
+        .text(`Page ${pageIndex + 1} of ${totalPages}`, marginLeft, pageHeight - 26, {
+          width: pageWidth - marginLeft - marginRight,
+          align: "center",
+        })
+        .text(`Generated ${generatedAt}`, marginLeft, pageHeight - 26, {
+          width: pageWidth - marginLeft - marginRight,
+          align: "right",
+        });
+
+      doc
+        .strokeColor("#e2e8f0")
+        .lineWidth(1)
+        .moveTo(marginLeft, pageHeight - 32)
+        .lineTo(pageWidth - marginRight, pageHeight - 32)
+        .stroke();
+
+      doc.fillColor("#000000");
+    };
+
+    doc.fontSize(20).fillColor("#0f172a").text(`SEO Analytics Report`, { align: 'center' });
+    doc.moveDown(0.35);
+    doc.fontSize(13).fillColor("#334155").text(`${periodLabel} report for ${client.name}`, { align: 'center' });
+    doc.moveDown(0.9);
+
+    doc.fontSize(11).fillColor("#475569").text(`Client: ${client.name}`);
     if (client.domain) {
       doc.text(`Domain: ${client.domain}`);
     }
     doc.text(`Report date: ${reportDate}`);
+    doc.fillColor("#000000");
 
     doc.moveDown();
-    doc.fontSize(14).text(REPORT_SECTION_TITLES.traffic_overview);
-    doc.moveDown(0.5);
-    doc.fontSize(12);
-    const webVisitors = (report as any).totalUsers ?? report.activeUsers ?? 0;
+    drawSectionHeader(REPORT_SECTION_TITLES.traffic_overview);
+    const webVisitors = (report as any).totalUsers ?? 0;
     const organicTraffic = (report as any).organicSearchEngagedSessions ?? report.organicSessions ?? 0;
-    doc.text(`Web Visitors: ${Number(webVisitors).toLocaleString()}`);
-    doc.text(`Organic Traffic: ${Number(organicTraffic).toLocaleString()}`);
-    doc.text(`First Time Visitors: ${Number(report.newUsers ?? 0).toLocaleString()}`);
-    doc.text(`Engaged Visitors: ${Number((report as any).engagedSessions ?? 0).toLocaleString()}`);
+    drawMetricRow("Web Visitors", Number(webVisitors).toLocaleString());
+    drawMetricRow("Organic Traffic", Number(organicTraffic).toLocaleString());
+    drawMetricRow("First Time Visitors", Number(report.newUsers ?? 0).toLocaleString());
+    drawMetricRow("Engaged Visitors", Number((report as any).engagedSessions ?? 0).toLocaleString());
 
     doc.moveDown();
-    doc.fontSize(14).text(REPORT_SECTION_TITLES.seo_performance);
-    doc.moveDown(0.5);
-    doc.fontSize(12);
+    drawSectionHeader(REPORT_SECTION_TITLES.seo_performance);
     if (report.averagePosition != null) {
-      doc.text(`Average Position: ${Number(report.averagePosition).toFixed(1)}`);
+      drawMetricRow("Average Position", Number(report.averagePosition).toFixed(1));
     }
-    doc.text(`Total Clicks: ${report.totalClicks?.toLocaleString?.() ?? report.totalClicks ?? 0}`);
-    doc.text(`Total Impressions: ${report.totalImpressions?.toLocaleString?.() ?? report.totalImpressions ?? 0}`);
+    drawMetricRow("Total Clicks", report.totalClicks?.toLocaleString?.() ?? report.totalClicks ?? 0);
+    drawMetricRow("Total Impressions", report.totalImpressions?.toLocaleString?.() ?? report.totalImpressions ?? 0);
     if (report.averageCtr != null) {
-      doc.text(`Average CTR: ${(Number(report.averageCtr) * 100).toFixed(2)}%`);
+      drawMetricRow("Average CTR", `${(Number(report.averageCtr) * 100).toFixed(2)}%`);
     }
 
     if (report.conversions != null && report.conversions > 0) {
       doc.moveDown();
-      doc.fontSize(14).text('Conversions');
-      doc.moveDown(0.5);
-      doc.fontSize(12);
-      doc.text(`Conversions: ${report.conversions}`);
+      drawSectionHeader('Conversions');
+      drawMetricRow("Conversions", report.conversions);
       if (report.conversionRate != null) {
-        doc.text(`Conversion Rate: ${(Number(report.conversionRate) * 100).toFixed(2)}%`);
+        drawMetricRow("Conversion Rate", `${(Number(report.conversionRate) * 100).toFixed(2)}%`);
       }
     }
 
@@ -750,11 +840,27 @@ export async function generateReportPDFBuffer(
       }
     }
 
-    doc.moveDown(2);
-    doc.fontSize(10).fillColor('#666').text(
+    ensurePageSpace(42);
+    doc.moveDown(0.8);
+    const pageLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
+    const pageRight =
+      safeNumber((doc as any)?.page?.width, 595) - safeNumber((doc as any)?.page?.margins?.right, defaultMargin);
+    const noticeWidth = Math.max(1, pageRight - pageLeft);
+    const noticeY = doc.y;
+    doc.save();
+    doc.roundedRect(pageLeft, noticeY, noticeWidth, 34, 4).fill("#f8fafc");
+    doc.restore();
+    doc.fontSize(10).fillColor('#64748b').text(
       `This PDF was generated automatically by ${BRAND_DISPLAY_NAME} based on the latest available analytics data.`,
-      { align: 'center' }
+      pageLeft + 10,
+      noticeY + 11,
+      { width: noticeWidth - 20, align: 'center' }
     );
+
+    const pageRange = doc.bufferedPageRange();
+    for (let i = 0; i < pageRange.count; i += 1) {
+      drawPageChrome(i, pageRange.count);
+    }
 
     doc.end();
   });
@@ -1033,19 +1139,68 @@ function campaignWinsEmailHtml(params: {
   eventDetails: string[];
   dashboardUrl: string | null;
 }): string {
-  const dashboardLine = params.dashboardUrl
-    ? `<a href="${escapeHtml(params.dashboardUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(params.dashboardUrl)}</a>`
-    : "Dashboard link unavailable right now.";
-  const lines = params.eventDetails.map((line) => `<p style="margin: 0 0 10px 0;">${escapeHtml(line)}</p>`).join("");
+  const dashboardLink = params.dashboardUrl ? escapeHtml(params.dashboardUrl) : "";
+  const winAccentColors = ["#ec4899", "#8b5cf6", "#06b6d4", "#22c55e", "#f59e0b"];
+  const winsHtml = params.eventDetails
+    .map((line, index) => {
+      const accent = winAccentColors[index % winAccentColors.length];
+      return `
+        <tr>
+          <td style="padding: 0 0 10px 0;">
+            <div style="background: #ffffff; border: 1px solid #f1f5f9; border-left: 5px solid ${accent}; border-radius: 10px; padding: 12px 14px; color: #111827; font-size: 14px; line-height: 1.5;">
+              ${escapeHtml(line)}
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
   const agencyName = BRAND_DISPLAY_NAME;
+  const safeClientName = escapeHtml(params.clientName || "your campaign");
   return `
-    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
-      <p>Hi ${escapeHtml(params.clientFirstName || "there")},</p>
-      <p>We have some great news from your SEO campaign this week.</p>
-      ${lines}
-      <p>You can log in to your dashboard anytime to see the full picture.</p>
-      <p>${dashboardLine}</p>
-      <p>Talk soon,<br/>${escapeHtml(agencyName)}</p>
+    <div style="margin: 0; padding: 24px 12px; background: linear-gradient(160deg, #eff6ff 0%, #f5f3ff 35%, #fdf2f8 100%); font-family: Arial, sans-serif; color: #111827;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 640px; margin: 0 auto;">
+        <tr>
+          <td style="padding: 0;">
+            <div style="border-radius: 18px; overflow: hidden; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);">
+              <div style="padding: 24px; background: linear-gradient(120deg, #4f46e5 0%, #a21caf 55%, #ec4899 100%); color: #ffffff;">
+                <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.9;">Campaign Wins</div>
+                <h1 style="margin: 8px 0 4px; font-size: 24px; line-height: 1.25;">Great progress for ${safeClientName}</h1>
+                <p style="margin: 0; font-size: 14px; color: #fdf4ff;">Fresh SEO milestones are in for this week.</p>
+              </div>
+
+              <div style="background: #ffffff; padding: 22px 24px 18px;">
+                <p style="margin: 0 0 14px 0; font-size: 15px; line-height: 1.6; color: #111827;">
+                  Hi ${escapeHtml(params.clientFirstName || "there")},
+                </p>
+                <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.65; color: #334155;">
+                  Here are the biggest wins we detected in your campaign:
+                </p>
+
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 14px;">
+                  ${winsHtml}
+                </table>
+
+                <div style="margin: 16px 0 0; padding: 14px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0;">
+                  <p style="margin: 0 0 10px 0; font-size: 13px; line-height: 1.5; color: #475569;">
+                    Open your dashboard for the full picture and latest updates.
+                  </p>
+                  ${
+                    params.dashboardUrl
+                      ? `<a href="${dashboardLink}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: linear-gradient(120deg, #2563eb 0%, #7c3aed 100%); color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 700; padding: 10px 14px; border-radius: 8px;">View Dashboard</a>`
+                      : `<span style="font-size: 13px; color: #94a3b8;">Dashboard link unavailable right now.</span>`
+                  }
+                </div>
+
+                <p style="margin: 18px 0 0; font-size: 14px; line-height: 1.6; color: #334155;">
+                  Talk soon,<br/>
+                  <span style="font-weight: 700; color: #0f172a;">${escapeHtml(agencyName)}</span>
+                </p>
+              </div>
+            </div>
+          </td>
+        </tr>
+      </table>
     </div>
   `;
 }
@@ -1580,6 +1735,107 @@ async function processCampaignWinsForClient(client: {
     where: { id: client.id },
     data: { campaignWinsLastSent: now },
   });
+}
+
+export async function getCampaignWinsInstantPreviewForClient(clientId: string): Promise<{
+  recipients: string[];
+  subject: string;
+  eventDetails: string[];
+  html: string;
+  preview: boolean;
+}> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: {
+      id: true,
+      name: true,
+      campaignWinsEnabled: true,
+      campaignWinsEmails: true,
+      user: { select: { name: true } },
+    },
+  });
+  if (!client) {
+    throw new Error("Client not found");
+  }
+  if (!client.campaignWinsEnabled) {
+    throw new Error("Campaign Wins is not enabled for this client");
+  }
+
+  const recipients = parseRecipientEmails(client.campaignWinsEmails);
+  if (recipients.length === 0) {
+    throw new Error("No Campaign Wins recipients configured");
+  }
+
+  // Refresh event detection before previewing to include newly-eligible wins.
+  await detectKeywordWins(client.id);
+  await detectTrafficMilestones(client.id);
+  await detectWorkCompleted(client.id);
+  await detectAiVisibility(client.id);
+  await detectReviewOrLeadActivity(client.id);
+
+  const now = new Date();
+  const pendingEvents = await prisma.campaignWinEvent.findMany({
+    where: {
+      clientId: client.id,
+      OR: [{ notifiedAt: null }, { notifiedAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) } }],
+    },
+    orderBy: { triggeredAt: "desc" },
+    take: 10,
+  });
+
+  const selectedEvents = sortCampaignWinEvents(pendingEvents).slice(0, 3);
+  const eventDetails =
+    selectedEvents.length > 0
+      ? selectedEvents.map((e) => e.eventDetail)
+      : [
+          "Your campaign is active and we are tracking performance milestones this week.",
+          "This is a preview message so you can review the Campaign Wins email format.",
+        ];
+
+  const shareUrl = await buildShareDashboardUrl(client.id).catch(() => null);
+  const clientFirstName = String(client.user?.name || "").trim().split(/\s+/)[0] || "there";
+  const subject = `Campaign Update Preview — ${client.name}`;
+  const html = campaignWinsEmailHtml({
+    clientName: client.name,
+    clientFirstName,
+    eventDetails,
+    dashboardUrl: shareUrl,
+  });
+
+  return {
+    recipients,
+    subject,
+    eventDetails,
+    html,
+    preview: true,
+  };
+}
+
+export async function sendCampaignWinsInstantEmailForClient(clientId: string): Promise<{
+  recipients: string[];
+  subject: string;
+  eventDetails: string[];
+  preview: boolean;
+}> {
+  const previewPayload = await getCampaignWinsInstantPreviewForClient(clientId);
+  const { recipients, subject, html, eventDetails, preview } = previewPayload;
+
+  await Promise.all(
+    recipients.map((to) =>
+      sendEmail({
+        to,
+        subject,
+        html,
+      })
+    )
+  );
+
+  return {
+    recipients,
+    subject,
+    eventDetails,
+    preview,
+  };
 }
 
 export async function processCampaignWinsReports(): Promise<void> {

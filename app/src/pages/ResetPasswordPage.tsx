@@ -4,6 +4,7 @@ import { Lock, Eye, EyeOff } from "lucide-react";
 import zoesiLogo from "@/assets/zoesi-blue.png";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 const ResetPasswordPage = () => {
   const [searchParams] = useSearchParams();
@@ -15,6 +16,7 @@ const ResetPasswordPage = () => {
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const { brandName, logoUrl, primaryColor } = usePublicBranding();
 
   useEffect(() => {
     if (!token) {
@@ -67,7 +69,7 @@ const ResetPasswordPage = () => {
         <div className="max-w-md w-full">
           <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
             <div className="flex justify-center mb-4">
-              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
+              <img src={logoUrl || zoesiLogo} alt={brandName} className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Invalid or expired link</h1>
             <p className="text-gray-600 mb-6">
@@ -96,7 +98,7 @@ const ResetPasswordPage = () => {
         <div className="max-w-md w-full">
           <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
             <div className="flex justify-center mb-4">
-              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
+              <img src={logoUrl || zoesiLogo} alt={brandName} className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Password updated</h1>
             <p className="text-gray-600 mb-6">You can now sign in with your new password.</p>
@@ -118,7 +120,7 @@ const ResetPasswordPage = () => {
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <img src={zoesiLogo} alt="ZOESI" className="h-12 w-auto" />
+              <img src={logoUrl || zoesiLogo} alt={brandName} className="h-12 w-auto" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Set new password</h1>
             <p className="text-gray-600">Enter your new password below.</p>
@@ -181,6 +183,7 @@ const ResetPasswordPage = () => {
               type="submit"
               disabled={loading}
               className="w-full bg-primary-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: primaryColor }}
             >
               {loading ? "Updating…" : "Update password"}
             </button>

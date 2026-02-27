@@ -40,6 +40,15 @@ model Agency {
   updatedAt             DateTime             @updatedAt
   name                  String
   subdomain             String?              @unique
+  brandDisplayName      String?              @db.VarChar(255)
+  logoUrl               String?              @db.VarChar(2048)
+  primaryColor          String?              @db.VarChar(16)
+  customDomain          String?              @unique @db.VarChar(255)
+  domainStatus          AgencyDomainStatus   @default(NONE)
+  domainVerificationToken String?            @db.VarChar(191)
+  domainVerifiedAt      DateTime?
+  sslIssuedAt           DateTime?
+  sslError              String?              @db.VarChar(500)
   stripeCustomerId      String?              @db.VarChar(255)
   stripeSubscriptionId  String?              @db.VarChar(255)
   billingType           BillingType?         @default(paid)
@@ -883,6 +892,15 @@ enum BillingType {
   free
   trial
   custom
+}
+
+enum AgencyDomainStatus {
+  NONE
+  PENDING_VERIFICATION
+  VERIFIED
+  SSL_PENDING
+  ACTIVE
+  FAILED
 }
 
 enum CampaignWinEventType {

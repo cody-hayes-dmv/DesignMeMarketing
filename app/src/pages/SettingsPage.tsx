@@ -48,8 +48,25 @@ const SettingsPage = () => {
     name: "",
     subdomain: "",
     website: "",
+    brandDisplayName: "",
+    logoUrl: "",
+    primaryColor: "#4f46e5",
+    customDomain: "",
   });
   const [isBusinessTier, setIsBusinessTier] = useState(false);
+  const [domainStatus, setDomainStatus] = useState<
+    "NONE" | "PENDING_VERIFICATION" | "VERIFIED" | "SSL_PENDING" | "ACTIVE" | "FAILED"
+  >("NONE");
+  const [domainVerifiedAt, setDomainVerifiedAt] = useState<string | null>(null);
+  const [sslIssuedAt, setSslIssuedAt] = useState<string | null>(null);
+  const [domainError, setDomainError] = useState<string | null>(null);
+  const [domainActionLoading, setDomainActionLoading] = useState<"verify" | "ssl" | null>(null);
+  const [domainInstructions, setDomainInstructions] = useState<{
+    txtHost: string;
+    txtValue: string;
+    cnameHost: string;
+    cnameTarget: string;
+  } | null>(null);
 
   const defaults = {
     emailReports: true,
@@ -108,7 +125,7 @@ const SettingsPage = () => {
     { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
     { id: "enterprise-calculator", label: "Enterprise Calculator", icon: Calculator, roles: ["SUPER_ADMIN"] },
     { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
-    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY", "ADMIN"] },
+    { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
     { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
     { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
@@ -173,18 +190,39 @@ const SettingsPage = () => {
     }
   }, [templateModalOpen, templateModalMode, user?.role]);
 
+  const applyAgencyData = (data: any) => {
+    setAgencyForm({
+      name: data?.name || "",
+      subdomain: data?.subdomain || "",
+      website: "", // Not stored in backend currently
+      brandDisplayName: data?.brandDisplayName || "",
+      logoUrl: data?.logoUrl || "",
+      primaryColor: data?.primaryColor || "#4f46e5",
+      customDomain: data?.customDomain || "",
+    });
+    setIsBusinessTier(!!data?.isBusinessTier);
+    setDomainStatus(
+      (data?.domainStatus as
+        | "NONE"
+        | "PENDING_VERIFICATION"
+        | "VERIFIED"
+        | "SSL_PENDING"
+        | "ACTIVE"
+        | "FAILED") || "NONE"
+    );
+    setDomainVerifiedAt(data?.domainVerifiedAt || null);
+    setSslIssuedAt(data?.sslIssuedAt || null);
+    setDomainError(data?.sslError || null);
+    setDomainInstructions(data?.domainInstructions || null);
+  };
+
   const fetchAgencyData = async () => {
     try {
       setAgencyLoading(true);
       const response = await api.get("/agencies/me");
       // Handle null response for SUPER_ADMIN (though they shouldn't call this)
       if (response.data) {
-        setAgencyForm({
-          name: response.data.name || "",
-          subdomain: response.data.subdomain || "",
-          website: "", // Not stored in backend currently
-        });
-        setIsBusinessTier(!!response.data.isBusinessTier);
+        applyAgencyData(response.data);
       }
     } catch (error: any) {
       if (error.response?.status !== 404) {
@@ -259,26 +297,55 @@ const SettingsPage = () => {
     e.preventDefault();
     try {
       setLoading(true);
-      const updateData: { name?: string; subdomain?: string } = {};
-      if (agencyForm.name) {
-        updateData.name = agencyForm.name;
-      }
-      if (agencyForm.subdomain) {
-        updateData.subdomain = agencyForm.subdomain;
-      }
+      const updateData = {
+        name: agencyForm.name.trim(),
+        subdomain: agencyForm.subdomain.trim() || null,
+        brandDisplayName: agencyForm.brandDisplayName.trim() || null,
+        logoUrl: agencyForm.logoUrl.trim() || null,
+        primaryColor: agencyForm.primaryColor || null,
+        customDomain: agencyForm.customDomain.trim() || null,
+      };
 
-      if (Object.keys(updateData).length === 0) {
-        toast.error("No changes to save");
-        return;
-      }
-
-      await api.put("/agencies/me", updateData);
+      const res = await api.put("/agencies/me", updateData);
       toast.success("Agency settings updated successfully!");
-      fetchAgencyData();
+      if (res?.data) applyAgencyData(res.data);
+      dispatch(checkAuth() as any);
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to update agency settings");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVerifyDomain = async () => {
+    try {
+      setDomainActionLoading("verify");
+      const res = await api.post("/agencies/me/domain/verify");
+      if (res?.data?.verified) {
+        toast.success(res?.data?.message || "Domain verified");
+      } else {
+        toast(res?.data?.message || "Domain is not verified yet. Check DNS records and retry.");
+      }
+      await fetchAgencyData();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Domain verification failed");
+      await fetchAgencyData();
+    } finally {
+      setDomainActionLoading(null);
+    }
+  };
+
+  const handleProvisionSsl = async () => {
+    try {
+      setDomainActionLoading("ssl");
+      const res = await api.post("/agencies/me/domain/provision-ssl");
+      toast.success(res?.data?.message || "SSL provisioning requested");
+      await fetchAgencyData();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "SSL provisioning failed");
+      await fetchAgencyData();
+    } finally {
+      setDomainActionLoading(null);
     }
   };
 
@@ -583,27 +650,160 @@ const SettingsPage = () => {
                     />
                   </div>
                   {!isBusinessTier && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        White-label subdomain
-                      </label>
-                      <div className="flex">
-                        <input
-                          type="text"
-                          value={agencyForm.subdomain}
-                          onChange={(e) =>
-                            setAgencyForm({
-                              ...agencyForm,
-                              subdomain: e.target.value,
-                            })
-                          }
-                          className="flex-1 px-4 py-3 border border-gray-300 rounded-l-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
-                        <span className="bg-gray-50 border border-l-0 border-gray-300 rounded-r-lg px-4 py-3 text-gray-500">
-                          .yourseodashboard.com
-                        </span>
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          White-label subdomain
+                        </label>
+                        <div className="flex">
+                          <input
+                            type="text"
+                            value={agencyForm.subdomain}
+                            onChange={(e) =>
+                              setAgencyForm({
+                                ...agencyForm,
+                                subdomain: e.target.value,
+                              })
+                            }
+                            className="flex-1 px-4 py-3 border border-gray-300 rounded-l-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          />
+                          <span className="bg-gray-50 border border-l-0 border-gray-300 rounded-r-lg px-4 py-3 text-gray-500">
+                            .yourmarketingdashboard.ai
+                          </span>
+                        </div>
                       </div>
-                    </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Brand display name
+                          </label>
+                          <input
+                            type="text"
+                            value={agencyForm.brandDisplayName}
+                            onChange={(e) =>
+                              setAgencyForm({ ...agencyForm, brandDisplayName: e.target.value })
+                            }
+                            placeholder="Your Agency Name"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Primary brand color
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="color"
+                              value={agencyForm.primaryColor || "#4f46e5"}
+                              onChange={(e) =>
+                                setAgencyForm({ ...agencyForm, primaryColor: e.target.value })
+                              }
+                              className="h-12 w-14 rounded border border-gray-300 bg-white p-1"
+                            />
+                            <input
+                              type="text"
+                              value={agencyForm.primaryColor}
+                              onChange={(e) =>
+                                setAgencyForm({ ...agencyForm, primaryColor: e.target.value })
+                              }
+                              placeholder="#4f46e5"
+                              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Logo URL
+                        </label>
+                        <input
+                          type="url"
+                          value={agencyForm.logoUrl}
+                          onChange={(e) =>
+                            setAgencyForm({ ...agencyForm, logoUrl: e.target.value })
+                          }
+                          placeholder="https://cdn.example.com/logo.png"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                        {agencyForm.logoUrl && (
+                          <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3 inline-block">
+                            <img
+                              src={agencyForm.logoUrl}
+                              alt="Brand logo preview"
+                              className="h-10 w-auto object-contain"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-gray-200 p-4 space-y-3 bg-gray-50/60">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Custom domain
+                          </label>
+                          <input
+                            type="text"
+                            value={agencyForm.customDomain}
+                            onChange={(e) =>
+                              setAgencyForm({ ...agencyForm, customDomain: e.target.value })
+                            }
+                            placeholder="portal.youragency.com"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <span className="font-medium text-gray-700">Status:</span>
+                          <span className="inline-flex items-center rounded-full bg-white border border-gray-300 px-2.5 py-1 text-xs font-semibold text-gray-700">
+                            {domainStatus}
+                          </span>
+                          {domainVerifiedAt && (
+                            <span className="text-gray-500">Verified: {new Date(domainVerifiedAt).toLocaleString()}</span>
+                          )}
+                          {sslIssuedAt && (
+                            <span className="text-gray-500">SSL issued: {new Date(sslIssuedAt).toLocaleString()}</span>
+                          )}
+                        </div>
+
+                        {domainError && (
+                          <p className="text-sm text-rose-600">{domainError}</p>
+                        )}
+
+                        {domainInstructions && (
+                          <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-600 space-y-1">
+                            <p className="font-semibold text-gray-700">DNS verification records</p>
+                            <p><strong>TXT host:</strong> {domainInstructions.txtHost}</p>
+                            <p><strong>TXT value:</strong> {domainInstructions.txtValue}</p>
+                            <p><strong>CNAME host:</strong> {domainInstructions.cnameHost}</p>
+                            <p><strong>CNAME target:</strong> {domainInstructions.cnameTarget}</p>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={domainActionLoading !== null || !agencyForm.customDomain.trim()}
+                            onClick={handleVerifyDomain}
+                            className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {domainActionLoading === "verify" ? "Verifying..." : "Verify domain"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={domainActionLoading !== null || !(domainStatus === "VERIFIED" || domainStatus === "ACTIVE")}
+                            onClick={handleProvisionSsl}
+                            className="inline-flex items-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {domainActionLoading === "ssl" ? "Provisioning..." : "Provision SSL"}
+                          </button>
+                        </div>
+                      </div>
+                    </>
                   )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">

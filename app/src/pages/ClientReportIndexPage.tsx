@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import api from "@/lib/api";
 import { logout } from "@/store/slices/authSlice";
+import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 type ClientLite = {
   id: string;
@@ -14,6 +15,7 @@ const ClientReportIndexPage: React.FC = () => {
   const dispatch = useDispatch();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { brandName, primaryColor } = usePublicBranding();
 
   useEffect(() => {
     const run = async () => {
@@ -42,8 +44,9 @@ const ClientReportIndexPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-8 min-h-screen bg-gradient-to-br from-primary-50 via-blue-50 to-indigo-50">
         <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-500">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">{brandName}</p>
           Loading your report...
         </div>
       </div>
@@ -52,8 +55,9 @@ const ClientReportIndexPage: React.FC = () => {
 
   if (error) {
     return (
-      <div className="p-8">
+      <div className="p-8 min-h-screen bg-gradient-to-br from-primary-50 via-blue-50 to-indigo-50">
         <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">{brandName}</p>
           <p className="text-sm text-rose-600">{error}</p>
           <button
             type="button"
@@ -61,7 +65,8 @@ const ClientReportIndexPage: React.FC = () => {
               dispatch(logout() as any);
               navigate("/login", { replace: true });
             }}
-            className="mt-4 inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="mt-4 inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white"
+            style={{ backgroundColor: primaryColor }}
           >
             Back to Login
           </button>
