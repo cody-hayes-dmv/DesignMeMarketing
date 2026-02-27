@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { register, clearError } from "@/store/slices/authSlice";
@@ -10,7 +10,6 @@ import {
   Eye,
   EyeOff,
   CheckCircle,
-  Building2,
 } from "lucide-react";
 import zoesiLogo from "@/assets/zoesi-blue.png";
 import AgencyRegisterModal from "@/components/AgencyRegisterModal";
@@ -18,12 +17,14 @@ import { usePublicBranding } from "@/hooks/usePublicBranding";
 
 const RegisterPage = () => {
   const dispatch = useDispatch();
+  const location = useLocation();
   const { loading, error } = useSelector((state: RootState) => state.auth);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
     name: "",
     confirmPassword: "",
+    role: "AGENCY" as "ADMIN" | "AGENCY" | "USER" | "SPECIALIST",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -34,6 +35,13 @@ const RegisterPage = () => {
   useEffect(() => {
     dispatch(clearError());
   }, [dispatch]);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    if (searchParams.get("trial") === "1") {
+      setAgencyModalOpen(true);
+    }
+  }, [location.search]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +57,7 @@ const RegisterPage = () => {
           email: formData.email,
           password: formData.password,
           name: formData.name,
+          role: formData.role,
         }) as any
       ).unwrap();
       setRegistrationSuccess(true);
@@ -137,6 +146,34 @@ const RegisterPage = () => {
                   placeholder="Enter your full name"
                   required
                 />
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="role"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
+                Role
+              </label>
+              <div className="relative">
+                <select
+                  id="role"
+                  name="role"
+                  value={formData.role}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      role: e.target.value as "ADMIN" | "AGENCY" | "USER" | "SPECIALIST",
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 focus:border-blue-500 transition-colors bg-white"
+                >
+                  <option value="ADMIN">Admin</option>
+                  <option value="AGENCY">Agency</option>
+                  <option value="USER">Client</option>
+                  <option value="SPECIALIST">Specialist</option>
+                </select>
               </div>
             </div>
 
@@ -270,23 +307,6 @@ const RegisterPage = () => {
               )}
             </button>
 
-            <div className="relative my-4">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-3 bg-white text-gray-500 font-medium">or</span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setAgencyModalOpen(true)}
-              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition-colors shadow-sm"
-            >
-              <Building2 className="h-5 w-5" />
-              Start For Free
-            </button>
           </form>
 
           <AgencyRegisterModal

@@ -1,25 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useDispatch } from "react-redux";
-import { CheckCircle, XCircle } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { ArrowRight, CheckCircle, XCircle } from "lucide-react";
 import api from "@/lib/api";
-import { login } from "@/store/slices/authSlice";
 import { usePublicBranding } from "@/hooks/usePublicBranding";
 
-const getRedirectUrl = (role: string) => {
-  switch (role) {
-    case "SUPER_ADMIN": return "/superadmin/dashboard";
-    case "ADMIN":
-    case "AGENCY": return "/agency/dashboard";
-    case "SPECIALIST": return "/specialist/dashboard";
-    case "USER": return "/client/dashboard";
-    default: return "/agency/dashboard";
-  }
-};
-
 const VerifyPage = () => {
-  const navigate = useNavigate();
-  const dispatch = useDispatch();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token")?.trim() ?? "";
 
@@ -37,17 +22,13 @@ const VerifyPage = () => {
     let cancelled = false;
     api
       .post("/auth/verify", { token })
-      .then((res) => {
+      .then(() => {
         if (cancelled) return;
-        const { token: jwtToken, user } = res.data || {};
-        if (jwtToken && user) {
-          localStorage.setItem("token", jwtToken);
-          dispatch(login.fulfilled(user, "", undefined) as any);
-          navigate(getRedirectUrl(user.role || "AGENCY"), { replace: true });
-        } else {
-          setStatus("success");
-          setMessage("Email verified successfully. You can now sign in.");
-        }
+        // Do not auto-login after verification. This avoids auth token/session
+        // mismatches across environments and gives a consistent explicit sign-in step.
+        localStorage.removeItem("token");
+        setStatus("success");
+        setMessage("Email verified successfully. You can now sign in.");
       })
       .catch((err: any) => {
         if (!cancelled) {
@@ -59,7 +40,7 @@ const VerifyPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [token, dispatch, navigate]);
+  }, [token]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center px-4">
@@ -87,11 +68,13 @@ const VerifyPage = () => {
               <p className="text-gray-600 mb-6">{message}</p>
               <Link
                 to="/login"
-                className="inline-flex items-center justify-center w-full py-3 px-6 rounded-lg font-semibold text-white transition-colors"
-                style={{ backgroundColor: primaryColor }}
+                className="inline-flex items-center justify-center gap-2 w-full py-3 px-6 rounded-lg font-semibold text-white transition-all shadow-md hover:shadow-lg animate-pulse"
+                style={{ backgroundColor: primaryColor, animationDuration: "1.8s" }}
               >
-                Sign in
+                Continue to Sign in
+                <ArrowRight className="h-4 w-4" />
               </Link>
+              <p className="text-xs text-gray-500 mt-3">Your account is verified and ready.</p>
             </>
           )}
 

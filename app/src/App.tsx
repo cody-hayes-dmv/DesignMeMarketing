@@ -42,7 +42,8 @@ function App() {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (token) {
+    const isVerifyRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/verify");
+    if (token && !isVerifyRoute) {
       dispatch(checkAuth() as any);
     }
   }, [dispatch]);

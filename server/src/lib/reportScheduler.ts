@@ -1529,16 +1529,30 @@ async function detectAiVisibility(clientId: string): Promise<void> {
   const now = new Date();
   const recentSince = new Date(now);
   recentSince.setDate(recentSince.getDate() - 7);
-  const recentMentions = await prisma.aiMention.findMany({
-    where: {
-      clientId,
-      dateRecorded: { gte: recentSince },
-      mentions: { gt: 0 },
-    },
-    select: { query: true, platform: true, dateRecorded: true },
-    orderBy: { dateRecorded: "desc" },
-    take: 300,
-  });
+  let recentMentions: Array<{ query: string; platform: string; dateRecorded: Date }> = [];
+  try {
+    recentMentions = await prisma.aiMention.findMany({
+      where: {
+        clientId,
+        dateRecorded: { gte: recentSince },
+        mentions: { gt: 0 },
+      },
+      select: { query: true, platform: true, dateRecorded: true },
+      orderBy: { dateRecorded: "desc" },
+      take: 300,
+    });
+  } catch (error: any) {
+    const missingTable =
+      error?.code === "P2021" &&
+      String(error?.meta?.table || "").toLowerCase().includes("ai_mentions");
+    if (missingTable) {
+      console.warn(
+        "[Campaign Wins] Skipping AI_VISIBILITY: table `ai_mentions` is missing. Run `npx prisma db push` (or deploy migrations) to enable this feature."
+      );
+      return;
+    }
+    throw error;
+  }
 
   const seen = new Set<string>();
   for (const mention of recentMentions) {

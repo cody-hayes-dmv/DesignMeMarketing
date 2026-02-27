@@ -17,6 +17,7 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   name: z.string().min(1),
+  role: z.enum(["ADMIN", "AGENCY", "USER", "SPECIALIST"]).optional(),
 });
 
 const loginSchema = z.object({
@@ -119,7 +120,7 @@ async function resolveAgencyBrandingForHost(host: string | null) {
 // Register
 router.post("/register", async (req, res) => {
   try {
-    const { email, password, name } = registerSchema.parse(req.body);
+    const { email, password, name, role } = registerSchema.parse(req.body);
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -139,7 +140,7 @@ router.post("/register", async (req, res) => {
         email,
         name,
         passwordHash,
-        role: "AGENCY",
+        role: role || "AGENCY",
       },
     });
 
@@ -160,16 +161,22 @@ router.post("/register", async (req, res) => {
       },
     });
 
-    // Send verification email
-    // await sendEmail({
-    //   to: email,
-    //   subject: "Verify your email - Your Marketing Dashboard",
-    //   html: `
-    //     <h1>Welcome to Your Marketing Dashboard!</h1>
-    //     <p>Please verify your email by clicking the link below:</p>
-    //     <a href="${process.env.FRONTEND_URL}/verify?token=${verificationToken}">Verify Email</a>
-    //   `,
-    // });
+    // Send verification email (non-blocking)
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3001";
+    const verifyUrl = `${frontendUrl}/verify?token=${encodeURIComponent(verificationToken)}`;
+    await sendEmail({
+      to: email,
+      subject: `Verify your email - ${BRAND_DISPLAY_NAME}`,
+      html: `
+        <h1>Welcome to ${BRAND_DISPLAY_NAME}!</h1>
+        <p>Please verify your email by clicking the link below:</p>
+        <p><a href="${verifyUrl}">Verify my email</a></p>
+        <p>If the link doesn't work, copy and paste this URL into your browser:</p>
+        <p style="word-break:break-all">${verifyUrl}</p>
+      `,
+    }).catch((emailErr) => {
+      console.warn("Register verification email failed:", (emailErr as any)?.message || emailErr);
+    });
 
     res.status(201).json({
       message:

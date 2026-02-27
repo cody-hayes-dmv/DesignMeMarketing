@@ -78,16 +78,19 @@ export const register = createAsyncThunk(
     email,
     password,
     name,
+    role,
   }: {
     email: string;
     password: string;
     name: string;
+    role: "ADMIN" | "AGENCY" | "USER" | "SPECIALIST";
   }) => {
     try {
       const response = await api.post("/auth/register", {
         email,
         password,
         name,
+        role,
       });
       return response.data;
     } catch (error: any) {
