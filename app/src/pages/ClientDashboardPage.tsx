@@ -47,6 +47,7 @@ import {
   Building2,
   DollarSign,
   BookOpen,
+  MapPin,
 } from "lucide-react";
 import api, { getUploadFileUrl } from "@/lib/api";
 import {
@@ -77,6 +78,7 @@ import ClientKeywordsManager from "@/components/ClientKeywordsManager";
 import WorkLogRecurringModal from "@/components/WorkLogRecurringModal";
 import type { WorkLogRecurringRuleForEdit } from "@/components/WorkLogRecurringModal";
 import InfoTooltip from "@/components/InfoTooltip";
+import GoogleBusinessSearch, { type GoogleBusinessSelection } from "@/components/GoogleBusinessSearch";
 import { formatReportPeriodLabel, getReportStatusBadgeClass, toDisplayReportStatus } from "@/lib/reportPresentation";
 
 interface TrafficSourceSlice {
@@ -142,7 +144,7 @@ type WorkLogTask = {
   createdAt: string;
   updatedAt: string;
   assignee?: { id: string; name?: string | null; email: string } | null;
-  createdBy?: { id: string; name?: string | null; email: string } | null;
+  createdBy?: { id: string; name?: string | null; email: string; role?: string | null } | null;
 };
 
 type BacklinkFilter = "all" | "new" | "natural" | "manual";
@@ -182,6 +184,18 @@ interface TopPageItem {
   lostKeywords: number;
   paidTraffic: number;
 }
+
+type LocalMapKeywordRow = {
+  id: string;
+  keywordText: string;
+  businessName: string;
+  businessAddress: string | null;
+  status: "active" | "paused" | "canceled";
+  latestAta: number | null;
+  previousAta: number | null;
+  trend: number | null;
+  lastRunDate: string | null;
+};
 
 interface TrendPoint {
   date: string;
@@ -291,7 +305,7 @@ const ClientDashboardPage: React.FC = () => {
   const [includedClientIds, setIncludedClientIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   type ClientDashboardTopTab = "dashboard" | "report" | "users" | "keywords" | "integration";
-  type ClientDashboardSection = "seo" | "ai-intelligence" | "ppc" | "backlinks" | "worklog";
+  type ClientDashboardSection = "seo" | "ai-intelligence" | "local-map" | "ppc" | "backlinks" | "worklog";
 
   const initialNav = (() => {
     if (clientPortalMode) {
@@ -374,6 +388,7 @@ const ClientDashboardPage: React.FC = () => {
       cancelled = true;
     };
   }, [user?.role]);
+
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
@@ -575,6 +590,126 @@ const ClientDashboardPage: React.FC = () => {
   const [ppcData, setPpcData] = useState<any>(null);
   const [ppcLoading, setPpcLoading] = useState(false);
   const [ppcError, setPpcError] = useState<string | null>(null);
+  const [localMapSummary, setLocalMapSummary] = useState<{
+    total: number;
+    active: number;
+    remaining: number;
+    activeForDashboard: number;
+  }>({
+    total: 0,
+    active: 0,
+    remaining: 0,
+    activeForDashboard: 0,
+  });
+  const [localMapKeywords, setLocalMapKeywords] = useState<LocalMapKeywordRow[]>([]);
+  const [localMapLoading, setLocalMapLoading] = useState(false);
+  const [localMapActivationOpen, setLocalMapActivationOpen] = useState(false);
+  const [localMapMoneyKeywords, setLocalMapMoneyKeywords] = useState<Array<{ id: string; keyword: string }>>([]);
+  const [localMapSelectedKeywordId, setLocalMapSelectedKeywordId] = useState("");
+  const [localMapBusinessSelection, setLocalMapBusinessSelection] = useState<GoogleBusinessSelection | null>(null);
+  const [localMapLabel, setLocalMapLabel] = useState("");
+  const [localMapSubmitting, setLocalMapSubmitting] = useState(false);
+
+  const loadLocalMapData = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      setLocalMapLoading(true);
+      const [summaryRes, listRes] = await Promise.all([
+        api.get(`/local-map/summary/${clientId}`),
+        api.get(`/local-map/keywords/${clientId}`),
+      ]);
+      const summary = summaryRes?.data ?? {};
+      setLocalMapSummary({
+        total: Number(summary.total ?? 0),
+        active: Number(summary.active ?? 0),
+        remaining: Number(summary.remaining ?? 0),
+        activeForDashboard: Number(summary.activeForDashboard ?? 0),
+      });
+      const rows = Array.isArray(listRes.data) ? listRes.data : [];
+      setLocalMapKeywords(
+        rows.map((row: any) => ({
+          id: String(row.id),
+          keywordText: String(row.keywordText ?? ""),
+          businessName: String(row.businessName ?? ""),
+          businessAddress: row.businessAddress ? String(row.businessAddress) : null,
+          status: row.status as "active" | "paused" | "canceled",
+          latestAta: row.latestAta == null ? null : Number(row.latestAta),
+          previousAta: row.previousAta == null ? null : Number(row.previousAta),
+          trend: row.trend == null ? null : Number(row.trend),
+          lastRunDate: row.lastRunDate ? String(row.lastRunDate) : null,
+        }))
+      );
+    } catch {
+      setLocalMapKeywords([]);
+    } finally {
+      setLocalMapLoading(false);
+    }
+  }, [clientId]);
+
+  const loadLocalMapMoneyKeywords = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      const res = await api.get(`/seo/keywords/${clientId}`);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const filtered = rows.filter((row: any) => String(row?.type || "money") === "money");
+      setLocalMapMoneyKeywords(
+        filtered.map((row: any) => ({
+          id: String(row.id),
+          keyword: String(row.keyword || ""),
+        }))
+      );
+    } catch {
+      setLocalMapMoneyKeywords([]);
+    }
+  }, [clientId]);
+
+  const handleActivateLocalMapKeyword = useCallback(async () => {
+    if (!clientId) return;
+    if (!localMapSelectedKeywordId) {
+      toast.error("Select a keyword");
+      return;
+    }
+    if (!localMapBusinessSelection) {
+      toast.error("Select a business profile");
+      return;
+    }
+
+    try {
+      setLocalMapSubmitting(true);
+      await api.post(`/local-map/keywords/${clientId}`, {
+        keywordId: localMapSelectedKeywordId,
+        placeId: localMapBusinessSelection.placeId,
+        businessName: localMapBusinessSelection.businessName,
+        businessAddress: localMapBusinessSelection.address,
+        centerLat: localMapBusinessSelection.lat,
+        centerLng: localMapBusinessSelection.lng,
+        locationLabel: localMapLabel.trim() || null,
+      });
+      toast.success("Local map keyword activated");
+      setLocalMapActivationOpen(false);
+      setLocalMapSelectedKeywordId("");
+      setLocalMapBusinessSelection(null);
+      setLocalMapLabel("");
+      await loadLocalMapData();
+    } catch (error: any) {
+      const message = error?.response?.data?.message || "Failed to activate local map keyword";
+      toast.error(message);
+    } finally {
+      setLocalMapSubmitting(false);
+    }
+  }, [
+    clientId,
+    localMapBusinessSelection,
+    localMapLabel,
+    localMapSelectedKeywordId,
+    loadLocalMapData,
+  ]);
+
+  useEffect(() => {
+    if (activeTab !== "dashboard" || dashboardSection !== "local-map") return;
+    void loadLocalMapData();
+  }, [activeTab, dashboardSection, loadLocalMapData]);
+
   const [ppcDateRange] = useState("30"); // Fixed last 30 days for PPC data (no UI selector)
   const [showGA4Modal, setShowGA4Modal] = useState(false);
   const [ga4PropertyId, setGa4PropertyId] = useState("");
@@ -675,12 +810,11 @@ const ClientDashboardPage: React.FC = () => {
     attachments: [],
     approvalNotifyUserIds: [],
   });
-  const [approvalRecipients, setApprovalRecipients] = useState<{ id: string; name: string | null; email: string }[]>([]);
-  const [approvalRecipientsLoading, setApprovalRecipientsLoading] = useState(false);
   const [assignableUsers, setAssignableUsers] = useState<{ id: string; name: string | null; email: string; role: string }[]>([]);
   const [assignableLoading, setAssignableLoading] = useState(false);
   const [assignableSearch, setAssignableSearch] = useState("");
   const [assignToOpen, setAssignToOpen] = useState(false);
+  const [workLogAssigneesModalOpen, setWorkLogAssigneesModalOpen] = useState(false);
   const assignToRef = useRef<HTMLDivElement | null>(null);
   const workLogTaskNotesRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -693,7 +827,7 @@ const ClientDashboardPage: React.FC = () => {
   }, [workLogModalOpen]);
 
   useEffect(() => {
-    if (!workLogModalOpen && !workLogRecurringRulesOpen) return;
+    if (!workLogModalOpen && !workLogRecurringRulesOpen && !workLogAssigneesModalOpen) return;
     if (user?.role === "USER") return;
     let cancelled = false;
     const q = assignableSearch.trim();
@@ -710,7 +844,7 @@ const ClientDashboardPage: React.FC = () => {
         if (!cancelled) setAssignableLoading(false);
       });
     return () => { cancelled = true; };
-  }, [workLogModalOpen, workLogRecurringRulesOpen, assignableSearch, user?.role]);
+  }, [workLogModalOpen, workLogRecurringRulesOpen, workLogAssigneesModalOpen, assignableSearch, user?.role]);
 
   useEffect(() => {
     if (!assignToOpen) return;
@@ -720,27 +854,6 @@ const ClientDashboardPage: React.FC = () => {
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
   }, [assignToOpen]);
-
-  useEffect(() => {
-    if (!workLogModalOpen || !clientId) {
-      setApprovalRecipients([]);
-      return;
-    }
-    let cancelled = false;
-    setApprovalRecipientsLoading(true);
-    api
-      .get(`/tasks/worklog/${clientId}/approval-recipients`)
-      .then((res) => {
-        if (!cancelled) setApprovalRecipients(Array.isArray(res.data) ? res.data : []);
-      })
-      .catch(() => {
-        if (!cancelled) setApprovalRecipients([]);
-      })
-      .finally(() => {
-        if (!cancelled) setApprovalRecipientsLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [workLogModalOpen, clientId]);
 
   const [workLogDeleteConfirm, setWorkLogDeleteConfirm] = useState<{
     isOpen: boolean;
@@ -757,11 +870,24 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogComments, setWorkLogComments] = useState<WorkLogComment[]>([]);
   const [workLogCommentsLoading, setWorkLogCommentsLoading] = useState(false);
   const [workLogCommentsError, setWorkLogCommentsError] = useState<string | null>(null);
-  const [workLogCommentType, setWorkLogCommentType] = useState<ActivityType>("COMMENT");
   const [workLogNewComment, setWorkLogNewComment] = useState("");
   const [postingWorkLogComment, setPostingWorkLogComment] = useState(false);
+  const [workLogMentionQuery, setWorkLogMentionQuery] = useState("");
+  const [workLogMentionRange, setWorkLogMentionRange] = useState<{ start: number; end: number } | null>(null);
+  const [workLogMentionedUserIds, setWorkLogMentionedUserIds] = useState<string[]>([]);
+  const [workLogMentionActiveIndex, setWorkLogMentionActiveIndex] = useState(0);
+  const [workLogCommentDeleteConfirm, setWorkLogCommentDeleteConfirm] = useState<{ isOpen: boolean; commentId: string | null }>({
+    isOpen: false,
+    commentId: null,
+  });
+  const [workLogCollaboratorEditorOpen, setWorkLogCollaboratorEditorOpen] = useState(false);
+  const [workLogCollaboratorSearch, setWorkLogCollaboratorSearch] = useState("");
+  const [workLogManualCollaboratorIdsByTask, setWorkLogManualCollaboratorIdsByTask] = useState<Record<string, string[]>>({});
+  const [workLogRemovedCollaboratorIdsByTask, setWorkLogRemovedCollaboratorIdsByTask] = useState<Record<string, string[]>>({});
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const workLogCommentInputRef = useRef<HTMLTextAreaElement | null>(null);
   const workLogAddMenuRef = useRef<HTMLDivElement | null>(null);
+  const lastAutoOpenedWorkLogTaskIdRef = useRef<string | null>(null);
 
 
   // Client portal users (Users tab)
@@ -1142,29 +1268,52 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
+  const hydrateWorkLogFormFromTask = useCallback((task: WorkLogTask) => {
+    const attachments = parseProofAttachments((task as any).proof);
+    const titleForForm = (task.description || task.title || "").trim();
+    const dueDateRaw = (task as any).dueDate;
+    const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
+    const assignee = task.assignee;
+    const rawApproval = (task as any).approvalNotifyUserIds;
+    const approvalIds: string[] = Array.isArray(rawApproval)
+      ? rawApproval
+      : (typeof rawApproval === "string"
+          ? (() => {
+              try {
+                const a = JSON.parse(rawApproval);
+                return Array.isArray(a) ? a : [];
+              } catch {
+                return [];
+              }
+            })()
+          : []);
+    setWorkLogForm({
+      title: titleForForm,
+      description: titleForForm,
+      taskNotes: (task as any).taskNotes || "",
+      category: task.category || "",
+      dueDate: dueDateStr,
+      assigneeId: assignee?.id ?? "",
+      assigneeDisplay: assignee ? (assignee.name || assignee.email || "") : "",
+      status: task.status,
+      attachments,
+      approvalNotifyUserIds: approvalIds,
+    });
+  }, []);
+
+  const openWorkLogEdit = (taskId: string) => {
+    const task = workLogTasks.find((t) => t.id === taskId);
+    if (task) hydrateWorkLogFormFromTask(task);
+    setWorkLogModalMode("edit");
+    setSelectedWorkLogTaskId(taskId);
+    setWorkLogUrlInput("");
+    setWorkLogUrlType("url");
+    setWorkLogModalOpen(true);
+  };
+
   const openWorkLogView = (taskId: string) => {
     const task = workLogTasks.find((t) => t.id === taskId);
-    if (task) {
-      const attachments = parseProofAttachments((task as any).proof);
-      const titleForForm = (task.description || task.title || "").trim();
-      const dueDateRaw = (task as any).dueDate;
-      const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
-      const assignee = task.assignee;
-      const rawApproval = (task as any).approvalNotifyUserIds;
-      const approvalIds: string[] = Array.isArray(rawApproval) ? rawApproval : (typeof rawApproval === "string" ? (() => { try { const a = JSON.parse(rawApproval); return Array.isArray(a) ? a : []; } catch { return []; } })() : []);
-      setWorkLogForm({
-        title: titleForForm,
-        description: titleForForm,
-        taskNotes: (task as any).taskNotes || "",
-        category: task.category || "",
-        dueDate: dueDateStr,
-        assigneeId: assignee?.id ?? "",
-        assigneeDisplay: assignee ? (assignee.name || assignee.email || "") : "",
-        status: task.status,
-        attachments,
-        approvalNotifyUserIds: approvalIds,
-      });
-    }
+    if (task) hydrateWorkLogFormFromTask(task);
     setWorkLogModalMode("view");
     setSelectedWorkLogTaskId(taskId);
     setWorkLogUrlInput("");
@@ -1172,35 +1321,61 @@ const ClientDashboardPage: React.FC = () => {
     setWorkLogModalOpen(true);
   };
 
-  const openWorkLogEdit = (taskId: string) => {
-    const task = workLogTasks.find((t) => t.id === taskId);
-    if (task) {
-      const attachments = parseProofAttachments((task as any).proof);
-      const titleForForm = (task.description || task.title || "").trim();
-      const dueDateRaw = (task as any).dueDate;
-      const dueDateStr = dueDateRaw ? (typeof dueDateRaw === "string" ? dueDateRaw.slice(0, 10) : new Date(dueDateRaw).toISOString().slice(0, 10)) : "";
-      const assignee = task.assignee;
-      const rawApproval = (task as any).approvalNotifyUserIds;
-      const approvalIds: string[] = Array.isArray(rawApproval) ? rawApproval : (typeof rawApproval === "string" ? (() => { try { const a = JSON.parse(rawApproval); return Array.isArray(a) ? a : []; } catch { return []; } })() : []);
-      setWorkLogForm({
-        title: titleForForm,
-        description: titleForForm,
-        taskNotes: (task as any).taskNotes || "",
-        category: task.category || "",
-        dueDate: dueDateStr,
-        assigneeId: assignee?.id ?? "",
-        assigneeDisplay: assignee ? (assignee.name || assignee.email || "") : "",
-        status: task.status,
-        attachments,
-        approvalNotifyUserIds: approvalIds,
-      });
+  // Notification deep-link support:
+  // /client/dashboard/:clientId?tab=worklog&taskId=xxx
+  useEffect(() => {
+    if (!clientId) return;
+    const urlParams = new URLSearchParams(location.search);
+    const tabParam = urlParams.get("tab");
+    if (tabParam !== "worklog") return;
+    if (activeTab !== "dashboard") setActiveTab("dashboard");
+    if (dashboardSection !== "worklog") setDashboardSection("worklog");
+  }, [clientId, location.search, activeTab, dashboardSection]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    const urlParams = new URLSearchParams(location.search);
+    const tabParam = urlParams.get("tab");
+    const taskId = urlParams.get("taskId");
+    if (tabParam !== "worklog" || !taskId) {
+      lastAutoOpenedWorkLogTaskIdRef.current = null;
+      return;
     }
+    if (activeTab !== "dashboard" || dashboardSection !== "worklog") return;
+    if (workLogLoading) return;
+    if (lastAutoOpenedWorkLogTaskIdRef.current === taskId) return;
+
+    const task = workLogTasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    lastAutoOpenedWorkLogTaskIdRef.current = taskId;
+    hydrateWorkLogFormFromTask(task);
     setWorkLogModalMode("edit");
     setSelectedWorkLogTaskId(taskId);
     setWorkLogUrlInput("");
     setWorkLogUrlType("url");
     setWorkLogModalOpen(true);
-  };
+
+    const nextParams = new URLSearchParams(location.search);
+    nextParams.delete("taskId");
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextParams.toString() ? `?${nextParams.toString()}` : "",
+      },
+      { replace: true }
+    );
+  }, [
+    clientId,
+    location.search,
+    location.pathname,
+    navigate,
+    activeTab,
+    dashboardSection,
+    workLogLoading,
+    workLogTasks,
+    hydrateWorkLogFormFromTask,
+  ]);
 
   const handleSaveWorkLog = async () => {
     if (!clientId) return;
@@ -1295,11 +1470,28 @@ const ClientDashboardPage: React.FC = () => {
   };
 
   const selectedWorkLogTask = workLogTasks.find((t) => t.id === selectedWorkLogTaskId);
-  const canEditSelectedWorkLog = user?.role === "SUPER_ADMIN" || selectedWorkLogTask?.createdBy?.id === user?.id;
-  const canCommentOnWorkLog = Boolean(user);
-  const workLogCommentTypes: ActivityType[] = user?.role === "USER"
-    ? ["COMMENT", "QUESTION"]
-    : ["COMMENT", "QUESTION", "APPROVAL_REQUEST"];
+  useEffect(() => {
+    if (!workLogModalOpen) return;
+    if (!selectedWorkLogTaskId) return;
+    if (workLogModalMode === "create") return;
+    const task = workLogTasks.find((t) => t.id === selectedWorkLogTaskId);
+    if (task) hydrateWorkLogFormFromTask(task);
+  }, [workLogModalOpen, workLogModalMode, selectedWorkLogTaskId, workLogTasks, hydrateWorkLogFormFromTask]);
+  const isClientWorkLogUser = user?.role === "USER";
+  const isAdminViewingSuperAdminWorkLog =
+    user?.role === "ADMIN" && selectedWorkLogTask?.createdBy?.role === "SUPER_ADMIN";
+  const isAgencyViewingAdminOrSuperAdminWorkLog =
+    user?.role === "AGENCY" &&
+    (selectedWorkLogTask?.createdBy?.role === "SUPER_ADMIN" || selectedWorkLogTask?.createdBy?.role === "ADMIN");
+  const isWorkLogFieldsReadOnly =
+    workLogModalMode === "view" ||
+    isClientWorkLogUser ||
+    isAdminViewingSuperAdminWorkLog ||
+    isAgencyViewingAdminOrSuperAdminWorkLog;
+  const canEditSelectedWorkLog =
+    !isClientWorkLogUser && (user?.role === "SUPER_ADMIN" || selectedWorkLogTask?.createdBy?.id === user?.id);
+  const canCommentOnWorkLog =
+    Boolean(user) && workLogModalMode !== "view";
 
   const fetchWorkLogComments = useCallback(async (taskId: string) => {
     try {
@@ -1321,33 +1513,141 @@ const ClientDashboardPage: React.FC = () => {
       setWorkLogComments([]);
       setWorkLogCommentsError(null);
       setWorkLogNewComment("");
-      setWorkLogCommentType("COMMENT");
+      setWorkLogMentionQuery("");
+      setWorkLogMentionRange(null);
+      setWorkLogMentionedUserIds([]);
+      setWorkLogMentionActiveIndex(0);
       return;
     }
     void fetchWorkLogComments(selectedWorkLogTaskId);
   }, [workLogModalOpen, workLogModalMode, selectedWorkLogTaskId, fetchWorkLogComments]);
 
+  const updateWorkLogMentionState = useCallback(
+    (value: string, caret: number) => {
+      const safeCaret = Math.max(0, Math.min(caret, value.length));
+      const beforeCaret = value.slice(0, safeCaret);
+      const atIndex = beforeCaret.lastIndexOf("@");
+      if (atIndex === -1) {
+        setWorkLogMentionRange(null);
+        setWorkLogMentionQuery("");
+        return;
+      }
+
+      const prevChar = atIndex > 0 ? beforeCaret[atIndex - 1] : " ";
+      if (!/\s|[\(\[\{,]/.test(prevChar)) {
+        setWorkLogMentionRange(null);
+        setWorkLogMentionQuery("");
+        return;
+      }
+
+      const query = beforeCaret.slice(atIndex + 1);
+      if (!/^[A-Za-z0-9._-]*$/.test(query)) {
+        setWorkLogMentionRange(null);
+        setWorkLogMentionQuery("");
+        return;
+      }
+
+      setWorkLogMentionRange({ start: atIndex, end: safeCaret });
+      setWorkLogMentionQuery(query.toLowerCase());
+    },
+    []
+  );
+
+  const handleWorkLogCommentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const next = e.target.value;
+    setWorkLogNewComment(next);
+    updateWorkLogMentionState(next, e.target.selectionStart ?? next.length);
+  };
+
+  const buildWorkLogMentionToken = useCallback((member: { id: string; name: string | null; email: string }) => {
+    const base =
+      (member.name && member.name.trim()) ||
+      (member.email.includes("@") ? member.email.split("@")[0] : member.email) ||
+      "user";
+    const normalized = base
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    return normalized || `user_${member.id.slice(0, 6).toLowerCase()}`;
+  }, []);
+
+  const handleSelectWorkLogMention = (member: { id: string; name: string | null; email: string }) => {
+    if (!workLogMentionRange) return;
+    const base = workLogNewComment;
+    const mentionText = `@${buildWorkLogMentionToken(member)} `;
+    const next =
+      base.slice(0, workLogMentionRange.start) +
+      mentionText +
+      base.slice(workLogMentionRange.end);
+    const nextCaret = workLogMentionRange.start + mentionText.length;
+    setWorkLogNewComment(next);
+    setWorkLogMentionRange(null);
+    setWorkLogMentionQuery("");
+    setWorkLogMentionActiveIndex(0);
+    setWorkLogMentionedUserIds((prev) => (prev.includes(member.id) ? prev : [...prev, member.id]));
+    requestAnimationFrame(() => {
+      if (workLogCommentInputRef.current) {
+        workLogCommentInputRef.current.focus();
+        workLogCommentInputRef.current.setSelectionRange(nextCaret, nextCaret);
+      }
+    });
+  };
+
   const handlePostWorkLogComment = async () => {
     if (!selectedWorkLogTaskId) return;
     const body = workLogNewComment.trim();
     if (!body) return;
+    const mentionTokenToId = new Map(
+      workLogProjectAssignees.map((member) => [buildWorkLogMentionToken(member), member.id] as const)
+    );
+    const bodyMentionIds = Array.from(
+      new Set(
+        (body.match(/@([A-Za-z0-9._-]+)/g) || [])
+          .map((raw) => raw.slice(1).toLowerCase())
+          .map((token) => mentionTokenToId.get(token))
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    const mentionUserIds = Array.from(
+      new Set([...(workLogMentionedUserIds || []), ...bodyMentionIds])
+    ).filter((id) => id !== user?.id);
     try {
       setPostingWorkLogComment(true);
       const res = await api.post(
         `/tasks/${selectedWorkLogTaskId}/comments`,
-        { body, type: workLogCommentType },
+        { body, type: "COMMENT", mentionUserIds },
         { timeout: 30000 },
       );
       const created = res.data as WorkLogComment;
       setWorkLogComments((prev) => [...prev, created]);
       setWorkLogNewComment("");
-      setWorkLogCommentType("COMMENT");
+      setWorkLogMentionQuery("");
+      setWorkLogMentionRange(null);
+      setWorkLogMentionedUserIds([]);
+      setWorkLogMentionActiveIndex(0);
       setWorkLogCommentsError(null);
     } catch (e: any) {
       console.error("Failed to post work log activity", e);
       toast.error(e?.response?.data?.message || "Failed to post activity");
     } finally {
       setPostingWorkLogComment(false);
+    }
+  };
+
+  const requestDeleteWorkLogComment = (commentId: string) => {
+    setWorkLogCommentDeleteConfirm({ isOpen: true, commentId });
+  };
+
+  const confirmDeleteWorkLogComment = async () => {
+    if (!selectedWorkLogTaskId || !workLogCommentDeleteConfirm.commentId) return;
+    try {
+      await api.delete(`/tasks/${selectedWorkLogTaskId}/comments/${workLogCommentDeleteConfirm.commentId}`, { timeout: 30000 });
+      setWorkLogComments((prev) => prev.filter((c) => c.id !== workLogCommentDeleteConfirm.commentId));
+      toast.success("Activity removed.");
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Failed to delete activity");
+    } finally {
+      setWorkLogCommentDeleteConfirm({ isOpen: false, commentId: null });
     }
   };
 
@@ -1522,6 +1822,7 @@ const ClientDashboardPage: React.FC = () => {
       const sectionLabelMap: Record<string, string> = {
         seo: "SEO Overview",
         "ai-intelligence": "AI Intelligence",
+        "local-map": "Local Map Rankings",
         ppc: "PPC",
         backlinks: "Backlinks",
         worklog: "Work Log",
@@ -1668,6 +1969,7 @@ const ClientDashboardPage: React.FC = () => {
       const sectionSlugMap: Record<string, string> = {
         seo: "seo-overview",
         "ai-intelligence": "ai-intelligence",
+        "local-map": "local-map-rankings",
         ppc: "ppc",
         backlinks: "backlinks",
         worklog: "work-log",
@@ -2692,6 +2994,270 @@ const ClientDashboardPage: React.FC = () => {
       ? workLogTasks.filter((t) => t.status === "DONE")
       : workLogTasks.filter((t) => t.status !== "DONE");
   }, [workLogListTab, workLogTasks]);
+
+  const workLogProjectAssignees = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string | null; email: string; role: string | null }>();
+    const roleByUserId = new Map(assignableUsers.map((u) => [u.id, u.role] as const));
+    const isAgencyRole = (role: string | null | undefined) => String(role || "").toUpperCase().includes("AGENCY");
+
+    for (const cu of clientUsers) {
+      const userId = String(cu.userId || "").trim();
+      const email = String(cu.email || "").trim();
+      if (!userId || !email) continue;
+      if (!byId.has(userId)) {
+        byId.set(userId, {
+          id: userId,
+          name: cu.name ?? null,
+          email,
+          role: roleByUserId.get(userId) ?? cu.role ?? null,
+        });
+      }
+    }
+
+    for (const task of workLogTasks) {
+      const a = task.assignee;
+      if (!a?.id || !a.email) continue;
+      if (!byId.has(a.id)) {
+        byId.set(a.id, {
+          id: a.id,
+          name: a.name ?? null,
+          email: a.email,
+          role: roleByUserId.get(a.id) ?? null,
+        });
+      }
+    }
+
+    return Array.from(byId.values()).sort((a, b) => {
+      if (isAgencyRole(a.role) && !isAgencyRole(b.role)) return 1;
+      if (!isAgencyRole(a.role) && isAgencyRole(b.role)) return -1;
+      const aLabel = (a.name || a.email).toLowerCase();
+      const bLabel = (b.name || b.email).toLowerCase();
+      return aLabel.localeCompare(bLabel);
+    }).filter((member) => !isAgencyRole(member.role));
+  }, [assignableUsers, clientUsers, workLogTasks]);
+
+  const workLogApprovalClientUsers = useMemo(() => {
+    return clientUsers
+      .filter((u) => u.role === "CLIENT" && u.status === "ACTIVE")
+      .map((u) => ({
+        id: u.userId,
+        name: u.name,
+        email: u.email,
+      }));
+  }, [clientUsers]);
+
+  const workLogMentionSuggestions = useMemo(() => {
+    if (!workLogMentionRange) return [];
+    const q = workLogMentionQuery.trim();
+    return workLogProjectAssignees
+      .filter((member) => {
+        if (member.id === user?.id) return false;
+        if (!q) return true;
+        const name = (member.name || "").toLowerCase();
+        const email = (member.email || "").toLowerCase();
+        return name.includes(q) || email.includes(q);
+      })
+      .slice(0, 8);
+  }, [workLogMentionQuery, workLogMentionRange, workLogProjectAssignees, user?.id]);
+
+  const workLogEntryCollaborators = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string | null; email: string; role: string | null }>();
+    const roleByUserId = new Map(assignableUsers.map((u) => [u.id, u.role] as const));
+    const projectById = new Map(workLogProjectAssignees.map((m) => [m.id, m] as const));
+    const projectByMentionToken = new Map(
+      workLogProjectAssignees.map((m) => [buildWorkLogMentionToken(m), m] as const)
+    );
+
+    const addMember = (member: { id: string; name: string | null; email: string; role: string | null }) => {
+      if (!member.id || !member.email) return;
+      if (!byId.has(member.id)) byId.set(member.id, member);
+    };
+
+    const selectedAssignee = selectedWorkLogTask?.assignee;
+    if (selectedAssignee?.id && selectedAssignee.email) {
+      addMember({
+        id: selectedAssignee.id,
+        name: selectedAssignee.name ?? null,
+        email: selectedAssignee.email,
+        role: roleByUserId.get(selectedAssignee.id) ?? projectById.get(selectedAssignee.id)?.role ?? null,
+      });
+    }
+
+    for (const c of workLogComments) {
+      const authorId = c.author?.id || "";
+      if (authorId) {
+        const fallback = projectById.get(authorId);
+        const authorEmail = c.author?.email || fallback?.email || "";
+        if (authorEmail) {
+          addMember({
+            id: authorId,
+            name: c.author?.name ?? fallback?.name ?? null,
+            email: authorEmail,
+            role: c.author?.role ?? fallback?.role ?? roleByUserId.get(authorId) ?? null,
+          });
+        }
+      }
+
+      const mentionMatches = c.body.match(/@([A-Za-z0-9._-]+)/g) || [];
+      for (const raw of mentionMatches) {
+        const token = raw.slice(1).toLowerCase();
+        const member = projectByMentionToken.get(token);
+        if (!member) continue;
+        addMember(member);
+      }
+    }
+
+    const taskId = selectedWorkLogTaskId || "";
+    const manualIds = new Set((taskId ? workLogManualCollaboratorIdsByTask[taskId] : []) || []);
+    const removedIds = new Set((taskId ? workLogRemovedCollaboratorIdsByTask[taskId] : []) || []);
+    for (const manualId of manualIds) {
+      const member = projectById.get(manualId);
+      if (member) addMember(member);
+    }
+    for (const removedId of removedIds) {
+      byId.delete(removedId);
+    }
+
+    return Array.from(byId.values()).sort((a, b) => {
+      const aLabel = (a.name || a.email).toLowerCase();
+      const bLabel = (b.name || b.email).toLowerCase();
+      return aLabel.localeCompare(bLabel);
+    }).filter((member) => member.id !== user?.id);
+  }, [
+    assignableUsers,
+    buildWorkLogMentionToken,
+    selectedWorkLogTask,
+    selectedWorkLogTaskId,
+    user?.id,
+    workLogComments,
+    workLogManualCollaboratorIdsByTask,
+    workLogProjectAssignees,
+    workLogRemovedCollaboratorIdsByTask,
+  ]);
+
+  const workLogCollaboratorSearchResults = useMemo(() => {
+    const q = workLogCollaboratorSearch.trim().toLowerCase();
+    return workLogProjectAssignees.filter((m) => {
+      if (m.id === user?.id) return false;
+      if (!q) return true;
+      const name = (m.name || "").toLowerCase();
+      const email = m.email.toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [workLogCollaboratorSearch, workLogProjectAssignees, user?.id]);
+
+  const addWorkLogCollaborator = useCallback(
+    (userId: string) => {
+      const taskId = selectedWorkLogTaskId;
+      if (!taskId) return;
+      setWorkLogManualCollaboratorIdsByTask((prev) => {
+        const existing = new Set(prev[taskId] || []);
+        existing.add(userId);
+        return { ...prev, [taskId]: Array.from(existing) };
+      });
+      setWorkLogRemovedCollaboratorIdsByTask((prev) => {
+        const existing = new Set(prev[taskId] || []);
+        existing.delete(userId);
+        return { ...prev, [taskId]: Array.from(existing) };
+      });
+    },
+    [selectedWorkLogTaskId]
+  );
+
+  const removeWorkLogCollaborator = useCallback(
+    (userId: string) => {
+      const taskId = selectedWorkLogTaskId;
+      if (!taskId) return;
+      setWorkLogManualCollaboratorIdsByTask((prev) => {
+        const existing = new Set(prev[taskId] || []);
+        existing.delete(userId);
+        return { ...prev, [taskId]: Array.from(existing) };
+      });
+      setWorkLogRemovedCollaboratorIdsByTask((prev) => {
+        const existing = new Set(prev[taskId] || []);
+        existing.add(userId);
+        return { ...prev, [taskId]: Array.from(existing) };
+      });
+    },
+    [selectedWorkLogTaskId]
+  );
+
+  useEffect(() => {
+    if (!workLogMentionRange || workLogMentionSuggestions.length === 0) {
+      setWorkLogMentionActiveIndex(0);
+      return;
+    }
+    setWorkLogMentionActiveIndex((prev) => Math.min(prev, workLogMentionSuggestions.length - 1));
+  }, [workLogMentionRange, workLogMentionSuggestions.length]);
+
+  useEffect(() => {
+    setWorkLogCollaboratorEditorOpen(false);
+    setWorkLogCollaboratorSearch("");
+  }, [selectedWorkLogTaskId, workLogModalOpen]);
+
+  const handleWorkLogMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!workLogMentionRange || workLogMentionSuggestions.length === 0) {
+      if (e.key === "Escape") {
+        setWorkLogMentionRange(null);
+        setWorkLogMentionQuery("");
+      }
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setWorkLogMentionActiveIndex((prev) => (prev + 1) % workLogMentionSuggestions.length);
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setWorkLogMentionActiveIndex((prev) => (prev - 1 + workLogMentionSuggestions.length) % workLogMentionSuggestions.length);
+      return;
+    }
+
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      const candidate = workLogMentionSuggestions[workLogMentionActiveIndex];
+      if (candidate) handleSelectWorkLogMention(candidate);
+      return;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setWorkLogMentionRange(null);
+      setWorkLogMentionQuery("");
+    }
+  };
+
+  const renderWorkLogCommentBody = useCallback((body: string) => {
+    const parts = body.split(/(@[A-Za-z0-9._-]+)/g);
+    return parts.map((part, idx) => {
+      if (/^@[A-Za-z0-9._-]+$/.test(part)) {
+        return (
+          <span key={`mention-${idx}`} className="rounded bg-green-100 px-1 text-green-800 font-medium">
+            {part}
+          </span>
+        );
+      }
+      return <React.Fragment key={`text-${idx}`}>{part}</React.Fragment>;
+    });
+  }, []);
+
+  const renderWorkLogCommentEditorOverlay = useCallback((body: string) => {
+    const parts = body.split(/(@[A-Za-z0-9._-]+)/g);
+    return parts.map((part, idx) => {
+      if (/^@[A-Za-z0-9._-]+$/.test(part)) {
+        // Keep overlay mention metrics identical to textarea text so caret mapping stays accurate.
+        return (
+          <span key={`editor-mention-${idx}`} className="rounded-sm bg-green-100/70 text-green-800 font-normal">
+            {part}
+          </span>
+        );
+      }
+      return <React.Fragment key={`editor-text-${idx}`}>{part}</React.Fragment>;
+    });
+  }, []);
 
   const workLogPagination = useMemo(() => {
     const totalRows = workLogFilteredTasks.length;
@@ -4066,6 +4632,11 @@ const ClientDashboardPage: React.FC = () => {
 
   const fetchClientUsers = useCallback(async () => {
     if (!clientId) return;
+    if (user?.role === "USER") {
+      setClientUsers([]);
+      setClientUsersError(null);
+      return;
+    }
     try {
       setClientUsersLoading(true);
       setClientUsersError(null);
@@ -4073,18 +4644,22 @@ const ClientDashboardPage: React.FC = () => {
       const rows = Array.isArray(res.data) ? (res.data as ClientUserRow[]) : [];
       setClientUsers(rows);
     } catch (e: any) {
-      console.error("Failed to fetch client users", e);
+      if (e?.response?.status !== 403) {
+        console.error("Failed to fetch client users", e);
+      }
       setClientUsers([]);
       setClientUsersError(e?.response?.data?.message || "Failed to load users.");
     } finally {
       setClientUsersLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, user?.role]);
 
   useEffect(() => {
-    if (activeTab !== "users") return;
+    const isUsersTabActive = activeTab === "users";
+    const isWorkLogTabActive = activeTab === "dashboard" && dashboardSection === "worklog";
+    if (!isUsersTabActive && !isWorkLogTabActive && !workLogAssigneesModalOpen) return;
     void fetchClientUsers();
-  }, [activeTab, fetchClientUsers]);
+  }, [activeTab, dashboardSection, workLogAssigneesModalOpen, fetchClientUsers]);
 
   const submitInviteClientUsers = useCallback(async () => {
     const normalizedInvites = inviteClientUsersRows
@@ -4823,6 +5398,7 @@ const ClientDashboardPage: React.FC = () => {
                         [
                           { id: "seo", label: "SEO Overview", icon: Search },
                           { id: "ai-intelligence", label: "AI Intelligence", icon: Sparkles },
+                          ...(user?.role === "SPECIALIST" ? [] : [{ id: "local-map" as const, label: "Local Map Rankings", icon: MapPin }]),
                           ...(googleAdsConnected === true ? [{ id: "ppc" as const, label: "PPC", icon: TrendingUp }] : []),
                           { id: "backlinks", label: "Backlinks", icon: Search },
                           { id: "worklog", label: "Work Log", icon: Clock },
@@ -6706,6 +7282,186 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 )}
 
+                {dashboardSection === "local-map" && (
+                  <div className="space-y-6">
+                    <div className="rounded-2xl border border-primary-200 bg-gradient-to-r from-primary-600 via-indigo-600 to-blue-600 p-5 text-white shadow-lg">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h2 className="text-xl font-bold">Local Map Rankings</h2>
+                          <p className="text-sm text-white/90">
+                            Account-wide allocation for recurring local map visibility tracking.
+                          </p>
+                        </div>
+                        <div className="flex gap-2 text-xs font-semibold">
+                          <span className="rounded-full bg-white/15 px-3 py-1">
+                            {localMapSummary.total} Available
+                          </span>
+                          <span className="rounded-full bg-white/15 px-3 py-1">
+                            {localMapSummary.active} Active
+                          </span>
+                          <span className="rounded-full bg-white/15 px-3 py-1">
+                            {localMapSummary.remaining} Remaining
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-primary-100 p-4">
+                        <p className="text-xs uppercase tracking-wide text-indigo-700 font-semibold">Grid Keywords Available</p>
+                        <p className="mt-1 text-2xl font-bold text-indigo-900">{localMapSummary.total}</p>
+                        <p className="text-xs text-indigo-700">Account-wide pool</p>
+                      </div>
+                      <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-100 p-4">
+                        <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Active Keywords</p>
+                        <p className="mt-1 text-2xl font-bold text-emerald-900">{localMapSummary.active}</p>
+                        <p className="text-xs text-emerald-700">Across all dashboards</p>
+                      </div>
+                      <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-100 p-4">
+                        <p className="text-xs uppercase tracking-wide text-amber-700 font-semibold">Remaining Slots</p>
+                        <p className="mt-1 text-2xl font-bold text-amber-900">{localMapSummary.remaining}</p>
+                        <p className="text-xs text-amber-700">Ready to activate</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                      <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm font-semibold text-gray-800">
+                          {localMapSummary.total} Grid Keywords Available - {localMapSummary.active} Active - {localMapSummary.remaining} Remaining (Account-Wide)
+                        </p>
+                        {user?.role !== "USER" && user?.role !== "SPECIALIST" && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLocalMapActivationOpen(true);
+                              void loadLocalMapMoneyKeywords();
+                            }}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add Keyword
+                          </button>
+                        )}
+                      </div>
+                      {localMapLoading ? (
+                        <div className="p-6 text-sm text-gray-500">Loading local map rankings...</div>
+                      ) : localMapKeywords.length === 0 ? (
+                        <div className="p-8 text-center">
+                          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Local Map Rankings yet</h3>
+                          <p className="text-sm text-gray-600 mb-4">
+                            Activate your first keyword to start biweekly Local Map Rankings snapshots.
+                          </p>
+                          {user?.role !== "USER" && user?.role !== "SPECIALIST" && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLocalMapActivationOpen(true);
+                                void loadLocalMapMoneyKeywords();
+                              }}
+                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Activate Your First Keyword
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[760px]">
+                            <thead className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Keyword</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Business</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Last Run</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">ATA</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Trend</th>
+                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {localMapKeywords.map((row, idx) => (
+                                <tr key={row.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/40"}>
+                                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">{row.keywordText}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">
+                                    <div>{row.businessName}</div>
+                                    {row.businessAddress && <div className="text-xs text-gray-500">{row.businessAddress}</div>}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">
+                                    {row.lastRunDate ? format(new Date(row.lastRunDate), "MMM d, yyyy") : "Not run yet"}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                                    {row.latestAta == null ? "-" : row.latestAta.toFixed(2)}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm">
+                                    {row.trend == null ? (
+                                      <span className="text-gray-500">-</span>
+                                    ) : row.trend >= 0 ? (
+                                      <span className="inline-flex items-center gap-1 text-emerald-600">
+                                        <TrendingUp className="h-4 w-4" />
+                                        {row.trend.toFixed(2)}
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-rose-600">
+                                        <TrendingDown className="h-4 w-4" />
+                                        {Math.abs(row.trend).toFixed(2)}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <div className="inline-flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        className="px-3 py-1.5 text-xs font-semibold rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                        onClick={async () => {
+                                          try {
+                                            const res = await api.get(`/local-map/report/${row.id}`);
+                                            const current = res?.data?.current;
+                                            if (current?.ataScore != null) {
+                                              toast.success(`Current ATA: ${Number(current.ataScore).toFixed(2)}`);
+                                            } else {
+                                              toast("No snapshots available yet for this keyword.");
+                                            }
+                                          } catch (error: any) {
+                                            toast.error(error?.response?.data?.message || "Unable to load report.");
+                                          }
+                                        }}
+                                      >
+                                        View Report
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="px-3 py-1.5 text-xs font-semibold rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                        onClick={async () => {
+                                          try {
+                                            const res = await api.get(`/local-map/pdf/keyword/${row.id}`, { responseType: "blob" });
+                                            const blob = new Blob([res.data], { type: "application/pdf" });
+                                            const url = URL.createObjectURL(blob);
+                                            const link = document.createElement("a");
+                                            link.href = url;
+                                            link.download = `${row.keywordText.replace(/\s+/g, "-").toLowerCase()}-local-map-report.pdf`;
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            link.remove();
+                                            URL.revokeObjectURL(url);
+                                          } catch (error: any) {
+                                            toast.error(error?.response?.data?.message || "Unable to download report.");
+                                          }
+                                        }}
+                                      >
+                                        Download Report
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {dashboardSection === "backlinks" && (
                   <div className="space-y-6">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -7041,19 +7797,20 @@ const ClientDashboardPage: React.FC = () => {
                           </p>
                         </div>
                       </div>
-                      {!reportOnly && !clientPortalMode && (
-                        <div className="relative flex-shrink-0" ref={workLogAddMenuRef}>
-                          <button
-                            type="button"
-                            onClick={() => setWorkLogAddMenuOpen((o) => !o)}
-                            disabled={!canModifyClientSettings}
-                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                            title={canModifyClientSettings ? "Add entry" : "Included clients are view-only"}
-                          >
-                            <Plus className="h-4 w-4" />
-                            <span>Add Entry</span>
-                            <ChevronDown className="h-4 w-4" />
-                          </button>
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                        {!reportOnly && !clientPortalMode && (
+                          <div className="relative flex-shrink-0" ref={workLogAddMenuRef}>
+                            <button
+                              type="button"
+                              onClick={() => setWorkLogAddMenuOpen((o) => !o)}
+                              disabled={!canModifyClientSettings}
+                              className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                              title={canModifyClientSettings ? "Add entry" : "Included clients are view-only"}
+                            >
+                              <Plus className="h-4 w-4" />
+                              <span>Add Entry</span>
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
                             {workLogAddMenuOpen && (
                               <div className="absolute right-0 mt-1 w-52 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-20">
                                 <button
@@ -7088,6 +7845,41 @@ const ClientDashboardPage: React.FC = () => {
                             )}
                           </div>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setWorkLogAssigneesModalOpen(true)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                          title="View project assignees and clients"
+                        >
+                          <Users className="h-4 w-4 text-gray-500" />
+                          <span>Assignees</span>
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{workLogProjectAssignees.length}</span>
+                        </button>
+                        <div className="flex gap-1 rounded-lg border border-gray-200 bg-white p-1">
+                          <button
+                            type="button"
+                            onClick={() => setWorkLogListTab("upcoming")}
+                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                              workLogListTab === "upcoming"
+                                ? "bg-primary-50 text-primary-700 border border-primary-200"
+                                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                            }`}
+                          >
+                            Upcoming
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setWorkLogListTab("completed")}
+                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                              workLogListTab === "completed"
+                                ? "bg-primary-50 text-primary-700 border border-primary-200"
+                                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                            }`}
+                          >
+                            Completed
+                          </button>
+                        </div>
+                      </div>
                     </div>
                     {/* Recurring tasks (this client) */}
                     {!reportOnly && (
@@ -7179,31 +7971,6 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </div>
                     )}
-                    {/* Upcoming / Completed tabs */}
-                    <div className="flex gap-1 border-b border-gray-200">
-                      <button
-                        type="button"
-                        onClick={() => setWorkLogListTab("upcoming")}
-                        className={`px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors ${
-                          workLogListTab === "upcoming"
-                            ? "bg-white border-gray-200 text-primary-600 -mb-px"
-                            : "bg-gray-50 border-transparent text-gray-600 hover:text-gray-900"
-                        }`}
-                      >
-                        Upcoming
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setWorkLogListTab("completed")}
-                        className={`px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 transition-colors ${
-                          workLogListTab === "completed"
-                            ? "bg-white border-gray-200 text-primary-600 -mb-px"
-                            : "bg-gray-50 border-transparent text-gray-600 hover:text-gray-900"
-                        }`}
-                      >
-                        Completed
-                      </button>
-                    </div>
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                       <div className="overflow-x-auto">
                         <table className="min-w-full">
@@ -7248,7 +8015,14 @@ const ClientDashboardPage: React.FC = () => {
                                 return (
                                   <tr key={task.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
                                     <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs align-top">
-                                      <span className="block truncate" title={titleText || undefined}>{titleDisplay || "—"}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => openWorkLogEdit(task.id)}
+                                        className="block w-full truncate text-left hover:text-primary-700 hover:underline transition-colors"
+                                        title={titleText || undefined}
+                                      >
+                                        {titleDisplay || "—"}
+                                      </button>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">{workType}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{dueDateStr}</td>
@@ -7266,9 +8040,9 @@ const ClientDashboardPage: React.FC = () => {
                                       <div className="inline-flex items-center gap-1 justify-end">
                                       <button
                                         type="button"
-                                        className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                        className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                                         title="View entry"
-                                        onClick={() => openWorkLogView(task.id)}
+                                        onClick={() => (user?.role === "SUPER_ADMIN" ? openWorkLogView(task.id) : openWorkLogEdit(task.id))}
                                       >
                                         <Eye className="h-4 w-4" />
                                       </button>
@@ -7359,12 +8133,30 @@ const ClientDashboardPage: React.FC = () => {
 
               {/* Dashboard modals (must render while on Dashboard tab) */}
               {workLogModalOpen && createPortal(
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div
+                  className={`fixed inset-0 z-50 ${
+                    workLogModalMode === "edit"
+                      ? "pointer-events-none flex items-stretch justify-end p-0"
+                      : "flex items-center justify-center p-4"
+                  }`}
+                >
+                  {workLogModalMode !== "edit" && (
+                    <div
+                      className="absolute inset-0 bg-black/50"
+                      onClick={() => setWorkLogModalOpen(false)}
+                    />
+                  )}
                   <div
-                    className="absolute inset-0 bg-black/50"
-                    onClick={() => setWorkLogModalOpen(false)}
-                  />
-                  <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden ring-2 ring-primary-200/80">
+                    className={`relative w-full flex flex-col bg-white shadow-2xl overflow-hidden pointer-events-auto ${
+                      workLogModalMode === "edit"
+                        ? "max-w-2xl h-full rounded-none ring-0"
+                        : "max-w-lg max-h-[90vh] rounded-2xl ring-2 ring-primary-200/80"
+                    }`}
+                    style={workLogModalMode === "edit" ? { animation: "workLogSlideInRight 260ms ease-out" } : undefined}
+                  >
+                    {workLogModalMode === "edit" && (
+                      <style>{`@keyframes workLogSlideInRight{from{transform:translateX(24px);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+                    )}
                     <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 border-b-2 border-teal-500/50">
                       <h3 className="text-lg font-bold text-white drop-shadow-sm">
                         {workLogModalMode === "create"
@@ -7382,17 +8174,27 @@ const ClientDashboardPage: React.FC = () => {
                       </button>
                     </div>
 
-                    <div className="overflow-auto overflow-x-auto max-h-[calc(90vh-14rem)] bg-gradient-to-b from-slate-50/50 to-white">
+                    <div
+                      className={`overflow-auto overflow-x-auto ${
+                        workLogModalMode === "edit"
+                          ? "flex-1"
+                          : "max-h-[calc(90vh-14rem)]"
+                      } bg-gradient-to-b from-slate-50/50 to-white`}
+                    >
                       <div className="px-6 py-5 space-y-4 min-w-0">
                       <div className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-3">
-                        <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
+                        {workLogModalMode !== "edit" && (
+                          <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
+                        )}
                         <input
                           type="text"
                           maxLength={90}
                           value={workLogForm.description}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
-                          disabled={workLogModalMode === "view"}
-                          className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow"
+                          disabled={isWorkLogFieldsReadOnly}
+                          className={`w-full border-2 border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow ${
+                            workLogModalMode === "edit" ? "text-lg font-semibold" : "text-sm"
+                          }`}
                           placeholder="e.g. Optimized homepage title tags"
                         />
                       </div>
@@ -7403,30 +8205,9 @@ const ClientDashboardPage: React.FC = () => {
                           type="text"
                           value={workLogForm.category}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
-                          disabled={workLogModalMode === "view"}
+                          disabled={isWorkLogFieldsReadOnly}
                           className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 disabled:bg-gray-50 transition-shadow"
                           placeholder="e.g. Technical, Content, Link Building"
-                        />
-                      </div>
-
-                      <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-3">
-                        <label className="block text-sm font-semibold text-amber-800 mb-1">Task</label>
-                        {workLogModalMode !== "view" && (
-                          <div className="flex flex-wrap gap-1 mb-1 p-1 border border-amber-200 rounded-t-lg bg-amber-50/50">
-                            <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bold">B</button>
-                            <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bullet list">• List</button>
-                            <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Numbered list">1. List</button>
-                          </div>
-                        )}
-                        <div
-                          ref={workLogTaskNotesRef}
-                          contentEditable={workLogModalMode !== "view"}
-                          suppressContentEditableWarning
-                          onInput={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
-                          onBlur={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
-                          className="min-h-[220px] w-full border border-gray-300 rounded-lg rounded-tl-none px-4 py-3 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 overflow-y-auto overflow-x-auto resize-y prose prose-sm max-w-none list-disc pl-5 space-y-1"
-                          data-placeholder="Add task details, bullet points, etc."
-                          style={{ outline: "none" }}
                         />
                       </div>
 
@@ -7436,14 +8217,14 @@ const ClientDashboardPage: React.FC = () => {
                           type="date"
                           value={workLogForm.dueDate}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, dueDate: e.target.value })}
-                          disabled={workLogModalMode === "view"}
+                          disabled={isWorkLogFieldsReadOnly}
                           className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 disabled:bg-gray-50 transition-shadow"
                         />
                       </div>
 
                       <div ref={assignToRef} className="relative rounded-xl border-l-4 border-slate-400 bg-slate-50/50 p-3">
                         <label className="block text-sm font-semibold text-slate-700 mb-1">Assign to</label>
-                        {workLogModalMode === "view" ? (
+                        {isWorkLogFieldsReadOnly ? (
                           <p className="text-sm text-gray-900 py-2">
                             {workLogForm.assigneeId
                               ? (() => {
@@ -7500,9 +8281,30 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </div>
 
+                      <div className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-3">
+                        <label className="block text-sm font-semibold text-amber-800 mb-1">Description</label>
+                        {!isWorkLogFieldsReadOnly && (
+                          <div className="flex flex-wrap gap-1 mb-1 p-1 border border-amber-200 rounded-t-lg bg-amber-50/50">
+                            <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bold">B</button>
+                            <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bullet list">• List</button>
+                            <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Numbered list">1. List</button>
+                          </div>
+                        )}
+                        <div
+                          ref={workLogTaskNotesRef}
+                          contentEditable={!isWorkLogFieldsReadOnly}
+                          suppressContentEditableWarning
+                          onInput={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                          onBlur={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                          className="min-h-[220px] w-full border border-gray-300 rounded-lg rounded-tl-none px-4 py-3 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 overflow-y-auto overflow-x-auto resize-y prose prose-sm max-w-none list-disc pl-5 space-y-1"
+                          data-placeholder="Add task details, bullet points, etc."
+                          style={{ outline: "none" }}
+                        />
+                      </div>
+
                       <div className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-3">
                         <label className="block text-sm font-semibold text-indigo-800 mb-2">Proof / Attachments</label>
-                        {workLogModalMode !== "view" && (
+                        {!isWorkLogFieldsReadOnly && (
                           <>
                             <input
                               id="work-log-file-input-1"
@@ -7594,7 +8396,7 @@ const ClientDashboardPage: React.FC = () => {
                                     </a>
                                   </div>
                                 </div>
-                                {workLogModalMode !== "view" && (
+                                {!isWorkLogFieldsReadOnly && (
                                   <button
                                     type="button"
                                     onClick={() => removeWorkLogAttachment(i)}
@@ -7617,7 +8419,7 @@ const ClientDashboardPage: React.FC = () => {
                         <select
                           value={workLogForm.status}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
-                          disabled={workLogModalMode === "view"}
+                          disabled={isWorkLogFieldsReadOnly}
                           className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow"
                         >
                           <option value="TODO">Pending</option>
@@ -7626,16 +8428,16 @@ const ClientDashboardPage: React.FC = () => {
                           <option value="NEEDS_APPROVAL">Needs Approval</option>
                           <option value="DONE">Completed</option>
                         </select>
-                        {workLogForm.status === "NEEDS_APPROVAL" && workLogModalMode !== "view" && (
+                        {workLogForm.status === "NEEDS_APPROVAL" && !isWorkLogFieldsReadOnly && (
                           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
                             <p className="text-xs font-medium text-amber-800 mb-2">Send approval request to (select who should be notified):</p>
-                            {approvalRecipientsLoading ? (
+                            {clientUsersLoading ? (
                               <p className="text-sm text-amber-700">Loading recipients…</p>
-                            ) : approvalRecipients.length === 0 ? (
+                            ) : workLogApprovalClientUsers.length === 0 ? (
                               <p className="text-sm text-amber-700">No users available for this account.</p>
                             ) : (
                               <div className="max-h-40 overflow-y-auto space-y-1.5">
-                                {approvalRecipients.map((u) => (
+                                {workLogApprovalClientUsers.map((u) => (
                                   <label key={u.id} className="flex items-center gap-2 cursor-pointer">
                                     <input
                                       type="checkbox"
@@ -7686,6 +8488,13 @@ const ClientDashboardPage: React.FC = () => {
                               ) : (
                                 workLogComments.map((c) => {
                                   const config = workLogActivityConfig[c.type] || workLogActivityConfig.COMMENT;
+                                  const displayName = c.author?.name || c.author?.email || "Unknown";
+                                  const initials = displayName
+                                    .split(/\s+/)
+                                    .filter(Boolean)
+                                    .slice(0, 2)
+                                    .map((part) => part.charAt(0).toUpperCase())
+                                    .join("") || "U";
                                   const authorRole = c.author?.role === "USER"
                                     ? "Client"
                                     : c.author?.role === "SPECIALIST"
@@ -7702,28 +8511,55 @@ const ClientDashboardPage: React.FC = () => {
                                       return "";
                                     }
                                   })();
+                                  const isAuthor = Boolean(user?.id) && c.author?.id === user?.id;
+                                  const canDelete = isAuthor;
                                   return (
-                                    <div key={c.id} className={`rounded-lg border p-3 ${config.border} ${config.bg}`}>
+                                    <div key={c.id} className={`group rounded-lg border p-3 ${config.border} ${config.bg}`}>
                                       <div className="flex items-start justify-between gap-2">
-                                        <div className="min-w-0">
+                                        <div className="min-w-0 flex items-start gap-3">
+                                          <div
+                                            className={`h-8 w-8 flex-shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold ${
+                                              c.author?.role === "USER"
+                                                ? "bg-violet-100 text-violet-700"
+                                                : c.author?.role === "SPECIALIST"
+                                                  ? "bg-emerald-100 text-emerald-700"
+                                                  : c.author?.role === "SUPER_ADMIN"
+                                                    ? "bg-indigo-100 text-indigo-700"
+                                                    : c.author?.role === "ADMIN"
+                                                      ? "bg-blue-100 text-blue-700"
+                                                      : "bg-slate-100 text-slate-700"
+                                            }`}
+                                            title={displayName}
+                                          >
+                                            {initials}
+                                          </div>
+                                          <div className="min-w-0">
                                           <div className="flex items-center gap-2 min-w-0">
                                             <p className="text-sm font-medium text-gray-900 truncate">
-                                              {c.author?.name || c.author?.email || "Unknown"}
+                                              {displayName}
                                             </p>
                                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
                                               {authorRole}
                                             </span>
-                                            {c.type !== "COMMENT" && (
-                                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${config.color} ${config.bg} ${config.border}`}>
-                                                {config.label}
-                                              </span>
-                                            )}
                                           </div>
                                           <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
-                                            {c.body}
+                                            {renderWorkLogCommentBody(c.body)}
                                           </p>
+                                          </div>
                                         </div>
-                                        <p className="text-xs text-gray-500 shrink-0">{when}</p>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <p className="text-xs text-gray-500">{when}</p>
+                                          {canDelete && (
+                                            <button
+                                              type="button"
+                                              onClick={() => requestDeleteWorkLogComment(c.id)}
+                                              className="p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                                              title="Delete"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
                                   );
@@ -7736,39 +8572,48 @@ const ClientDashboardPage: React.FC = () => {
                                 <p className="text-sm text-gray-500">Sign in to participate in the conversation.</p>
                               ) : (
                                 <div className="space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    {workLogCommentTypes.map((type) => {
-                                      const cfg = workLogActivityConfig[type];
-                                      return (
-                                        <button
-                                          key={type}
-                                          type="button"
-                                          onClick={() => setWorkLogCommentType(type)}
-                                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-                                            workLogCommentType === type
-                                              ? `${cfg.color} ${cfg.bg} ${cfg.border}`
-                                              : "text-gray-500 bg-white border-gray-200 hover:bg-gray-50"
-                                          }`}
-                                        >
-                                          {cfg.label}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
                                   <div className="flex flex-col sm:flex-row gap-2">
-                                    <textarea
-                                      value={workLogNewComment}
-                                      onChange={(e) => setWorkLogNewComment(e.target.value)}
-                                      rows={2}
-                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                      placeholder={
-                                        workLogCommentType === "QUESTION"
-                                          ? "Ask a question..."
-                                          : workLogCommentType === "APPROVAL_REQUEST"
-                                            ? "Request approval (describe what needs review)..."
-                                            : "Write a comment..."
-                                      }
-                                    />
+                                    <div className="relative flex-1">
+                                      <div
+                                        aria-hidden
+                                        className="absolute inset-0 pointer-events-none px-3 py-2 text-sm leading-5 text-gray-700 whitespace-pre-wrap break-words rounded-lg"
+                                      >
+                                        {workLogNewComment.length === 0 ? (
+                                          <span className="text-gray-400">Write a comment... Use @ to mention a user.</span>
+                                        ) : (
+                                          renderWorkLogCommentEditorOverlay(workLogNewComment)
+                                        )}
+                                      </div>
+                                      <textarea
+                                        ref={workLogCommentInputRef}
+                                        value={workLogNewComment}
+                                        onChange={handleWorkLogCommentChange}
+                                        onClick={(e) => updateWorkLogMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+                                        onKeyUp={(e) => updateWorkLogMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+                                        onKeyDown={handleWorkLogMentionKeyDown}
+                                        rows={2}
+                                        className="relative z-10 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm leading-5 bg-transparent text-transparent caret-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                        placeholder=""
+                                      />
+                                      {workLogMentionRange && workLogMentionSuggestions.length > 0 && (
+                                        <div className="absolute bottom-full z-30 mb-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                                          {workLogMentionSuggestions.map((member, idx) => (
+                                            <button
+                                              key={member.id}
+                                              type="button"
+                                              onMouseDown={(e) => {
+                                                e.preventDefault();
+                                                handleSelectWorkLogMention(member);
+                                              }}
+                                              className={`w-full px-3 py-2 text-left ${idx === workLogMentionActiveIndex ? "bg-primary-50" : "hover:bg-gray-50"}`}
+                                            >
+                                              <div className="text-sm font-medium text-gray-900">{member.name || member.email}</div>
+                                              <div className="text-xs text-gray-500">{member.email}</div>
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
                                     <button
                                       type="button"
                                       disabled={postingWorkLogComment || workLogNewComment.trim().length === 0}
@@ -7778,6 +8623,94 @@ const ClientDashboardPage: React.FC = () => {
                                       <Send className="h-4 w-4" />
                                       Post
                                     </button>
+                                  </div>
+                                  <div className="pt-1">
+                                    <div className="flex items-center gap-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => setWorkLogCollaboratorEditorOpen((v) => !v)}
+                                        className="text-sm font-medium text-gray-700 hover:text-gray-900"
+                                      >
+                                        Collaborators
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setWorkLogCollaboratorEditorOpen((v) => !v)}
+                                        className="flex items-center -space-x-2"
+                                        title="Edit collaborators"
+                                      >
+                                        {workLogEntryCollaborators.slice(0, 8).map((member) => {
+                                          const displayName = member.name || member.email;
+                                          const initials = displayName
+                                            .split(" ")
+                                            .filter(Boolean)
+                                            .slice(0, 2)
+                                            .map((part) => part[0]?.toUpperCase() || "")
+                                            .join("") || "U";
+                                          return (
+                                            <div
+                                              key={member.id}
+                                              className="h-7 w-7 rounded-full border-2 border-white bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center justify-center"
+                                              title={`${displayName} (${member.email})`}
+                                            >
+                                              {initials}
+                                            </div>
+                                          );
+                                        })}
+                                        {workLogEntryCollaborators.length > 8 && (
+                                          <div
+                                            className="h-7 w-7 rounded-full border-2 border-white bg-gray-100 text-gray-600 text-[10px] font-semibold flex items-center justify-center"
+                                            title={`${workLogEntryCollaborators.length - 8} more`}
+                                          >
+                                            +{workLogEntryCollaborators.length - 8}
+                                          </div>
+                                        )}
+                                        <span className="ml-1 h-7 w-7 rounded-full border border-gray-300 bg-white text-gray-600 flex items-center justify-center">
+                                          <Plus className="h-3.5 w-3.5" />
+                                        </span>
+                                      </button>
+                                    </div>
+                                    {workLogCollaboratorEditorOpen && (
+                                      <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {workLogEntryCollaborators.map((member) => (
+                                            <span key={member.id} className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                                              {member.name || member.email}
+                                              <button type="button" className="text-gray-500 hover:text-red-600" onClick={() => removeWorkLogCollaborator(member.id)}>
+                                                <X className="h-3 w-3" />
+                                              </button>
+                                            </span>
+                                          ))}
+                                        </div>
+                                        <input
+                                          value={workLogCollaboratorSearch}
+                                          onChange={(e) => setWorkLogCollaboratorSearch(e.target.value)}
+                                          placeholder="Add collaborators by name or email..."
+                                          className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                        />
+                                        <div className="max-h-40 overflow-y-auto rounded-md border border-gray-200">
+                                          {workLogCollaboratorSearchResults.map((member) => {
+                                            const selected = workLogEntryCollaborators.some((m) => m.id === member.id);
+                                            return (
+                                              <button
+                                                key={member.id}
+                                                type="button"
+                                                onClick={() => (selected ? removeWorkLogCollaborator(member.id) : addWorkLogCollaborator(member.id))}
+                                                className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-gray-50"
+                                              >
+                                                <div className="min-w-0">
+                                                  <div className="text-sm text-gray-900 truncate">{member.name || member.email}</div>
+                                                  <div className="text-xs text-gray-500 truncate">{member.email}</div>
+                                                </div>
+                                                <span className={`text-xs font-medium ${selected ? "text-red-600" : "text-primary-600"}`}>
+                                                  {selected ? "Remove" : "Add"}
+                                                </span>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               )}
@@ -7796,7 +8729,7 @@ const ClientDashboardPage: React.FC = () => {
                   >
                     Close
                   </button>
-                  {workLogModalMode !== "view" && canEditSelectedWorkLog && (
+                  {!isWorkLogFieldsReadOnly && canEditSelectedWorkLog && (
                     <button
                       type="button"
                       onClick={handleSaveWorkLog}
@@ -8007,12 +8940,92 @@ const ClientDashboardPage: React.FC = () => {
                   document.body
                 )}
 
+              {workLogAssigneesModalOpen &&
+                createPortal(
+                  <div className="fixed inset-0 z-[80] bg-black/55" onClick={() => setWorkLogAssigneesModalOpen(false)}>
+                    <div className="flex min-h-full items-start justify-center p-4 sm:p-8">
+                      <div
+                        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+                          <h3 className="text-xl font-semibold">Project assignees and clients</h3>
+                          <button
+                            type="button"
+                            onClick={() => setWorkLogAssigneesModalOpen(false)}
+                            className="rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                            aria-label="Close"
+                          >
+                            <X className="h-5 w-5" />
+                          </button>
+                        </div>
+                        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+                          {workLogProjectAssignees.length === 0 ? (
+                            <p className="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
+                              No assignees found for this project yet.
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {workLogProjectAssignees.map((member) => {
+                                const displayName = member.name || member.email;
+                                const initials = displayName
+                                  .split(" ")
+                                  .filter(Boolean)
+                                  .slice(0, 2)
+                                  .map((part) => part[0]?.toUpperCase() || "")
+                                  .join("") || "U";
+                                return (
+                                  <div key={member.id} className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5">
+                                    <div className="min-w-0 flex items-center gap-3">
+                                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-bold text-indigo-200">
+                                        {initials}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-slate-100">{displayName}</p>
+                                        <p className="truncate text-xs text-slate-400">{member.email}</p>
+                                      </div>
+                                    </div>
+                                    <span className="rounded-md border border-slate-600 bg-slate-900 px-2.5 py-1 text-xs text-slate-300">
+                                      {(() => {
+                                        const normalized = (member.role || "ASSIGNEE").toUpperCase();
+                                        if (normalized === "USER") return "Client";
+                                        return normalized
+                                          .replace(/_/g, " ")
+                                          .toLowerCase()
+                                          .split(" ")
+                                          .filter(Boolean)
+                                          .map((part) => part[0]?.toUpperCase() + part.slice(1))
+                                          .join(" ");
+                                      })()}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )}
+
               <ConfirmDialog
                 isOpen={workLogDeleteConfirm.isOpen}
                 onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null })}
                 onConfirm={() => void confirmDeleteWorkLog()}
                 title="Delete work log entry"
                 message={`Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`}
+                confirmText="Delete"
+                cancelText="Cancel"
+                variant="danger"
+              />
+              <ConfirmDialog
+                isOpen={workLogCommentDeleteConfirm.isOpen}
+                onClose={() => setWorkLogCommentDeleteConfirm({ isOpen: false, commentId: null })}
+                onConfirm={() => void confirmDeleteWorkLogComment()}
+                title="Delete activity"
+                message="Are you sure you want to delete this activity?"
                 confirmText="Delete"
                 cancelText="Cancel"
                 variant="danger"
@@ -8039,6 +9052,7 @@ const ClientDashboardPage: React.FC = () => {
                 canEdit={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")}
                 showStatus={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"}
                 showExtendedSuperAdminFields={user?.role === "SUPER_ADMIN"}
+                showSeoRoadmapSection={false}
                 onClose={() => setShowViewClientModal(false)}
                 onSave={
                   ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")
@@ -9394,12 +10408,30 @@ const ClientDashboardPage: React.FC = () => {
           )}
 
           {workLogModalOpen && createPortal(
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className={`fixed inset-0 z-50 ${
+                workLogModalMode === "edit"
+                  ? "pointer-events-none flex items-stretch justify-end p-0"
+                  : "flex items-center justify-center p-4"
+              }`}
+            >
+              {workLogModalMode !== "edit" && (
+                <div
+                  className="absolute inset-0 bg-black/50"
+                  onClick={() => setWorkLogModalOpen(false)}
+                />
+              )}
               <div
-                className="absolute inset-0 bg-black/50"
-                onClick={() => setWorkLogModalOpen(false)}
-              />
-              <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl border-2 border-primary-200 overflow-hidden">
+                className={`relative w-full flex flex-col bg-white shadow-2xl overflow-hidden pointer-events-auto ${
+                  workLogModalMode === "edit"
+                    ? "max-w-2xl h-full rounded-none border-0"
+                    : "max-w-lg max-h-[90vh] rounded-2xl border-2 border-primary-200"
+                }`}
+                style={workLogModalMode === "edit" ? { animation: "workLogSlideInRight 260ms ease-out" } : undefined}
+              >
+                {workLogModalMode === "edit" && (
+                  <style>{`@keyframes workLogSlideInRight{from{transform:translateX(24px);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+                )}
                 <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
                   <h3 className="text-lg font-bold text-primary-900">
                     {workLogModalMode === "create"
@@ -9417,17 +10449,27 @@ const ClientDashboardPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="overflow-auto overflow-x-auto max-h-[calc(90vh-14rem)]">
+                <div
+                  className={`overflow-auto overflow-x-auto ${
+                    workLogModalMode === "edit"
+                      ? "flex-1"
+                      : "max-h-[calc(90vh-14rem)]"
+                  }`}
+                >
                   <div className="px-6 py-5 space-y-4 min-w-0">
                   <div>
-                    <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
+                    {workLogModalMode !== "edit" && (
+                      <label className="block text-sm font-semibold text-primary-800 mb-1">Title</label>
+                    )}
                     <input
                       type="text"
                       maxLength={90}
                       value={workLogForm.description}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, description: e.target.value })}
-                      disabled={workLogModalMode === "view"}
-                      className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow"
+                      disabled={isWorkLogFieldsReadOnly}
+                      className={`w-full border-2 border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow ${
+                        workLogModalMode === "edit" ? "text-lg font-semibold" : "text-sm"
+                      }`}
                       placeholder="e.g. Optimized homepage title tags"
                     />
                   </div>
@@ -9438,29 +10480,9 @@ const ClientDashboardPage: React.FC = () => {
                       type="text"
                       value={workLogForm.category}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, category: e.target.value })}
-                      disabled={workLogModalMode === "view"}
+                      disabled={isWorkLogFieldsReadOnly}
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 disabled:bg-gray-50 transition-shadow"
                       placeholder="e.g. Technical, Content, Link Building"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-amber-800 mb-1">Task</label>
-                    {workLogModalMode !== "view" && (
-                      <div className="flex flex-wrap gap-1 mb-1 p-1 border border-amber-200 rounded-t-lg bg-amber-50/50">
-                        <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bold">B</button>
-                        <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bullet list">• List</button>
-                        <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Numbered list">1. List</button>
-                      </div>
-                    )}
-                    <div
-                      ref={workLogTaskNotesRef}
-                      contentEditable={workLogModalMode !== "view"}
-                      suppressContentEditableWarning
-                      onInput={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
-                      onBlur={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
-                      className="min-h-[220px] w-full border border-gray-300 rounded-lg rounded-tl-none px-4 py-3 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 overflow-y-auto overflow-x-auto resize-y prose prose-sm max-w-none list-disc pl-5 space-y-1"
-                      style={{ outline: "none" }}
                     />
                   </div>
 
@@ -9470,14 +10492,14 @@ const ClientDashboardPage: React.FC = () => {
                       type="date"
                       value={workLogForm.dueDate}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, dueDate: e.target.value })}
-                      disabled={workLogModalMode === "view"}
+                      disabled={isWorkLogFieldsReadOnly}
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-400 disabled:bg-gray-50 transition-shadow"
                     />
                   </div>
 
                   <div ref={assignToRef} className="relative">
                     <label className="block text-sm font-semibold text-slate-700 mb-1">Assign to</label>
-                    {workLogModalMode === "view" ? (
+                    {isWorkLogFieldsReadOnly ? (
                       <p className="text-sm text-gray-900 py-2">
                         {workLogForm.assigneeId
                           ? (() => {
@@ -9534,9 +10556,29 @@ const ClientDashboardPage: React.FC = () => {
                     )}
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-semibold text-amber-800 mb-1">Description</label>
+                    {!isWorkLogFieldsReadOnly && (
+                      <div className="flex flex-wrap gap-1 mb-1 p-1 border border-amber-200 rounded-t-lg bg-amber-50/50">
+                        <button type="button" onClick={() => document.execCommand("bold")} className="px-2 py-1 text-sm font-bold border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bold">B</button>
+                        <button type="button" onClick={() => document.execCommand("insertUnorderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Bullet list">• List</button>
+                        <button type="button" onClick={() => document.execCommand("insertOrderedList")} className="px-2 py-1 text-sm border border-amber-300 rounded hover:bg-amber-100 text-amber-900" title="Numbered list">1. List</button>
+                      </div>
+                    )}
+                    <div
+                      ref={workLogTaskNotesRef}
+                      contentEditable={!isWorkLogFieldsReadOnly}
+                      suppressContentEditableWarning
+                      onInput={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                      onBlur={(e) => setWorkLogForm((prev) => ({ ...prev, taskNotes: (e.target as HTMLDivElement).innerHTML }))}
+                      className="min-h-[220px] w-full border border-gray-300 rounded-lg rounded-tl-none px-4 py-3 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50 overflow-y-auto overflow-x-auto resize-y prose prose-sm max-w-none list-disc pl-5 space-y-1"
+                      style={{ outline: "none" }}
+                    />
+                  </div>
+
                   <div className="rounded-xl border-l-4 border-indigo-500 bg-indigo-50/50 p-3">
                     <label className="block text-sm font-semibold text-indigo-800 mb-2">Proof / Attachments</label>
-                    {workLogModalMode !== "view" && (
+                    {!isWorkLogFieldsReadOnly && (
                       <>
                         <input
                           id="work-log-file-input-2"
@@ -9623,7 +10665,7 @@ const ClientDashboardPage: React.FC = () => {
                                 </a>
                               </div>
                             </div>
-                            {workLogModalMode !== "view" && (
+                            {!isWorkLogFieldsReadOnly && (
                               <button
                                 type="button"
                                 onClick={() => removeWorkLogAttachment(i)}
@@ -9646,7 +10688,7 @@ const ClientDashboardPage: React.FC = () => {
                     <select
                       value={workLogForm.status}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
-                      disabled={workLogModalMode === "view"}
+                      disabled={isWorkLogFieldsReadOnly}
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 disabled:bg-gray-50 transition-shadow"
                     >
                       <option value="TODO">Pending</option>
@@ -9655,16 +10697,16 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="NEEDS_APPROVAL">Needs Approval</option>
                       <option value="DONE">Completed</option>
                     </select>
-                    {workLogForm.status === "NEEDS_APPROVAL" && workLogModalMode !== "view" && (
+                    {workLogForm.status === "NEEDS_APPROVAL" && !isWorkLogFieldsReadOnly && (
                       <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
                         <p className="text-xs font-medium text-amber-800 mb-2">Send approval request to (select who should be notified):</p>
-                        {approvalRecipientsLoading ? (
+                        {clientUsersLoading ? (
                           <p className="text-sm text-amber-700">Loading recipients…</p>
-                        ) : approvalRecipients.length === 0 ? (
+                        ) : workLogApprovalClientUsers.length === 0 ? (
                           <p className="text-sm text-amber-700">No users available for this account.</p>
                         ) : (
                           <div className="max-h-40 overflow-y-auto space-y-1.5">
-                            {approvalRecipients.map((u) => (
+                            {workLogApprovalClientUsers.map((u) => (
                               <label key={u.id} className="flex items-center gap-2 cursor-pointer">
                                 <input
                                   type="checkbox"
@@ -9715,6 +10757,13 @@ const ClientDashboardPage: React.FC = () => {
                           ) : (
                             workLogComments.map((c) => {
                               const config = workLogActivityConfig[c.type] || workLogActivityConfig.COMMENT;
+                              const displayName = c.author?.name || c.author?.email || "Unknown";
+                              const initials = displayName
+                                .split(/\s+/)
+                                .filter(Boolean)
+                                .slice(0, 2)
+                                .map((part) => part.charAt(0).toUpperCase())
+                                .join("") || "U";
                               const authorRole = c.author?.role === "USER"
                                 ? "Client"
                                 : c.author?.role === "SPECIALIST"
@@ -9731,28 +10780,55 @@ const ClientDashboardPage: React.FC = () => {
                                   return "";
                                 }
                               })();
+                              const isAuthor = Boolean(user?.id) && c.author?.id === user?.id;
+                              const canDelete = isAuthor;
                               return (
-                                <div key={c.id} className={`rounded-lg border p-3 ${config.border} ${config.bg}`}>
+                                <div key={c.id} className={`group rounded-lg border p-3 ${config.border} ${config.bg}`}>
                                   <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex items-start gap-3">
+                                      <div
+                                        className={`h-8 w-8 flex-shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold ${
+                                          c.author?.role === "USER"
+                                            ? "bg-violet-100 text-violet-700"
+                                            : c.author?.role === "SPECIALIST"
+                                              ? "bg-emerald-100 text-emerald-700"
+                                              : c.author?.role === "SUPER_ADMIN"
+                                                ? "bg-indigo-100 text-indigo-700"
+                                                : c.author?.role === "ADMIN"
+                                                  ? "bg-blue-100 text-blue-700"
+                                                  : "bg-slate-100 text-slate-700"
+                                        }`}
+                                        title={displayName}
+                                      >
+                                        {initials}
+                                      </div>
+                                      <div className="min-w-0">
                                       <div className="flex items-center gap-2 min-w-0">
                                         <p className="text-sm font-medium text-gray-900 truncate">
-                                          {c.author?.name || c.author?.email || "Unknown"}
+                                          {displayName}
                                         </p>
                                         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
                                           {authorRole}
                                         </span>
-                                        {c.type !== "COMMENT" && (
-                                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${config.color} ${config.bg} ${config.border}`}>
-                                            {config.label}
-                                          </span>
-                                        )}
                                       </div>
                                       <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
-                                        {c.body}
+                                        {renderWorkLogCommentBody(c.body)}
                                       </p>
+                                      </div>
                                     </div>
-                                    <p className="text-xs text-gray-500 shrink-0">{when}</p>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <p className="text-xs text-gray-500">{when}</p>
+                                      {canDelete && (
+                                        <button
+                                          type="button"
+                                          onClick={() => requestDeleteWorkLogComment(c.id)}
+                                          className="p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                                          title="Delete"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -9765,39 +10841,48 @@ const ClientDashboardPage: React.FC = () => {
                             <p className="text-sm text-gray-500">Sign in to participate in the conversation.</p>
                           ) : (
                             <div className="space-y-2">
-                              <div className="flex items-center gap-2">
-                                {workLogCommentTypes.map((type) => {
-                                  const cfg = workLogActivityConfig[type];
-                                  return (
-                                    <button
-                                      key={type}
-                                      type="button"
-                                      onClick={() => setWorkLogCommentType(type)}
-                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-                                        workLogCommentType === type
-                                          ? `${cfg.color} ${cfg.bg} ${cfg.border}`
-                                          : "text-gray-500 bg-white border-gray-200 hover:bg-gray-50"
-                                      }`}
-                                    >
-                                      {cfg.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
                               <div className="flex flex-col sm:flex-row gap-2">
-                                <textarea
-                                  value={workLogNewComment}
-                                  onChange={(e) => setWorkLogNewComment(e.target.value)}
-                                  rows={2}
-                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                  placeholder={
-                                    workLogCommentType === "QUESTION"
-                                      ? "Ask a question..."
-                                      : workLogCommentType === "APPROVAL_REQUEST"
-                                        ? "Request approval (describe what needs review)..."
-                                        : "Write a comment..."
-                                  }
-                                />
+                                <div className="relative flex-1">
+                                  <div
+                                    aria-hidden
+                                    className="absolute inset-0 pointer-events-none px-3 py-2 text-sm leading-5 text-gray-700 whitespace-pre-wrap break-words rounded-lg"
+                                  >
+                                    {workLogNewComment.length === 0 ? (
+                                      <span className="text-gray-400">Write a comment... Use @ to mention a user.</span>
+                                    ) : (
+                                      renderWorkLogCommentEditorOverlay(workLogNewComment)
+                                    )}
+                                  </div>
+                                  <textarea
+                                    ref={workLogCommentInputRef}
+                                    value={workLogNewComment}
+                                    onChange={handleWorkLogCommentChange}
+                                    onClick={(e) => updateWorkLogMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+                                    onKeyUp={(e) => updateWorkLogMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+                                    onKeyDown={handleWorkLogMentionKeyDown}
+                                    rows={2}
+                                    className="relative z-10 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm leading-5 bg-transparent text-transparent caret-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    placeholder=""
+                                  />
+                                  {workLogMentionRange && workLogMentionSuggestions.length > 0 && (
+                                    <div className="absolute bottom-full z-30 mb-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                                      {workLogMentionSuggestions.map((member, idx) => (
+                                        <button
+                                          key={member.id}
+                                          type="button"
+                                          onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            handleSelectWorkLogMention(member);
+                                          }}
+                                          className={`w-full px-3 py-2 text-left ${idx === workLogMentionActiveIndex ? "bg-primary-50" : "hover:bg-gray-50"}`}
+                                        >
+                                          <div className="text-sm font-medium text-gray-900">{member.name || member.email}</div>
+                                          <div className="text-xs text-gray-500">{member.email}</div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                                 <button
                                   type="button"
                                   disabled={postingWorkLogComment || workLogNewComment.trim().length === 0}
@@ -9807,6 +10892,94 @@ const ClientDashboardPage: React.FC = () => {
                                   <Send className="h-4 w-4" />
                                   Post
                                 </button>
+                              </div>
+                              <div className="pt-1">
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setWorkLogCollaboratorEditorOpen((v) => !v)}
+                                    className="text-sm font-medium text-gray-700 hover:text-gray-900"
+                                  >
+                                    Collaborators
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setWorkLogCollaboratorEditorOpen((v) => !v)}
+                                    className="flex items-center -space-x-2"
+                                    title="Edit collaborators"
+                                  >
+                                    {workLogEntryCollaborators.slice(0, 8).map((member) => {
+                                      const displayName = member.name || member.email;
+                                      const initials = displayName
+                                        .split(" ")
+                                        .filter(Boolean)
+                                        .slice(0, 2)
+                                        .map((part) => part[0]?.toUpperCase() || "")
+                                        .join("") || "U";
+                                      return (
+                                        <div
+                                          key={member.id}
+                                          className="h-7 w-7 rounded-full border-2 border-white bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center justify-center"
+                                          title={`${displayName} (${member.email})`}
+                                        >
+                                          {initials}
+                                        </div>
+                                      );
+                                    })}
+                                    {workLogEntryCollaborators.length > 8 && (
+                                      <div
+                                        className="h-7 w-7 rounded-full border-2 border-white bg-gray-100 text-gray-600 text-[10px] font-semibold flex items-center justify-center"
+                                        title={`${workLogEntryCollaborators.length - 8} more`}
+                                      >
+                                        +{workLogEntryCollaborators.length - 8}
+                                      </div>
+                                    )}
+                                    <span className="ml-1 h-7 w-7 rounded-full border border-gray-300 bg-white text-gray-600 flex items-center justify-center">
+                                      <Plus className="h-3.5 w-3.5" />
+                                    </span>
+                                  </button>
+                                </div>
+                                {workLogCollaboratorEditorOpen && (
+                                  <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {workLogEntryCollaborators.map((member) => (
+                                        <span key={member.id} className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                                          {member.name || member.email}
+                                          <button type="button" className="text-gray-500 hover:text-red-600" onClick={() => removeWorkLogCollaborator(member.id)}>
+                                            <X className="h-3 w-3" />
+                                          </button>
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <input
+                                      value={workLogCollaboratorSearch}
+                                      onChange={(e) => setWorkLogCollaboratorSearch(e.target.value)}
+                                      placeholder="Add collaborators by name or email..."
+                                      className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    />
+                                    <div className="max-h-40 overflow-y-auto rounded-md border border-gray-200">
+                                      {workLogCollaboratorSearchResults.map((member) => {
+                                        const selected = workLogEntryCollaborators.some((m) => m.id === member.id);
+                                        return (
+                                          <button
+                                            key={member.id}
+                                            type="button"
+                                            onClick={() => (selected ? removeWorkLogCollaborator(member.id) : addWorkLogCollaborator(member.id))}
+                                            className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-gray-50"
+                                          >
+                                            <div className="min-w-0">
+                                              <div className="text-sm text-gray-900 truncate">{member.name || member.email}</div>
+                                              <div className="text-xs text-gray-500 truncate">{member.email}</div>
+                                            </div>
+                                            <span className={`text-xs font-medium ${selected ? "text-red-600" : "text-primary-600"}`}>
+                                              {selected ? "Remove" : "Add"}
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -9825,7 +10998,7 @@ const ClientDashboardPage: React.FC = () => {
                   >
                     Close
                   </button>
-                  {workLogModalMode !== "view" && canEditSelectedWorkLog && (
+                  {!isWorkLogFieldsReadOnly && canEditSelectedWorkLog && (
                     <button
                       type="button"
                       onClick={handleSaveWorkLog}
@@ -9993,12 +11166,188 @@ const ClientDashboardPage: React.FC = () => {
           document.body
         )}
 
+      {workLogAssigneesModalOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[80] bg-black/55" onClick={() => setWorkLogAssigneesModalOpen(false)}>
+            <div className="flex min-h-full items-start justify-center p-4 sm:p-8">
+              <div
+                className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+                  <h3 className="text-xl font-semibold">Project assignees and clients</h3>
+                  <button
+                    type="button"
+                    onClick={() => setWorkLogAssigneesModalOpen(false)}
+                    className="rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    aria-label="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+                  {workLogProjectAssignees.length === 0 ? (
+                    <p className="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
+                      No assignees found for this project yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {workLogProjectAssignees.map((member) => {
+                        const displayName = member.name || member.email;
+                        const initials = displayName
+                          .split(" ")
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((part) => part[0]?.toUpperCase() || "")
+                          .join("") || "U";
+                        return (
+                          <div key={member.id} className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5">
+                            <div className="min-w-0 flex items-center gap-3">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-bold text-indigo-200">
+                                {initials}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-slate-100">{displayName}</p>
+                                <p className="truncate text-xs text-slate-400">{member.email}</p>
+                              </div>
+                            </div>
+                            <span className="rounded-md border border-slate-600 bg-slate-900 px-2.5 py-1 text-xs text-slate-300">
+                              {(() => {
+                                const normalized = (member.role || "ASSIGNEE").toUpperCase();
+                                if (normalized === "USER") return "Client";
+                                return normalized
+                                  .replace(/_/g, " ")
+                                  .toLowerCase()
+                                  .split(" ")
+                                  .filter(Boolean)
+                                  .map((part) => part[0]?.toUpperCase() + part.slice(1))
+                                  .join(" ");
+                              })()}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {localMapActivationOpen && createPortal(
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-primary-600 via-indigo-600 to-blue-600 text-white">
+              <div>
+                <h3 className="text-lg font-bold">Activate Local Map Keyword</h3>
+                <p className="text-xs text-white/90">Choose a money keyword and select a GBP listing.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLocalMapActivationOpen(false)}
+                className="p-1 rounded-md text-white/80 hover:bg-white/15"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-primary-100 px-3 py-2 text-xs text-indigo-800">
+                Grid defaults: 7x7 points, 0.5 mile spacing. Center point is pulled from the selected GBP listing.
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Target className="h-3.5 w-3.5 text-primary-600" />
+                    Keyword
+                  </span>
+                </label>
+                <select
+                  value={localMapSelectedKeywordId}
+                  onChange={(e) => setLocalMapSelectedKeywordId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">Select a money keyword</option>
+                  {localMapMoneyKeywords.map((kw) => (
+                    <option key={kw.id} value={kw.id}>
+                      {kw.keyword}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <GoogleBusinessSearch
+                value={localMapBusinessSelection}
+                onSelect={setLocalMapBusinessSelection}
+                placeholder="Search Google Business Profile listing"
+              />
+
+              {localMapBusinessSelection && (
+                <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-100 px-3 py-2 text-sm text-emerald-900">
+                  <div className="font-semibold">{localMapBusinessSelection.businessName}</div>
+                  <div className="text-emerald-800">{localMapBusinessSelection.address}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Center: {localMapBusinessSelection.lat}, {localMapBusinessSelection.lng}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <span className="inline-flex items-center gap-1.5">
+                    <BookOpen className="h-3.5 w-3.5 text-primary-600" />
+                    Label (optional)
+                  </span>
+                </label>
+                <input
+                  value={localMapLabel}
+                  onChange={(e) => setLocalMapLabel(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="Main Office"
+                />
+              </div>
+            </div>
+
+            <div className="px-5 py-4 border-t border-gray-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setLocalMapActivationOpen(false)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleActivateLocalMapKeyword()}
+                disabled={localMapSubmitting}
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60"
+              >
+                {localMapSubmitting ? "Activating..." : "Activate"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       <ConfirmDialog
         isOpen={workLogDeleteConfirm.isOpen}
         onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null })}
         onConfirm={() => void confirmDeleteWorkLog()}
         title="Delete work log entry"
         message={`Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+      <ConfirmDialog
+        isOpen={workLogCommentDeleteConfirm.isOpen}
+        onClose={() => setWorkLogCommentDeleteConfirm({ isOpen: false, commentId: null })}
+        onConfirm={() => void confirmDeleteWorkLogComment()}
+        title="Delete activity"
+        message="Are you sure you want to delete this activity?"
         confirmText="Delete"
         cancelText="Cancel"
         variant="danger"
@@ -10097,37 +11446,6 @@ const ClientDashboardPage: React.FC = () => {
                     <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
                       <div className="text-xs font-medium text-orange-600 mb-1">Engaged Visitors</div>
                       <div className="text-2xl font-bold text-orange-900">{Number(serverReport?.engagedVisitors ?? serverReport?.engagedSessions ?? 0).toLocaleString()}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* SEO Performance Card */}
-                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-                  <div className="flex items-center mb-4">
-                    <TrendingUp className="h-5 w-5 text-green-500 mr-2" />
-                    <h2 className="text-xl font-bold text-gray-900">SEO Performance</h2>
-                  </div>
-                  <p className="text-sm text-gray-500 mb-4">Ranking and search visibility metrics for this period.</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Average Position</div>
-                      <div className="text-2xl font-bold text-gray-900">
-                        {serverReport?.averagePosition != null ? Number(serverReport.averagePosition).toFixed(1) : "0.0"}
-                      </div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Total Clicks</div>
-                      <div className="text-2xl font-bold text-gray-900">{Number(serverReport?.totalClicks ?? 0).toLocaleString()}</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Total Impressions</div>
-                      <div className="text-2xl font-bold text-gray-900">{Number(serverReport?.totalImpressions ?? 0).toLocaleString()}</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Average CTR</div>
-                      <div className="text-2xl font-bold text-gray-900">
-                        {serverReport?.averageCtr != null ? (Number(serverReport.averageCtr) * 100).toFixed(2) : "0.00"}%
-                      </div>
                     </div>
                   </div>
                 </div>

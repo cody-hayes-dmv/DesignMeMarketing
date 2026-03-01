@@ -15,6 +15,7 @@ import uploadRoutes from "./routes/upload.js";
 import financialRoutes from "./routes/financial.js";
 import aiCommandRoutes from "./routes/aiCommands.js";
 import stripeWebhookRoutes from "./routes/stripeWebhook.js";
+import localMapRoutes from "./routes/localMap.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { resolveAgencyDomainContext } from "./middleware/resolveAgencyDomainContext.js";
 
@@ -27,6 +28,8 @@ dotenv.config({ path: resolve(__dirname, "../.env") });
 const requiredEnvVars = {
   JWT_SECRET: process.env.JWT_SECRET,
   DATABASE_URL: process.env.DATABASE_URL,
+  DATAFORSEO_BASE64: process.env.DATAFORSEO_BASE64,
+  GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY,
 };
 
 const missingVars = Object.entries(requiredEnvVars)
@@ -82,6 +85,7 @@ app.use("/api/team", teamRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/financial", financialRoutes);
 app.use("/api/ai-commands", aiCommandRoutes);
+app.use("/api/local-map", localMapRoutes);
 app.use("/uploads", express.static("uploads")); // Serve uploaded files
 
 // Health check
@@ -118,6 +122,7 @@ server.on("listening", async () => {
   const { autoSyncBacklinksForStaleClients, autoRefreshSeoDataForDueClients } = await import("./routes/seo.js");
   const { archiveCanceledClientsPastEndDate, archiveScheduledClients } = await import("./lib/clientStatusWorkflow.js");
   const { processRecurringTaskRules } = await import("./routes/tasks.js");
+  const { processScheduledLocalMapRankings } = await import("./routes/localMap.js");
 
   // Run immediately on startup (for testing)
   processScheduledReports().catch(console.error);
@@ -207,6 +212,11 @@ server.on("listening", async () => {
   setTimeout(() => captureDataForSeoDailySpend().catch(console.error), 10 * 1000);
   setInterval(() => captureDataForSeoDailySpend().catch(console.error), 6 * 60 * 60 * 1000);
   console.log("DataForSEO spending capture started (runs every 6 hours)");
+
+  // Local Map Rankings recurring runs: check every hour and execute on 1st/15th
+  processScheduledLocalMapRankings().catch(console.error);
+  setInterval(() => processScheduledLocalMapRankings().catch(console.error), 60 * 60 * 1000);
+  console.log("Local Map scheduler started (checks hourly, runs on 1st and 15th)");
 });
 
 server.on("error", (err: any) => {

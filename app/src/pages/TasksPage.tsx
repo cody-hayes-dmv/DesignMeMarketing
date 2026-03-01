@@ -91,7 +91,9 @@ const TasksPage = () => {
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role?: string }>>([]);
     const [assignSelectedOpen, setAssignSelectedOpen] = useState(false);
     const [assignSelectedSpecialistId, setAssignSelectedSpecialistId] = useState<string>("");
+    const [bulkEditOpen, setBulkEditOpen] = useState(false);
     const [bulkAssigning, setBulkAssigning] = useState(false);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
     const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
     const { tasks } = useSelector((state: RootState) => state.task);
     const { user } = useSelector((state: RootState) => state.auth);
@@ -263,7 +265,12 @@ const TasksPage = () => {
             return Array.from(merged);
         });
     };
-    const clearSelection = () => setSelectedTaskIds([]);
+    const clearSelection = () => {
+        setSelectedTaskIds([]);
+        setBulkEditOpen(false);
+        setAssignSelectedOpen(false);
+        setAssignSelectedSpecialistId("");
+    };
 
     const handleBulkAssign = async () => {
         if (selectedTaskIds.length === 0) return;
@@ -297,24 +304,56 @@ const TasksPage = () => {
         setOpen(true);
     };
 
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null }>({
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null; taskIds: string[] }>({
     isOpen: false,
     taskId: null,
+    taskIds: [],
   });
 
   const handleDeleteTask = async (id: string) => {
-    setDeleteConfirm({ isOpen: true, taskId: id });
+    setDeleteConfirm({ isOpen: true, taskId: id, taskIds: [] });
+  };
+
+  const handleBulkDeleteSelected = () => {
+    if (selectedTaskIds.length === 0) return;
+    setDeleteConfirm({ isOpen: true, taskId: null, taskIds: [...selectedTaskIds] });
   };
 
   const confirmDeleteTask = async () => {
-    if (!deleteConfirm.taskId) return;
+    const taskIdsToDelete = deleteConfirm.taskIds.length > 0
+      ? deleteConfirm.taskIds
+      : deleteConfirm.taskId
+        ? [deleteConfirm.taskId]
+        : [];
+    if (taskIdsToDelete.length === 0) return;
     try {
-      await dispatch(deleteTask(deleteConfirm.taskId) as any);
-      toast.success("Task deleted successfully!");
-      setDeleteConfirm({ isOpen: false, taskId: null });
+      if (taskIdsToDelete.length > 1) setBulkDeleting(true);
+      const results = await Promise.all(
+        taskIdsToDelete.map((taskId) => dispatch(deleteTask(taskId) as any))
+      );
+      let successCount = 0;
+      let failedCount = 0;
+      results.forEach((action: any) => {
+        if (action?.meta?.requestStatus === "fulfilled") successCount += 1;
+        else failedCount += 1;
+      });
+
+      if (successCount > 0) {
+        toast.success(successCount === 1 ? "Task deleted successfully!" : `${successCount} tasks deleted successfully!`);
+      }
+      if (failedCount > 0) {
+        toast.error(failedCount === 1 ? "1 task failed to delete." : `${failedCount} tasks failed to delete.`);
+      }
+      setDeleteConfirm({ isOpen: false, taskId: null, taskIds: [] });
+      if (deleteConfirm.taskIds.length > 0) {
+        clearSelection();
+      }
+      dispatch(fetchTasks() as any);
     } catch (error: any) {
       console.error("Failed to delete task:", error);
-      setDeleteConfirm({ isOpen: false, taskId: null });
+      setDeleteConfirm({ isOpen: false, taskId: null, taskIds: [] });
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -911,10 +950,11 @@ const TasksPage = () => {
                             </span>
                             <button
                                 type="button"
-                                onClick={() => setAssignSelectedOpen(true)}
+                                onClick={() => setBulkEditOpen((prev) => !prev)}
                                 className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
                             >
-                                Assign Selected
+                                <Edit className="h-4 w-4" />
+                                Edit
                             </button>
                             <button
                                 type="button"
@@ -923,6 +963,25 @@ const TasksPage = () => {
                             >
                                 Clear selection
                             </button>
+                            {bulkEditOpen && !assignSelectedOpen && (
+                                <div className="flex items-center gap-2 ml-2 flex-wrap">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAssignSelectedOpen(true)}
+                                        className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700"
+                                    >
+                                        Assign
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleBulkDeleteSelected}
+                                        disabled={bulkDeleting}
+                                        className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                                    >
+                                        {bulkDeleting ? "Deleting…" : "Delete"}
+                                    </button>
+                                </div>
+                            )}
                             {assignSelectedOpen && (
                                 <div className="flex items-center gap-2 ml-2 flex-wrap">
                                     <select
@@ -950,7 +1009,7 @@ const TasksPage = () => {
                                         onClick={() => setAssignSelectedOpen(false)}
                                         className="text-sm text-gray-600 hover:text-gray-900"
                                     >
-                                        Cancel
+                                        Back
                                     </button>
                                 </div>
                             )}
@@ -1251,10 +1310,14 @@ const TasksPage = () => {
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog
                 isOpen={deleteConfirm.isOpen}
-                onClose={() => setDeleteConfirm({ isOpen: false, taskId: null })}
+                onClose={() => setDeleteConfirm({ isOpen: false, taskId: null, taskIds: [] })}
                 onConfirm={confirmDeleteTask}
-                title="Delete Task"
-                message="Are you sure you want to delete this task? This action cannot be undone and all task data will be permanently removed."
+                title={deleteConfirm.taskIds.length > 0 ? "Delete Tasks" : "Delete Task"}
+                message={
+                  deleteConfirm.taskIds.length > 0
+                    ? `Are you sure you want to delete ${deleteConfirm.taskIds.length} selected tasks? This action cannot be undone and all task data will be permanently removed.`
+                    : "Are you sure you want to delete this task? This action cannot be undone and all task data will be permanently removed."
+                }
                 confirmText="Delete"
                 cancelText="Cancel"
                 variant="danger"

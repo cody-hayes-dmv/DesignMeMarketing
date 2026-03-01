@@ -2097,6 +2097,7 @@ const ClientsPage = () => {
                     const text = buildClientCopyText(clientForm, {
                       showStatus: user?.role === "SUPER_ADMIN" || user?.role === "ADMIN",
                       includeExtendedSuperAdminFields: user?.role === "SUPER_ADMIN",
+                      includeSeoRoadmapSection: false,
                     });
                     navigator.clipboard.writeText(text).then(
                       () => toast.success("Copied to clipboard"),
@@ -2301,7 +2302,7 @@ const ClientsPage = () => {
                   <>
                     {/* Full form for Super Admin / Specialist - includes all agency fields plus additional fields */}
                     <section className="rounded-xl border-l-4 border-primary-500 bg-primary-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-primary-900 mb-4">SECTION A: BUSINESS INFORMATION (Required)</h3>
+                      <h3 className="text-sm font-semibold text-primary-900 mb-4">BUSINESS INFORMATION (Required)</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Name *</label>
@@ -2408,7 +2409,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-emerald-900 mb-4">SECTION B: LOCATION INFORMATION (Required)</h3>
+                      <h3 className="text-sm font-semibold text-emerald-900 mb-4">LOCATION INFORMATION (Required)</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Address *</label>
@@ -2479,7 +2480,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section className="rounded-xl border-l-4 border-amber-500 bg-amber-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-amber-900 mb-4">SECTION C: CONTACT INFORMATION (Required)</h3>
+                      <h3 className="text-sm font-semibold text-amber-900 mb-4">CONTACT INFORMATION (Required)</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
@@ -2507,7 +2508,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section className="rounded-xl border-l-4 border-violet-500 bg-violet-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-violet-900 mb-4">SECTION D: WEBSITE LOGIN INFO (Optional)</h3>
+                      <h3 className="text-sm font-semibold text-violet-900 mb-4">WEBSITE LOGIN INFO (Optional)</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Login URL</label>
@@ -2540,7 +2541,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-blue-900 mb-4">SECTION E: CAMPAIGN TYPE (Required)</h3>
+                      <h3 className="text-sm font-semibold text-blue-900 mb-4">CAMPAIGN TYPE (Required)</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Type *</label>
@@ -2559,7 +2560,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-teal-900 mb-4">SECTION F: GOOGLE BUSINESS PROFILE (Optional)</h3>
+                      <h3 className="text-sm font-semibold text-teal-900 mb-4">GOOGLE BUSINESS PROFILE (Optional)</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Primary GBP Category</label>
@@ -2615,7 +2616,7 @@ const ClientsPage = () => {
                 {user?.role === "SUPER_ADMIN" && (
                   <>
                     <section className="rounded-xl border-l-4 border-cyan-500 bg-cyan-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-cyan-900 mb-4">SECTION G: KEYWORD ALLOCATION</h3>
+                      <h3 className="text-sm font-semibold text-cyan-900 mb-4">KEYWORD ALLOCATION</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Number of Keywords for Campaign</label>
@@ -2645,7 +2646,7 @@ const ClientsPage = () => {
                     </section>
 
                     <section className="rounded-xl border-l-4 border-fuchsia-500 bg-fuchsia-50/40 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-fuchsia-900 mb-4">SECTION H: GEOLOCATION DATA</h3>
+                      <h3 className="text-sm font-semibold text-fuchsia-900 mb-4">GEOLOCATION DATA</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Latitude</label>
@@ -2674,23 +2675,8 @@ const ClientsPage = () => {
                       </div>
                     </section>
 
-                    <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-slate-900 mb-4">SECTION I: SEO ROADMAP</h3>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">SEO Roadmap Section</label>
-                        <textarea
-                          value={clientForm.seoRoadmapSection}
-                          onChange={(e) => setClientForm({ ...clientForm, seoRoadmapSection: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                          rows={4}
-                          placeholder="Month 1: Technical audit + on-page optimization. Month 2: Content hub creation. Month 3: Link building campaign."
-                        />
-                        <p className="mt-1 text-xs text-gray-500">Internal strategy notes, not visible to agency/client users.</p>
-                      </div>
-                    </section>
-
                     <section className="rounded-xl border-l-4 border-orange-500 bg-orange-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-orange-900 mb-4">SECTION J: MANAGED SERVICE STATUS</h3>
+                      <h3 className="text-sm font-semibold text-orange-900 mb-4">MANAGED SERVICE STATUS</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Managed Service Status</label>

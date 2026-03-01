@@ -37,6 +37,7 @@ interface ClientAccountFormModalProps {
   canEdit: boolean;
   showStatus?: boolean;
   showExtendedSuperAdminFields?: boolean;
+  showSeoRoadmapSection?: boolean;
   onClose: () => void;
   onSave?: () => void;
   saving?: boolean;
@@ -51,6 +52,7 @@ export default function ClientAccountFormModal({
   canEdit,
   showStatus = false,
   showExtendedSuperAdminFields = false,
+  showSeoRoadmapSection = true,
   onClose,
   onSave,
   saving = false,
@@ -58,7 +60,11 @@ export default function ClientAccountFormModal({
   if (!open) return null;
 
   const copyAllToClipboard = () => {
-    const text = buildClientCopyText(form, { showStatus, includeExtendedSuperAdminFields: showExtendedSuperAdminFields });
+    const text = buildClientCopyText(form, {
+      showStatus,
+      includeExtendedSuperAdminFields: showExtendedSuperAdminFields,
+      includeSeoRoadmapSection: showSeoRoadmapSection,
+    });
     navigator.clipboard.writeText(text).then(
       () => toast.success("Copied to clipboard"),
       () => toast.error("Failed to copy")
@@ -586,29 +592,31 @@ export default function ClientAccountFormModal({
                   </div>
                 </section>
 
-                <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
-                  <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
-                    SEO ROADMAP
-                  </h3>
-                  <div>
-                    {field(
-                      "SEO Roadmap Section",
-                      false,
-                      canEdit ? (
-                        <textarea
-                          value={form.seoRoadmapSection}
-                          onChange={(e) => setForm((f) => ({ ...f, seoRoadmapSection: e.target.value }))}
-                          className={inputClass}
-                          rows={4}
-                          placeholder="Month 1: Technical audit + on-page optimization. Month 2: Content hub creation. Month 3: Link building campaign."
-                        />
-                      ) : (
-                        ro(form.seoRoadmapSection)
-                      )
-                    )}
-                  </div>
-                </section>
+                {showSeoRoadmapSection && (
+                  <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
+                    <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+                      SEO ROADMAP
+                    </h3>
+                    <div>
+                      {field(
+                        "SEO Roadmap Section",
+                        false,
+                        canEdit ? (
+                          <textarea
+                            value={form.seoRoadmapSection}
+                            onChange={(e) => setForm((f) => ({ ...f, seoRoadmapSection: e.target.value }))}
+                            className={inputClass}
+                            rows={4}
+                            placeholder="Month 1: Technical audit + on-page optimization. Month 2: Content hub creation. Month 3: Link building campaign."
+                          />
+                        ) : (
+                          ro(form.seoRoadmapSection)
+                        )
+                      )}
+                    </div>
+                  </section>
+                )}
 
                 <section className="rounded-xl border-l-4 border-orange-500 bg-orange-50/50 p-4 sm:p-5">
                   <h3 className="text-sm font-semibold text-orange-900 mb-4 flex items-center gap-2">

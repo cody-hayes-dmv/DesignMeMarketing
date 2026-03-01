@@ -380,7 +380,7 @@ export function generateReportEmailHTML(
                     <tr>
                       <td style="padding: 16px; text-align: center;">
                         <div style="font-size: 11px; font-weight: 600; color: #166534; margin-bottom: 4px;">Organic Traffic</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #14532d;">${Number((report as any).organicSearchEngagedSessions ?? report.organicSessions ?? 0).toLocaleString()}</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #14532d;">${Number((report as any).organicSearchEngagedSessions ?? 0).toLocaleString()}</div>
                       </td>
                     </tr>
                   </table>
@@ -400,59 +400,7 @@ export function generateReportEmailHTML(
                     <tr>
                       <td style="padding: 16px; text-align: center;">
                         <div style="font-size: 11px; font-weight: 600; color: #9a3412; margin-bottom: 4px;">Engaged Visitors</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #7c2d12;">${Number((report as any).engagedSessions ?? 0).toLocaleString()}</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </div>
-
-          <!-- SEO Performance Card -->
-          <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
-            <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
-              <span style="display: inline-block; width: 4px; height: 20px; background-color: #10b981; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-              ${REPORT_SECTION_TITLES.seo_performance}
-            </h2>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
-              <tr>
-                <td width="25%" align="center" valign="top" style="padding: 8px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-                    <tr>
-                      <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Average Position</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${report.averagePosition != null ? Number(report.averagePosition).toFixed(1) : "0.0"}</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-                <td width="25%" align="center" valign="top" style="padding: 8px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-                    <tr>
-                      <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Total Clicks</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${Number(report.totalClicks || 0).toLocaleString()}</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-                <td width="25%" align="center" valign="top" style="padding: 8px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-                    <tr>
-                      <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Total Impressions</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${Number(report.totalImpressions || 0).toLocaleString()}</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-                <td width="25%" align="center" valign="top" style="padding: 8px;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
-                    <tr>
-                      <td style="padding: 16px; text-align: center;">
-                        <div style="font-size: 11px; font-weight: 600; color: #4b5563; margin-bottom: 4px;">Average CTR</div>
-                        <div style="font-size: 24px; font-weight: 700; color: #111827;">${report.averageCtr != null ? (Number(report.averageCtr) * 100).toFixed(2) : "0.00"}%</div>
+                        <div style="font-size: 24px; font-weight: 700; color: #7c2d12;">${Number((report as any).engagedVisitors ?? (report as any).engagedSessions ?? 0).toLocaleString()}</div>
                       </td>
                     </tr>
                   </table>
@@ -467,11 +415,11 @@ export function generateReportEmailHTML(
               <span style="display: inline-block; width: 4px; height: 20px; background-color: #2563eb; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
               ${REPORT_SECTION_TITLES.money_keywords}
             </h2>
-            <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">(Sorted by highest rank)</p>
+            <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">High-intent keywords that drive qualified opportunities.</p>
             ${
               moneyKeywords.length === 0
                 ? `<div style="padding: 32px; text-align: center; color: #6b7280; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
-                    <p style="margin: 0;">No money keywords available.</p>
+                    <p style="margin: 0;">No money keywords tracked yet.</p>
                   </div>`
                 : buildKeywordTableHtml(moneyKeywords)
             }
@@ -483,32 +431,35 @@ export function generateReportEmailHTML(
               <span style="display: inline-block; width: 4px; height: 20px; background-color: #8b5cf6; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
               ${REPORT_SECTION_TITLES.topical_keywords}
             </h2>
-            <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">(Sorted by highest rank)</p>
+            <p style="margin: 0 0 16px 0; font-size: 12px; color: #6b7280;">Supportive topic coverage and informational discovery terms.</p>
             ${
               topicalKeywords.length === 0
                 ? `<div style="padding: 32px; text-align: center; color: #6b7280; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
-                    <p style="margin: 0;">No topical keywords available.</p>
+                    <p style="margin: 0;">No topical keywords tracked yet.</p>
                   </div>`
                 : buildKeywordTableHtml(topicalKeywords)
             }
           </div>
 
           <!-- Live Dashboard Card -->
-          ${
-            shareUrl
-              ? `<div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
-                  <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
-                    <span style="display: inline-block; width: 4px; height: 20px; background-color: #a855f7; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
-                    ${REPORT_SECTION_TITLES.live_dashboard}
-                  </h2>
-                  <div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 16px;">
+          <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+            <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
+              <span style="display: inline-block; width: 4px; height: 20px; background-color: #a855f7; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
+              ${REPORT_SECTION_TITLES.live_dashboard}
+            </h2>
+            <p style="margin: 0 0 12px 0; font-size: 12px; color: #6b7280;">Share this live report URL to provide read-only visibility.</p>
+            ${
+              shareUrl
+                ? `<div style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 16px;">
                     <a href="${escapeHtml(shareUrl)}" target="_blank" rel="noopener noreferrer" style="color: #7c3aed; font-weight: 600; text-decoration: underline; word-break: break-all;">
                       ${escapeHtml(shareUrl)}
                     </a>
-                  </div>
-                </div>`
-              : ""
-          }
+                  </div>`
+                : `<div style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; color: #6b7280;">
+                    Share link unavailable.
+                  </div>`
+            }
+          </div>
         </div>
 
         <div style="background-color: #f9fafb; border-top: 1px solid #e5e7eb; padding: 16px; text-align: center;">
@@ -606,6 +557,17 @@ export async function generateReportPDFBuffer(
       doc.fillColor("#000000");
     };
 
+    const drawSectionDescription = (text: string) => {
+      ensurePageSpace(20);
+      const pageLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
+      const pageRight =
+        safeNumber((doc as any)?.page?.width, 595) - safeNumber((doc as any)?.page?.margins?.right, defaultMargin);
+      const rowWidth = Math.max(1, pageRight - pageLeft);
+      doc.fontSize(9.5).fillColor("#64748b").text(text, pageLeft, doc.y, { width: rowWidth, align: "left" });
+      doc.moveDown(0.6);
+      doc.fillColor("#000000");
+    };
+
     const drawPageChrome = (pageIndex: number, totalPages: number) => {
       doc.switchToPage(pageIndex);
       const pageWidth = safeNumber((doc as any)?.page?.width, 595);
@@ -657,50 +619,25 @@ export async function generateReportPDFBuffer(
 
     doc.moveDown();
     drawSectionHeader(REPORT_SECTION_TITLES.traffic_overview);
+    drawSectionDescription("Core visitor metrics for this reporting period.");
     const webVisitors = (report as any).totalUsers ?? 0;
-    const organicTraffic = (report as any).organicSearchEngagedSessions ?? report.organicSessions ?? 0;
+    const organicTraffic = (report as any).organicSearchEngagedSessions ?? 0;
     drawMetricRow("Web Visitors", Number(webVisitors).toLocaleString());
     drawMetricRow("Organic Traffic", Number(organicTraffic).toLocaleString());
     drawMetricRow("First Time Visitors", Number(report.newUsers ?? 0).toLocaleString());
-    drawMetricRow("Engaged Visitors", Number((report as any).engagedSessions ?? 0).toLocaleString());
-
-    doc.moveDown();
-    drawSectionHeader(REPORT_SECTION_TITLES.seo_performance);
-    if (report.averagePosition != null) {
-      drawMetricRow("Average Position", Number(report.averagePosition).toFixed(1));
-    }
-    drawMetricRow("Total Clicks", report.totalClicks?.toLocaleString?.() ?? report.totalClicks ?? 0);
-    drawMetricRow("Total Impressions", report.totalImpressions?.toLocaleString?.() ?? report.totalImpressions ?? 0);
-    if (report.averageCtr != null) {
-      drawMetricRow("Average CTR", `${(Number(report.averageCtr) * 100).toFixed(2)}%`);
-    }
-
-    if (report.conversions != null && report.conversions > 0) {
-      doc.moveDown();
-      drawSectionHeader('Conversions');
-      drawMetricRow("Conversions", report.conversions);
-      if (report.conversionRate != null) {
-        drawMetricRow("Conversion Rate", `${(Number(report.conversionRate) * 100).toFixed(2)}%`);
-      }
-    }
-
-    // NOTE: PDFKit link annotations can throw "unsupported number: NaN" on some environments.
-    // To keep email sending reliable, render URLs as plain text in the PDF (no clickable links).
-    if (isHttpUrl(shareUrl)) {
-      doc.moveDown();
-      // Avoid underline for long URLs (PDFKit underline path can NaN on some systems)
-      doc.fillColor("#1d4ed8").fontSize(11).text(`Live dashboard: ${shareUrl}`);
-      doc.fillColor("#000000");
-    }
+    drawMetricRow("Engaged Visitors", Number((report as any).engagedVisitors ?? (report as any).engagedSessions ?? 0).toLocaleString());
 
     const moneyKws = targetKeywords.filter((k) => (k as any).type !== "topical");
     const topicalKws = targetKeywords.filter((k) => (k as any).type === "topical");
 
-    const drawKeywordTable = (title: string, keywords: ReportTargetKeywordRow[]) => {
+    const drawKeywordTable = (title: string, subtitle: string, keywords: ReportTargetKeywordRow[]) => {
       if (keywords.length === 0) return;
 
       doc.addPage({ layout: "landscape" });
       doc.fontSize(16).fillColor("#000000").text(title);
+      doc.moveDown(0.15);
+      doc.fontSize(9.5).fillColor("#64748b").text(subtitle);
+      doc.fillColor("#000000");
       doc.moveDown(0.5);
 
       const pageLeft = safeNumber((doc as any)?.page?.margins?.left, defaultMargin);
@@ -722,10 +659,10 @@ export async function generateReportPDFBuffer(
         { key: "keyword", label: "Keyword" },
         { key: "location", label: "Location" },
         { key: "date", label: "Date Added" },
-        { key: "google", label: "Google" },
+        { key: "google", label: "Position" },
         { key: "change", label: "Change" },
         { key: "serp", label: "SERP Features" },
-        { key: "url", label: "Google URL" },
+        { key: "url", label: "URL" },
       ];
 
       const rowPaddingY = 4;
@@ -795,6 +732,9 @@ export async function generateReportPDFBuffer(
         if (y + rowH > bottomLimit) {
           doc.addPage({ layout: "landscape" });
           doc.fontSize(16).fillColor("#000000").text(title);
+          doc.moveDown(0.15);
+          doc.fontSize(9.5).fillColor("#64748b").text(subtitle);
+          doc.fillColor("#000000");
           doc.moveDown(0.5);
           y = drawHeader(doc.y);
           doc.fontSize(9);
@@ -829,16 +769,21 @@ export async function generateReportPDFBuffer(
     };
 
     if (moneyKws.length > 0 || topicalKws.length > 0) {
-      drawKeywordTable("Money Keywords", moneyKws);
-      drawKeywordTable("Topical Keywords", topicalKws);
-
-      if (isHttpUrl(shareUrl)) {
-        doc.moveDown(1.5);
-        // Avoid underline for long URLs (PDFKit underline path can NaN on some systems)
-        doc.fillColor("#1d4ed8").fontSize(11).text(`Live dashboard: ${shareUrl}`);
-        doc.fillColor("#000000");
-      }
+      drawKeywordTable("Money Keywords", "High-intent keywords that drive qualified opportunities.", moneyKws);
+      drawKeywordTable("Topical Keywords", "Supportive topic coverage and informational discovery terms.", topicalKws);
+    } else {
+      doc.moveDown();
+      drawSectionHeader("Money Keywords");
+      drawMetricRow("Status", "No money keywords tracked yet.");
+      doc.moveDown();
+      drawSectionHeader("Topical Keywords");
+      drawMetricRow("Status", "No topical keywords tracked yet.");
     }
+
+    doc.moveDown();
+    drawSectionHeader("Live Dashboard");
+    drawSectionDescription("Share this live report URL to provide read-only visibility.");
+    drawMetricRow("URL", isHttpUrl(shareUrl) ? shareUrl : "Share link unavailable.");
 
     ensurePageSpace(42);
     doc.moveDown(0.8);

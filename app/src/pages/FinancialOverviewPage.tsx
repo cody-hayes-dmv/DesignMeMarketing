@@ -374,7 +374,7 @@ const FinancialOverviewPage: React.FC = () => {
           <div className="px-6 py-4 bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-600">
             <h3 className="text-lg font-semibold text-white">Monthly Recurring Revenue Breakdown</h3>
             <p className="mt-1 text-sm text-white/90">
-              Platform subscriptions by tier • Managed services by package • Add-ons. Click a segment to see accounts.
+              Platform subscriptions by tier • Managed services • Add-ons by type. Click a segment to see accounts.
             </p>
           </div>
           <div className="p-6 bg-primary-50/20">

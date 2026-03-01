@@ -26,6 +26,7 @@ import {
   Package,
   CreditCard,
   FolderPlus,
+  MapPin,
   type LucideIcon,
 } from "lucide-react";
 
@@ -211,6 +212,20 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       path: "/agency/reports",
       hasSubMenu: false,
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+    },
+    {
+      icon: MapPin,
+      label: "Local Map Snapshot",
+      path: "/agency/local-map-snapshot",
+      hasSubMenu: false,
+      roles: ["AGENCY", "SUPER_ADMIN"],
+    },
+    {
+      icon: MapPin,
+      label: "Prospect Snapshot",
+      path: "/superadmin/prospect-snapshot",
+      hasSubMenu: false,
+      roles: ["SUPER_ADMIN"],
     },
     {
       icon: Briefcase,

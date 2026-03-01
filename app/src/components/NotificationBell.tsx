@@ -32,8 +32,16 @@ const NotificationBell: React.FC = () => {
 
   const isSuperOrAdmin = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
   const isClientUser = user?.role === "USER";
+  const isSpecialistUser = user?.role === "SPECIALIST";
   const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
   const clientDashboardPath = firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks";
+  const defaultDashboardPath = isSuperOrAdmin
+    ? "/superadmin/dashboard"
+    : isClientUser
+    ? clientDashboardPath
+    : isSpecialistUser
+    ? "/specialist/dashboard"
+    : "/agency/dashboard";
   const notificationsUrl = isSuperOrAdmin ? "/seo/super-admin/notifications" : "/agencies/me/notifications";
   const markReadUrl = isSuperOrAdmin ? "/seo/super-admin/notifications/mark-read" : "/agencies/me/notifications/mark-read";
 
@@ -104,10 +112,10 @@ const NotificationBell: React.FC = () => {
       navigate(item.link || "/client/tasks");
       return;
     }
-    // Agency panel requirement: reading a notification should always
-    // land on Agency Dashboard with a fresh reload.
+    // Agency/specialist panels: respect notification deep-links so
+    // task/worklog notifications can open the target modal from URL params.
     if (!isSuperOrAdmin) {
-      window.location.assign("/agency/dashboard");
+      navigate(item.link || defaultDashboardPath);
       return;
     }
     navigate(item.link);
@@ -238,7 +246,7 @@ const NotificationBell: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  navigate(isSuperOrAdmin ? "/superadmin/dashboard" : isClientUser ? clientDashboardPath : "/agency/dashboard");
+                  navigate(defaultDashboardPath);
                 }}
                 className="w-full text-center text-xs font-medium text-primary-600 hover:text-primary-700 py-1.5"
               >

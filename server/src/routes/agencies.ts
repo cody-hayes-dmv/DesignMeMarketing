@@ -3466,31 +3466,70 @@ export function getAllowedAddOnOptions(tierId: TierId | null): {
   extra_dashboards: string[];
   extra_keywords_tracked: string[];
   extra_keyword_lookups: string[];
+  local_map_rankings_extra_keywords: string[];
 } {
   const keywordsTracked = ['50', '100', '250'];
   const researchCredits = ['50', '150', '300'];
-  if (!tierId) return { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] };
+  const localMapKeywords = ['5', '15'];
+  if (!tierId) {
+    return {
+      extra_dashboards: [],
+      extra_keywords_tracked: [],
+      extra_keyword_lookups: [],
+      local_map_rankings_extra_keywords: [],
+    };
+  }
   switch (tierId) {
     case 'free':
-      return { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] };
+      return {
+        extra_dashboards: [],
+        extra_keywords_tracked: [],
+        extra_keyword_lookups: [],
+        local_map_rankings_extra_keywords: [],
+      };
     case 'business_lite':
     case 'business_pro':
-      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
+      return {
+        extra_dashboards: [],
+        extra_keywords_tracked: keywordsTracked,
+        extra_keyword_lookups: researchCredits,
+        local_map_rankings_extra_keywords: [],
+      };
     case 'solo':
-      return { extra_dashboards: ['5_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
+      return {
+        extra_dashboards: ['5_slots'],
+        extra_keywords_tracked: keywordsTracked,
+        extra_keyword_lookups: researchCredits,
+        local_map_rankings_extra_keywords: localMapKeywords,
+      };
     case 'starter':
-      return { extra_dashboards: ['5_slots', '10_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
+      return {
+        extra_dashboards: ['5_slots', '10_slots'],
+        extra_keywords_tracked: keywordsTracked,
+        extra_keyword_lookups: researchCredits,
+        local_map_rankings_extra_keywords: localMapKeywords,
+      };
     case 'growth':
     case 'pro':
     case 'enterprise':
-      return { extra_dashboards: ['5_slots', '10_slots', '25_slots'], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
+      return {
+        extra_dashboards: ['5_slots', '10_slots', '25_slots'],
+        extra_keywords_tracked: keywordsTracked,
+        extra_keyword_lookups: researchCredits,
+        local_map_rankings_extra_keywords: localMapKeywords,
+      };
     default:
-      return { extra_dashboards: [], extra_keywords_tracked: keywordsTracked, extra_keyword_lookups: researchCredits };
+      return {
+        extra_dashboards: [],
+        extra_keywords_tracked: keywordsTracked,
+        extra_keyword_lookups: researchCredits,
+        local_map_rankings_extra_keywords: localMapKeywords,
+      };
   }
 }
 
 const addAddOnSchema = z.object({
-  addOnType: z.enum(['extra_dashboards', 'extra_keywords_tracked', 'extra_keyword_lookups']),
+  addOnType: z.enum(['extra_dashboards', 'extra_keywords_tracked', 'extra_keyword_lookups', 'local_map_rankings_extra_keywords']),
   addOnOption: z.string().min(1),
 });
 
@@ -3510,6 +3549,10 @@ const ADDON_PRICE_ENV_KEY: Record<string, Record<string, string>> = {
     '150': 'STRIPE_PRICE_ADDON_EXTRA_CREDITS_150',
     '300': 'STRIPE_PRICE_ADDON_EXTRA_CREDITS_300',
   },
+  local_map_rankings_extra_keywords: {
+    '5': 'STRIPE_PRICE_ADDON_LOCAL_MAP_KEYWORDS_5',
+    '15': 'STRIPE_PRICE_ADDON_LOCAL_MAP_KEYWORDS_15',
+  },
 };
 
 const ADDON_OPTIONS: Record<string, Record<string, { displayName: string; details: string; priceCents: number; billingInterval: string }>> = {
@@ -3527,6 +3570,31 @@ const ADDON_OPTIONS: Record<string, Record<string, { displayName: string; detail
     '50': { displayName: 'Extra Research Credits (+50/mo)', details: '+50 research credits per month', priceCents: 2900, billingInterval: 'monthly' },
     '150': { displayName: 'Extra Research Credits (+150/mo)', details: '+150 research credits per month', priceCents: 6900, billingInterval: 'monthly' },
     '300': { displayName: 'Extra Research Credits (+300/mo)', details: '+300 research credits per month', priceCents: 11900, billingInterval: 'monthly' },
+  },
+  local_map_rankings_extra_keywords: {
+    '5': { displayName: 'Local Map Rankings - Extra Keywords (+5)', details: '+5 recurring map grid keywords', priceCents: 2900, billingInterval: 'monthly' },
+    '15': { displayName: 'Local Map Rankings - Extra Keywords (+15)', details: '+15 recurring map grid keywords', priceCents: 6900, billingInterval: 'monthly' },
+  },
+};
+
+const SNAPSHOT_CREDIT_PACKS: Record<string, { credits: number; priceCents: number; displayName: string; stripePriceEnvKey: string }> = {
+  '5': {
+    credits: 5,
+    priceCents: 1900,
+    displayName: 'Local Map Snapshot Credits (5)',
+    stripePriceEnvKey: 'STRIPE_PRICE_ADDON_LOCAL_MAP_SNAPSHOT_CREDITS_5',
+  },
+  '10': {
+    credits: 10,
+    priceCents: 3400,
+    displayName: 'Local Map Snapshot Credits (10)',
+    stripePriceEnvKey: 'STRIPE_PRICE_ADDON_LOCAL_MAP_SNAPSHOT_CREDITS_10',
+  },
+  '25': {
+    credits: 25,
+    priceCents: 7400,
+    displayName: 'Local Map Snapshot Credits (25)',
+    stripePriceEnvKey: 'STRIPE_PRICE_ADDON_LOCAL_MAP_SNAPSHOT_CREDITS_25',
   },
 };
 
@@ -3622,6 +3690,77 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
     }
     console.error('Add add-on error:', err);
     res.status(500).json({ message: err?.message || 'Failed to add add-on' });
+  }
+});
+
+router.post('/add-ons/local-map-snapshot-credits/checkout', authenticateToken, async (req, res) => {
+  try {
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const { pack } = z.object({ pack: z.enum(['5', '10', '25']) }).parse(req.body ?? {});
+    const selectedPack = SNAPSHOT_CREDIT_PACKS[pack];
+    if (!selectedPack) {
+      return res.status(400).json({ message: 'Invalid credit pack' });
+    }
+
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Stripe is not configured' });
+    }
+
+    const customerId = membership.agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
+    if (!customerId) {
+      return res.status(400).json({
+        message: 'Activate your billing profile first to purchase one-time snapshot credits.',
+      });
+    }
+
+    const frontEndBase = process.env.FRONTEND_URL || 'http://localhost:3001';
+    const stripePriceId = process.env[selectedPack.stripePriceEnvKey];
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer: customerId,
+      success_url: `${frontEndBase}/agency/add-ons?snapshotCreditsPurchase=success`,
+      cancel_url: `${frontEndBase}/agency/add-ons?snapshotCreditsPurchase=cancelled`,
+      ...(stripePriceId
+        ? {
+            line_items: [{ price: stripePriceId, quantity: 1 }],
+          }
+        : {
+            line_items: [
+              {
+                quantity: 1,
+                price_data: {
+                  currency: 'usd',
+                  product_data: {
+                    name: selectedPack.displayName,
+                    description: `${selectedPack.credits} one-time Local Map Snapshot credits`,
+                  },
+                  unit_amount: selectedPack.priceCents,
+                },
+              },
+            ],
+          }),
+      metadata: {
+        agencyId: membership.agencyId,
+        addOnType: 'local_map_snapshot_credit_pack',
+        addOnOption: pack,
+      },
+    });
+
+    return res.status(201).json({ url: session.url, sessionId: session.id });
+  } catch (err: any) {
+    if (err.name === 'ZodError') {
+      return res.status(400).json({ message: err.errors?.[0]?.message || 'Invalid input', errors: err.errors });
+    }
+    console.error('Create local map snapshot checkout error:', err);
+    return res.status(500).json({ message: err?.message || 'Failed to start checkout' });
   }
 });
 

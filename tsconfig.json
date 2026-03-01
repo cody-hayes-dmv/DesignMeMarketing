@@ -16,9 +16,10 @@
     /* Path mapping */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./app/src/*"]
     }
   },
-  "include": ["src/**/*", "prisma/**/*"],
+  "files": ["app/src/main.tsx", "server/src/index.ts"],
+  "include": ["src/**/*", "prisma/**/*", "app/src/**/*", "server/src/**/*", "server/prisma/**/*"],
   "exclude": ["node_modules", "dist"]
 }

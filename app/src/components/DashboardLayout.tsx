@@ -65,6 +65,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/agency/research" || path === "/agnecy/research" || path === "/admin/research" || path === "/superadmin/research") return "Research";
     if (path === "/agency/rankings") return "Rankings";
     if (path === "/agency/reports") return "Reports";
+    if (path === "/agency/local-map-snapshot") return "Local Map Snapshot";
     if (path === "/agency/managed-services") return "Managed Services";
     if (path === "/agency/add-ons") return "Add-Ons";
     if (path === "/agency/subscription") return "Subscription";
@@ -81,6 +82,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/superadmin/agencies/myagency") return "My Agency";
     if (path === "/superadmin/agencies/allagencies") return "All Agencies";
     if (path === "/superadmin/tasks") return "Tasks";
+    if (path === "/superadmin/prospect-snapshot") return "Prospect Snapshot";
 
     if (path === "/specialist/dashboard") return "Dashboard";
     if (path === "/specialist/clients") return "My Clients";
@@ -264,7 +266,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
             {showBrandedHeader && <p className="text-xs text-gray-500">{brandName}</p>}
           </div>
-          {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY") && <NotificationBell />}
+          {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY" || user?.role === "SPECIALIST") && <NotificationBell />}
         </div>
         {trialExpired && (
           <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-4 flex-wrap">

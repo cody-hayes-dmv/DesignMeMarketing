@@ -11,13 +11,15 @@
     "test:tasks-notifications": "node --import tsx --test src/routes/tasks.notification-routing.test.ts",
     "test:quality-contracts": "node --import tsx --test src/lib/qualityContracts.test.ts",
     "test:metric-accuracy": "node --import tsx --test src/lib/metricAccuracy.test.ts",
+    "test:local-map": "node --import tsx --test src/lib/localMap.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:reset": "prisma db push --force-reset",
     "db:seed": "tsx prisma/seed.ts",
     "user:create-client": "tsx scripts/createClientUser.ts",
-    "upload:sanitize": "tsx scripts/sanitizeUploadFilenames.ts"
+    "upload:sanitize": "tsx scripts/sanitizeUploadFilenames.ts",
+    "dataforseo:import": "tsx scripts/importDataForSeoDailySpend.ts"
   },
   "dependencies": {
     "@google-analytics/data": "^5.2.1",

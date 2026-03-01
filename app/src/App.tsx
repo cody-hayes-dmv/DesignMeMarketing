@@ -24,8 +24,10 @@ import SubscriptionPage from "./pages/Agency/SubscriptionPage";
 import ManagedServicesPage from "./pages/Agency/ManagedServicesPage";
 import AddOnsPage from "./pages/Agency/AddOnsPage";
 import AgencyDashboardPage from "./pages/Agency/AgencyDashboardPage";
+import LocalMapSnapshotPage from "./pages/Agency/LocalMapSnapshotPage";
 import AgenciesPage from "./pages/SuperAdmin/AgenciesPage";
 import SuperAdminDashboard from "./pages/SuperAdmin/SuperAdminDashboard";
+import ProspectSnapshotPage from "./pages/SuperAdmin/ProspectSnapshotPage";
 import VendastaPage from "./pages/VendastaPage";
 import IncludedPage from "./pages/IncludedPage";
 import ClientDashboardPage from "./pages/ClientDashboardPage";
@@ -349,6 +351,50 @@ function App() {
           }
         />
       ))}
+
+      <Route
+        path="/agency/local-map-snapshot"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : !["AGENCY", "SUPER_ADMIN"].includes(user.role) ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : (
+            <DashboardLayout>
+              <LocalMapSnapshotPage />
+            </DashboardLayout>
+          )
+        }
+      />
+
+      <Route
+        path="/superadmin/prospect-snapshot"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : user.role !== "SUPER_ADMIN" ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : (
+            <DashboardLayout>
+              <ProspectSnapshotPage />
+            </DashboardLayout>
+          )
+        }
+      />
 
       {/* Super Admin Financial Overview route */}
       <Route

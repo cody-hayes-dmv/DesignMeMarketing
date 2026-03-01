@@ -55,6 +55,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   addon_dashboards: "#22c55e",
   addon_keywords_tracked: "#84cc16",
   addon_keyword_lookups: "#eab308",
+  addon_all: "#22c55e",
+  managed_services: "#0ea5e9",
   other: "#94a3b8",
 };
 
@@ -92,6 +94,45 @@ function friendlyProductName(rawName: string): string {
   return ADDON_DISPLAY_NAMES[upper] || ADDON_DISPLAY_NAMES[rawName] || rawName;
 }
 
+function normalizeAddOnProductName(rawCategory: string, rawName: string): string {
+  if (rawCategory === "addon_dashboards" || rawCategory === "addon_slots") {
+    return "Extra Client Dashboards";
+  }
+  if (rawCategory === "addon_keywords_tracked" || rawCategory === "addon_mappacks") {
+    return "Extra Keywords Tracked";
+  }
+  if (rawCategory === "addon_keyword_lookups" || rawCategory === "addon_creditpacks") {
+    return "Extra Research Credits";
+  }
+
+  const n = (rawName || "").toLowerCase();
+  const loose = n.replace(/[_-]+/g, " ");
+  if (n.includes("dashboard") || loose.includes("dashboard")) return "Extra Client Dashboards";
+  if (
+    n.includes("keywords tracked") ||
+    n.includes("keyword tracked") ||
+    n.includes("extra keywords") ||
+    n.includes("addon_extra_keywords") ||
+    loose.includes("extra keywords")
+  ) {
+    return "Extra Keywords Tracked";
+  }
+  if (
+    n.includes("research credit") ||
+    n.includes("keyword lookup") ||
+    n.includes("keyword_lookups") ||
+    n.includes("addon_extra_keyword_lookups") ||
+    n.includes("extra credits") ||
+    n.includes("credit pack") ||
+    loose.includes("keyword lookups") ||
+    loose.includes("research credits") ||
+    loose.includes("extra credits")
+  ) {
+    return "Extra Research Credits";
+  }
+  return friendlyProductName(rawName);
+}
+
 function normalizeToMonthly(amount: number, interval: "day" | "week" | "month" | "year"): number {
   switch (interval) {
     case "day":
@@ -105,6 +146,63 @@ function normalizeToMonthly(amount: number, interval: "day" | "week" | "month" |
     default:
       return amount;
   }
+}
+
+function normalizeMrrSegmentCategory(rawCategory: string, productName: string): string {
+  // Group all managed packages under one bucket.
+  if (rawCategory.startsWith("managed_")) return "managed_services";
+
+  const normalizedName = (productName || "").toLowerCase();
+  const normalizedLooseName = normalizedName.replace(/[_-]+/g, " ");
+  const normalizedToken = (productName || "").toUpperCase().replace(/\s+/g, "_");
+  if (
+    normalizedToken.startsWith("MANAGED_") ||
+    normalizedName.includes("managed") ||
+    normalizedName.includes("seo essentials + automation") ||
+    normalizedName.includes("growth & automation") ||
+    normalizedName.includes("authority builder") ||
+    normalizedName.includes("market domination")
+  ) {
+    return "managed_services";
+  }
+
+  // Group add-ons into the three financial overview buckets.
+  if (
+    rawCategory === "addon_dashboards" ||
+    rawCategory === "addon_keywords_tracked" ||
+    rawCategory === "addon_keyword_lookups" ||
+    rawCategory === "addon_slots" ||
+    rawCategory === "addon_mappacks" ||
+    rawCategory === "addon_creditpacks"
+  ) {
+    return "addon_all";
+  }
+
+  if (
+    normalizedName.includes("dashboard") ||
+    normalizedName.includes("keywords tracked") ||
+    normalizedName.includes("keyword tracked") ||
+    normalizedName.includes("extra keywords") ||
+    normalizedName.includes("keyword_lookups") ||
+    normalizedName.includes("extra credits") ||
+    normalizedName.includes("research credit") ||
+    normalizedName.includes("keyword lookup") ||
+    normalizedName.includes("research lookup") ||
+    normalizedLooseName.includes("extra keywords") ||
+    normalizedLooseName.includes("keyword lookups") ||
+    normalizedLooseName.includes("extra credits") ||
+    normalizedLooseName.includes("research credits")
+  ) {
+    return "addon_all";
+  }
+
+  return rawCategory;
+}
+
+function mrrSegmentLabel(category: string): string {
+  if (category === "managed_services") return "Managed Services";
+  if (category === "addon_all") return "Add-ons";
+  return CATEGORY_LABELS[category as MrrCategory] || category;
 }
 
 router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (req, res) => {
@@ -159,8 +257,8 @@ router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (r
           interval as "day" | "week" | "month" | "year"
         );
 
-        const key = category;
-        const label = CATEGORY_LABELS[category as MrrCategory] || category;
+        const key = normalizeMrrSegmentCategory(category, productName);
+        const label = mrrSegmentLabel(key);
         const color = CATEGORY_COLORS[key] || "#94a3b8";
 
         let seg = segmentsMap.get(key);
@@ -174,7 +272,7 @@ router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (r
           customerId,
           customerEmail,
           mrr: monthlyAmount,
-          productName: friendlyProductName(productName),
+          productName: key === "addon_all" ? normalizeAddOnProductName(category, productName) : friendlyProductName(productName),
         });
         }
       }
@@ -183,7 +281,7 @@ router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (r
     }
 
     const segments = Array.from(segmentsMap.values())
-      .filter((s) => s.mrr > 0)
+      .filter((s) => s.mrr > 0 && s.category !== "other")
       .sort((a, b) => b.mrr - a.mrr);
 
     const totalMrr = segments.reduce((sum, s) => sum + s.mrr, 0);
@@ -421,36 +519,68 @@ function byApiFromBlock(block: unknown): Record<string, number> {
 
 /** Normalize money.statistics.day into dailyExpenses (array of { date, total, byApi }). */
 function parseMoneyStatisticsDay(dayBlock: unknown): DataForSeoDailyExpense[] {
-  const entries: DataForSeoDailyExpense[] = [];
-  if (!dayBlock || typeof dayBlock !== "object") return entries;
+  if (!dayBlock || typeof dayBlock !== "object") return [];
 
-  const push = (date: string, block: unknown) => {
-    const total = sumNumericInObject(block);
-    const byApi = byApiFromBlock(block);
-    entries.push({ date, total: Math.round(total * 10000) / 10000, byApi });
+  const byDate = new Map<string, { total: number; byApi: Record<string, number> }>();
+  const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  const mergeByApi = (target: Record<string, number>, source: Record<string, number>) => {
+    for (const [apiName, value] of Object.entries(source)) {
+      target[apiName] = (target[apiName] || 0) + value;
+    }
   };
 
-  const o = dayBlock as Record<string, unknown>;
-  if (Array.isArray(o)) {
-    for (const item of o) {
-      const it = item as Record<string, unknown>;
-      const date = typeof it?.value === "string" ? it.value.slice(0, 10) : new Date().toISOString().slice(0, 10);
-      push(date, item);
+  const push = (date: string, block: unknown) => {
+    if (!dateKeyPattern.test(date)) return;
+    const total = sumNumericInObject(block);
+    const byApi = byApiFromBlock(block);
+    const existing = byDate.get(date);
+    if (!existing) {
+      byDate.set(date, { total, byApi: { ...byApi } });
+      return;
     }
-    return entries;
-  }
-  // Object keyed by date (e.g. "2025-01-01": { serp: {... }, ... })
-  const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
-  const dateKeys = Object.keys(o).filter((k) => dateKeyPattern.test(k));
-  if (dateKeys.length > 0) {
-    for (const date of dateKeys.sort()) {
-      push(date, o[date]);
+    existing.total += total;
+    mergeByApi(existing.byApi, byApi);
+  };
+
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
     }
-    return entries;
-  }
-  const date = typeof o.value === "string" ? o.value.slice(0, 10) : new Date().toISOString().slice(0, 10);
-  push(date, dayBlock);
-  return entries;
+
+    const obj = node as Record<string, unknown>;
+    const valueDate =
+      typeof obj.value === "string" && dateKeyPattern.test(obj.value.slice(0, 10))
+        ? obj.value.slice(0, 10)
+        : null;
+    if (valueDate) {
+      push(valueDate, obj);
+      return;
+    }
+
+    for (const [key, value] of Object.entries(obj)) {
+      if (dateKeyPattern.test(key)) {
+        push(key, value);
+        continue;
+      }
+      visit(value);
+    }
+  };
+
+  visit(dayBlock);
+
+  return Array.from(byDate.entries())
+    .map(([date, data]) => ({
+      date,
+      total: Math.round(data.total * 10000) / 10000,
+      byApi: Object.fromEntries(
+        Object.entries(data.byApi).map(([apiName, value]) => [apiName, Math.round(value * 10000) / 10000])
+      ),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Aggregate minute-level statistics (value: "yyyy-MM-dd HH:mm") into daily totals. */

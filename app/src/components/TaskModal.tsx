@@ -29,6 +29,9 @@ type TaskComment = {
     author: { id: string; name: string | null; email: string; role?: string };
 };
 
+type MentionRange = { start: number; end: number };
+type CollaboratorMember = { id: string; name: string | null; email: string; role: string | null };
+
 const activityConfig: Record<ActivityType, { icon: React.ReactNode; label: string; color: string; bgColor: string; borderColor: string }> = {
     COMMENT: {
         icon: <MessageSquare className="h-4 w-4" />,
@@ -80,13 +83,21 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const { user } = useSelector((state: RootState) => state.auth);
     const isSpecialistView = user?.role === "SPECIALIST";
     const isClientUser = user?.role === "USER";
-    const isNotOwner = (user?.role === "ADMIN" || user?.role === "AGENCY") && Number(mode) === 1 && task?.createdBy?.id !== user?.id;
+    const isAgencyViewingNonAgencyTask =
+        user?.role === "AGENCY" &&
+        Number(mode) === 1 &&
+        task?.createdBy?.role !== "AGENCY";
+    const isNotOwner =
+        (user?.role === "ADMIN" && Number(mode) === 1 && task?.createdBy?.id !== user?.id) ||
+        isAgencyViewingNonAgencyTask;
     const isAdminAssigneeStatusEditor =
         user?.role === "ADMIN" &&
         Number(mode) === 1 &&
         task?.createdBy?.id !== user?.id &&
         task?.assignee?.id === user?.id;
     const formReadOnly = isSpecialistView || isClientUser || isNotOwner;
+    const canEditStatus =
+        !isClientUser && (!formReadOnly || isSpecialistView || isAdminAssigneeStatusEditor);
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
     const [assignableLoading, setAssignableLoading] = useState(false);
     const [assignableSearch, setAssignableSearch] = useState("");
@@ -118,10 +129,19 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         commentId: null,
     });
     const [commentType, setCommentType] = useState<ActivityType>("COMMENT");
+    const [commentMentionRange, setCommentMentionRange] = useState<MentionRange | null>(null);
+    const [commentMentionQuery, setCommentMentionQuery] = useState("");
+    const [commentMentionActiveIndex, setCommentMentionActiveIndex] = useState(0);
+    const [commentMentionedUserIds, setCommentMentionedUserIds] = useState<string[]>([]);
+    const [collaboratorEditorOpen, setCollaboratorEditorOpen] = useState(false);
+    const [collaboratorSearch, setCollaboratorSearch] = useState("");
+    const [manualCollaboratorIds, setManualCollaboratorIds] = useState<string[]>([]);
+    const [removedCollaboratorIds, setRemovedCollaboratorIds] = useState<string[]>([]);
     const [approving, setApproving] = useState(false);
     const [requestingRevisions, setRequestingRevisions] = useState(false);
     const [revisionComment, setRevisionComment] = useState("");
     const [showRevisionInput, setShowRevisionInput] = useState(false);
+    const commentInputRef = React.useRef<HTMLTextAreaElement>(null);
 
     const hydrateFromTask = React.useCallback((taskData: Task) => {
         const assignee = taskData.assignee;
@@ -344,9 +364,120 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
 
     const canComment = Boolean(user);
     const canApprove = isClientUser && task?.status === "NEEDS_APPROVAL";
-    const availableCommentTypes: ActivityType[] = isClientUser
-        ? ["COMMENT", "QUESTION"]
-        : ["COMMENT", "QUESTION", "APPROVAL_REQUEST"];
+    const availableCommentTypes: ActivityType[] = ["COMMENT"];
+
+    const buildCommentMentionToken = React.useCallback((member: { id: string; name: string | null; email: string }) => {
+        const rawHandle = (member.name || member.email || "").trim();
+        return (rawHandle
+            .replace(/\s+/g, "_")
+            .replace(/[^A-Za-z0-9._-]/g, "") || "user").toLowerCase();
+    }, []);
+
+    const collaboratorPool = useMemo(() => {
+        const byId = new Map<string, CollaboratorMember>();
+        const add = (member: CollaboratorMember | null | undefined) => {
+            if (!member?.id || !member.email) return;
+            if (!byId.has(member.id)) byId.set(member.id, member);
+        };
+
+        assignableUsers.forEach((u) => add({ id: u.id, name: u.name ?? null, email: u.email, role: u.role ?? null }));
+        if (task?.createdBy?.id && task.createdBy.email) {
+            add({
+                id: task.createdBy.id,
+                name: task.createdBy.name ?? null,
+                email: task.createdBy.email,
+                role: (task.createdBy as any).role ?? null,
+            });
+        }
+        if (task?.assignee?.id && task.assignee.email) {
+            const fallbackRole = assignableUsers.find((u) => u.id === task.assignee?.id)?.role ?? null;
+            add({ id: task.assignee.id, name: task.assignee.name ?? null, email: task.assignee.email, role: fallbackRole });
+        }
+        if (user?.id && user?.email) {
+            add({ id: user.id, name: user.name ?? null, email: user.email, role: user.role ?? null });
+        }
+        comments.forEach((c) => {
+            if (!c.author?.id || !c.author?.email) return;
+            add({ id: c.author.id, name: c.author.name ?? null, email: c.author.email, role: c.author.role ?? null });
+        });
+
+        return Array.from(byId.values()).sort((a, b) => {
+            const aLabel = (a.name || a.email).toLowerCase();
+            const bLabel = (b.name || b.email).toLowerCase();
+            return aLabel.localeCompare(bLabel);
+        });
+    }, [assignableUsers, comments, task?.assignee, task?.createdBy, user]);
+
+    const entryCollaborators = useMemo(() => {
+        const byId = new Map<string, CollaboratorMember>();
+        const poolById = new Map(collaboratorPool.map((m) => [m.id, m] as const));
+        const poolByMentionToken = new Map(
+            collaboratorPool.map((m) => [buildCommentMentionToken(m), m] as const)
+        );
+        const add = (member: CollaboratorMember | null | undefined) => {
+            if (!member?.id || !member.email) return;
+            if (!byId.has(member.id)) byId.set(member.id, member);
+        };
+
+        if (task?.assignee?.id && task.assignee.email) {
+            const fallback = poolById.get(task.assignee.id);
+            add({
+                id: task.assignee.id,
+                name: task.assignee.name ?? fallback?.name ?? null,
+                email: task.assignee.email,
+                role: fallback?.role ?? null,
+            });
+        }
+
+        comments.forEach((c) => {
+            if (c.author?.id && c.author?.email) {
+                const fallback = poolById.get(c.author.id);
+                add({
+                    id: c.author.id,
+                    name: c.author.name ?? fallback?.name ?? null,
+                    email: c.author.email,
+                    role: c.author.role ?? fallback?.role ?? null,
+                });
+            }
+            const mentionMatches = c.body.match(/@([A-Za-z0-9._-]+)/g) || [];
+            mentionMatches.forEach((raw) => {
+                const token = raw.slice(1).toLowerCase();
+                const member = poolByMentionToken.get(token);
+                if (member) add(member);
+            });
+        });
+
+        manualCollaboratorIds.forEach((id) => {
+            const member = poolById.get(id);
+            if (member) add(member);
+        });
+        removedCollaboratorIds.forEach((id) => byId.delete(id));
+
+        return Array.from(byId.values()).sort((a, b) => {
+            const aLabel = (a.name || a.email).toLowerCase();
+            const bLabel = (b.name || b.email).toLowerCase();
+            return aLabel.localeCompare(bLabel);
+        }).filter((member) => member.id !== user?.id);
+    }, [buildCommentMentionToken, collaboratorPool, comments, manualCollaboratorIds, removedCollaboratorIds, task?.assignee, user?.id]);
+
+    const collaboratorSearchResults = useMemo(() => {
+        const q = collaboratorSearch.trim().toLowerCase();
+        return collaboratorPool.filter((m) => {
+            if (m.id === user?.id) return false;
+            if (!q) return true;
+            return (m.name || "").toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
+        });
+    }, [collaboratorPool, collaboratorSearch, user?.id]);
+
+    const addCollaborator = React.useCallback((userId: string) => {
+        setManualCollaboratorIds((prev) => Array.from(new Set([...prev, userId])));
+        setRemovedCollaboratorIds((prev) => prev.filter((id) => id !== userId));
+    }, []);
+
+    const removeCollaborator = React.useCallback((userId: string) => {
+        setManualCollaboratorIds((prev) => prev.filter((id) => id !== userId));
+        setRemovedCollaboratorIds((prev) => Array.from(new Set([...prev, userId])));
+    }, []);
 
     const fetchComments = async (taskId: string) => {
         try {
@@ -363,30 +494,202 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         }
     };
 
+    const updateCommentMentionState = React.useCallback((value: string, caretPosition: number) => {
+        if (caretPosition < 0) {
+            setCommentMentionRange(null);
+            setCommentMentionQuery("");
+            return;
+        }
+
+        const beforeCaret = value.slice(0, caretPosition);
+        const atIndex = beforeCaret.lastIndexOf("@");
+        if (atIndex < 0) {
+            setCommentMentionRange(null);
+            setCommentMentionQuery("");
+            return;
+        }
+
+        if (atIndex > 0 && /[A-Za-z0-9._-]/.test(beforeCaret.charAt(atIndex - 1))) {
+            setCommentMentionRange(null);
+            setCommentMentionQuery("");
+            return;
+        }
+
+        const query = beforeCaret.slice(atIndex + 1);
+        if (!/^[A-Za-z0-9._-]*$/.test(query)) {
+            setCommentMentionRange(null);
+            setCommentMentionQuery("");
+            return;
+        }
+
+        setCommentMentionRange({ start: atIndex, end: caretPosition });
+        setCommentMentionQuery(query);
+    }, []);
+
+    const commentMentionSuggestions = useMemo(() => {
+        if (!commentMentionRange) return [];
+        const q = commentMentionQuery.trim().toLowerCase();
+        const filtered = collaboratorPool.filter((member) => {
+            if (member.id === user?.id) return false;
+            if (!q) return true;
+            return (
+                (member.name || "").toLowerCase().includes(q) ||
+                (member.email || "").toLowerCase().includes(q)
+            );
+        });
+        return filtered.slice(0, 8);
+    }, [collaboratorPool, commentMentionQuery, commentMentionRange, user?.id]);
+
+    useEffect(() => {
+        if (!commentMentionRange || commentMentionSuggestions.length === 0) {
+            setCommentMentionActiveIndex(0);
+            return;
+        }
+        setCommentMentionActiveIndex((prev) => Math.min(prev, commentMentionSuggestions.length - 1));
+    }, [commentMentionRange, commentMentionSuggestions.length]);
+
+    const handleSelectCommentMention = React.useCallback((member: { id: string; name: string | null; email: string }) => {
+        if (!commentMentionRange) return;
+        const token = `@${buildCommentMentionToken(member)}`;
+        const before = newComment.slice(0, commentMentionRange.start);
+        const after = newComment.slice(commentMentionRange.end);
+        const needsSpace = after.length > 0 && !/^\s/.test(after) ? " " : "";
+        const nextValue = `${before}${token}${needsSpace}${after}`;
+        const nextCursor = (before + token + needsSpace).length;
+
+        setNewComment(nextValue);
+        setCommentMentionRange(null);
+        setCommentMentionQuery("");
+        setCommentMentionActiveIndex(0);
+        setCommentMentionedUserIds((prev) => (prev.includes(member.id) ? prev : [...prev, member.id]));
+
+        requestAnimationFrame(() => {
+            if (!commentInputRef.current) return;
+            commentInputRef.current.focus();
+            commentInputRef.current.setSelectionRange(nextCursor, nextCursor);
+        });
+    }, [buildCommentMentionToken, commentMentionRange, newComment]);
+
+    const handleCommentMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (!commentMentionRange || commentMentionSuggestions.length === 0) {
+            if (e.key === "Escape") {
+                setCommentMentionRange(null);
+                setCommentMentionQuery("");
+            }
+            return;
+        }
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setCommentMentionActiveIndex((prev) => (prev + 1) % commentMentionSuggestions.length);
+            return;
+        }
+
+        if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setCommentMentionActiveIndex((prev) => (prev - 1 + commentMentionSuggestions.length) % commentMentionSuggestions.length);
+            return;
+        }
+
+        if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            const candidate = commentMentionSuggestions[commentMentionActiveIndex];
+            if (candidate) handleSelectCommentMention(candidate);
+            return;
+        }
+
+        if (e.key === "Escape") {
+            e.preventDefault();
+            setCommentMentionRange(null);
+            setCommentMentionQuery("");
+        }
+    };
+
+    const renderCommentBody = React.useCallback((body: string) => {
+        const parts = body.split(/(@[A-Za-z0-9._-]+)/g);
+        return parts.map((part, idx) => {
+            if (/^@[A-Za-z0-9._-]+$/.test(part)) {
+                return (
+                    <span key={`mention-${idx}`} className="rounded bg-green-100 px-1 text-green-800 font-medium">
+                        {part}
+                    </span>
+                );
+            }
+            return <React.Fragment key={`text-${idx}`}>{part}</React.Fragment>;
+        });
+    }, []);
+
+    const renderCommentEditorOverlay = React.useCallback((body: string) => {
+        const parts = body.split(/(@[A-Za-z0-9._-]+)/g);
+        return parts.map((part, idx) => {
+            if (/^@[A-Za-z0-9._-]+$/.test(part)) {
+                return (
+                    <span key={`editor-mention-${idx}`} className="rounded-sm bg-green-100/70 text-green-800 font-normal">
+                        {part}
+                    </span>
+                );
+            }
+            return <React.Fragment key={`editor-text-${idx}`}>{part}</React.Fragment>;
+        });
+    }, []);
+
     useEffect(() => {
         if (!open) return;
         if (mode !== 1 || !task?.id) {
             setComments([]);
             setCommentsError(null);
             setNewComment("");
+            setCommentMentionRange(null);
+            setCommentMentionQuery("");
+            setCommentMentionedUserIds([]);
             return;
         }
         void fetchComments(task.id);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, mode, task?.id]);
 
+    useEffect(() => {
+        if (!open) return;
+        setCollaboratorEditorOpen(false);
+        setCollaboratorSearch("");
+        setManualCollaboratorIds([]);
+        setRemovedCollaboratorIds([]);
+    }, [open, task?.id]);
+
     const handlePostComment = async () => {
         if (!task?.id) return;
         const body = newComment.trim();
         if (!body) return;
+        const mentionTokenToId = new Map(
+            collaboratorPool.map((member) => [buildCommentMentionToken(member), member.id] as const)
+        );
+        const bodyMentionIds = Array.from(
+            new Set(
+                (body.match(/@([A-Za-z0-9._-]+)/g) || [])
+                    .map((raw) => raw.slice(1).toLowerCase())
+                    .map((token) => mentionTokenToId.get(token))
+                    .filter((id): id is string => Boolean(id))
+            )
+        );
+        const mentionUserIds = Array.from(
+            new Set([...(commentMentionedUserIds || []), ...bodyMentionIds])
+        ).filter((id) => id !== user?.id);
         try {
             setPostingComment(true);
-            const res = await api.post(`/tasks/${task.id}/comments`, { body, type: commentType }, { timeout: 30000 });
+            const res = await api.post(
+                `/tasks/${task.id}/comments`,
+                { body, type: commentType, mentionUserIds },
+                { timeout: 30000 }
+            );
             const created = res.data as TaskComment;
             setComments((prev) => [...prev, created]);
             setNewComment("");
             setCommentType("COMMENT");
             setCommentsError(null);
+            setCommentMentionRange(null);
+            setCommentMentionQuery("");
+            setCommentMentionActiveIndex(0);
+            setCommentMentionedUserIds([]);
         } catch (e: any) {
             console.error("Failed to post comment", e);
             toast.error(e?.response?.data?.message || "Failed to post comment");
@@ -527,8 +830,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <select
                                 value={form.status}
                                 onChange={(e) => setForm({ ...form, status: e.target.value as TaskStatus })}
-                                disabled={isClientUser}
-                                className={`border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-primary-500 focus:border-transparent ${isClientUser ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                                disabled={!canEditStatus}
+                                className={`border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-primary-500 focus:border-transparent ${!canEditStatus ? "bg-gray-100 cursor-not-allowed" : ""}`}
                             >
                                 <option value="TODO">TODO</option>
                                 <option value="IN_PROGRESS">IN_PROGRESS</option>
@@ -866,7 +1169,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <p className="mt-2 text-sm text-gray-500">Save the task to start the activity feed.</p>
                         ) : (
                             <div className="mt-3 rounded-lg border border-gray-200 bg-white">
-                                <div className="max-h-80 overflow-y-auto p-3 space-y-3">
+                                <div className="max-h-64 overflow-y-auto p-3 space-y-3">
                                     {commentsLoading ? (
                                         <p className="text-sm text-gray-500">Loading activity...</p>
                                     ) : commentsError ? (
@@ -876,9 +1179,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                     ) : (
                                         comments.map((c) => {
                                             const config = activityConfig[c.type] || activityConfig.COMMENT;
-                                            const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
                                             const isAuthor = user?.id && c.author?.id === user.id;
-                                            const canDelete = canComment && (isAdmin || isAuthor);
+                                            const canDelete = canComment && isAuthor;
                                             const isSystemEntry = c.type === "APPROVAL" || c.type === "REVISION_REQUEST";
                                             const authorRole = c.author?.role === "USER"
                                                 ? "Client"
@@ -896,46 +1198,59 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                                     return "";
                                                 }
                                             })();
+                                            const displayName = c.author?.name || c.author?.email || "Unknown";
+                                            const initials = displayName
+                                                .split(/\s+/)
+                                                .filter(Boolean)
+                                                .slice(0, 2)
+                                                .map((part) => part.charAt(0).toUpperCase())
+                                                .join("") || "U";
                                             return (
-                                                <div key={c.id} className={`rounded-lg border p-3 ${config.borderColor} ${config.bgColor}`}>
-                                                    <div className="flex items-start gap-3">
-                                                        <span className={`mt-0.5 shrink-0 ${config.color}`}>{config.icon}</span>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center justify-between gap-2">
+                                                <div key={c.id} className={`group rounded-lg border p-3 ${config.borderColor} ${config.bgColor}`}>
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="min-w-0 flex items-start gap-3">
+                                                            <div
+                                                                className={`h-8 w-8 flex-shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold ${
+                                                                    c.author?.role === "USER"
+                                                                        ? "bg-violet-100 text-violet-700"
+                                                                        : c.author?.role === "SPECIALIST"
+                                                                            ? "bg-emerald-100 text-emerald-700"
+                                                                            : c.author?.role === "SUPER_ADMIN"
+                                                                                ? "bg-indigo-100 text-indigo-700"
+                                                                                : c.author?.role === "ADMIN"
+                                                                                    ? "bg-blue-100 text-blue-700"
+                                                                                    : "bg-slate-100 text-slate-700"
+                                                                }`}
+                                                                title={displayName}
+                                                            >
+                                                                {initials}
+                                                            </div>
+                                                            <div className="min-w-0">
                                                                 <div className="flex items-center gap-2 min-w-0">
                                                                     <p className="text-sm font-medium text-gray-900 truncate">
-                                                                        {c.author?.name || c.author?.email || "Unknown"}
+                                                                        {displayName}
                                                                     </p>
-                                                                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                                                                        c.author?.role === "USER"
-                                                                            ? "bg-violet-100 text-violet-700"
-                                                                            : "bg-blue-100 text-blue-700"
-                                                                    }`}>
+                                                                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
                                                                         {authorRole}
                                                                     </span>
-                                                                    {c.type !== "COMMENT" && (
-                                                                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${config.color} ${config.bgColor} border ${config.borderColor}`}>
-                                                                            {config.label}
-                                                                        </span>
-                                                                    )}
                                                                 </div>
-                                                                <div className="flex items-center gap-1 shrink-0">
-                                                                    <p className="text-xs text-gray-500">{when}</p>
-                                                                    {canDelete && !isSystemEntry && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => requestDeleteComment(c.id)}
-                                                                            className="p-1 text-red-400 hover:text-red-600"
-                                                                            title="Delete"
-                                                                        >
-                                                                            <Trash2 className="h-3.5 w-3.5" />
-                                                                        </button>
-                                                                    )}
-                                                                </div>
+                                                                <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
+                                                                    {renderCommentBody(c.body)}
+                                                                </p>
                                                             </div>
-                                                            <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap break-words">
-                                                                {c.body}
-                                                            </p>
+                                                        </div>
+                                                        <div className="flex items-center gap-1 shrink-0">
+                                                            <p className="text-xs text-gray-500">{when}</p>
+                                                            {canDelete && !isSystemEntry && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => requestDeleteComment(c.id)}
+                                                                    className="p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                                                                    title="Delete"
+                                                                >
+                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -970,19 +1285,53 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                                 })}
                                             </div>
                                             <div className="flex flex-col sm:flex-row gap-2">
-                                                <textarea
-                                                    value={newComment}
-                                                    onChange={(e) => setNewComment(e.target.value)}
-                                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                                    rows={2}
-                                                    placeholder={
-                                                        commentType === "QUESTION"
-                                                            ? "Ask a question..."
-                                                            : commentType === "APPROVAL_REQUEST"
-                                                            ? "Request approval (describe what needs review)..."
-                                                            : "Write a comment..."
-                                                    }
-                                                />
+                                                <div className="relative flex-1">
+                                                    <div
+                                                        aria-hidden
+                                                        className="absolute inset-0 pointer-events-none px-3 py-2 text-sm leading-5 text-gray-700 whitespace-pre-wrap break-words rounded-lg"
+                                                    >
+                                                        {newComment.length === 0 ? (
+                                                            <span className="text-gray-400">
+                                                                {"Write a comment... Use @ to mention a user."}
+                                                            </span>
+                                                        ) : (
+                                                            renderCommentEditorOverlay(newComment)
+                                                        )}
+                                                    </div>
+                                                    <textarea
+                                                        ref={commentInputRef}
+                                                        value={newComment}
+                                                        onChange={(e) => {
+                                                            const value = e.target.value;
+                                                            setNewComment(value);
+                                                            updateCommentMentionState(value, e.target.selectionStart ?? value.length);
+                                                        }}
+                                                        onClick={(e) => updateCommentMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+                                                        onKeyUp={(e) => updateCommentMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+                                                        onKeyDown={handleCommentMentionKeyDown}
+                                                        className="relative z-10 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm leading-5 bg-transparent text-transparent caret-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                                        rows={2}
+                                                        placeholder=""
+                                                    />
+                                                    {commentMentionRange && commentMentionSuggestions.length > 0 && (
+                                                        <div className="absolute bottom-full z-30 mb-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                                                            {commentMentionSuggestions.map((member, idx) => (
+                                                                <button
+                                                                    key={member.id}
+                                                                    type="button"
+                                                                    onMouseDown={(e) => {
+                                                                        e.preventDefault();
+                                                                        handleSelectCommentMention(member);
+                                                                    }}
+                                                                    className={`w-full px-3 py-2 text-left ${idx === commentMentionActiveIndex ? "bg-primary-50" : "hover:bg-gray-50"}`}
+                                                                >
+                                                                    <div className="text-sm font-medium text-gray-900">{member.name || member.email}</div>
+                                                                    <div className="text-xs text-gray-500">{member.email}</div>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
                                                 <button
                                                     type="button"
                                                     disabled={postingComment || newComment.trim().length === 0}
@@ -992,6 +1341,94 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                                     <Send className="h-4 w-4" />
                                                     Post
                                                 </button>
+                                            </div>
+                                            <div className="pt-1">
+                                                <div className="flex items-center gap-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCollaboratorEditorOpen((v) => !v)}
+                                                        className="text-sm font-medium text-gray-700 hover:text-gray-900"
+                                                    >
+                                                        Collaborators
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCollaboratorEditorOpen((v) => !v)}
+                                                        className="flex items-center -space-x-2"
+                                                        title="Edit collaborators"
+                                                    >
+                                                        {entryCollaborators.slice(0, 8).map((member) => {
+                                                            const displayName = member.name || member.email;
+                                                            const initials = displayName
+                                                                .split(" ")
+                                                                .filter(Boolean)
+                                                                .slice(0, 2)
+                                                                .map((part) => part[0]?.toUpperCase() || "")
+                                                                .join("") || "U";
+                                                            return (
+                                                                <div
+                                                                    key={member.id}
+                                                                    className="h-7 w-7 rounded-full border-2 border-white bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center justify-center"
+                                                                    title={`${displayName} (${member.email})`}
+                                                                >
+                                                                    {initials}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        {entryCollaborators.length > 8 && (
+                                                            <div
+                                                                className="h-7 w-7 rounded-full border-2 border-white bg-gray-100 text-gray-600 text-[10px] font-semibold flex items-center justify-center"
+                                                                title={`${entryCollaborators.length - 8} more`}
+                                                            >
+                                                                +{entryCollaborators.length - 8}
+                                                            </div>
+                                                        )}
+                                                        <span className="ml-1 h-7 w-7 rounded-full border border-gray-300 bg-white text-gray-600 flex items-center justify-center">
+                                                            <Plus className="h-3.5 w-3.5" />
+                                                        </span>
+                                                    </button>
+                                                </div>
+                                                {collaboratorEditorOpen && (
+                                                    <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {entryCollaborators.map((member) => (
+                                                                <span key={member.id} className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-700">
+                                                                    {member.name || member.email}
+                                                                    <button type="button" className="text-gray-500 hover:text-red-600" onClick={() => removeCollaborator(member.id)}>
+                                                                        <X className="h-3 w-3" />
+                                                                    </button>
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                        <input
+                                                            value={collaboratorSearch}
+                                                            onChange={(e) => setCollaboratorSearch(e.target.value)}
+                                                            placeholder="Add collaborators by name or email..."
+                                                            className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                                        />
+                                                        <div className="max-h-40 overflow-y-auto rounded-md border border-gray-200">
+                                                            {collaboratorSearchResults.map((member) => {
+                                                                const selected = entryCollaborators.some((m) => m.id === member.id);
+                                                                return (
+                                                                    <button
+                                                                        key={member.id}
+                                                                        type="button"
+                                                                        onClick={() => (selected ? removeCollaborator(member.id) : addCollaborator(member.id))}
+                                                                        className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-gray-50"
+                                                                    >
+                                                                        <div className="min-w-0">
+                                                                            <div className="text-sm text-gray-900 truncate">{member.name || member.email}</div>
+                                                                            <div className="text-xs text-gray-500 truncate">{member.email}</div>
+                                                                        </div>
+                                                                        <span className={`text-xs font-medium ${selected ? "text-red-600" : "text-primary-600"}`}>
+                                                                            {selected ? "Remove" : "Add"}
+                                                                        </span>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     )}

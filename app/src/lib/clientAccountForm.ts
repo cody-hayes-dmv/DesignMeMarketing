@@ -296,57 +296,68 @@ export function formStateToUpdatePayload(
 /** Build normalized copy text for client info modals. */
 export function buildClientCopyText(
   form: ClientFormState,
-  options?: { showStatus?: boolean; includeExtendedSuperAdminFields?: boolean }
+  options?: {
+    showStatus?: boolean;
+    includeExtendedSuperAdminFields?: boolean;
+    includeSeoRoadmapSection?: boolean;
+  }
 ): string {
   const businessNiche = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
   const industry = form.industry === "Other" ? form.industryOther : form.industry;
   const lines: string[] = [
-    "SECTION A: BUSINESS INFORMATION (Required)",
+    "BUSINESS INFORMATION (Required)",
     `Business Name: ${form.name || ""}`,
     `Business Niche: ${businessNiche || ""}`,
     `Business Description: ${form.businessDescription || ""}`,
     `Primary Domain: ${form.domain || ""}`,
     `Industry: ${industry || ""}`,
     "",
-    "SECTION B: LOCATION INFORMATION (Required)",
+    "LOCATION INFORMATION (Required)",
     `Business Address: ${form.businessAddress || ""}`,
     `Primary Location City: ${form.primaryLocationCity || ""}`,
     `Primary Location State: ${form.primaryLocationState || ""}`,
     `Service Radius: ${form.serviceRadius || ""}`,
     `Areas Served: ${form.serviceAreasServed || ""}`,
     "",
-    "SECTION C: CONTACT INFORMATION (Required)",
+    "CONTACT INFORMATION (Required)",
     `Phone Number: ${form.phoneNumber || ""}`,
     `Email: ${form.emailAddress || ""}`,
     "",
-    "SECTION D: WEBSITE LOGIN INFO (Optional)",
+    "WEBSITE LOGIN INFO (Optional)",
     `Website Login URL: ${form.loginUrl || ""}`,
     `Website Username: ${form.loginUsername || ""}`,
     `Website Password: ${form.loginPassword ? form.loginPassword : "[hidden/blank]"}`,
     "",
-    "SECTION E: CAMPAIGN TYPE (Required)",
+    "CAMPAIGN TYPE (Required)",
     `Campaign Type: ${form.campaignType || ""}`,
     "",
-    "SECTION F: GOOGLE BUSINESS PROFILE (Optional)",
+    "GOOGLE BUSINESS PROFILE (Optional)",
     `Google Business Profile Category: ${form.gbpPrimaryCategory || ""}`,
     `Secondary GBP Categories: ${form.gbpSecondaryCategories || ""}`,
   ];
 
   if (options?.includeExtendedSuperAdminFields) {
+    const includeSeoRoadmapSection = options?.includeSeoRoadmapSection !== false;
     lines.push(
       "",
-      "SECTION G: KEYWORD ALLOCATION",
+      "KEYWORD ALLOCATION",
       `Number of Keywords for Campaign: ${form.targetKeywordCount || ""}`,
       `Total Keywords to Target: ${form.totalKeywordsToTarget || ""}`,
       "",
-      "SECTION H: GEOLOCATION DATA",
+      "GEOLOCATION DATA",
       `Latitude: ${form.latitude || ""}`,
-      `Longitude: ${form.longitude || ""}`,
+      `Longitude: ${form.longitude || ""}`
+    );
+    if (includeSeoRoadmapSection) {
+      lines.push(
+        "",
+        "SEO ROADMAP",
+        `SEO Roadmap Section: ${form.seoRoadmapSection || ""}`
+      );
+    }
+    lines.push(
       "",
-      "SECTION I: SEO ROADMAP",
-      `SEO Roadmap Section: ${form.seoRoadmapSection || ""}`,
-      "",
-      "SECTION J: MANAGED SERVICE STATUS",
+      "MANAGED SERVICE STATUS",
       `Managed Service Status: ${form.managedServiceStatus || ""}`,
       `Managed Service Package: ${form.managedServicePackage || ""}`,
       `Service Start Date: ${form.serviceStartDate || ""}`,

@@ -89,10 +89,13 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
   const locationBoxRef = useRef<HTMLDivElement | null>(null);
   const [refreshingKeywordIds, setRefreshingKeywordIds] = useState<Record<string, boolean>>({});
   const [deletingKeywordIds, setDeletingKeywordIds] = useState<Record<string, boolean>>({});
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; keywordId: string | null; keywordText: string | null }>({
+  const [bulkDeletingKeywords, setBulkDeletingKeywords] = useState(false);
+  const [selectedKeywordIds, setSelectedKeywordIds] = useState<Set<string>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; keywordId: string | null; keywordText: string | null; keywordIds: string[] }>({
     isOpen: false,
     keywordId: null,
     keywordText: null,
+    keywordIds: [],
   });
   const [keywordsPageSize, setKeywordsPageSize] = useState<(typeof KEYWORDS_PAGE_SIZES)[number]>(25);
   const [keywordsPage, setKeywordsPage] = useState(1);
@@ -120,10 +123,25 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
     const rows = filteredKeywords.slice(startIdx, endIdx);
     return { totalRows, totalPages, page, from, to, rows };
   }, [filteredKeywords, keywordsPage, keywordsPageSize]);
+  const pageKeywordIds = keywordsPagination.rows.map((k) => k.id);
+  const selectedOnPageCount = pageKeywordIds.filter((id) => selectedKeywordIds.has(id)).length;
+  const allPageSelected = pageKeywordIds.length > 0 && selectedOnPageCount === pageKeywordIds.length;
 
   useEffect(() => {
     setKeywordsPage(1);
   }, [trackSearchTerm, effectiveClientId]);
+
+  useEffect(() => {
+    setSelectedKeywordIds((prev) => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set(tabKeywords.map((k) => k.id));
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [tabKeywords]);
 
   useEffect(() => {
     setKeywordsPage(1);
@@ -327,22 +345,102 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
   };
 
   const handleDeleteTrackedKeyword = (keywordId: string, keywordText: string) => {
-    setDeleteConfirm({ isOpen: true, keywordId, keywordText });
+    setDeleteConfirm({ isOpen: true, keywordId, keywordText, keywordIds: [] });
+  };
+
+  const toggleKeywordSelection = (keywordId: string, checked: boolean) => {
+    setSelectedKeywordIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(keywordId);
+      else next.delete(keywordId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllOnPage = (checked: boolean) => {
+    setSelectedKeywordIds((prev) => {
+      const next = new Set(prev);
+      pageKeywordIds.forEach((id) => {
+        if (checked) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
+  const handleDeleteSelectedKeywords = () => {
+    const selectedIds = tabKeywords.filter((k) => selectedKeywordIds.has(k.id)).map((k) => k.id);
+    if (selectedIds.length === 0) return;
+    setDeleteConfirm({
+      isOpen: true,
+      keywordId: null,
+      keywordText: null,
+      keywordIds: selectedIds,
+    });
+  };
+
+  const handleClearSelectedKeywords = () => {
+    setSelectedKeywordIds(new Set());
   };
 
   const confirmDeleteTrackedKeyword = async () => {
-    if (!deleteConfirm.keywordId || !effectiveClientId) return;
+    if (!effectiveClientId) return;
+    const keywordIdsToDelete = deleteConfirm.keywordIds.length > 0
+      ? deleteConfirm.keywordIds
+      : deleteConfirm.keywordId
+        ? [deleteConfirm.keywordId]
+        : [];
+    if (keywordIdsToDelete.length === 0) return;
     try {
-      setDeletingKeywordIds((p) => ({ ...p, [deleteConfirm.keywordId!]: true }));
-      await api.delete(`/seo/keywords/${effectiveClientId}/${deleteConfirm.keywordId}`);
-      toast.success("Keyword deleted.");
+      if (keywordIdsToDelete.length > 1) setBulkDeletingKeywords(true);
+      setDeletingKeywordIds((p) => {
+        const next = { ...p };
+        keywordIdsToDelete.forEach((id) => {
+          next[id] = true;
+        });
+        return next;
+      });
+      const deleteResults = await Promise.allSettled(
+        keywordIdsToDelete.map((keywordId) => api.delete(`/seo/keywords/${effectiveClientId}/${keywordId}`))
+      );
+      const deletedIds: string[] = [];
+      let failedCount = 0;
+      deleteResults.forEach((result, idx) => {
+        if (result.status === "fulfilled") deletedIds.push(keywordIdsToDelete[idx]);
+        else failedCount += 1;
+      });
+      if (deletedIds.length > 0) {
+        toast.success(
+          deletedIds.length === 1 ? "Keyword deleted." : `${deletedIds.length} keywords deleted.`
+        );
+      }
+      if (failedCount > 0) {
+        toast.error(
+          failedCount === 1
+            ? "1 keyword could not be deleted."
+            : `${failedCount} keywords could not be deleted.`
+        );
+      }
       const res = await api.get(`/seo/keywords/${effectiveClientId}`);
       setTrackedKeywords(Array.isArray(res.data) ? res.data : []);
-      setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null });
+      setSelectedKeywordIds((prev) => {
+        if (deletedIds.length === 0) return prev;
+        const next = new Set(prev);
+        deletedIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null, keywordIds: [] });
     } catch (error: any) {
       toast.error(error?.response?.data?.message || "Delete failed.");
     } finally {
-      setDeletingKeywordIds((p) => ({ ...p, [deleteConfirm.keywordId!]: false }));
+      setDeletingKeywordIds((p) => {
+        const next = { ...p };
+        keywordIdsToDelete.forEach((id) => {
+          next[id] = false;
+        });
+        return next;
+      });
+      setBulkDeletingKeywords(false);
     }
   };
 
@@ -564,10 +662,44 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
             }`}>{topicalCount}</span>
           </button>
         </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-3">
+          <span className="text-sm font-medium text-gray-600">
+            Selected: {selectedKeywordIds.size}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleClearSelectedKeywords}
+              disabled={selectedKeywordIds.size === 0 || bulkDeletingKeywords}
+              className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Clear selection
+            </button>
+            <button
+              type="button"
+              onClick={handleDeleteSelectedKeywords}
+              disabled={!canModifyKeywords || selectedKeywordIds.size === 0 || bulkDeletingKeywords}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {bulkDeletingKeywords ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete selected
+            </button>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                <th className="w-12 px-4 py-3.5 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    onChange={(e) => toggleSelectAllOnPage(e.target.checked)}
+                    disabled={!canModifyKeywords || keywordsPagination.rows.length === 0}
+                    className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+                    aria-label="Select all keywords on this page"
+                  />
+                </th>
                 <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Keyword</th>
                 <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Search volume</th>
                 <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Keyword Difficulty</th>
@@ -579,21 +711,31 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
             <tbody className="divide-y divide-gray-100">
               {trackedLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500 bg-gray-50/50">
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500 bg-gray-50/50">
                     <span className="inline-flex items-center gap-3"><Loader2 className="h-5 w-5 animate-spin text-primary-600" /> Loading…</span>
                   </td>
                 </tr>
               ) : trackedError ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600 bg-rose-50/50">{trackedError}</td>
+                  <td colSpan={7} className="px-6 py-8 text-center text-sm text-rose-600 bg-rose-50/50">{trackedError}</td>
                 </tr>
               ) : filteredKeywords.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 bg-amber-50/50">No tracked keywords yet. Add some above.</td>
+                  <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500 bg-amber-50/50">No tracked keywords yet. Add some above.</td>
                 </tr>
               ) : (
                 keywordsPagination.rows.map((keyword, index) => (
                   <tr key={keyword.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
+                    <td className="px-4 py-4 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedKeywordIds.has(keyword.id)}
+                        onChange={(e) => toggleKeywordSelection(keyword.id, e.target.checked)}
+                        disabled={!canModifyKeywords}
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+                        aria-label={`Select keyword ${keyword.keyword}`}
+                      />
+                    </td>
                     <td className="px-6 py-4">
                       <p className="font-semibold text-gray-900">{keyword.keyword}</p>
                       {keyword.googleUrl && (
@@ -626,7 +768,7 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
                         <button
                           type="button"
                           onClick={() => handleDeleteTrackedKeyword(keyword.id, keyword.keyword)}
-                          disabled={!!deletingKeywordIds[keyword.id] || !canModifyKeywords}
+                          disabled={!!deletingKeywordIds[keyword.id] || !canModifyKeywords || bulkDeletingKeywords}
                           className="inline-flex items-center justify-center rounded-lg p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
                           title="Delete"
                         >
@@ -694,10 +836,14 @@ const ClientKeywordsManager: React.FC<ClientKeywordsManagerProps> = ({
 
       <ConfirmDialog
         isOpen={deleteConfirm.isOpen}
-        onClose={() => setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null })}
+        onClose={() => setDeleteConfirm({ isOpen: false, keywordId: null, keywordText: null, keywordIds: [] })}
         onConfirm={confirmDeleteTrackedKeyword}
-        title="Delete Keyword"
-        message={`Are you sure you want to delete "${deleteConfirm.keywordText}"? This cannot be undone.`}
+        title={deleteConfirm.keywordIds.length > 0 ? "Delete Keywords" : "Delete Keyword"}
+        message={
+          deleteConfirm.keywordIds.length > 0
+            ? `Are you sure you want to delete ${deleteConfirm.keywordIds.length} selected keywords? This cannot be undone.`
+            : `Are you sure you want to delete "${deleteConfirm.keywordText}"? This cannot be undone.`
+        }
         confirmText="Delete"
         cancelText="Cancel"
         variant="danger"

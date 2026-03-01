@@ -30,6 +30,7 @@ model User {
   memberships    UserAgency[]
   clientUsers    ClientUser[]
   invitedClientUsers ClientUser[] @relation("ClientUserInvitedBy")
+  onDemandSnapshotRuns OnDemandSnapshotLog[] @relation("OnDemandSnapshotRunBy")
 
   @@map("users")
 }
@@ -82,6 +83,11 @@ model Agency {
   // Keyword research credits (reset monthly)
   keywordResearchCreditsUsed    Int            @default(0)
   keywordResearchCreditsResetAt DateTime?      @db.DateTime
+  // Local map snapshot credits
+  snapshotMonthlyAllowance      Int            @default(0)
+  snapshotMonthlyUsed           Int            @default(0)
+  snapshotMonthlyResetAt        DateTime?      @db.DateTime
+  snapshotPurchasedCredits      Int            @default(0)
   // Additional questions (stored as JSON: referralSource, referralText, primaryGoals[], currentTools, etc.)
   onboardingData        String?              @db.LongText
   onboardingTemplates   OnboardingTemplate[]
@@ -93,6 +99,8 @@ model Agency {
   addOns                AgencyAddOn[]
   clientsBelongingToAgency Client[]           @relation("ClientsBelongingToAgency")
   includedClients       ClientAgencyIncluded[]
+  gridKeywords          GridKeyword[]
+  onDemandSnapshotLogs  OnDemandSnapshotLog[]
 
   @@map("agencies")
 }
@@ -280,6 +288,8 @@ model Client {
   agencyInclusions      ClientAgencyIncluded[]
   campaignWinEvents     CampaignWinEvent[]
   campaignWinKeywordStates CampaignWinKeywordState[]
+  gridKeywords          GridKeyword[]
+  onDemandSnapshotLogs  OnDemandSnapshotLog[]
 
   @@index([name, domain])
   @@index([userId], map: "clients_userId_fkey")
@@ -524,6 +534,7 @@ model Keyword {
   type             String   @default("money") @db.VarChar(20)
   client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   campaignWinKeywordStates CampaignWinKeywordState[]
+  gridKeywords     GridKeyword[]
 
   @@unique([clientId, keyword])
   @@index([clientId, currentPosition])
@@ -829,6 +840,76 @@ model DataForSeoDailySpend {
   @@map("dataforseo_daily_spend")
 }
 
+model GridKeyword {
+  id               String           @id @default(cuid())
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  agencyId         String
+  clientId         String
+  keywordId        String
+  keywordText      String           @db.VarChar(255)
+  placeId          String           @db.VarChar(255)
+  businessName     String           @db.VarChar(255)
+  businessAddress  String?          @db.VarChar(500)
+  centerLat        Decimal          @db.Decimal(10, 7)
+  centerLng        Decimal          @db.Decimal(10, 7)
+  locationLabel    String?          @db.VarChar(255)
+  gridSize         Int              @default(7)
+  gridSpacingMiles Decimal          @default(0.5) @db.Decimal(6, 2)
+  status           GridKeywordStatus @default(active)
+  nextRunAt        DateTime?
+  lastRunAt        DateTime?
+  agency           Agency           @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client           Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  keyword          Keyword          @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  snapshots        GridSnapshot[]
+
+  @@unique([clientId, keywordId, placeId])
+  @@index([agencyId, status])
+  @@index([clientId, status])
+  @@index([nextRunAt, status])
+  @@map("grid_keywords")
+}
+
+model GridSnapshot {
+  id            String      @id @default(cuid())
+  createdAt     DateTime    @default(now())
+  gridKeywordId String
+  runDate       DateTime
+  gridData      String      @db.LongText
+  ataScore      Float
+  isBenchmark   Boolean     @default(false)
+  gridKeyword   GridKeyword @relation(fields: [gridKeywordId], references: [id], onDelete: Cascade)
+
+  @@index([gridKeywordId, runDate])
+  @@index([runDate])
+  @@map("grid_snapshots")
+}
+
+model OnDemandSnapshotLog {
+  id              String               @id @default(cuid())
+  createdAt       DateTime             @default(now())
+  agencyId        String?
+  clientId        String?
+  runByUserId     String?
+  keywordText     String               @db.VarChar(255)
+  placeId         String               @db.VarChar(255)
+  businessName    String               @db.VarChar(255)
+  businessAddress String?              @db.VarChar(500)
+  centerLat       Decimal              @db.Decimal(10, 7)
+  centerLng       Decimal              @db.Decimal(10, 7)
+  gridData        String               @db.LongText
+  ataScore        Float
+  creditSource    SnapshotCreditSource
+  agency          Agency?              @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  client          Client?              @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  runBy           User?                @relation("OnDemandSnapshotRunBy", fields: [runByUserId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId, createdAt])
+  @@index([runByUserId, createdAt])
+  @@map("on_demand_snapshot_logs")
+}
+
 enum Role {
   SUPER_ADMIN
   ADMIN
@@ -930,4 +1011,16 @@ enum TaskCommentType {
   APPROVAL_REQUEST
   APPROVAL
   REVISION_REQUEST
+}
+
+enum GridKeywordStatus {
+  active
+  paused
+  canceled
+}
+
+enum SnapshotCreditSource {
+  monthly_allowance
+  purchased_credits
+  super_admin
 }
