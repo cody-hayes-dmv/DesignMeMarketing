@@ -13,6 +13,8 @@ export type GoogleBusinessSelection = {
 type GoogleBusinessSearchProps = {
   value: GoogleBusinessSelection | null;
   onSelect: (selection: GoogleBusinessSelection) => void;
+  onQueryChange?: (query: string) => void;
+  inputId?: string;
   disabled?: boolean;
   placeholder?: string;
 };
@@ -20,6 +22,8 @@ type GoogleBusinessSearchProps = {
 const GoogleBusinessSearch: React.FC<GoogleBusinessSearchProps> = ({
   value,
   onSelect,
+  onQueryChange,
+  inputId,
   disabled = false,
   placeholder = "Search business name...",
 }) => {
@@ -87,10 +91,13 @@ const GoogleBusinessSearch: React.FC<GoogleBusinessSearchProps> = ({
       <div className="relative">
         <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
+          id={inputId}
           value={query}
           disabled={disabled}
           onChange={(e) => {
-            setQuery(e.target.value);
+            const next = e.target.value;
+            setQuery(next);
+            onQueryChange?.(next);
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}

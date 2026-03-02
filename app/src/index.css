@@ -2,7 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Global UI zoom-out (1 = 100%, 0.9 = 90%). */
+  --app-zoom: 0.85;
+}
+
 @layer base {
+  html {
+    font-size: calc(16px * var(--app-zoom));
+  }
+
   * {
     @apply border-border;
   }

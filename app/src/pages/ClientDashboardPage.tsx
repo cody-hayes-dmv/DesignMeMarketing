@@ -118,6 +118,7 @@ interface ClientReport {
     traffic: number;
   };
   clientId: string;
+  scheduleKind?: "seo" | "local_map" | "campaign_wins";
 }
 
 type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
@@ -197,6 +198,27 @@ type LocalMapKeywordRow = {
   lastRunDate: string | null;
 };
 
+type LocalMapSnapshotReportRow = {
+  id: string;
+  runDate: string;
+  ataScore: number;
+  isBenchmark: boolean;
+  gridData: string;
+};
+
+type LocalMapKeywordReportPayload = {
+  keyword: {
+    id: string;
+    keywordText: string;
+    businessName: string;
+    businessAddress: string | null;
+  };
+  current: LocalMapSnapshotReportRow | null;
+  previousThree: LocalMapSnapshotReportRow[];
+  benchmark: LocalMapSnapshotReportRow | null;
+  trend: Array<{ runDate: string; ataScore: number }>;
+};
+
 interface TrendPoint {
   date: string;
   value: number;
@@ -253,6 +275,27 @@ const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
   Referral: "#F59E0B",
   Paid: "#EF4444",
   Other: "#6366F1",
+};
+
+const LOCAL_MAP_SCHEDULE_PREFIX = "[LOCAL_MAP] ";
+
+const parseLocalMapGridData = (raw: string): Array<{ rank: number | null }> => {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item: any) => ({
+      rank: item?.rank == null ? null : Number(item.rank),
+    }));
+  } catch {
+    return [];
+  }
+};
+
+const localMapCellClass = (rank: number | null): string => {
+  if (rank != null && rank >= 1 && rank <= 3) return "bg-emerald-500 text-white";
+  if (rank != null && rank >= 4 && rank <= 10) return "bg-yellow-300 text-yellow-900";
+  if (rank != null && rank >= 11 && rank <= 20) return "bg-orange-300 text-orange-900";
+  return "bg-rose-300 text-rose-900";
 };
 
 
@@ -605,10 +648,15 @@ const ClientDashboardPage: React.FC = () => {
   const [localMapLoading, setLocalMapLoading] = useState(false);
   const [localMapActivationOpen, setLocalMapActivationOpen] = useState(false);
   const [localMapMoneyKeywords, setLocalMapMoneyKeywords] = useState<Array<{ id: string; keyword: string }>>([]);
+  const [localMapMoneyKeywordsLoading, setLocalMapMoneyKeywordsLoading] = useState(false);
   const [localMapSelectedKeywordId, setLocalMapSelectedKeywordId] = useState("");
   const [localMapBusinessSelection, setLocalMapBusinessSelection] = useState<GoogleBusinessSelection | null>(null);
+  const [localMapBusinessQuery, setLocalMapBusinessQuery] = useState("");
   const [localMapLabel, setLocalMapLabel] = useState("");
   const [localMapSubmitting, setLocalMapSubmitting] = useState(false);
+  const [localMapReportOpen, setLocalMapReportOpen] = useState(false);
+  const [localMapReportLoading, setLocalMapReportLoading] = useState(false);
+  const [localMapReport, setLocalMapReport] = useState<LocalMapKeywordReportPayload | null>(null);
 
   const loadLocalMapData = useCallback(async () => {
     if (!clientId) return;
@@ -649,6 +697,7 @@ const ClientDashboardPage: React.FC = () => {
   const loadLocalMapMoneyKeywords = useCallback(async () => {
     if (!clientId) return;
     try {
+      setLocalMapMoneyKeywordsLoading(true);
       const res = await api.get(`/seo/keywords/${clientId}`);
       const rows = Array.isArray(res.data) ? res.data : [];
       const filtered = rows.filter((row: any) => String(row?.type || "money") === "money");
@@ -660,8 +709,20 @@ const ClientDashboardPage: React.FC = () => {
       );
     } catch {
       setLocalMapMoneyKeywords([]);
+    } finally {
+      setLocalMapMoneyKeywordsLoading(false);
     }
   }, [clientId]);
+
+  const openLocalMapActivationModal = useCallback(async () => {
+    // Ensure other overlays never mask this modal.
+    setLocalMapReportOpen(false);
+    setShowClientReportModal(false);
+    setImportBacklinksModalOpen(false);
+    toast("Opening activation form...", { duration: 1200 });
+    setLocalMapActivationOpen(true);
+    await loadLocalMapMoneyKeywords();
+  }, [loadLocalMapMoneyKeywords]);
 
   const handleActivateLocalMapKeyword = useCallback(async () => {
     if (!clientId) return;
@@ -669,26 +730,48 @@ const ClientDashboardPage: React.FC = () => {
       toast.error("Select a keyword");
       return;
     }
-    if (!localMapBusinessSelection) {
-      toast.error("Select a business profile");
-      return;
-    }
 
     try {
       setLocalMapSubmitting(true);
+      let resolvedBusiness = localMapBusinessSelection;
+      const inlineBusinessInput = (document.getElementById("local-map-business-inline") as HTMLInputElement | null)?.value?.trim() || "";
+      const modalBusinessInput = (document.getElementById("local-map-business-modal") as HTMLInputElement | null)?.value?.trim() || "";
+      const businessQueryFallback = localMapBusinessQuery.trim() || inlineBusinessInput || modalBusinessInput;
+
+      if (!resolvedBusiness && businessQueryFallback) {
+        const lookup = await api.get("/local-map/gbp/search", { params: { q: businessQueryFallback } });
+        const first = Array.isArray(lookup.data) ? lookup.data[0] : null;
+        if (first) {
+          resolvedBusiness = {
+            placeId: String(first.placeId || ""),
+            businessName: String(first.businessName || ""),
+            address: String(first.address || ""),
+            lat: Number(first.lat),
+            lng: Number(first.lng),
+          };
+          setLocalMapBusinessSelection(resolvedBusiness);
+        }
+      }
+
+      if (!resolvedBusiness) {
+        toast.error("Select a business profile");
+        return;
+      }
+
       await api.post(`/local-map/keywords/${clientId}`, {
         keywordId: localMapSelectedKeywordId,
-        placeId: localMapBusinessSelection.placeId,
-        businessName: localMapBusinessSelection.businessName,
-        businessAddress: localMapBusinessSelection.address,
-        centerLat: localMapBusinessSelection.lat,
-        centerLng: localMapBusinessSelection.lng,
+        placeId: resolvedBusiness.placeId,
+        businessName: resolvedBusiness.businessName,
+        businessAddress: resolvedBusiness.address,
+        centerLat: resolvedBusiness.lat,
+        centerLng: resolvedBusiness.lng,
         locationLabel: localMapLabel.trim() || null,
       });
       toast.success("Local map keyword activated");
       setLocalMapActivationOpen(false);
       setLocalMapSelectedKeywordId("");
       setLocalMapBusinessSelection(null);
+      setLocalMapBusinessQuery("");
       setLocalMapLabel("");
       await loadLocalMapData();
     } catch (error: any) {
@@ -700,10 +783,24 @@ const ClientDashboardPage: React.FC = () => {
   }, [
     clientId,
     localMapBusinessSelection,
+    localMapBusinessQuery,
     localMapLabel,
     localMapSelectedKeywordId,
     loadLocalMapData,
   ]);
+
+  const openLocalMapReport = useCallback(async (gridKeywordId: string) => {
+    try {
+      setLocalMapReportLoading(true);
+      const res = await api.get(`/local-map/report/${gridKeywordId}`);
+      setLocalMapReport(res.data as LocalMapKeywordReportPayload);
+      setLocalMapReportOpen(true);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Unable to load report.");
+    } finally {
+      setLocalMapReportLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (activeTab !== "dashboard" || dashboardSection !== "local-map") return;
@@ -763,7 +860,9 @@ const ClientDashboardPage: React.FC = () => {
   const [showViewClientModal, setShowViewClientModal] = useState(false);
   const [viewClientForm, setViewClientForm] = useState(EMPTY_CLIENT_FORM);
   const [viewClientSaving, setViewClientSaving] = useState(false);
-  const [clientReportFrequency, setClientReportFrequency] = useState<"weekly" | "biweekly" | "monthly" | "campaign_wins">("monthly");
+  const [clientReportFrequency, setClientReportFrequency] = useState<
+    "weekly" | "biweekly" | "monthly" | "campaign_wins" | "local_map_biweekly" | "local_map_monthly"
+  >("monthly");
   const [clientReportDayOfWeek, setClientReportDayOfWeek] = useState(1); // Monday
   const [clientReportDayOfMonth, setClientReportDayOfMonth] = useState(1);
   const [clientReportTimeOfDay, setClientReportTimeOfDay] = useState("09:00");
@@ -3696,6 +3795,11 @@ const ClientDashboardPage: React.FC = () => {
           avgPosition: Number(serverReport.averagePosition ?? 0),
           traffic: Number(serverReport.totalImpressions ?? 0),
         },
+        scheduleKind:
+          typeof serverReport?.scheduleEmailSubject === "string"
+          && String(serverReport.scheduleEmailSubject).startsWith(LOCAL_MAP_SCHEDULE_PREFIX)
+            ? "local_map"
+            : "seo",
       };
     }
     // No report exists for this client yet
@@ -3768,23 +3872,39 @@ const ClientDashboardPage: React.FC = () => {
         }, { timeout: 15000 });
         toast.success("Campaign Wins report enabled successfully");
       } else {
+        const isLocalMapSchedule =
+          clientReportFrequency === "local_map_biweekly" || clientReportFrequency === "local_map_monthly";
+        const resolvedFrequency =
+          clientReportFrequency === "local_map_biweekly"
+            ? "biweekly"
+            : clientReportFrequency === "local_map_monthly"
+            ? "monthly"
+            : clientReportFrequency;
+
         // 1) Create or update schedule for this client
         await api.post(`/seo/reports/${clientId}/schedule`, {
-          frequency: clientReportFrequency,
-          dayOfWeek: clientReportFrequency !== "monthly" ? clientReportDayOfWeek : undefined,
-          dayOfMonth: clientReportFrequency === "monthly" ? clientReportDayOfMonth : undefined,
+          frequency: resolvedFrequency,
+          reportKind: isLocalMapSchedule ? "local_map" : "seo",
+          dayOfWeek: resolvedFrequency !== "monthly" ? clientReportDayOfWeek : undefined,
+          dayOfMonth: resolvedFrequency === "monthly" ? clientReportDayOfMonth : undefined,
           timeOfDay: clientReportTimeOfDay,
           recipients: recipientsList,
           emailSubject: modalEmailSubject || undefined,
           isActive: true,
         }, { timeout: 15000 });
 
-        // 2) Generate initial report immediately (GA4 + DataForSEO can take 30–60s)
-        await api.post(`/seo/reports/${clientId}/generate`, {
-          period: clientReportFrequency,
-        }, { timeout: 90000 });
+        // 2) Generate initial SEO report immediately; Local Map schedules are sent after map-run days.
+        if (!isLocalMapSchedule) {
+          await api.post(`/seo/reports/${clientId}/generate`, {
+            period: resolvedFrequency,
+          }, { timeout: 90000 });
+        }
 
-        toast.success("Report created and schedule saved successfully");
+        toast.success(
+          isLocalMapSchedule
+            ? "Local Map report schedule saved successfully"
+            : "Report created and schedule saved successfully"
+        );
       }
 
       // Sync parent state so next open shows saved values
@@ -7324,6 +7444,71 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                     </div>
 
+                    {localMapActivationOpen && (
+                      <div className="bg-white border-2 border-primary-200 rounded-2xl p-5 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-base font-bold text-gray-900">Activate Local Map Keyword</h3>
+                          <button
+                            type="button"
+                            onClick={() => setLocalMapActivationOpen(false)}
+                            className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Keyword</label>
+                            <select
+                              value={localMapSelectedKeywordId}
+                              onChange={(e) => setLocalMapSelectedKeywordId(e.target.value)}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            >
+                              <option value="">Select a money keyword</option>
+                              {localMapMoneyKeywords.map((kw) => (
+                                <option key={kw.id} value={kw.id}>
+                                  {kw.keyword}
+                                </option>
+                              ))}
+                            </select>
+                            {localMapMoneyKeywordsLoading ? (
+                              <p className="mt-1 text-xs text-gray-500">Loading money keywords...</p>
+                            ) : localMapMoneyKeywords.length === 0 ? (
+                              <p className="mt-1 text-xs text-amber-700">No money keywords found on this dashboard.</p>
+                            ) : null}
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Label (optional)</label>
+                            <input
+                              value={localMapLabel}
+                              onChange={(e) => setLocalMapLabel(e.target.value)}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                              placeholder="Main Office"
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-4">
+                          <GoogleBusinessSearch
+                            value={localMapBusinessSelection}
+                            onSelect={setLocalMapBusinessSelection}
+                            onQueryChange={setLocalMapBusinessQuery}
+                            inputId="local-map-business-inline"
+                            placeholder="Search Google Business Profile listing"
+                          />
+                        </div>
+                        <div className="mt-4 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => void handleActivateLocalMapKeyword()}
+                            disabled={localMapSubmitting}
+                            className="px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60"
+                          >
+                            {localMapSubmitting ? "Activating..." : "Activate"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
                       <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-sm font-semibold text-gray-800">
@@ -7333,8 +7518,7 @@ const ClientDashboardPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => {
-                              setLocalMapActivationOpen(true);
-                              void loadLocalMapMoneyKeywords();
+                              void openLocalMapActivationModal();
                             }}
                             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700"
                           >
@@ -7355,8 +7539,7 @@ const ClientDashboardPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => {
-                                setLocalMapActivationOpen(true);
-                                void loadLocalMapMoneyKeywords();
+                                void openLocalMapActivationModal();
                               }}
                               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700"
                             >
@@ -7412,21 +7595,9 @@ const ClientDashboardPage: React.FC = () => {
                                       <button
                                         type="button"
                                         className="px-3 py-1.5 text-xs font-semibold rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-                                        onClick={async () => {
-                                          try {
-                                            const res = await api.get(`/local-map/report/${row.id}`);
-                                            const current = res?.data?.current;
-                                            if (current?.ataScore != null) {
-                                              toast.success(`Current ATA: ${Number(current.ataScore).toFixed(2)}`);
-                                            } else {
-                                              toast("No snapshots available yet for this keyword.");
-                                            }
-                                          } catch (error: any) {
-                                            toast.error(error?.response?.data?.message || "Unable to load report.");
-                                          }
-                                        }}
+                                        onClick={() => void openLocalMapReport(row.id)}
                                       >
-                                        View Report
+                                        {localMapReportLoading ? "Loading..." : "View Report"}
                                       </button>
                                       <button
                                         type="button"
@@ -10216,7 +10387,25 @@ const ClientDashboardPage: React.FC = () => {
                           ) : (
                             <tr key={singleReportForClient.id} className="bg-white hover:bg-primary-50/50 transition-colors">
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{singleReportForClient.name}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">{singleReportForClient.type}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">
+                                <div className="inline-flex items-center gap-2">
+                                  <span>{singleReportForClient.type}</span>
+                                  <span
+                                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                      singleReportForClient.scheduleKind === "local_map"
+                                        ? "bg-violet-100 text-violet-700"
+                                        : "bg-emerald-100 text-emerald-700"
+                                    }`}
+                                  >
+                                    {singleReportForClient.scheduleKind === "local_map" ? "Local Map" : "SEO"}
+                                  </span>
+                                  {serverReport?.campaignWinsEnabled ? (
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[11px] font-semibold">
+                                      Campaign Wins On
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{singleReportForClient.lastGenerated}</td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <span
@@ -10297,13 +10486,23 @@ const ClientDashboardPage: React.FC = () => {
                     <select
                       value={clientReportFrequency}
                       onChange={(e) =>
-                        setClientReportFrequency(e.target.value as "weekly" | "biweekly" | "monthly" | "campaign_wins")
+                        setClientReportFrequency(
+                          e.target.value as
+                            | "weekly"
+                            | "biweekly"
+                            | "monthly"
+                            | "campaign_wins"
+                            | "local_map_biweekly"
+                            | "local_map_monthly"
+                        )
                       }
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-400 transition-shadow"
                     >
                       <option value="weekly">Weekly</option>
                       <option value="biweekly">Biweekly</option>
                       <option value="monthly">Monthly</option>
+                      <option value="local_map_biweekly">Local Map Rankings - Biweekly</option>
+                      <option value="local_map_monthly">Local Map Rankings - Monthly</option>
                       <option value="campaign_wins">Campaign Wins Report</option>
                     </select>
                   </div>
@@ -10316,7 +10515,9 @@ const ClientDashboardPage: React.FC = () => {
                       </p>
                     </div>
                   )}
-                  {clientReportFrequency !== "campaign_wins" && clientReportFrequency !== "monthly" ? (
+                  {clientReportFrequency !== "campaign_wins" &&
+                  clientReportFrequency !== "monthly" &&
+                  clientReportFrequency !== "local_map_monthly" ? (
                     <div>
                       <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Week</label>
                       <select
@@ -10333,7 +10534,7 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </select>
                     </div>
-                  ) : clientReportFrequency !== "campaign_wins" ? (
+                  ) : clientReportFrequency === "monthly" || clientReportFrequency === "local_map_monthly" ? (
                     <div>
                       <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Month</label>
                       <input
@@ -10346,7 +10547,8 @@ const ClientDashboardPage: React.FC = () => {
                       />
                     </div>
                   ) : null}
-                  {clientReportFrequency !== "campaign_wins" && (
+                  {clientReportFrequency !== "campaign_wins" &&
+                    !clientReportFrequency.startsWith("local_map_") && (
                   <div>
                     <label className="block text-sm font-semibold text-violet-800 mb-2">Time of Day</label>
                     <input
@@ -10399,6 +10601,8 @@ const ClientDashboardPage: React.FC = () => {
                         ? "Saving..."
                         : clientReportFrequency === "campaign_wins"
                         ? "Save Campaign Wins"
+                        : clientReportFrequency.startsWith("local_map_")
+                        ? "Save Local Map Schedule"
                         : "Create Report"}
                     </button>
                   </div>
@@ -11236,8 +11440,172 @@ const ClientDashboardPage: React.FC = () => {
           document.body
         )}
 
-      {localMapActivationOpen && createPortal(
+      {localMapReportOpen && localMapReport && createPortal(
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-primary-600 via-indigo-600 to-blue-600 text-white">
+              <div>
+                <h3 className="text-lg font-bold">Local Map Report</h3>
+                <p className="text-xs text-white/90">
+                  {localMapReport.keyword.keywordText} - {localMapReport.keyword.businessName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLocalMapReportOpen(false)}
+                className="p-1 rounded-md text-white/80 hover:bg-white/15"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-100 p-3">
+                  <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Current ATA</p>
+                  <p className="text-2xl font-bold text-emerald-900">
+                    {localMapReport.current?.ataScore != null ? Number(localMapReport.current.ataScore).toFixed(2) : "-"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-primary-100 p-3">
+                  <p className="text-xs uppercase tracking-wide text-indigo-700 font-semibold">Current Run Date</p>
+                  <p className="text-sm font-semibold text-indigo-900">
+                    {localMapReport.current?.runDate ? format(new Date(localMapReport.current.runDate), "MMM d, yyyy") : "Not run yet"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-100 p-3">
+                  <p className="text-xs uppercase tracking-wide text-amber-700 font-semibold">Benchmark</p>
+                  <p className="text-sm font-semibold text-amber-900">
+                    {localMapReport.benchmark?.runDate ? format(new Date(localMapReport.benchmark.runDate), "MMM d, yyyy") : "Not set"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <h4 className="text-sm font-semibold text-gray-900 mb-3">ATA Trend</h4>
+                {localMapReport.trend?.length ? (
+                  <div className="space-y-1">
+                    {localMapReport.trend.map((point) => (
+                      <div key={`${point.runDate}-${point.ataScore}`} className="flex items-center justify-between text-sm text-gray-700">
+                        <span>{format(new Date(point.runDate), "MMM d, yyyy")}</span>
+                        <span className="font-semibold">{Number(point.ataScore).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No trend data yet.</p>
+                )}
+              </div>
+
+              {localMapReport.current && (
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-3">Current Grid</h4>
+                  {(() => {
+                    const cells = parseLocalMapGridData(localMapReport.current!.gridData);
+                    const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
+                    return (
+                      <div className="space-y-1 min-w-[520px] overflow-x-auto">
+                        {Array.from({ length: size }).map((_, rowIdx) => (
+                          <div key={`current-${rowIdx}`} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+                            {Array.from({ length: size }).map((__, colIdx) => {
+                              const point = cells[rowIdx * size + colIdx];
+                              const rank = point?.rank ?? null;
+                              return (
+                                <div
+                                  key={`current-${rowIdx}-${colIdx}`}
+                                  className={`h-11 rounded text-[11px] font-semibold flex items-center justify-center ${localMapCellClass(rank)}`}
+                                >
+                                  {rank == null ? "NR" : rank}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {localMapReport.previousThree.map((snap) => {
+                  const cells = parseLocalMapGridData(snap.gridData);
+                  const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
+                  return (
+                    <div key={snap.id} className="bg-white border border-gray-200 rounded-xl p-4">
+                      <h4 className="text-sm font-semibold text-gray-900">
+                        Previous - {format(new Date(snap.runDate), "MMM d, yyyy")}
+                      </h4>
+                      <p className="text-xs text-gray-600 mb-3">ATA {Number(snap.ataScore).toFixed(2)}</p>
+                      <div className="space-y-1 min-w-[300px] overflow-x-auto">
+                        {Array.from({ length: size }).map((_, rowIdx) => (
+                          <div key={`${snap.id}-row-${rowIdx}`} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+                            {Array.from({ length: size }).map((__, colIdx) => {
+                              const point = cells[rowIdx * size + colIdx];
+                              const rank = point?.rank ?? null;
+                              return (
+                                <div
+                                  key={`${snap.id}-${rowIdx}-${colIdx}`}
+                                  className={`h-9 rounded text-[10px] font-semibold flex items-center justify-center ${localMapCellClass(rank)}`}
+                                >
+                                  {rank == null ? "NR" : rank}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {localMapReport.benchmark && (
+                  <div className="bg-white border border-amber-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-amber-900">
+                      Benchmark - {format(new Date(localMapReport.benchmark.runDate), "MMM d, yyyy")}
+                    </h4>
+                    <p className="text-xs text-amber-700 mb-3">ATA {Number(localMapReport.benchmark.ataScore).toFixed(2)}</p>
+                    {(() => {
+                      const cells = parseLocalMapGridData(localMapReport.benchmark!.gridData);
+                      const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
+                      return (
+                        <div className="space-y-1 min-w-[300px] overflow-x-auto">
+                          {Array.from({ length: size }).map((_, rowIdx) => (
+                            <div key={`benchmark-row-${rowIdx}`} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+                              {Array.from({ length: size }).map((__, colIdx) => {
+                                const point = cells[rowIdx * size + colIdx];
+                                const rank = point?.rank ?? null;
+                                return (
+                                  <div
+                                    key={`benchmark-${rowIdx}-${colIdx}`}
+                                    className={`h-9 rounded text-[10px] font-semibold flex items-center justify-center ${localMapCellClass(rank)}`}
+                                  >
+                                    {rank == null ? "NR" : rank}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {localMapActivationOpen && (
+        <div className="fixed top-4 right-4 z-[140] rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 shadow">
+          Debug: localMapActivationOpen = true
+        </div>
+      )}
+
+      {false && localMapActivationOpen && (
+        <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4">
           <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-primary-600 via-indigo-600 to-blue-600 text-white">
               <div>
@@ -11276,20 +11644,29 @@ const ClientDashboardPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                {localMapMoneyKeywordsLoading ? (
+                  <p className="mt-1 text-xs text-gray-500">Loading money keywords...</p>
+                ) : localMapMoneyKeywords.length === 0 ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    No money keywords found on this dashboard yet. Add money keywords first, then activate Local Map.
+                  </p>
+                ) : null}
               </div>
 
               <GoogleBusinessSearch
                 value={localMapBusinessSelection}
                 onSelect={setLocalMapBusinessSelection}
+                onQueryChange={setLocalMapBusinessQuery}
+                inputId="local-map-business-modal"
                 placeholder="Search Google Business Profile listing"
               />
 
               {localMapBusinessSelection && (
                 <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-100 px-3 py-2 text-sm text-emerald-900">
-                  <div className="font-semibold">{localMapBusinessSelection.businessName}</div>
-                  <div className="text-emerald-800">{localMapBusinessSelection.address}</div>
+                  <div className="font-semibold">{localMapBusinessSelection?.businessName}</div>
+                  <div className="text-emerald-800">{localMapBusinessSelection?.address}</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Center: {localMapBusinessSelection.lat}, {localMapBusinessSelection.lng}
+                    Center: {localMapBusinessSelection?.lat}, {localMapBusinessSelection?.lng}
                   </div>
                 </div>
               )}
@@ -11328,8 +11705,7 @@ const ClientDashboardPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>
       )}
 
       <ConfirmDialog

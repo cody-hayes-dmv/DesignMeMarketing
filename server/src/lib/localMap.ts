@@ -35,6 +35,8 @@ const EARTH_RADIUS_METERS = 6371000;
 const DEFAULT_GRID_SIZE = 7;
 const DEFAULT_GRID_SPACING_MILES = 0.5;
 const NOT_RANKED_FALLBACK = 20;
+const DEFAULT_DATAFORSEO_LANGUAGE_CODE = "en";
+const DEFAULT_DATAFORSEO_DEVICE = "desktop";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -164,6 +166,90 @@ function extractTopCompetitorsCurrent(points: LocalMapGridPoint[]): string[] {
     .map(([name]) => name);
 }
 
+function gridCoordinates(centerLat: number, centerLng: number, gridSize: number, spacingMeters: number): LocalMapGridPoint[] {
+  const radius = Math.floor(gridSize / 2);
+  const points: LocalMapGridPoint[] = [];
+  for (let row = -radius; row <= radius; row += 1) {
+    for (let col = -radius; col <= radius; col += 1) {
+      const coords = decodePolylineDistance(centerLat, centerLng, row * spacingMeters, col * spacingMeters);
+      points.push({
+        lat: Number(coords.lat.toFixed(7)),
+        lng: Number(coords.lng.toFixed(7)),
+        rank: null,
+        competitors: [],
+      });
+    }
+  }
+  return points;
+}
+
+function normalizePlaceId(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function parseItemsForCoordinate(
+  responseJson: unknown,
+  targetPlaceId: string
+): { rank: number | null; competitors: string[] } {
+  const tasks = Array.isArray((responseJson as UnknownRecord)?.tasks)
+    ? ((responseJson as UnknownRecord).tasks as unknown[])
+    : [];
+  const firstTask = (tasks[0] as UnknownRecord | undefined) ?? {};
+  const taskStatusCode = toNumber(firstTask.status_code);
+  if (taskStatusCode != null && taskStatusCode >= 40000) {
+    throw new Error(`DataForSEO task failed with status_code ${taskStatusCode}`);
+  }
+
+  const taskResults = Array.isArray(firstTask.result) ? (firstTask.result as unknown[]) : [];
+  const firstResult = (taskResults[0] as UnknownRecord | undefined) ?? {};
+  const items = Array.isArray(firstResult.items) ? (firstResult.items as unknown[]) : [];
+
+  const ranked = items
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as UnknownRecord;
+      const title = toStringOrNull(row.title) ?? "";
+      const placeId = normalizePlaceId(row.place_id);
+      const rank = normalizeMapRank(row.rank_absolute ?? row.rank_group ?? row.rank);
+      return { title, placeId, rank };
+    })
+    .filter((entry): entry is { title: string; placeId: string; rank: number | null } => Boolean(entry));
+
+  const competitors = ranked
+    .slice(0, 3)
+    .map((entry) => entry.title)
+    .filter((name) => name.length > 0);
+  const match = ranked.find((entry) => entry.placeId && entry.placeId === targetPlaceId);
+
+  return {
+    rank: match?.rank ?? null,
+    competitors,
+  };
+}
+
+async function mapWithConcurrency<T, U>(
+  values: T[],
+  concurrency: number,
+  run: (value: T, index: number) => Promise<U>
+): Promise<U[]> {
+  if (values.length === 0) return [];
+  const maxConcurrency = Math.max(1, Math.floor(concurrency));
+  const out: U[] = new Array(values.length) as U[];
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < values.length) {
+      const idx = cursor;
+      cursor += 1;
+      out[idx] = await run(values[idx], idx);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(maxConcurrency, values.length) }, () => worker());
+  await Promise.all(workers);
+  return out;
+}
+
 async function getJsonResponse(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return null;
@@ -242,54 +328,67 @@ export async function runDataForSeoLocalGrid(
   const gridSpacingMiles = input.gridSpacingMiles ?? DEFAULT_GRID_SPACING_MILES;
   const spacingMeters = milesToMeters(gridSpacingMiles);
 
-  const payload = [
-    {
-      keyword: input.keyword,
-      place_id: input.placeId,
-      location_coordinate: `${input.centerLat},${input.centerLng}`,
-      grid_type: "square",
-      grid_rows: gridSize,
-      grid_cols: gridSize,
-      distance: spacingMeters,
-    },
-  ];
+  const languageCode = process.env.DATAFORSEO_LANGUAGE_CODE || DEFAULT_DATAFORSEO_LANGUAGE_CODE;
+  const device = process.env.DATAFORSEO_DEVICE || DEFAULT_DATAFORSEO_DEVICE;
+  const depth = Math.max(20, Number(process.env.DATAFORSEO_MAPS_DEPTH ?? 20));
+  const targetPlaceId = normalizePlaceId(input.placeId);
+  const points = gridCoordinates(input.centerLat, input.centerLng, gridSize, spacingMeters);
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${base64Auth}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+  const rawResult: unknown[] = [];
+  const gridData = await mapWithConcurrency(points, 8, async (point) => {
+    const payload = [
+      {
+        keyword: input.keyword,
+        location_coordinate: `${point.lat},${point.lng},20z`,
+        language_code: languageCode,
+        device,
+        depth,
+      },
+    ];
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${base64Auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await getJsonResponse(response);
+      rawResult.push(json);
+      if (!response.ok) {
+        throw new Error(`DataForSEO local grid request failed with status ${response.status}`);
+      }
+
+      const parsed = parseItemsForCoordinate(json, targetPlaceId);
+      return {
+        lat: point.lat,
+        lng: point.lng,
+        rank: parsed.rank,
+        competitors: parsed.competitors,
+      };
+    } catch {
+      return {
+        lat: point.lat,
+        lng: point.lng,
+        rank: null,
+        competitors: [],
+      };
+    }
   });
 
-  const json = await getJsonResponse(response);
-  if (!response.ok) {
-    throw new Error(`DataForSEO local grid request failed with status ${response.status}`);
-  }
+  const hasAnyRank = gridData.some((p) => p.rank != null);
+  const normalizedGridData = hasAnyRank ? gridData : buildFallbackGrid(input.centerLat, input.centerLng, gridSize, spacingMeters);
 
-  const tasks = Array.isArray((json as UnknownRecord)?.tasks) ? ((json as UnknownRecord).tasks as unknown[]) : [];
-  const firstTask = (tasks[0] as UnknownRecord | undefined) ?? {};
-  const taskStatusCode = toNumber(firstTask.status_code);
-  if (taskStatusCode != null && taskStatusCode >= 40000) {
-    throw new Error(`DataForSEO task failed with status_code ${taskStatusCode}`);
-  }
-
-  const taskResults = Array.isArray(firstTask.result) ? (firstTask.result as unknown[]) : [];
-  const firstResult = (taskResults[0] as UnknownRecord | undefined) ?? {};
-  let gridData = parseGridPointsFromResult(firstResult);
-
-  if (!gridData.length) {
-    gridData = buildFallbackGrid(input.centerLat, input.centerLng, gridSize, spacingMeters);
-  }
-
-  const ataScore = calculateAtaScore(gridData);
-  const topCompetitorsCurrent = extractTopCompetitorsCurrent(gridData);
+  const ataScore = calculateAtaScore(normalizedGridData);
+  const topCompetitorsCurrent = extractTopCompetitorsCurrent(normalizedGridData);
 
   return {
-    gridData,
+    gridData: normalizedGridData,
     ataScore,
     topCompetitorsCurrent,
-    rawResult: json,
+    rawResult,
   };
 }

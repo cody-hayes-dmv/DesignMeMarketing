@@ -28,6 +28,10 @@ function rankLabel(rank: number | null): string {
   return String(rank);
 }
 
+function parseDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
 async function renderPdf(write: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40, size: "LETTER" });
@@ -58,12 +62,37 @@ function drawGridTable(doc: PDFKit.PDFDocument, grid: ParsedGridPoint[]) {
   doc.moveDown(2);
 }
 
+function drawSnapshotSection(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  snapshot: GridSnapshot | null,
+  keyword: GridKeyword
+) {
+  doc.fontSize(12).fillColor("#111827").text(title);
+  doc.moveDown(0.3);
+  if (!snapshot) {
+    doc.fontSize(10).fillColor("#6B7280").text("No snapshot available.");
+    doc.moveDown(0.8);
+    return;
+  }
+
+  doc.fontSize(10).fillColor("#374151").text(`Keyword: ${keyword.keywordText}`);
+  doc.text(`Business: ${keyword.businessName}`);
+  doc.text(`Run Date: ${parseDate(snapshot.runDate)}  |  ATA: ${snapshot.ataScore.toFixed(2)}`);
+  doc.moveDown(0.4);
+  drawGridTable(doc, parseGrid(snapshot.gridData));
+}
+
 export async function generateLocalMapKeywordPdfBuffer(
   keyword: GridKeyword,
   snapshots: GridSnapshot[]
 ): Promise<Buffer> {
   return renderPdf((doc) => {
-    const current = snapshots[0];
+    const sorted = [...snapshots].sort((a, b) => b.runDate.getTime() - a.runDate.getTime());
+    const current = sorted[0] ?? null;
+    const previousThree = sorted.slice(1, 4);
+    const benchmark = sorted.find((snap) => snap.isBenchmark) ?? null;
+
     doc.fontSize(20).fillColor("#111827").text("Local Map Rankings Report", { align: "left" });
     doc.moveDown(0.5);
     doc.fontSize(12).fillColor("#111827").text(`Keyword: ${keyword.keywordText}`);
@@ -75,19 +104,29 @@ export async function generateLocalMapKeywordPdfBuffer(
     doc.text(`Current Run Date: ${current ? current.runDate.toISOString().slice(0, 10) : "N/A"}`);
     doc.moveDown(0.8);
 
-    if (!current) {
+    if (!sorted.length) {
       doc.fontSize(11).fillColor("#6B7280").text("No snapshots available yet.");
       return;
     }
 
-    doc.fontSize(12).fillColor("#111827").text("Current Grid");
-    const grid = parseGrid(current.gridData);
-    drawGridTable(doc, grid);
+    drawSnapshotSection(doc, "CURRENT", current, keyword);
+
+    if (previousThree.length) {
+      for (const prev of previousThree) {
+        if (doc.y > 630) doc.addPage();
+        drawSnapshotSection(doc, `PREVIOUS - ${parseDate(prev.runDate)}`, prev, keyword);
+      }
+    }
+
+    if (benchmark) {
+      if (doc.y > 630) doc.addPage();
+      drawSnapshotSection(doc, `BENCHMARK - ${parseDate(benchmark.runDate)}`, benchmark, keyword);
+    }
   });
 }
 
 export async function generateLocalMapBundlePdfBuffer(
-  rows: Array<{ keyword: GridKeyword; latestSnapshot: GridSnapshot | null }>
+  rows: Array<{ keyword: GridKeyword; snapshots: GridSnapshot[] }>
 ): Promise<Buffer> {
   return renderPdf((doc) => {
     doc.fontSize(20).fillColor("#111827").text("Local Map Rankings - Dashboard Bundle");
@@ -102,13 +141,24 @@ export async function generateLocalMapBundlePdfBuffer(
         doc.text(row.keyword.businessAddress);
       }
       doc.moveDown(0.4);
-      doc.text(`ATA: ${row.latestSnapshot ? row.latestSnapshot.ataScore.toFixed(2) : "-"}`);
-      doc.text(`Run Date: ${row.latestSnapshot ? row.latestSnapshot.runDate.toISOString().slice(0, 10) : "N/A"}`);
-      doc.moveDown(0.4);
-      if (row.latestSnapshot) {
-        drawGridTable(doc, parseGrid(row.latestSnapshot.gridData));
-      } else {
+      const sorted = [...row.snapshots].sort((a, b) => b.runDate.getTime() - a.runDate.getTime());
+      const current = sorted[0] ?? null;
+      const previousThree = sorted.slice(1, 4);
+      const benchmark = sorted.find((snap) => snap.isBenchmark) ?? null;
+
+      if (!current) {
         doc.fillColor("#6B7280").text("No snapshot available yet.");
+        return;
+      }
+
+      drawSnapshotSection(doc, "CURRENT", current, row.keyword);
+      previousThree.forEach((snap) => {
+        if (doc.y > 630) doc.addPage();
+        drawSnapshotSection(doc, `PREVIOUS - ${parseDate(snap.runDate)}`, snap, row.keyword);
+      });
+      if (benchmark) {
+        if (doc.y > 630) doc.addPage();
+        drawSnapshotSection(doc, `BENCHMARK - ${parseDate(benchmark.runDate)}`, benchmark, row.keyword);
       }
     });
   });

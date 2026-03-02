@@ -5,6 +5,9 @@ import { prisma } from "../lib/prisma.js";
 import { getTierConfig, normalizeTierId } from "../lib/tiers.js";
 import { calculateAtaScore, runDataForSeoLocalGrid, searchGoogleBusinessProfiles, type LocalMapGridPoint } from "../lib/localMap.js";
 import { generateLocalMapBundlePdfBuffer, generateLocalMapKeywordPdfBuffer } from "../lib/localMapPdf.js";
+import { sendEmail } from "../lib/email.js";
+import { buildReportEmailSubject, normalizeEmailRecipients } from "../lib/qualityContracts.js";
+import { LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX, calculateNextRunTime, isLocalMapScheduleSubject } from "../lib/reportScheduler.js";
 
 const router = express.Router();
 const localMapEnabled = String(process.env.ENABLE_LOCAL_MAP_RANKINGS ?? "true").toLowerCase() === "true";
@@ -290,15 +293,106 @@ export async function processScheduledLocalMapRankings(now = new Date()): Promis
       status: "active",
       OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }],
     },
-    select: { id: true },
+    select: { id: true, clientId: true },
     take: 300,
   });
 
+  const touchedClientIds = new Set<string>();
   for (const row of due) {
     try {
       await runScheduledGridKeyword(row.id, now);
+      touchedClientIds.add(row.clientId);
     } catch (error) {
       console.error("[LocalMap] scheduled run failed", row.id, error);
+    }
+  }
+
+  await processScheduledLocalMapEmails(Array.from(touchedClientIds), now);
+}
+
+async function processScheduledLocalMapEmails(clientIds: string[], now: Date): Promise<void> {
+  if (!clientIds.length) return;
+
+  const schedules = await prisma.reportSchedule.findMany({
+    where: {
+      isActive: true,
+      clientId: { in: clientIds },
+      frequency: { in: ["biweekly", "monthly"] },
+      nextRunAt: { lte: now },
+    },
+    include: {
+      client: { select: { id: true, name: true } },
+    },
+  });
+
+  const localMapSchedules = schedules.filter((schedule) => isLocalMapScheduleSubject(schedule.emailSubject));
+  for (const schedule of localMapSchedules) {
+    try {
+      if (schedule.frequency === "monthly" && now.getDate() !== 1) continue;
+
+      const recipients = normalizeEmailRecipients(schedule.recipients);
+      if (!recipients.length) continue;
+
+      const keywords = await prisma.gridKeyword.findMany({
+        where: { clientId: schedule.clientId, status: "active" },
+        include: {
+          snapshots: {
+            orderBy: { runDate: "desc" },
+          },
+        },
+        orderBy: { keywordText: "asc" },
+      });
+      if (!keywords.length) continue;
+
+      const pdf = await generateLocalMapBundlePdfBuffer(
+        keywords.map((row) => ({
+          keyword: row,
+          snapshots: row.snapshots,
+        }))
+      );
+
+      const subjectWithoutMarker = String(schedule.emailSubject || "")
+        .replace(LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX, "")
+        .trim();
+      const emailSubject = subjectWithoutMarker
+        || `Local Map Rankings - ${buildReportEmailSubject(schedule.client?.name || "Client", schedule.frequency)}`;
+      const html = `
+        <div style="font-family: Arial, sans-serif; color: #111827;">
+          <h2 style="margin: 0 0 8px;">Local Map Rankings Report</h2>
+          <p style="margin: 0 0 10px;">Your latest Local Map Rankings bundle is attached.</p>
+          <p style="margin: 0; color: #6b7280; font-size: 12px;">Client: ${schedule.client?.name || "Unknown"}</p>
+        </div>
+      `;
+
+      await Promise.all(
+        recipients.map((to) =>
+          sendEmail({
+            to,
+            subject: emailSubject,
+            html,
+            attachments: [
+              {
+                filename: `local-map-rankings-${(schedule.client?.name || "client").replace(/\s+/g, "-").toLowerCase()}.pdf`,
+                content: pdf,
+                contentType: "application/pdf",
+              },
+            ],
+          })
+        )
+      );
+
+      const nextRunAt = calculateNextRunTime(
+        schedule.frequency,
+        schedule.dayOfWeek ?? undefined,
+        schedule.dayOfMonth ?? undefined,
+        schedule.timeOfDay
+      );
+      await prisma.reportSchedule.update({
+        where: { id: schedule.id },
+        data: { lastRunAt: now, nextRunAt },
+      });
+    } catch (error) {
+      console.error("[LocalMap] scheduled email failed", schedule.id, error);
     }
   }
 }
@@ -734,7 +828,7 @@ router.get("/pdf/keyword/:gridKeywordId", authenticateToken, async (req, res) =>
     const { gridKeywordId } = req.params;
     const keyword = await prisma.gridKeyword.findUnique({
       where: { id: gridKeywordId },
-      include: { snapshots: { orderBy: { runDate: "desc" }, take: 1 } },
+      include: { snapshots: { orderBy: { runDate: "desc" } } },
     });
     if (!keyword) return res.status(404).json({ message: "Grid keyword not found" });
     const canRead = await canReadClient(req.user, keyword.clientId);
@@ -779,7 +873,6 @@ router.get("/pdf/dashboard/:clientId", authenticateToken, async (req, res) => {
       include: {
         snapshots: {
           orderBy: { runDate: "desc" },
-          take: 1,
         },
       },
       orderBy: { keywordText: "asc" },
@@ -788,7 +881,7 @@ router.get("/pdf/dashboard/:clientId", authenticateToken, async (req, res) => {
     const pdf = await generateLocalMapBundlePdfBuffer(
       keywords.map((row) => ({
         keyword: row,
-        latestSnapshot: row.snapshots[0] ?? null,
+        snapshots: row.snapshots,
       }))
     );
     res.setHeader("Content-Type", "application/pdf");

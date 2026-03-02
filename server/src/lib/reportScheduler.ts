@@ -11,6 +11,12 @@ import {
   REPORT_SECTION_TITLES,
 } from "./qualityContracts.js";
 
+export const LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX = "[LOCAL_MAP] ";
+
+export function isLocalMapScheduleSubject(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith(LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX);
+}
+
 type ReportTargetKeywordRow = {
   id: string;
   keyword: string;
@@ -1849,10 +1855,12 @@ export async function processScheduledReports(): Promise<void> {
       }
     });
 
+    const seoDueSchedules = dueSchedules.filter((schedule) => !isLocalMapScheduleSubject(schedule.emailSubject));
+
     console.log(`[Report Scheduler] Checking scheduled reports at ${now.toISOString()}`);
-    console.log(`[Report Scheduler] Found ${dueSchedules.length} due schedule(s)`);
+    console.log(`[Report Scheduler] Found ${seoDueSchedules.length} due SEO schedule(s)`);
     
-    if (dueSchedules.length === 0) {
+    if (seoDueSchedules.length === 0) {
       // Log all active schedules for debugging
       const allActiveSchedules = await prisma.reportSchedule.findMany({
         where: { isActive: true },
@@ -1875,7 +1883,7 @@ export async function processScheduledReports(): Promise<void> {
       return;
     }
 
-    for (const schedule of dueSchedules) {
+    for (const schedule of seoDueSchedules) {
       try {
         console.log(`[Report Scheduler] Processing schedule ${schedule.id} for client ${schedule.client.name}`);
         

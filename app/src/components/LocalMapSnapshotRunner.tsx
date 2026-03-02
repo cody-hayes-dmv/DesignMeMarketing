@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { Download, Loader2, MapPin, Play, Sparkles, Target } from "lucide-react";
+import { jsPDF } from "jspdf";
 import api from "@/lib/api";
 import GoogleBusinessSearch, { type GoogleBusinessSelection } from "@/components/GoogleBusinessSearch";
 
@@ -39,6 +40,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
 }) => {
   const [keyword, setKeyword] = useState("");
   const [business, setBusiness] = useState<GoogleBusinessSelection | null>(null);
+  const [businessQuery, setBusinessQuery] = useState("");
   const [running, setRunning] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
@@ -78,20 +80,39 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       toast.error("Enter a keyword");
       return;
     }
-    if (!business) {
-      toast.error("Select a business");
-      return;
-    }
 
     try {
       setRunning(true);
+      let resolvedBusiness = business;
+      // UX fallback: if user typed but didn't explicitly click a dropdown option,
+      // auto-pick the first GBP search result.
+      if (!resolvedBusiness && businessQuery.trim()) {
+        const lookup = await api.get("/local-map/gbp/search", { params: { q: businessQuery.trim() } });
+        const first = Array.isArray(lookup.data) ? lookup.data[0] : null;
+        if (first) {
+          resolvedBusiness = {
+            placeId: String(first.placeId || ""),
+            businessName: String(first.businessName || ""),
+            address: String(first.address || ""),
+            lat: Number(first.lat),
+            lng: Number(first.lng),
+          };
+          setBusiness(resolvedBusiness);
+        }
+      }
+
+      if (!resolvedBusiness) {
+        toast.error("Select a business");
+        return;
+      }
+
       const res = await api.post("/local-map/snapshot/run", {
         keyword: keyword.trim(),
-        placeId: business.placeId,
-        businessName: business.businessName,
-        businessAddress: business.address,
-        centerLat: business.lat,
-        centerLng: business.lng,
+        placeId: resolvedBusiness.placeId,
+        businessName: resolvedBusiness.businessName,
+        businessAddress: resolvedBusiness.address,
+        centerLat: resolvedBusiness.lat,
+        centerLng: resolvedBusiness.lng,
         superAdminMode,
       });
       const points = Array.isArray(res?.data?.gridData) ? res.data.gridData : [];
@@ -104,6 +125,61 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
     } finally {
       setRunning(false);
     }
+  };
+
+  const downloadSnapshotPdf = () => {
+    if (!gridData.length) {
+      toast.error("Run a snapshot first");
+      return;
+    }
+
+    const doc = new jsPDF({ unit: "pt", format: "letter" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = 48;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text("Local Map Snapshot", margin, y);
+    y += 24;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.text(`Keyword: ${keyword || "-"}`, margin, y);
+    y += 16;
+    doc.text(`Business: ${business?.businessName || businessQuery || "-"}`, margin, y);
+    y += 16;
+    if (business?.address) {
+      doc.text(`Address: ${business.address}`, margin, y);
+      y += 16;
+    }
+    if (ataScore != null) {
+      doc.text(`ATA Score: ${ataScore.toFixed(2)}`, margin, y);
+      y += 20;
+    }
+
+    const size = Math.max(1, Math.round(Math.sqrt(gridData.length)));
+    const printable = pageWidth - margin * 2;
+    const cell = Math.floor(printable / size);
+    const startX = margin;
+    const startY = y;
+
+    doc.setFontSize(9);
+    for (let row = 0; row < size; row += 1) {
+      for (let col = 0; col < size; col += 1) {
+        const idx = row * size + col;
+        const point = gridData[idx];
+        const x = startX + col * cell;
+        const yy = startY + row * cell;
+        doc.setDrawColor(209, 213, 219);
+        doc.rect(x, yy, cell, cell);
+        const label = point?.rank == null ? "NR" : String(point.rank);
+        doc.text(label, x + cell / 2, yy + cell / 2 + 3, { align: "center" });
+      }
+    }
+
+    const fileKeyword = (keyword || "snapshot").trim().toLowerCase().replace(/\s+/g, "-");
+    doc.save(`${fileKeyword}-local-map-snapshot.pdf`);
   };
 
   return (
@@ -165,7 +241,11 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
-        <GoogleBusinessSearch value={business} onSelect={setBusiness} />
+        <GoogleBusinessSearch
+          value={business}
+          onSelect={setBusiness}
+          onQueryChange={setBusinessQuery}
+        />
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -178,7 +258,8 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => toast("PDF export is connected and pending final report template")}
+            onClick={downloadSnapshotPdf}
+            disabled={!gridData.length}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50"
           >
             <Download className="h-4 w-4" />

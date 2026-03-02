@@ -8508,6 +8508,7 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
     const { clientId } = req.params;
     const scheduleData = z.object({
       frequency: z.enum(["weekly", "biweekly", "monthly"]),
+      reportKind: z.enum(["seo", "local_map"]).optional().default("seo"),
       dayOfWeek: z.number().min(0).max(6).optional(),
       dayOfMonth: z.number().min(1).max(31).optional(),
       timeOfDay: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).default("09:00"),
@@ -8515,6 +8516,7 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
       emailSubject: z.string().optional(),
       isActive: z.boolean().default(true)
     }).parse(req.body);
+    const { reportKind, ...scheduleFields } = scheduleData;
 
     // Check if user has access to this client
     const client = await prisma.client.findUnique({
@@ -8548,35 +8550,58 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
       return res.status(403).json({ message: "Access denied" });
     }
 
+    const { LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX } = await import("../lib/reportScheduler.js");
+    const isLocalMapSchedule = reportKind === "local_map";
+    if (isLocalMapSchedule && scheduleData.frequency === "weekly") {
+      return res.status(400).json({ message: "Local Map schedules support biweekly or monthly only." });
+    }
+
     // Calculate next run time
     const { calculateNextRunTime } = await import("../lib/reportScheduler.js");
     const nextRunAt = calculateNextRunTime(
       scheduleData.frequency,
-      scheduleData.dayOfWeek,
-      scheduleData.dayOfMonth,
-      scheduleData.timeOfDay
+      scheduleFields.dayOfWeek,
+      scheduleFields.dayOfMonth,
+      scheduleFields.timeOfDay
     );
 
     // Check if schedule already exists
     const existing = await prisma.reportSchedule.findFirst({
-      where: { clientId, frequency: scheduleData.frequency }
+      where: {
+        clientId,
+        frequency: scheduleFields.frequency,
+        ...(isLocalMapSchedule
+          ? { emailSubject: { startsWith: LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX } }
+          : {
+              OR: [
+                { emailSubject: null },
+                { emailSubject: { not: { startsWith: LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX } } },
+              ],
+            }),
+      }
     });
+
+    const storedEmailSubject = isLocalMapSchedule
+      ? `${LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX}${(scheduleFields.emailSubject || "").trim()}`
+      : scheduleFields.emailSubject;
 
     const schedule = existing
       ? await prisma.reportSchedule.update({
           where: { id: existing.id },
           data: {
-            ...scheduleData,
+            ...scheduleFields,
             // ReportSchedule.recipients is a String column; store as JSON array string.
-            recipients: JSON.stringify(scheduleData.recipients),
+            recipients: JSON.stringify(scheduleFields.recipients),
+            emailSubject: storedEmailSubject,
             nextRunAt
           }
         })
       : await prisma.reportSchedule.create({
           data: {
-            ...scheduleData,
+            ...scheduleFields,
             // ReportSchedule.recipients is a String column; store as JSON array string.
-            recipients: JSON.stringify(scheduleData.recipients),
+            recipients: JSON.stringify(scheduleFields.recipients),
+            emailSubject: storedEmailSubject,
             clientId,
             nextRunAt
           }
