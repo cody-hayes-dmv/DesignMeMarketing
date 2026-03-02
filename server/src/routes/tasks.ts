@@ -438,6 +438,45 @@ async function createTaskActivityNotifications(
   }
 }
 
+async function notifyTaskAssigneeOnlyActivity(
+  task: {
+    id: string;
+    title: string;
+    assigneeId?: string | null;
+    agencyId?: string | null;
+  },
+  actorUserId: string,
+  actorName: string,
+  commentType: "APPROVAL" | "REVISION_REQUEST",
+  body: string
+): Promise<void> {
+  const assigneeId = task.assigneeId ?? null;
+  if (!assigneeId || assigneeId === actorUserId) return;
+
+  const assignee = await prisma.user.findUnique({
+    where: { id: assigneeId },
+    select: { role: true },
+  });
+  const basePath =
+    assignee?.role === "USER"
+      ? "/client/tasks"
+      : assignee?.role === "SPECIALIST"
+      ? "/specialist/tasks"
+      : "/agency/tasks";
+
+  const action = commentType === "APPROVAL" ? "approved" : "requested revisions on";
+  await prisma.notification.create({
+    data: {
+      userId: assigneeId,
+      agencyId: task.agencyId ?? null,
+      type: "task_activity",
+      title: `${actorName} ${action} "${task.title}"`,
+      message: body.length > 120 ? body.slice(0, 120) + "…" : body,
+      link: `${basePath}?taskId=${task.id}`,
+    },
+  }).catch((e) => console.warn("[Task] Assignee-only activity notification error", e?.message));
+}
+
 async function notifyClientUsersTaskNeedsApproval(
   task: { id: string; title: string; clientId?: string | null },
   requestedByName: string,
@@ -1866,28 +1905,19 @@ router.post("/:id/approve", authenticateToken, async (req, res) => {
       },
     });
 
-    // Fire notifications
-    createTaskActivityNotifications(
+    // Client-side approval action: notify only the task assignee.
+    notifyTaskAssigneeOnlyActivity(
       {
         id: task.id,
         title: task.title,
-        clientId: task.clientId,
         agencyId: task.agencyId,
         assigneeId: task.assigneeId,
-        createdById: task.createdById,
       },
       req.user.userId,
       authorName,
       "APPROVAL",
       approvalBody
-    ).catch((e) => console.warn("[Task] Approval notification error", e?.message));
-
-    // Also send task-completed emails
-    sendTaskCompletedEmails(
-      { ...updated, approvalNotifyUserIds: updated.approvalNotifyUserIds ?? undefined },
-      updated.approvalNotifyUserIds,
-      req.user.userId
-    ).catch((e) => console.warn("[Task] Completion emails failed", e?.message));
+    ).catch((e) => console.warn("[Task] Approval assignee notification error", e?.message));
 
     return res.json(updated);
   } catch (error: any) {
@@ -1936,21 +1966,19 @@ router.post("/:id/request-revisions", authenticateToken, async (req, res) => {
       },
     });
 
-    // Fire notifications
-    createTaskActivityNotifications(
+    // Client-side revision request action: notify only the task assignee.
+    notifyTaskAssigneeOnlyActivity(
       {
         id: task.id,
         title: task.title,
-        clientId: task.clientId,
         agencyId: task.agencyId,
         assigneeId: task.assigneeId,
-        createdById: task.createdById,
       },
       req.user.userId,
       authorName,
       "REVISION_REQUEST",
       comment
-    ).catch((e) => console.warn("[Task] Revision request notification error", e?.message));
+    ).catch((e) => console.warn("[Task] Revision request assignee notification error", e?.message));
 
     return res.json(updated);
   } catch (error: any) {
