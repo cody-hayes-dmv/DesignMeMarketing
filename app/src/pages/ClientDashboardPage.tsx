@@ -8841,6 +8841,10 @@ const ClientDashboardPage: React.FC = () => {
                                         </span>
                                       </button>
                                     </div>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                      Collaborators notified on every message: <span className="font-semibold text-gray-700">{workLogEntryCollaborators.length}</span>
+                                      {" "}• @mention adds collaborator
+                                    </p>
                                     {workLogCollaboratorEditorOpen && (
                                       <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
                                         <div className="flex flex-wrap gap-1.5">
@@ -11143,6 +11147,10 @@ const ClientDashboardPage: React.FC = () => {
                                     </span>
                                   </button>
                                 </div>
+                                <p className="mt-1 text-xs text-gray-500">
+                                  Collaborators notified on every message: <span className="font-semibold text-gray-700">{workLogEntryCollaborators.length}</span>
+                                  {" "}• @mention adds collaborator
+                                </p>
                                 {workLogCollaboratorEditorOpen && (
                                   <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
                                     <div className="flex flex-wrap gap-1.5">

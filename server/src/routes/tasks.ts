@@ -233,6 +233,17 @@ const commentBodySchema = z.object({
   context: z.enum(["TASK", "WORKLOG"]).optional(),
 });
 
+function parseUserIdJson(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((v) => String(v || "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export function selectTaskActivityRecipientIds(params: {
   authorRole: Role | null | undefined;
   authorId: string;
@@ -1320,7 +1331,89 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
       where: { id: req.user.userId },
       select: { name: true, email: true },
     });
-    if (requestedMentionIds.length === 0) {
+    // Restrict collaborator notifications to users that can access this task.
+    const allowedIds = new Set<string>();
+    const superAdmins = await prisma.user.findMany({
+      where: { role: "SUPER_ADMIN" },
+      select: { id: true },
+    });
+    superAdmins.forEach((u) => allowedIds.add(u.id));
+
+    let agencyScopeId: string | null = task.agencyId ?? null;
+    if (task.clientId) {
+      const client = await prisma.client.findUnique({
+        where: { id: task.clientId },
+        select: { belongsToAgencyId: true },
+      });
+      if (client) agencyScopeId = client.belongsToAgencyId ?? null;
+    }
+    if (agencyScopeId) {
+      const members = await prisma.userAgency.findMany({
+        where: { agencyId: agencyScopeId },
+        select: { userId: true },
+      });
+      members.forEach((m) => allowedIds.add(m.userId));
+    }
+    if (task.assigneeId) allowedIds.add(task.assigneeId);
+    if (task.createdById) allowedIds.add(task.createdById);
+    if (task.clientId) {
+      const clientUsers = await prisma.clientUser.findMany({
+        where: { clientId: task.clientId, status: "ACTIVE" },
+        select: { userId: true },
+      });
+      clientUsers.forEach((cu) => allowedIds.add(cu.userId));
+    }
+
+    const existingCollaboratorIds = parseUserIdJson((task as any).approvalNotifyUserIds);
+    const validMentionIds = requestedMentionIds.filter((uid) => allowedIds.has(uid));
+    const nextCollaboratorIds = Array.from(
+      new Set([...existingCollaboratorIds, ...validMentionIds])
+    ).filter((uid) => uid !== req.user.userId);
+
+    // Persist collaborator list when new @mentions are added.
+    if (validMentionIds.length > 0) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { approvalNotifyUserIds: JSON.stringify(nextCollaboratorIds) },
+      }).catch((e) => console.warn("[Task] Collaborator persist error", e?.message));
+    }
+
+    // Collaborator workflow: once someone is @mentioned, they become a collaborator
+    // and all collaborators get notified on every future activity comment.
+    if (nextCollaboratorIds.length > 0) {
+      const collaborators = await prisma.user.findMany({
+        where: { id: { in: nextCollaboratorIds } },
+        select: { id: true, role: true },
+      });
+      const actionMap: Record<string, string> = {
+        COMMENT: "commented on",
+        QUESTION: "asked a question on",
+        APPROVAL_REQUEST: "requested approval for",
+        APPROVAL: "approved",
+        REVISION_REQUEST: "requested revisions on",
+      };
+      const action = actionMap[commentType] || "commented on";
+      const collaboratorNotifRows = collaborators.map((u) => {
+        const basePath =
+          u.role === "USER"
+            ? "/client/tasks"
+            : u.role === "SPECIALIST"
+            ? "/specialist/tasks"
+            : "/agency/tasks";
+        return {
+          userId: u.id,
+          agencyId: task.agencyId ?? null,
+          type: "task_activity",
+          title: `${author?.name || author?.email || "Someone"} ${action} "${task.title}"`,
+          message: body.length > 120 ? body.slice(0, 120) + "…" : body,
+          link: `${basePath}?taskId=${task.id}`,
+        };
+      });
+      await prisma.notification
+        .createMany({ data: collaboratorNotifRows })
+        .catch((e) => console.warn("[Task] Collaborator notification error", e?.message));
+    } else {
+      // No collaborators yet -> keep existing default routing.
       createTaskActivityNotifications(
         {
           id: task.id,
@@ -1335,70 +1428,6 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
         commentType,
         body
       ).catch((e) => console.warn("[Task] Activity notification error", e?.message));
-    }
-
-    if (requestedMentionIds.length > 0) {
-      // Restrict mention notifications to users that can access this task.
-      const allowedIds = new Set<string>();
-
-      const superAdmins = await prisma.user.findMany({
-        where: { role: "SUPER_ADMIN" },
-        select: { id: true },
-      });
-      superAdmins.forEach((u) => allowedIds.add(u.id));
-
-      let agencyScopeId: string | null = task.agencyId ?? null;
-      if (task.clientId) {
-        const client = await prisma.client.findUnique({
-          where: { id: task.clientId },
-          select: { belongsToAgencyId: true },
-        });
-        if (client) agencyScopeId = client.belongsToAgencyId ?? null;
-      }
-      if (agencyScopeId) {
-        const members = await prisma.userAgency.findMany({
-          where: { agencyId: agencyScopeId },
-          select: { userId: true },
-        });
-        members.forEach((m) => allowedIds.add(m.userId));
-      }
-      if (task.assigneeId) allowedIds.add(task.assigneeId);
-      if (task.createdById) allowedIds.add(task.createdById);
-      if (task.clientId) {
-        const clientUsers = await prisma.clientUser.findMany({
-          where: { clientId: task.clientId, status: "ACTIVE" },
-          select: { userId: true },
-        });
-        clientUsers.forEach((cu) => allowedIds.add(cu.userId));
-      }
-
-      const mentionRecipientIds = requestedMentionIds.filter((uid) => allowedIds.has(uid));
-      if (mentionRecipientIds.length > 0) {
-        const mentionRecipients = await prisma.user.findMany({
-          where: { id: { in: mentionRecipientIds } },
-          select: { id: true, role: true },
-        });
-        const mentionNotifRows = mentionRecipients.map((u) => {
-          const basePath =
-            u.role === "USER"
-              ? "/client/tasks"
-              : u.role === "SPECIALIST"
-              ? "/specialist/tasks"
-              : "/agency/tasks";
-          return {
-            userId: u.id,
-            agencyId: task.agencyId ?? null,
-            type: "task_activity",
-            title: `${author?.name || author?.email || "Someone"} mentioned you in "${task.title}"`,
-            message: body.length > 120 ? body.slice(0, 120) + "…" : body,
-            link: `${basePath}?taskId=${task.id}`,
-          };
-        });
-
-        await prisma.notification
-          .createMany({ data: mentionNotifRows })
-          .catch((e) => console.warn("[Task] Mention notification error", e?.message));
-      }
     }
 
     return res.status(201).json(created);
