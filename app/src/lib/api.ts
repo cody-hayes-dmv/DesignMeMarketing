@@ -174,6 +174,8 @@ api.interceptors.response.use(
           toast.error("Session expired. Please login again.");
         } else if (status === 403) {
           const code = error.response?.data?.code;
+          const method = String(error.config?.method || "").toLowerCase();
+          const isKeywordCreate = /\/seo\/keywords\/[^/]+$/i.test(url) && method === "post";
           if (code === "TRIAL_EXPIRED") {
             toast.error(error.response?.data?.message || "Your free trial has ended. Please choose a paid plan to continue.");
             if (typeof window !== "undefined" && window.location.pathname.startsWith("/agency") && !window.location.pathname.endsWith("/subscription")) {
@@ -187,7 +189,16 @@ api.interceptors.response.use(
               localStorage.removeItem("token");
               toast.error("Session expired. Please login again.");
             } else {
-              toast.error("Access denied. You don't have permission to perform this action.");
+              if (isKeywordCreate) {
+                const keywordBlockedMessage =
+                  error.response?.data?.message ||
+                  "Keyword tracking is not available on your current plan.";
+                toast.error(
+                  `${keywordBlockedMessage} To track keywords, open Agency > Subscription and upgrade your plan or add the Extra Keywords Tracked add-on.`
+                );
+              } else {
+                toast.error(error.response?.data?.message || "Access denied. You don't have permission to perform this action.");
+              }
             }
           }
         } else if (status === 404) {

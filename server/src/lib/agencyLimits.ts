@@ -275,10 +275,10 @@ export function canAddKeywords(
   if (!ctx.tierConfig) return { allowed: true };
   const totalAfter = ctx.totalKeywords + addCount;
   const cap = ctx.effectiveKeywordCap;
-  if (cap > 0 && totalAfter > cap) {
+  if (totalAfter > cap) {
     return {
       allowed: false,
-      message: `Your plan allows ${cap} keywords total (account-wide). You have ${ctx.totalKeywords}. Upgrade or add an add-on to track more.`,
+      message: `Your plan allows ${cap} keywords total (account-wide). Upgrade or add an add-on to track more.`,
     };
   }
   return { allowed: true };
@@ -291,7 +291,7 @@ export function canAddTargetKeyword(ctx: AgencyTierContext, _clientId: string): 
   if (ctx.trialExpired) return { allowed: false, message: TRIAL_EXPIRED_MESSAGE };
   if (!ctx.tierConfig) return { allowed: true };
   const cap = ctx.effectiveKeywordCap;
-  if (cap > 0 && ctx.totalTargetKeywords + 1 > cap) {
+  if (ctx.totalTargetKeywords + 1 > cap) {
     return {
       allowed: false,
       message: `Your plan allows ${cap} keywords total (account-wide). You have ${ctx.totalTargetKeywords}. Upgrade or add an add-on to track more.`,

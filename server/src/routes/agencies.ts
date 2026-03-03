@@ -15,17 +15,101 @@ import {
   syncAgencyTierFromStripe,
 } from '../lib/stripeTierSync.js';
 import {
+  sendAgencyPlanActivationEmail,
+  sendAgencyPlanChangeEmail,
+} from '../lib/agencyPlanEmails.js';
+import {
   generateDomainVerificationToken,
   getDomainVerificationInstructions,
   normalizeDomainHost,
   requestSslProvisioning,
   verifyCustomDomainViaDns,
 } from '../lib/domainProvisioning.js';
+import { resolveSuperAdminNotificationRecipients } from '../lib/superAdminNotifications.js';
 
 const router = express.Router();
 
 // Restrict agency users with expired trial to subscription/me/activate only
 router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
+
+const resolveSuperAdminNotificationEmails = async (): Promise<string[]> => {
+  const superAdmins = await prisma.user.findMany({
+    where: { role: 'SUPER_ADMIN' },
+    select: { email: true, notificationPreferences: true },
+  });
+
+  return resolveSuperAdminNotificationRecipients(superAdmins, {
+    superAdminNotifyEmail: process.env.SUPER_ADMIN_NOTIFY_EMAIL,
+    managedServiceNotifyEmail: process.env.MANAGED_SERVICE_NOTIFY_EMAIL,
+    johnnyEmail: process.env.JOHNNY_EMAIL,
+  });
+};
+
+const notifySuperAdminsByEmail = async (options: { subject: string; html: string }) => {
+  const recipients = await resolveSuperAdminNotificationEmails();
+  if (!recipients.length) {
+    console.warn('Super admin notification email skipped: no recipients found');
+    return;
+  }
+  await Promise.all(
+    recipients.map((to) =>
+      sendEmail({
+        to,
+        subject: options.subject,
+        html: options.html,
+      }).catch((err: any) => {
+        console.warn('Super admin notification email failed:', to, err?.message);
+      })
+    )
+  );
+};
+
+const resolveAgencyEmailRecipient = async (agencyId: string, fallbackUserId?: string) => {
+  const [agency, fallbackUser] = await Promise.all([
+    prisma.agency.findUnique({
+      where: { id: agencyId },
+      select: { name: true, contactEmail: true, contactName: true },
+    }),
+    fallbackUserId
+      ? prisma.user.findUnique({
+          where: { id: fallbackUserId },
+          select: { email: true, name: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  const recipientEmail = String(agency?.contactEmail || fallbackUser?.email || '').trim().toLowerCase() || null;
+  const recipientName = String(agency?.contactName || fallbackUser?.name || 'there').trim();
+  const agencyName = String(agency?.name || 'your agency').trim();
+
+  return { recipientEmail, recipientName, agencyName };
+};
+
+const createNotificationOnce = async (data: {
+  agencyId: string | null;
+  userId?: string | null;
+  type: string;
+  title: string;
+  message: string;
+  link?: string | null;
+}, withinMs = 5 * 60 * 1000): Promise<boolean> => {
+  const recent = await prisma.notification.findFirst({
+    where: {
+      agencyId: data.agencyId,
+      userId: data.userId ?? null,
+      type: data.type,
+      title: data.title,
+      message: data.message,
+      createdAt: { gte: new Date(Date.now() - withinMs) },
+    },
+    select: { id: true },
+  });
+  if (recent) return false;
+  await prisma.notification.create({ data }).catch((e) =>
+    console.warn('Create notification failed:', e?.message)
+  );
+  return true;
+};
 
 const inviteSchema = z.object({
   email: z.string().email(),
@@ -57,6 +141,16 @@ const toDomainStatus = (value: string | null | undefined): DomainStatus => {
   if (!value) return "NONE";
   const upper = value.toUpperCase();
   return (domainStatusOrder as readonly string[]).includes(upper) ? (upper as DomainStatus) : "NONE";
+};
+
+const parseAgencyOnboardingData = (raw: string | null | undefined) => {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, any> : null;
+  } catch {
+    return null;
+  }
 };
 
 // Get all agencies (Admin only)
@@ -501,7 +595,7 @@ router.post('/register-free-trial', async (req, res) => {
     const agencyDashboardName = `${agencyName} - Agency Website`;
     const agencyDashboardDomain = `agency-${agency.id}.internal`;
     try {
-      await prisma.client.create({
+      const agencyDashboardClient = await prisma.client.create({
         data: {
           name: agencyDashboardName,
           domain: agencyDashboardDomain,
@@ -511,6 +605,11 @@ router.post('/register-free-trial', async (req, res) => {
           status: 'DASHBOARD_ONLY',
           managedServiceStatus: 'none',
         },
+      });
+      await prisma.clientAgencyIncluded.upsert({
+        where: { clientId_agencyId: { clientId: agencyDashboardClient.id, agencyId: agency.id } },
+        update: {},
+        create: { clientId: agencyDashboardClient.id, agencyId: agency.id },
       });
     } catch (dashboardErr: any) {
       console.warn('Agency register-free-trial: auto dashboard create failed', dashboardErr?.message);
@@ -553,12 +652,24 @@ router.post('/register-free-trial', async (req, res) => {
     await prisma.notification.create({
       data: {
         agencyId: null,
-        type: 'new_signup',
-        title: 'New agency sign-up',
-        message: `${agencyName} signed up for a free trial.`,
+        type: 'free_trial_started',
+        title: 'Free trial started',
+        message: `${agencyName} started a 7-day free trial.`,
         link: '/agency/agencies',
       },
     }).catch((e) => console.warn('Create signup notification failed:', e?.message));
+
+    await notifySuperAdminsByEmail({
+      subject: `Free trial started - ${agencyName}`,
+      html: `
+        <h2>A new agency started a 7-day free trial</h2>
+        <p><strong>Agency:</strong> ${agencyName}</p>
+        <p><strong>Contact:</strong> ${contactName}</p>
+        <p><strong>Email:</strong> ${contactEmail}</p>
+        <p><strong>Plan:</strong> Free 7-day trial</p>
+        <p><strong>Created:</strong> ${new Date().toISOString()}</p>
+      `,
+    });
 
     res.status(201).json({
       message: 'Please check your email to verify your account. After verification, you can sign in and use the Free tier for 7 days.',
@@ -861,7 +972,7 @@ router.post('/register', async (req, res) => {
     const agencyDashboardName = `${name} - Agency Website`;
     const agencyDashboardDomain = `agency-${agency.id}.internal`;
     try {
-      await prisma.client.create({
+      const agencyDashboardClient = await prisma.client.create({
         data: {
           name: agencyDashboardName,
           domain: agencyDashboardDomain,
@@ -871,6 +982,11 @@ router.post('/register', async (req, res) => {
           status: 'DASHBOARD_ONLY',
           managedServiceStatus: 'none',
         },
+      });
+      await prisma.clientAgencyIncluded.upsert({
+        where: { clientId_agencyId: { clientId: agencyDashboardClient.id, agencyId: agency.id } },
+        update: {},
+        create: { clientId: agencyDashboardClient.id, agencyId: agency.id },
       });
     } catch (dashboardErr: any) {
       console.warn('Agency register: auto dashboard create failed', dashboardErr?.message);
@@ -919,6 +1035,18 @@ router.post('/register', async (req, res) => {
         link: '/agency/agencies',
       },
     }).catch((e) => console.warn('Create signup notification failed:', e?.message));
+
+    await notifySuperAdminsByEmail({
+      subject: `New agency sign-up (Paid) - ${name}`,
+      html: `
+        <h2>New agency signed up with paid account</h2>
+        <p><strong>Agency:</strong> ${name}</p>
+        <p><strong>Contact:</strong> ${contactName || '-'}</p>
+        <p><strong>Email:</strong> ${contactEmail}</p>
+        <p><strong>Plan:</strong> Paid signup</p>
+        <p><strong>Created:</strong> ${new Date().toISOString()}</p>
+      `,
+    });
 
     res.status(201).json({
       message: 'Agency account created. Please check your email to verify your account.',
@@ -1180,7 +1308,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const agencyDashboardName = `${name} - Agency Website`;
     const agencyDashboardDomain = `agency-${agency.id}.internal`;
     try {
-      await prisma.client.create({
+      const agencyDashboardClient = await prisma.client.create({
         data: {
           name: agencyDashboardName,
           domain: agencyDashboardDomain,
@@ -1190,6 +1318,11 @@ router.post('/', authenticateToken, async (req, res) => {
           status: 'DASHBOARD_ONLY',
           managedServiceStatus: 'none',
         },
+      });
+      await prisma.clientAgencyIncluded.upsert({
+        where: { clientId_agencyId: { clientId: agencyDashboardClient.id, agencyId: agency.id } },
+        update: {},
+        create: { clientId: agencyDashboardClient.id, agencyId: agency.id },
       });
     } catch (dashboardErr: any) {
       console.warn('Auto agency dashboard create failed:', dashboardErr?.message);
@@ -1232,6 +1365,37 @@ router.post('/', authenticateToken, async (req, res) => {
         console.warn('Set-password email failed:', emailErr?.message);
       }
     }
+
+    await prisma.notification.create({
+      data: {
+        agencyId: null,
+        userId: null,
+        type: 'agency_created',
+        title: 'Agency created',
+        message: `${name} was created from Super Admin panel.`,
+        link: '/agency/agencies',
+      },
+    }).catch((e) => console.warn('Create Super Admin agency-created notification failed:', e?.message));
+
+    const billingLabel =
+      billingOption === 'charge'
+        ? `Paid (${tier || 'tier not set'})`
+        : billingOption === 'free_account'
+          ? 'Free account'
+          : billingOption === 'no_charge'
+            ? '7-day no-charge trial'
+            : 'Enterprise / manual invoice';
+    await notifySuperAdminsByEmail({
+      subject: `Agency created by Super Admin - ${name}`,
+      html: `
+        <h2>New agency created from Super Admin panel</h2>
+        <p><strong>Agency:</strong> ${name}</p>
+        <p><strong>Contact:</strong> ${contactName || '-'}</p>
+        <p><strong>Email:</strong> ${contactEmail}</p>
+        <p><strong>Billing:</strong> ${billingLabel}</p>
+        <p><strong>Created:</strong> ${new Date().toISOString()}</p>
+      `,
+    });
 
     res.status(201).json({
       id: agency.id,
@@ -1295,6 +1459,21 @@ router.get('/me', authenticateToken, async (req, res) => {
 
     const tierId = tierConfig?.id ?? null;
     const accountActivated = !!(membership.agency as { stripeCustomerId?: string | null }).stripeCustomerId;
+    const onboardingData = parseAgencyOnboardingData(membership.agency.onboardingData);
+    const onboardingCompleted = Boolean(
+      onboardingData?.submittedAt ||
+      membership.agency.website ||
+      membership.agency.industry ||
+      membership.agency.agencySize ||
+      membership.agency.numberOfClients ||
+      membership.agency.contactPhone ||
+      membership.agency.contactJobTitle ||
+      membership.agency.streetAddress ||
+      membership.agency.city ||
+      membership.agency.state ||
+      membership.agency.zip ||
+      membership.agency.country
+    );
     const domainInstructions =
       membership.agency.customDomain && membership.agency.domainVerificationToken
         ? getDomainVerificationInstructions(membership.agency.customDomain, membership.agency.domainVerificationToken)
@@ -1324,6 +1503,21 @@ router.get('/me', authenticateToken, async (req, res) => {
       trialExpired: trialExpired || undefined,
       billingType: billingType ?? undefined,
       accountActivated,
+      website: membership.agency.website ?? null,
+      industry: membership.agency.industry ?? null,
+      agencySize: membership.agency.agencySize ?? null,
+      numberOfClients: membership.agency.numberOfClients ?? null,
+      contactName: membership.agency.contactName ?? null,
+      contactEmail: membership.agency.contactEmail ?? null,
+      contactPhone: membership.agency.contactPhone ?? null,
+      contactJobTitle: membership.agency.contactJobTitle ?? null,
+      streetAddress: membership.agency.streetAddress ?? null,
+      city: membership.agency.city ?? null,
+      state: membership.agency.state ?? null,
+      zip: membership.agency.zip ?? null,
+      country: membership.agency.country ?? null,
+      onboardingData,
+      onboardingCompleted,
       allowedAddOns: getAllowedAddOnOptions(tierId as TierId | null),
       basePriceMonthlyUsd: tierConfig?.priceMonthlyUsd ?? null,
     });
@@ -1415,6 +1609,25 @@ router.post('/me/notifications/mark-read', authenticateToken, async (req, res) =
 // Update agency settings (current user's agency). Must be BEFORE /:agencyId.
 const updateAgencyMeSchema = z.object({
   name: z.string().min(1).optional(),
+  website: z.string().optional(),
+  industry: z.string().optional(),
+  agencySize: z.string().optional(),
+  numberOfClients: z.coerce.number().int().min(0).optional().nullable(),
+  contactName: z.string().optional(),
+  contactEmail: z.union([z.string().email(), z.literal(""), z.null()]).optional(),
+  contactPhone: z.string().optional(),
+  contactJobTitle: z.string().optional(),
+  streetAddress: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zip: z.string().optional(),
+  country: z.string().optional(),
+  referralSource: z.string().optional(),
+  referralSourceOther: z.string().optional(),
+  primaryGoals: z.array(z.string()).optional(),
+  primaryGoalsOther: z.string().optional(),
+  currentTools: z.string().optional(),
+  onboardingCompleted: z.boolean().optional(),
   subdomain: z.string().optional().nullable(),
   brandDisplayName: z.string().max(255).optional().nullable(),
   logoUrl: z.union([httpUrlSchema, z.literal(""), z.null()]).optional(),
@@ -1489,6 +1702,19 @@ router.put('/me', authenticateToken, async (req, res) => {
 
     const payload: Record<string, unknown> = {};
     if (updateData.name !== undefined) payload.name = updateData.name.trim();
+    if (updateData.website !== undefined) payload.website = updateData.website?.trim() || null;
+    if (updateData.industry !== undefined) payload.industry = updateData.industry?.trim() || null;
+    if (updateData.agencySize !== undefined) payload.agencySize = updateData.agencySize?.trim() || null;
+    if (updateData.numberOfClients !== undefined) payload.numberOfClients = updateData.numberOfClients ?? null;
+    if (updateData.contactName !== undefined) payload.contactName = updateData.contactName?.trim() || null;
+    if (updateData.contactEmail !== undefined) payload.contactEmail = String(updateData.contactEmail || "").trim().toLowerCase() || null;
+    if (updateData.contactPhone !== undefined) payload.contactPhone = updateData.contactPhone?.trim() || null;
+    if (updateData.contactJobTitle !== undefined) payload.contactJobTitle = updateData.contactJobTitle?.trim() || null;
+    if (updateData.streetAddress !== undefined) payload.streetAddress = updateData.streetAddress?.trim() || null;
+    if (updateData.city !== undefined) payload.city = updateData.city?.trim() || null;
+    if (updateData.state !== undefined) payload.state = updateData.state?.trim() || null;
+    if (updateData.zip !== undefined) payload.zip = updateData.zip?.trim() || null;
+    if (updateData.country !== undefined) payload.country = updateData.country?.trim() || null;
     if (updateData.subdomain !== undefined) payload.subdomain = nextSubdomain;
     if (updateData.brandDisplayName !== undefined) payload.brandDisplayName = updateData.brandDisplayName?.trim() || null;
     if (updateData.logoUrl !== undefined) payload.logoUrl = updateData.logoUrl?.trim() || null;
@@ -1506,11 +1732,71 @@ router.put('/me', authenticateToken, async (req, res) => {
       }
     }
 
+    const onboardingPatchRequested =
+      updateData.referralSource !== undefined ||
+      updateData.referralSourceOther !== undefined ||
+      updateData.primaryGoals !== undefined ||
+      updateData.primaryGoalsOther !== undefined ||
+      updateData.currentTools !== undefined ||
+      updateData.onboardingCompleted !== undefined;
+    if (onboardingPatchRequested) {
+      const existingOnboarding = parseAgencyOnboardingData(membership.agency.onboardingData) ?? {};
+      const referralSourceRaw =
+        updateData.referralSource !== undefined
+          ? updateData.referralSource
+          : String(existingOnboarding.referralSource || "");
+      const referralSourceNormalized = String(referralSourceRaw || "").trim();
+      const referralSourceOther =
+        updateData.referralSourceOther !== undefined
+          ? updateData.referralSourceOther
+          : String(existingOnboarding.referralSourceOther || "");
+      const primaryGoals =
+        updateData.primaryGoals !== undefined
+          ? updateData.primaryGoals
+          : Array.isArray(existingOnboarding.primaryGoals)
+            ? existingOnboarding.primaryGoals.map((goal: any) => String(goal))
+            : [];
+      const primaryGoalsOther =
+        updateData.primaryGoalsOther !== undefined
+          ? updateData.primaryGoalsOther
+          : String(existingOnboarding.primaryGoalsOther || "");
+      const currentTools =
+        updateData.currentTools !== undefined
+          ? updateData.currentTools
+          : String(existingOnboarding.currentTools || "");
+      const shouldMarkSubmitted =
+        updateData.onboardingCompleted === true || Boolean(existingOnboarding.submittedAt);
+
+      payload.onboardingData = JSON.stringify({
+        referralSource: referralSourceNormalized || undefined,
+        referralSourceOther: referralSourceNormalized === "referral" ? (String(referralSourceOther || "").trim() || undefined) : undefined,
+        primaryGoals: Array.isArray(primaryGoals) ? primaryGoals.filter(Boolean) : [],
+        primaryGoalsOther: String(primaryGoalsOther || "").trim() || undefined,
+        currentTools: String(currentTools || "").trim() || undefined,
+        submittedAt: shouldMarkSubmitted ? (existingOnboarding.submittedAt || new Date().toISOString()) : undefined,
+      });
+    }
+
     // Update agency
     const updatedAgency = await prisma.agency.update({
       where: { id: membership.agency.id },
       data: payload,
     });
+    const onboardingData = parseAgencyOnboardingData(updatedAgency.onboardingData);
+    const onboardingCompleted = Boolean(
+      onboardingData?.submittedAt ||
+      updatedAgency.website ||
+      updatedAgency.industry ||
+      updatedAgency.agencySize ||
+      updatedAgency.numberOfClients ||
+      updatedAgency.contactPhone ||
+      updatedAgency.contactJobTitle ||
+      updatedAgency.streetAddress ||
+      updatedAgency.city ||
+      updatedAgency.state ||
+      updatedAgency.zip ||
+      updatedAgency.country
+    );
     const domainInstructions =
       updatedAgency.customDomain && updatedAgency.domainVerificationToken
         ? getDomainVerificationInstructions(updatedAgency.customDomain, updatedAgency.domainVerificationToken)
@@ -1530,6 +1816,21 @@ router.put('/me', authenticateToken, async (req, res) => {
       sslError: updatedAgency.sslError ?? null,
       domainInstructions,
       createdAt: updatedAgency.createdAt,
+      website: updatedAgency.website ?? null,
+      industry: updatedAgency.industry ?? null,
+      agencySize: updatedAgency.agencySize ?? null,
+      numberOfClients: updatedAgency.numberOfClients ?? null,
+      contactName: updatedAgency.contactName ?? null,
+      contactEmail: updatedAgency.contactEmail ?? null,
+      contactPhone: updatedAgency.contactPhone ?? null,
+      contactJobTitle: updatedAgency.contactJobTitle ?? null,
+      streetAddress: updatedAgency.streetAddress ?? null,
+      city: updatedAgency.city ?? null,
+      state: updatedAgency.state ?? null,
+      zip: updatedAgency.zip ?? null,
+      country: updatedAgency.country ?? null,
+      onboardingData,
+      onboardingCompleted,
     });
   } catch (error: any) {
     if (error.name === 'ZodError') {
@@ -2696,31 +2997,53 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     const newPrice = getTierConfig(targetPlan)?.priceMonthlyUsd ?? 0;
     const isUpgrade = newPrice > oldPrice;
 
-    // Notify the agency
-    await prisma.notification.create({
-      data: {
-        agencyId: agency.id,
-        type: isUpgrade ? 'plan_upgrade' : 'plan_downgrade',
-        title: isUpgrade ? 'Plan upgraded' : 'Plan changed',
-        message: isUpgrade
-          ? `Your subscription has been upgraded to ${newTierName}.`
-          : `Your subscription has been changed to ${newTierName}.`,
-        link: '/agency/subscription',
-      },
-    }).catch((e) => console.warn('Create plan change notification failed:', e?.message));
+    const agencyNotifMessage = isUpgrade
+      ? `Your subscription has been upgraded to ${newTierName}.`
+      : `Your subscription has been changed to ${newTierName}.`;
+    const saNotifMessage = isUpgrade
+      ? `${updatedAgency?.name ?? 'An agency'} upgraded from ${oldTierName} to ${newTierName}.`
+      : `${updatedAgency?.name ?? 'An agency'} downgraded from ${oldTierName} to ${newTierName}.`;
 
-    // Notify super admins
-    await prisma.notification.create({
-      data: {
-        agencyId: null,
-        type: isUpgrade ? 'plan_upgrade' : 'plan_downgrade',
-        title: isUpgrade ? 'Agency upgraded' : 'Agency downgraded',
-        message: isUpgrade
-          ? `${updatedAgency?.name ?? 'An agency'} upgraded from ${oldTierName} to ${newTierName}.`
-          : `${updatedAgency?.name ?? 'An agency'} downgraded from ${oldTierName} to ${newTierName}.`,
-        link: '/agency/agencies',
-      },
-    }).catch((e) => console.warn('Create SA plan change notification failed:', e?.message));
+    const createdAgencyNotif = await createNotificationOnce({
+      agencyId: agency.id,
+      userId: null,
+      type: isUpgrade ? 'plan_upgrade' : 'plan_downgrade',
+      title: isUpgrade ? 'Plan upgraded' : 'Plan changed',
+      message: agencyNotifMessage,
+      link: '/agency/subscription',
+    });
+
+    const createdSaNotif = await createNotificationOnce({
+      agencyId: null,
+      userId: null,
+      type: isUpgrade ? 'plan_upgrade' : 'plan_downgrade',
+      title: isUpgrade ? 'Agency upgraded' : 'Agency downgraded',
+      message: saNotifMessage,
+      link: '/agency/agencies',
+    });
+
+    if (createdAgencyNotif) {
+      await sendAgencyPlanChangeEmail({
+        agencyId: agency.id,
+        oldTierName,
+        newTierName,
+        isUpgrade,
+        fallbackUserId: req.user.userId,
+      });
+    }
+
+    if (createdSaNotif) {
+      await notifySuperAdminsByEmail({
+        subject: `${isUpgrade ? 'Agency plan upgraded' : 'Agency plan changed'} - ${updatedAgency?.name ?? 'Agency'}`,
+        html: `
+          <h2>${isUpgrade ? 'Agency plan upgraded' : 'Agency plan changed'}</h2>
+          <p><strong>Agency:</strong> ${updatedAgency?.name ?? agency.id}</p>
+          <p><strong>Previous plan:</strong> ${oldTierName}</p>
+          <p><strong>Current plan:</strong> ${newTierName}</p>
+          <p><strong>Changed:</strong> ${new Date().toISOString()}</p>
+        `,
+      });
+    }
 
     return res.json({ success: true, message: 'Plan updated. Your subscription will reflect the change shortly.' });
   } catch (err: any) {
@@ -2986,6 +3309,24 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
       },
     }).catch((e) => console.warn('Create activation notification failed:', e?.message));
 
+    await sendAgencyPlanActivationEmail({
+      agencyId: agency.id,
+      tierName,
+      fallbackUserId: req.user.userId,
+    });
+
+    await notifySuperAdminsByEmail({
+      subject: `Agency activated plan - ${agency.name}`,
+      html: `
+        <h2>Agency plan activated</h2>
+        <p><strong>Agency:</strong> ${agency.name}</p>
+        <p><strong>Contact:</strong> ${agency.contactName || '-'}</p>
+        <p><strong>Email:</strong> ${agency.contactEmail || '-'}</p>
+        <p><strong>Activated plan:</strong> ${tierName}</p>
+        <p><strong>Activated:</strong> ${new Date().toISOString()}</p>
+      `,
+    });
+
     res.json({
       success: true,
       message: 'Subscription activated successfully.',
@@ -3145,24 +3486,49 @@ router.post('/managed-services', authenticateToken, async (req, res) => {
       return ms;
     });
 
-    const notifyEmail = process.env.MANAGED_SERVICE_NOTIFY_EMAIL || process.env.JOHNNY_EMAIL; // Super Admin notification email
-    if (notifyEmail) {
-      sendEmail({
-        to: notifyEmail,
-        subject: `Managed service pending approval: ${agencyName} – ${client.name} – ${pkg.name}`,
+    const createdAgencyNotif = await createNotificationOnce({
+      agencyId,
+      userId: null,
+      type: 'managed_service_requested',
+      title: 'Managed service requested',
+      message: `${pkg.name} was requested for ${client.name}. Waiting for Super Admin approval.`,
+      link: '/agency/managed-services',
+    });
+
+    const agencyRecipient = await resolveAgencyEmailRecipient(agencyId, user.userId);
+    if (createdAgencyNotif && agencyRecipient.recipientEmail) {
+      await sendEmail({
+        to: agencyRecipient.recipientEmail,
+        subject: `Managed service request received - ${BRAND_DISPLAY_NAME}`,
         html: `
-          <p>Agency <strong>${agencyName}</strong> requested a managed service (pending your approval).</p>
+          <h2>Your managed service request is in review</h2>
+          <p>Hi ${agencyRecipient.recipientName},</p>
+          <p>We received your managed service request and sent it to Super Admin for approval.</p>
           <ul>
-            <li><strong>Agency name:</strong> ${agencyName}</li>
-            <li><strong>Agency email:</strong> ${agencyEmail ?? '(not set)'}</li>
-            <li><strong>Client selected:</strong> ${client.name}</li>
-            <li><strong>Package chosen:</strong> ${pkg.name} ($${(pkg.priceCents / 100).toFixed(2)}/mo)</li>
+            <li><strong>Agency:</strong> ${agencyName}</li>
+            <li><strong>Client:</strong> ${client.name}</li>
+            <li><strong>Package:</strong> ${pkg.name} ($${(pkg.priceCents / 100).toFixed(2)}/mo)</li>
             <li><strong>Requested start date:</strong> ${startDate.toISOString().split('T')[0]}</li>
           </ul>
-          <p>Approve in the Super Admin panel to activate and start billing.</p>
+          <p>We will notify you as soon as it is approved or rejected.</p>
         `,
-      }).catch((e) => console.warn('Notify managed service email failed:', e));
+      }).catch((e) => console.warn('Agency managed-service confirmation email failed:', e?.message));
     }
+
+    await notifySuperAdminsByEmail({
+      subject: `Managed service pending approval: ${agencyName} - ${client.name} - ${pkg.name}`,
+      html: `
+        <p>Agency <strong>${agencyName}</strong> requested a managed service (pending your approval).</p>
+        <ul>
+          <li><strong>Agency name:</strong> ${agencyName}</li>
+          <li><strong>Agency email:</strong> ${agencyEmail ?? '(not set)'}</li>
+          <li><strong>Client selected:</strong> ${client.name}</li>
+          <li><strong>Package chosen:</strong> ${pkg.name} ($${(pkg.priceCents / 100).toFixed(2)}/mo)</li>
+          <li><strong>Requested start date:</strong> ${startDate.toISOString().split('T')[0]}</li>
+        </ul>
+        <p>Approve in the Super Admin panel to activate and start billing.</p>
+      `,
+    });
 
     const slackWebhook = process.env.MANAGED_SERVICE_SLACK_WEBHOOK || process.env.SLACK_WEBHOOK_URL;
     if (slackWebhook && typeof fetch === 'function') {
@@ -3674,6 +4040,53 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
         stripeSubscriptionItemId: stripeSubscriptionItemId ?? undefined,
       },
     });
+
+    const agencyName = String((membership!.agency as { name?: string | null })?.name || 'Agency');
+    const createdAgencyNotif = await createNotificationOnce({
+      agencyId,
+      userId: null,
+      type: 'addon_added',
+      title: 'Add-on added',
+      message: `${option.displayName} was added to your plan.`,
+      link: '/agency/add-ons',
+    });
+
+    const createdSaNotif = await createNotificationOnce({
+      agencyId: null,
+      userId: null,
+      type: 'addon_added',
+      title: 'Agency add-on added',
+      message: `${agencyName} added ${option.displayName}.`,
+      link: '/agency/agencies',
+    });
+
+    const agencyRecipient = await resolveAgencyEmailRecipient(agencyId, req.user.userId);
+    if (createdAgencyNotif && agencyRecipient.recipientEmail) {
+      await sendEmail({
+        to: agencyRecipient.recipientEmail,
+        subject: `Add-on added to your plan - ${BRAND_DISPLAY_NAME}`,
+        html: `
+          <h2>Add-on added successfully</h2>
+          <p>Hi ${agencyRecipient.recipientName},</p>
+          <p><strong>${option.displayName}</strong> has been added to your plan for <strong>${agencyRecipient.agencyName}</strong>.</p>
+          <p><strong>Billing:</strong> $${(option.priceCents / 100).toFixed(2)} / ${option.billingInterval.toLowerCase()}</p>
+        `,
+      }).catch((e) => console.warn('Agency add-on confirmation email failed:', e?.message));
+    }
+
+    if (createdSaNotif) {
+      await notifySuperAdminsByEmail({
+        subject: `Agency add-on added - ${agencyName}`,
+        html: `
+          <h2>Agency add-on added</h2>
+          <p><strong>Agency:</strong> ${agencyName}</p>
+          <p><strong>Add-on:</strong> ${option.displayName}</p>
+          <p><strong>Price:</strong> $${(option.priceCents / 100).toFixed(2)} / ${option.billingInterval.toLowerCase()}</p>
+          <p><strong>Added:</strong> ${new Date().toISOString()}</p>
+        `,
+      });
+    }
+
     res.status(201).json({
       id: created.id,
       addOnType: created.addOnType,

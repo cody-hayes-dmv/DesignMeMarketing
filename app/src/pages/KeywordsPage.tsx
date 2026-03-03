@@ -39,6 +39,20 @@ interface ResearchKeyword {
   seed: string;
 }
 
+interface KeywordDetailData {
+  keyword: string;
+  searchVolume: number;
+  globalVolume: number;
+  countryBreakdown: { countryCode: string; searchVolume: number }[];
+  keywordDifficulty: number;
+  difficultyLabel: string;
+  cpc: number;
+  competition: number;
+  competitionLevel: string;
+  intent: string;
+  monthlySearches: { year: number; month: number; searchVolume: number }[];
+}
+
 const DEFAULT_LOCATION = 2840; // United States
 const DEFAULT_LANGUAGE = "en";
 
@@ -97,6 +111,71 @@ const withSeedKeywordFirst = (seed: string, suggestions: ResearchKeyword[]): Res
   return [seedRow, ...rest];
 };
 
+const normalizeAndSortSuggestions = (seed: string, suggestions: ResearchKeyword[]): ResearchKeyword[] => {
+  const byKeyword = new Map<string, ResearchKeyword>();
+  for (const row of suggestions) {
+    const keyword = String(row.keyword || "").trim();
+    if (!keyword) continue;
+    const key = keyword.toLowerCase();
+    const existing = byKeyword.get(key);
+    if (!existing) {
+      byKeyword.set(key, { ...row, keyword });
+      continue;
+    }
+    // Keep the richer row when API returns duplicates.
+    const existingScore =
+      Number(existing.searchVolume || 0) +
+      (existing.difficulty != null ? 0.5 : 0) +
+      (existing.cpc != null ? 0.25 : 0) +
+      (existing.competition != null ? 0.25 : 0);
+    const nextScore =
+      Number(row.searchVolume || 0) +
+      (row.difficulty != null ? 0.5 : 0) +
+      (row.cpc != null ? 0.25 : 0) +
+      (row.competition != null ? 0.25 : 0);
+    if (nextScore > existingScore) byKeyword.set(key, { ...row, keyword });
+  }
+
+  const unique = Array.from(byKeyword.values()).sort((a, b) => {
+    const volDiff = Number(b.searchVolume || 0) - Number(a.searchVolume || 0);
+    if (volDiff !== 0) return volDiff;
+    return (a.keyword || "").localeCompare(b.keyword || "", undefined, { sensitivity: "base" });
+  });
+
+  return withSeedKeywordFirst(seed, unique);
+};
+
+const enrichSeedRowWithDetail = (
+  suggestions: ResearchKeyword[],
+  seed: string,
+  detail: KeywordDetailData | null
+): ResearchKeyword[] => {
+  if (!detail || !seed.trim()) return suggestions;
+  const seedKey = seed.trim().toLowerCase();
+  return suggestions.map((row) => {
+    if ((row.keyword || "").trim().toLowerCase() !== seedKey) return row;
+    return {
+      ...row,
+      searchVolume: Number(row.searchVolume || 0) > 0 ? row.searchVolume : Number(detail.searchVolume || 0),
+      cpc: row.cpc != null ? row.cpc : (Number.isFinite(detail.cpc) ? detail.cpc : null),
+      competition:
+        row.competition != null ? row.competition : (Number.isFinite(detail.competition) ? detail.competition : null),
+      competitionLevel: row.competitionLevel || detail.competitionLevel || null,
+      difficulty:
+        row.difficulty != null
+          ? row.difficulty
+          : (Number.isFinite(detail.keywordDifficulty) ? detail.keywordDifficulty : null),
+      monthlySearches:
+        row.monthlySearches ??
+        detail.monthlySearches.map((m) => ({
+          year: m.year,
+          month: m.month,
+          search_volume: m.searchVolume,
+        })),
+    };
+  });
+};
+
 // Difficulty description for Keyword Detail card (screenshot 1)
 function getDifficultyDescription(label: string): string {
   const lower = (label || "").toLowerCase();
@@ -129,19 +208,7 @@ const KeywordsPage: React.FC = () => {
   const [assignMessage, setAssignMessage] = useState<string | null>(null);
   const [assignKeywordType, setAssignKeywordType] = useState<"money" | "topical">("money");
 
-  const [keywordDetail, setKeywordDetail] = useState<{
-    keyword: string;
-    searchVolume: number;
-    globalVolume: number;
-    countryBreakdown: { countryCode: string; searchVolume: number }[];
-    keywordDifficulty: number;
-    difficultyLabel: string;
-    cpc: number;
-    competition: number;
-    competitionLevel: string;
-    intent: string;
-    monthlySearches: { year: number; month: number; searchVolume: number }[];
-  } | null>(null);
+  const [keywordDetail, setKeywordDetail] = useState<KeywordDetailData | null>(null);
   const [keywordDetailLoading, setKeywordDetailLoading] = useState(false);
   const [serpAnalysis, setSerpAnalysis] = useState<{
     keyword: string;
@@ -227,7 +294,7 @@ const KeywordsPage: React.FC = () => {
         | { suggestions?: ResearchKeyword[]; variations?: ResearchKeyword[]; questions?: ResearchKeyword[]; strategy?: { pillar: string; items: ResearchKeyword[] } }
         | ResearchKeyword[];
       const suggestions: ResearchKeyword[] = Array.isArray(data) ? data : (data?.suggestions ?? []);
-      const orderedSuggestions = withSeedKeywordFirst(researchSeed, suggestions);
+      const orderedSuggestions = normalizeAndSortSuggestions(researchSeed, suggestions);
       setResearchResults(orderedSuggestions);
       if (data && !Array.isArray(data) && data.suggestions) {
         setKeywordIdeas({
@@ -350,7 +417,9 @@ const KeywordsPage: React.FC = () => {
         ]);
         if (cancelled) return;
         if (detailRes.data?.found && detailRes.data?.detail) {
-          setKeywordDetail(detailRes.data.detail);
+          const detail = detailRes.data.detail as KeywordDetailData;
+          setKeywordDetail(detail);
+          setResearchResults((prev) => enrichSeedRowWithDetail(prev, researchSeed.trim(), detail));
         } else {
           setKeywordDetail(null);
         }
@@ -447,7 +516,7 @@ const KeywordsPage: React.FC = () => {
         | { suggestions?: ResearchKeyword[]; variations?: ResearchKeyword[]; questions?: ResearchKeyword[]; strategy?: { pillar: string; items: ResearchKeyword[] } }
         | ResearchKeyword[];
       const suggestions: ResearchKeyword[] = Array.isArray(data) ? data : (data?.suggestions ?? []);
-      const orderedSuggestions = withSeedKeywordFirst(keyword, suggestions);
+      const orderedSuggestions = normalizeAndSortSuggestions(keyword, suggestions);
       setResearchResults(orderedSuggestions);
       if (data && !Array.isArray(data) && data.suggestions) {
         setKeywordIdeas({
@@ -1089,6 +1158,9 @@ const KeywordsPage: React.FC = () => {
                     <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
                       Difficulty
                     </th>
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800 uppercase tracking-wider text-xs">
+                      Competition
+                    </th>
                     <th className="px-6 py-4">
                       <span className="sr-only">Actions</span>
                     </th>
@@ -1097,7 +1169,7 @@ const KeywordsPage: React.FC = () => {
                 <tbody className="bg-white divide-y divide-gray-100">
                   {researchLoading ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500">
+                      <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
                         <span className="inline-flex items-center gap-2 text-sm">
                           <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
                           Fetching keyword suggestions…
@@ -1106,7 +1178,7 @@ const KeywordsPage: React.FC = () => {
                     </tr>
                   ) : researchResults.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500 text-sm">
+                      <td colSpan={7} className="px-4 py-12 text-center text-gray-500 text-sm">
                         Run a keyword search to see suggestions.
                       </td>
                     </tr>
@@ -1133,10 +1205,15 @@ const KeywordsPage: React.FC = () => {
                           {formatNumber(result.searchVolume)}
                         </td>
                         <td className="px-6 py-4 text-gray-700 font-medium">
-                          {result.cpc && result.cpc > 0 ? `$${result.cpc.toFixed(2)}` : "—"}
+                          {result.cpc !== null && result.cpc !== undefined ? `$${Number(result.cpc).toFixed(2)}` : "—"}
                         </td>
                         <td className="px-6 py-4 text-gray-700 font-medium">
                           {result.difficulty !== null ? `${result.difficulty}` : "—"}
+                        </td>
+                        <td className="px-6 py-4 text-gray-700 font-medium">
+                          {result.competitionLevel
+                            ? `${result.competitionLevel}${result.competition !== null ? ` (${Number(result.competition).toFixed(2)})` : ""}`
+                            : (result.competition !== null ? Number(result.competition).toFixed(2) : "—")}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <button

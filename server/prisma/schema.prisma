@@ -226,8 +226,8 @@ model Client {
   id                    String                  @id @default(cuid())
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
-  name                  String                  @unique
-  domain                String                  @unique
+  name                  String
+  domain                String
   industry              String?
   targets               String?                 @db.LongText
   status                Status                  @default(PENDING)

@@ -48,6 +48,9 @@ import { RootState } from "@/store";
 
 export interface DomainOverviewData {
   client: { id: string; name: string; domain: string };
+  metricsPeriodDays?: number;
+  metricsPeriodLabel?: string;
+  organicTrafficSourceLabel?: string;
   metrics: {
     organicSearch: { keywords: number; traffic: number; trafficCost: number };
     paidSearch: { keywords: number; traffic: number; trafficCost: number };
@@ -269,6 +272,24 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
   const selectedClient = clients.find((c) => c.id === selectedClientId) || null;
   const activeDomain = selectedClient?.domain || directDomain || null;
+  const isDirectDomainMode = Boolean(directDomain && !selectedClientId);
+  const aiSearchUnavailableForDomain = !selectedClientId && !isDirectDomainMode;
+  const isExternalDomainResearch = !selectedClientId;
+  const seoMetricsPeriodLabel = overview?.metricsPeriodLabel || "Last 30 days";
+  const seoMetricsPeriodBadge = `${overview?.metricsPeriodDays ?? 30}d`;
+  const organicTrafficSourceLabel = overview?.organicTrafficSourceLabel || "Estimated";
+  const noOrganicKeywordsMessage = isExternalDomainResearch
+    ? "No organic keywords were returned for this domain yet. Try another domain or run a fresh search."
+    : "No organic keywords yet for this client. Refresh rankings from the client dashboard to populate this table.";
+  const noOrganicCompetitorsMessage = isExternalDomainResearch
+    ? "No competitor domains found for this search yet. Try a broader domain or re-run later."
+    : "No organic competitors detected yet. Refresh rankings and backlinks to generate competitor insights.";
+  const noBacklinksMessage = isExternalDomainResearch
+    ? "No backlink rows were returned for this domain yet."
+    : "No backlinks found yet for this client. Refresh backlink data in the client dashboard.";
+  const noRefDomainsMessage = isExternalDomainResearch
+    ? "No referring domains were returned for this domain yet."
+    : "No referring domains found yet for this client.";
   const hasUnavailableOverviewMetric = useCallback(
     (metric: string | string[]) => isMetricUnavailable(overview?.accuracy, metric),
     [overview?.accuracy]
@@ -280,16 +301,20 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
   // Use GA4-comparable rows for top-line KPIs; AI Overview/Mode are keyword-level SERP metrics.
   const aiSearchKpis = React.useMemo(() => {
+    if (aiSearchUnavailableForDomain) {
+      return { aiVisibilityScore: null, totalAiMentions: null, worldwideVisibility: null };
+    }
     if (hasUnavailableAiSearchMetric("ai_visibility_rows")) {
       return { aiVisibilityScore: null, totalAiMentions: null, worldwideVisibility: null };
     }
     const rows = aiSearch?.rows ?? [];
     const ga4Rows = rows.filter((r) => r.name === "ChatGPT" || r.name === "Gemini");
-    const totalAiMentions = ga4Rows.reduce((s, r) => s + (r.mentions ?? 0), 0);
-    const aiVisibilityScore = Math.min(100, ga4Rows.reduce((s, r) => s + (r.visibility ?? 0), 0));
+    const baselineRows = ga4Rows.length > 0 ? ga4Rows : rows;
+    const totalAiMentions = baselineRows.reduce((s, r) => s + (r.mentions ?? 0), 0);
+    const aiVisibilityScore = Math.min(100, baselineRows.reduce((s, r) => s + (r.visibility ?? 0), 0));
     const worldwideVisibility = totalAiMentions > 0 ? 100 : 0;
     return { aiVisibilityScore, totalAiMentions, worldwideVisibility };
-  }, [aiSearch?.rows, hasUnavailableAiSearchMetric]);
+  }, [aiSearch?.rows, aiSearchUnavailableForDomain, hasUnavailableAiSearchMetric]);
 
   const aiSearchPlatforms = React.useMemo(() => {
     return (aiSearch?.rows ?? []).map((r) => ({
@@ -430,15 +455,26 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     setLoading(true);
     if (!silentError) setError(null);
     try {
-      const selectedClientForLive = !isDirect ? clients.find((c) => c.id === clientIdOrDomain) : null;
-      const selectedClientDomain = selectedClientForLive?.domain?.trim();
-      // Accuracy policy: prefer live endpoint for both direct domains and tracked clients.
-      const overviewRes =
-        isDirect || selectedClientDomain
-          ? await api.get<DomainOverviewData>(`/seo/domain-overview-any`, {
-              params: { domain: isDirect ? clientIdOrDomain : selectedClientDomain, live: "true" },
-            })
-          : await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
+      let overviewRes;
+      if (isDirect) {
+        // External domains must use direct-domain endpoint.
+        overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview-any`, {
+          params: { domain: clientIdOrDomain, live: "true" },
+        });
+      } else {
+        // Tracked clients should use the client endpoint to include full agency/client context
+        // (paid metrics, traffic-source-derived tiles, and client-specific enrichments).
+        try {
+          overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
+        } catch (clientErr: any) {
+          // Fallback to direct-domain endpoint if the client route fails for any reason.
+          const selectedClientDomain = clients.find((c) => c.id === clientIdOrDomain)?.domain?.trim();
+          if (!selectedClientDomain) throw clientErr;
+          overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview-any`, {
+            params: { domain: selectedClientDomain, live: "true" },
+          });
+        }
+      }
       setOverview(overviewRes.data);
       return true;
     } catch (err: any) {
@@ -452,39 +488,46 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     }
   }, [clients]);
 
-  const fetchAiSearch = useCallback(async (clientId: string, timeRange: "1M" | "6M" | "1Y" | "2Y" | "All") => {
-    if (directDomain && !selectedClientId) return;
+  const fetchAiSearch = useCallback(async (target: string, timeRange: "1M" | "6M" | "1Y" | "2Y" | "All", isDirect: boolean = false) => {
     setAiSearchError(null);
     try {
       const period = AI_SEARCH_PERIOD_DAYS[timeRange];
-      const aiRes = await api.get<AiSearchVisibilityData>(`/seo/ai-search-visibility/${clientId}`, {
-        params: { period: String(period) },
-        timeout: 30000,
-      });
+      const aiRes = await api.get<AiSearchVisibilityData>(
+        isDirect ? `/seo/ai-search-visibility-any` : `/seo/ai-search-visibility/${target}`,
+        {
+          params: isDirect ? { domain: target, period: String(period) } : { period: String(period) },
+          timeout: 30000,
+        }
+      );
       setAiSearch(aiRes.data);
     } catch (err: any) {
       setAiSearch(null);
       setAiSearchError(err?.response?.data?.message || "Unable to load AI Search Visibility");
     }
-  }, [directDomain, selectedClientId]);
+  }, []);
 
   const fetchCitedSources = useCallback(async () => {
-    if (!selectedClientId) return;
+    if (!selectedClientId && !directDomain) return;
     setCitedSourcesLoading(true);
     setAiSearchError(null);
     try {
       const period = AI_SEARCH_PERIOD_DAYS[aiSearchTimeRange];
-      const aiRes = await api.get<AiSearchVisibilityData>(`/seo/ai-search-visibility/${selectedClientId}`, {
-        params: { period: String(period), force: "true" },
-        timeout: 60000,
-      });
+      const aiRes = await api.get<AiSearchVisibilityData>(
+        selectedClientId ? `/seo/ai-search-visibility/${selectedClientId}` : `/seo/ai-search-visibility-any`,
+        {
+          params: selectedClientId
+            ? { period: String(period), force: "true" }
+            : { domain: directDomain, period: String(period) },
+          timeout: 60000,
+        }
+      );
       setAiSearch(aiRes.data);
     } catch (err: any) {
       setAiSearchError((err as any)?.response?.data?.message || "Failed to load cited sources");
     } finally {
       setCitedSourcesLoading(false);
     }
-  }, [selectedClientId, aiSearchTimeRange]);
+  }, [selectedClientId, directDomain, aiSearchTimeRange]);
 
   const exportAiSearchToPdf = useCallback(async () => {
     const element = aiSearchSectionRef.current;
@@ -758,9 +801,11 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
 
   useEffect(() => {
     if (selectedClientId) {
-      fetchAiSearch(selectedClientId, aiSearchTimeRange);
+      fetchAiSearch(selectedClientId, aiSearchTimeRange, false);
+    } else if (directDomain) {
+      fetchAiSearch(directDomain, aiSearchTimeRange, true);
     }
-  }, [selectedClientId, aiSearchTimeRange, fetchAiSearch]);
+  }, [selectedClientId, directDomain, aiSearchTimeRange, fetchAiSearch]);
 
   const positionBarDataOrganic = overview?.positionDistribution
     ? [
@@ -1046,15 +1091,24 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   <div className="p-3 rounded-lg bg-gray-50/80">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Cited Pages</p>
                     <p className="mt-1 text-xl font-bold text-blue-600 tabular-nums">
-                      {hasUnavailableAiSearchMetric("ai_visibility_rows")
+                      {(hasUnavailableAiSearchMetric("ai_visibility_rows") || aiSearchUnavailableForDomain)
                         ? "Unavailable"
                         : formatCompactNumber(aiSearchPlatforms.reduce((s, p) => s + p.aiSearchVol, 0))}
                     </p>
                   </div>
                 </div>
                 <p className="mb-3 text-xs text-gray-500">
-                  AI Visibility and Mentions are based on GA4 AI referrals (ChatGPT + Gemini) for the selected period.
+                  {isDirectDomainMode
+                    ? "Direct domain mode uses DataForSEO AI mention signals (GA4 is not available for untracked domains)."
+                    : aiSearchUnavailableForDomain
+                      ? "AI Visibility is available for tracked client domains with GA4 data."
+                      : "AI Visibility and Mentions are based on GA4 AI referrals (ChatGPT + Gemini) for the selected period."}
                 </p>
+                {isDirectDomainMode && (
+                  <p className="mb-3 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+                    Source confidence: modeled from third-party AI mention samples; directional only.
+                  </p>
+                )}
 
                 {loading ? (
                   <div className="pt-4 border-t border-gray-100 text-sm text-gray-500">Loading AI Search visibility...</div>
@@ -1071,21 +1125,40 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {([
-                          { name: "ChatGPT", dotClass: "bg-gray-800" },
-                          { name: "AI Overview", dotClass: "bg-blue-600" },
-                          { name: "AI Mode", dotClass: "bg-red-500" },
-                          { name: "Gemini", dotClass: "bg-emerald-500" },
-                        ] as const).map((meta) => {
-                          const p = aiSearchPlatforms.find((r) => r.platform === meta.name) ?? { platform: meta.name, mentions: 0, aiSearchVol: 0 };
+                        {(isDirectDomainMode
+                          ? aiSearchPlatforms.map((p, idx) => ({
+                              name: p.platform,
+                              dotClass: ["bg-gray-800", "bg-blue-600", "bg-red-500", "bg-emerald-500", "bg-violet-500", "bg-amber-500"][idx % 6] || "bg-gray-400",
+                              mentions: p.mentions,
+                              aiSearchVol: p.aiSearchVol,
+                            }))
+                          : ([
+                              { name: "ChatGPT", dotClass: "bg-gray-800" },
+                              { name: "AI Overview", dotClass: "bg-blue-600" },
+                              { name: "AI Mode", dotClass: "bg-red-500" },
+                              { name: "Gemini", dotClass: "bg-emerald-500" },
+                            ] as const).map((meta) => {
+                              const p = aiSearchPlatforms.find((r) => r.platform === meta.name) ?? {
+                                platform: meta.name,
+                                mentions: 0,
+                                aiSearchVol: 0,
+                              };
+                              return {
+                                name: meta.name,
+                                dotClass: meta.dotClass,
+                                mentions: p.mentions,
+                                aiSearchVol: p.aiSearchVol,
+                              };
+                            })
+                        ).map((meta) => {
                           return (
                             <tr key={meta.name} className="group">
                               <td className="py-2.5 font-medium text-gray-800 flex items-center gap-2">
                                 <span className={`h-2.5 w-2.5 rounded-sm ${meta.dotClass} flex-shrink-0`} aria-hidden />
                                 {meta.name}
                               </td>
-                              <td className="py-2.5 text-right text-blue-600 font-semibold tabular-nums">{formatCompactNumber(p.mentions)}</td>
-                              <td className="py-2.5 text-right text-blue-600 font-semibold tabular-nums">{formatCompactNumber(p.aiSearchVol)}</td>
+                              <td className="py-2.5 text-right text-blue-600 font-semibold tabular-nums">{formatCompactNumber(meta.mentions)}</td>
+                              <td className="py-2.5 text-right text-blue-600 font-semibold tabular-nums">{formatCompactNumber(meta.aiSearchVol)}</td>
                             </tr>
                           );
                         })}
@@ -1099,30 +1172,43 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
             {/* SEO card - compact layout, no bottom white space */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/50">
-                <span className="inline-flex items-center px-4 py-1.5 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-400 shadow-sm">
-                  SEO
-                </span>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="inline-flex items-center px-4 py-1.5 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-400 shadow-sm">
+                    SEO
+                  </span>
+                  <span className="text-xs font-medium text-gray-500">
+                    {seoMetricsPeriodLabel}
+                  </span>
+                </div>
               </div>
               <div className="p-5 grid grid-cols-4 gap-4">
                 {[
                   { label: "Authority Score", value: overview.metrics.authorityScore ?? "—", format: (v: number | string) => (typeof v === "number" ? String(v) : v), tooltip: "Domain authority based on backlink profile", unavailable: hasUnavailableOverviewMetric("authorityScore") },
-                  { label: "Organic Traffic", value: overview.metrics.organicSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: "Estimated organic search traffic", unavailable: hasUnavailableOverviewMetric("organicSearch.traffic") },
+                  { label: "Organic Traffic", value: overview.metrics.organicSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: `Organic search traffic (${seoMetricsPeriodLabel})`, periodBadge: seoMetricsPeriodBadge, subLabel: organicTrafficSourceLabel, unavailable: hasUnavailableOverviewMetric("organicSearch.traffic") },
                   { label: "Paid Traffic", value: overview.metrics.paidSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: "Paid search traffic", unavailable: false },
                   { label: "Ref. Domains", value: overview.metrics.backlinks.referringDomains, format: (v: number) => formatCompactNumber(v), tooltip: "Number of referring domains", unavailable: false },
                   { label: "Traffic Share", value: overview.metrics.trafficShare, format: (v: number | null | undefined) => (v != null ? `${v}%` : "—"), tooltip: "Organic traffic as % of total", icon: true, unavailable: false },
-                  { label: "Organic Keywords", value: overview.metrics.organicSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: "Organic keywords ranking", unavailable: hasUnavailableOverviewMetric("organicSearch.keywords") },
+                  { label: "Organic Keywords", value: overview.metrics.organicSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: `Organic keywords ranking (${seoMetricsPeriodLabel})`, periodBadge: seoMetricsPeriodBadge, unavailable: hasUnavailableOverviewMetric("organicSearch.keywords") },
                   { label: "Paid Keywords", value: overview.metrics.paidSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: "Paid keywords", unavailable: false },
                   { label: "Backlinks", value: overview.metrics.backlinks.totalBacklinks, format: (v: number) => formatCompactNumber(v), tooltip: "Total backlinks", unavailable: false },
                 ].map((m, i) => (
                   <div key={m.label} className={`flex flex-col p-3 rounded-lg bg-gray-50/80 ${i % 4 < 3 ? "border-r-0" : ""}`}>
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider inline-flex items-center gap-1">
                       {m.label}
+                      {m.periodBadge && (
+                        <span className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">
+                          {m.periodBadge}
+                        </span>
+                      )}
                       <span title={m.tooltip}><Info className="h-3 w-3 text-gray-400 cursor-help flex-shrink-0" aria-hidden /></span>
                       {m.icon && <PieChartIcon className="h-3 w-3 text-gray-400 flex-shrink-0" aria-hidden />}
                     </p>
                     <p className="mt-1.5 text-lg font-bold text-blue-600 tabular-nums">
                       {m.unavailable ? "Unavailable" : m.format(m.value as any)}
                     </p>
+                    {m.subLabel && !m.unavailable && (
+                      <p className="mt-1 text-[11px] text-gray-500">{m.subLabel}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1316,7 +1402,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               <div className="flex flex-col gap-6">
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-1">Traffic <span className="text-xs font-normal text-amber-600">(Estimated)</span></h4>
-                  <p className="text-xs text-gray-500 mb-3">Trend is modeled from organic keyword history; paid and branded trend lines are hidden until source data is available.</p>
+                  <p className="text-xs text-gray-500 mb-3">Top SEO KPI tiles use {seoMetricsPeriodLabel}; trend is modeled from organic keyword history and follows the selected range.</p>
                   <div className="flex flex-wrap gap-4 mb-2">
                     <label className="inline-flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={trafficOrganic} onChange={(e) => setTrafficOrganic(e.target.checked)} className="rounded border-gray-300 focus:ring-2 focus:ring-offset-1" style={{ accentColor: "#3B82F6" }} />
@@ -1548,7 +1634,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white/80">
                         {(overview.topOrganicKeywords?.length ?? 0) === 0 ? (
-                          <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-500">No keywords yet</td></tr>
+                          <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-500">{noOrganicKeywordsMessage}</td></tr>
                         ) : (
                           (overview.topOrganicKeywords ?? []).slice(0, 10).map((k, i) => (
                             <tr key={i} className="hover:bg-blue-50/50">
@@ -1715,7 +1801,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       </div>
                     </>
                   ) : (
-                    <div className="p-8 text-center text-gray-500 text-sm">Find your direct competitors</div>
+                    <div className="p-8 text-center text-gray-500 text-sm">{noOrganicCompetitorsMessage}</div>
                   )}
                 </div>
                 <div className="rounded-lg border border-gray-200 border-l-4 border-l-emerald-500 overflow-hidden bg-emerald-50/40">
@@ -1971,7 +2057,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                         </tr>
                       ))}
                       {(!overview.backlinksList?.length) && (
-                        <tr><td colSpan={3} className="px-4 py-4 text-gray-500">No backlinks data</td></tr>
+                        <tr><td colSpan={3} className="px-4 py-4 text-gray-500">{noBacklinksMessage}</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -2113,7 +2199,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {(overview.referringDomains ?? []).length === 0 ? (
-                        <tr><td colSpan={3} className="px-6 py-4 text-gray-500">No data</td></tr>
+                        <tr><td colSpan={3} className="px-6 py-4 text-gray-500">{noRefDomainsMessage}</td></tr>
                       ) : (
                         (overview.referringDomains ?? []).slice(0, 15).map((r, i) => (
                           <tr key={i} className="hover:bg-gray-50">
@@ -2259,7 +2345,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               </div>
               <div className="max-h-[75vh] overflow-auto p-6">
                 {(overview.backlinksList?.length ?? 0) === 0 ? (
-                  <p className="py-8 text-center text-gray-500">No backlinks data</p>
+                  <p className="py-8 text-center text-gray-500">{noBacklinksMessage}</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -2340,7 +2426,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
             </div>
             <div className="flex-1 overflow-auto p-6">
               {(overview.organicCompetitors?.length ?? 0) === 0 ? (
-                <p className="text-center text-gray-500 py-8">Find your direct competitors</p>
+                <p className="text-center text-gray-500 py-8">{noOrganicCompetitorsMessage}</p>
               ) : (
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50 sticky top-0">
@@ -2404,7 +2490,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
               </div>
               <div className="max-h-[75vh] overflow-auto p-6">
                 {overview.topOrganicKeywords.length === 0 ? (
-                  <p className="py-8 text-center text-gray-500">No keywords yet</p>
+                  <p className="py-8 text-center text-gray-500">{noOrganicKeywordsMessage}</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">

@@ -12,9 +12,14 @@ import {
 } from "./qualityContracts.js";
 
 export const LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX = "[LOCAL_MAP] ";
+export const PPC_SCHEDULE_SUBJECT_PREFIX = "[PPC] ";
 
 export function isLocalMapScheduleSubject(value: string | null | undefined): boolean {
   return typeof value === "string" && value.startsWith(LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX);
+}
+
+export function isPpcScheduleSubject(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith(PPC_SCHEDULE_SUBJECT_PREFIX);
 }
 
 type ReportTargetKeywordRow = {
@@ -1832,6 +1837,192 @@ export async function processCampaignWinsReports(): Promise<void> {
   }
 }
 
+function getPpcRangeForPeriod(period: string): { startDate: Date; endDate: Date } {
+  const normalized = normalizeReportPeriod(period);
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  if (normalized === "weekly") {
+    startDate.setDate(startDate.getDate() - 7);
+  } else if (normalized === "biweekly") {
+    startDate.setDate(startDate.getDate() - 14);
+  } else {
+    startDate.setDate(startDate.getDate() - 30);
+  }
+  return { startDate, endDate };
+}
+
+export async function autoGeneratePpcReport(clientId: string, period: string): Promise<{
+  period: string;
+  dateRange: { start: string; end: string };
+  campaignSummary: {
+    clicks: number;
+    impressions: number;
+    cost: number;
+    conversions: number;
+    conversionRate: number;
+    avgCpc: number;
+    costPerConversion: number;
+  };
+  conversionSummary: {
+    totalConversions: number;
+    conversionValue: number;
+    conversionRate: number;
+    totalClicks: number;
+    totalCost: number;
+    costPerConversion: number;
+  };
+  campaigns: any[];
+  adGroups: any[];
+  keywords: any[];
+  conversions: any[];
+}> {
+  const normalized = normalizeReportPeriod(period);
+  const { startDate, endDate } = getPpcRangeForPeriod(normalized);
+  const { fetchGoogleAdsCampaigns, fetchGoogleAdsAdGroups, fetchGoogleAdsKeywords, fetchGoogleAdsConversions } =
+    await import("./googleAds.js");
+
+  const [campaignData, adGroupData, keywordData, conversionData] = await Promise.all([
+    fetchGoogleAdsCampaigns(clientId, startDate, endDate).catch(() => ({ campaigns: [], summary: {} })),
+    fetchGoogleAdsAdGroups(clientId, startDate, endDate).catch(() => ({ adGroups: [] })),
+    fetchGoogleAdsKeywords(clientId, startDate, endDate).catch(() => ({ keywords: [] })),
+    fetchGoogleAdsConversions(clientId, startDate, endDate).catch(() => ({
+      conversions: [],
+      summary: {
+        totalConversions: 0,
+        conversionValue: 0,
+        conversionRate: 0,
+        totalClicks: 0,
+        totalCost: 0,
+        costPerConversion: 0,
+      },
+    })),
+  ]);
+
+  return {
+    period: normalized,
+    dateRange: {
+      start: startDate.toISOString().split("T")[0],
+      end: endDate.toISOString().split("T")[0],
+    },
+    campaignSummary: {
+      clicks: Number(campaignData?.summary?.clicks ?? 0),
+      impressions: Number(campaignData?.summary?.impressions ?? 0),
+      cost: Number(campaignData?.summary?.cost ?? 0),
+      conversions: Number(campaignData?.summary?.conversions ?? 0),
+      conversionRate: Number(campaignData?.summary?.conversionRate ?? 0),
+      avgCpc: Number(campaignData?.summary?.avgCpc ?? 0),
+      costPerConversion: Number(campaignData?.summary?.costPerConversion ?? 0),
+    },
+    conversionSummary: {
+      totalConversions: Number(conversionData?.summary?.totalConversions ?? 0),
+      conversionValue: Number(conversionData?.summary?.conversionValue ?? 0),
+      conversionRate: Number(conversionData?.summary?.conversionRate ?? 0),
+      totalClicks: Number(conversionData?.summary?.totalClicks ?? 0),
+      totalCost: Number(conversionData?.summary?.totalCost ?? 0),
+      costPerConversion: Number(conversionData?.summary?.costPerConversion ?? 0),
+    },
+    campaigns: Array.isArray(campaignData?.campaigns) ? campaignData.campaigns : [],
+    adGroups: Array.isArray(adGroupData?.adGroups) ? adGroupData.adGroups : [],
+    keywords: Array.isArray(keywordData?.keywords) ? keywordData.keywords : [],
+    conversions: Array.isArray(conversionData?.conversions) ? conversionData.conversions : [],
+  };
+}
+
+export function generatePpcReportEmailHtml(clientName: string, report: Awaited<ReturnType<typeof autoGeneratePpcReport>>): string {
+  const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
+  const topCampaigns = report.campaigns.slice(0, 10);
+  const topAdGroups = report.adGroups.slice(0, 10);
+  const topKeywords = report.keywords.slice(0, 10);
+  return `
+    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+      <h2 style="margin: 0 0 8px;">PPC Performance Report</h2>
+      <p style="margin: 0 0 4px;">Client: <strong>${escapeHtml(clientName)}</strong></p>
+      <p style="margin: 0 0 14px;">Period: ${escapeHtml(periodLabel)} (${escapeHtml(report.dateRange.start)} to ${escapeHtml(report.dateRange.end)})</p>
+      <h3 style="margin: 12px 0 6px;">Summary</h3>
+      <ul style="margin: 0 0 12px; padding-left: 18px;">
+        <li>Clicks: ${report.campaignSummary.clicks.toLocaleString()}</li>
+        <li>Impressions: ${report.campaignSummary.impressions.toLocaleString()}</li>
+        <li>Cost: $${report.campaignSummary.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
+        <li>Conversions: ${report.conversionSummary.totalConversions.toLocaleString()}</li>
+        <li>Conversion Value: $${report.conversionSummary.conversionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
+      </ul>
+      <h3 style="margin: 12px 0 6px;">Top Campaigns</h3>
+      <ul style="margin: 0 0 10px; padding-left: 18px;">
+        ${topCampaigns.map((row: any) => `<li>${escapeHtml(row.name || "Unnamed")} — ${Number(row.clicks || 0).toLocaleString()} clicks, ${Number(row.conversions || 0).toLocaleString()} conv</li>`).join("") || "<li>No campaign activity in this period.</li>"}
+      </ul>
+      <h3 style="margin: 12px 0 6px;">Top Ad Groups</h3>
+      <ul style="margin: 0 0 10px; padding-left: 18px;">
+        ${topAdGroups.map((row: any) => `<li>${escapeHtml(row.name || "Unnamed")} — ${Number(row.clicks || 0).toLocaleString()} clicks, ${Number(row.conversions || 0).toLocaleString()} conv</li>`).join("") || "<li>No ad group activity in this period.</li>"}
+      </ul>
+      <h3 style="margin: 12px 0 6px;">Top Keywords</h3>
+      <ul style="margin: 0; padding-left: 18px;">
+        ${topKeywords.map((row: any) => `<li>${escapeHtml(row.keyword || "Unknown")} — ${Number(row.clicks || 0).toLocaleString()} clicks, ${Number(row.conversions || 0).toLocaleString()} conv</li>`).join("") || "<li>No keyword activity in this period.</li>"}
+      </ul>
+    </div>
+  `;
+}
+
+export async function generatePpcReportPdfBuffer(
+  clientName: string,
+  report: Awaited<ReturnType<typeof autoGeneratePpcReport>>
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 40, size: "A4" });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", (err: Error) => reject(err));
+
+    const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
+    doc.fontSize(20).text("PPC Performance Report");
+    doc.moveDown(0.5);
+    doc.fontSize(11).fillColor("#334155").text(`Client: ${clientName}`);
+    doc.text(`Period: ${periodLabel}`);
+    doc.text(`Date range: ${report.dateRange.start} to ${report.dateRange.end}`);
+    doc.fillColor("#000000");
+    doc.moveDown();
+
+    doc.fontSize(14).text("Summary");
+    doc.fontSize(11);
+    doc.text(`Clicks: ${report.campaignSummary.clicks.toLocaleString()}`);
+    doc.text(`Impressions: ${report.campaignSummary.impressions.toLocaleString()}`);
+    doc.text(
+      `Cost: $${report.campaignSummary.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    );
+    doc.text(`Conversions: ${report.conversionSummary.totalConversions.toLocaleString()}`);
+    doc.text(
+      `Conversion Value: $${report.conversionSummary.conversionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    );
+    doc.moveDown();
+
+    const writeTopRows = (title: string, rows: any[], label: (row: any) => string) => {
+      doc.fontSize(13).text(title);
+      doc.fontSize(10);
+      if (!rows.length) {
+        doc.text("No activity in this period.");
+        doc.moveDown(0.6);
+        return;
+      }
+      for (const row of rows.slice(0, 12)) {
+        doc.text(`- ${label(row)}`);
+      }
+      doc.moveDown(0.6);
+    };
+
+    writeTopRows("Top Campaigns", report.campaigns, (row) =>
+      `${String(row?.name || "Unnamed")} (${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conv)`
+    );
+    writeTopRows("Top Ad Groups", report.adGroups, (row) =>
+      `${String(row?.name || "Unnamed")} (${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conv)`
+    );
+    writeTopRows("Top Keywords", report.keywords, (row) =>
+      `${String(row?.keyword || "Unknown")} (${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conv)`
+    );
+
+    doc.end();
+  });
+}
+
 /**
  * Process scheduled reports - called by cron job
  */
@@ -1855,12 +2046,17 @@ export async function processScheduledReports(): Promise<void> {
       }
     });
 
-    const seoDueSchedules = dueSchedules.filter((schedule) => !isLocalMapScheduleSubject(schedule.emailSubject));
+    const seoDueSchedules = dueSchedules.filter(
+      (schedule) =>
+        !isLocalMapScheduleSubject(schedule.emailSubject) && !isPpcScheduleSubject(schedule.emailSubject)
+    );
+    const ppcDueSchedules = dueSchedules.filter((schedule) => isPpcScheduleSubject(schedule.emailSubject));
 
     console.log(`[Report Scheduler] Checking scheduled reports at ${now.toISOString()}`);
     console.log(`[Report Scheduler] Found ${seoDueSchedules.length} due SEO schedule(s)`);
+    console.log(`[Report Scheduler] Found ${ppcDueSchedules.length} due PPC schedule(s)`);
     
-    if (seoDueSchedules.length === 0) {
+    if (seoDueSchedules.length === 0 && ppcDueSchedules.length === 0) {
       // Log all active schedules for debugging
       const allActiveSchedules = await prisma.reportSchedule.findMany({
         where: { isActive: true },
@@ -1983,6 +2179,60 @@ export async function processScheduledReports(): Promise<void> {
         console.error(`[Report Scheduler] ✗ Failed to process schedule ${schedule.id} for client ${schedule.clientId}:`, error);
         console.error(`[Report Scheduler] Error details:`, error.message, error.stack);
         // Continue with other schedules even if one fails
+      }
+    }
+
+    for (const schedule of ppcDueSchedules) {
+      try {
+        console.log(`[Report Scheduler] Processing PPC schedule ${schedule.id} for client ${schedule.client.name}`);
+        const ppcReport = await autoGeneratePpcReport(schedule.clientId, schedule.frequency);
+        const recipients = normalizeEmailRecipients(schedule.recipients);
+
+        if (recipients && recipients.length > 0) {
+          const subjectWithoutMarker = String(schedule.emailSubject || "")
+            .replace(PPC_SCHEDULE_SUBJECT_PREFIX, "")
+            .trim();
+          const emailSubject =
+            subjectWithoutMarker || `PPC Report - ${buildReportEmailSubject(schedule.client.name, schedule.frequency)}`;
+          const emailHtml = generatePpcReportEmailHtml(schedule.client.name, ppcReport);
+          const pdfBuffer = await generatePpcReportPdfBuffer(schedule.client.name, ppcReport);
+
+          await Promise.all(
+            recipients.map((email: string) =>
+              sendEmail({
+                to: email,
+                subject: emailSubject,
+                html: emailHtml,
+                attachments: [
+                  {
+                    filename: `ppc-report-${schedule.client.name.replace(/\s+/g, "-").toLowerCase()}-${ppcReport.period}.pdf`,
+                    content: pdfBuffer,
+                    contentType: "application/pdf",
+                  },
+                ],
+              })
+            )
+          );
+          console.log(`[Report Scheduler] ✓ PPC report sent for client ${schedule.client.name} (${schedule.frequency})`);
+        } else {
+          console.log(`[Report Scheduler] ⚠ No recipients configured for PPC schedule ${schedule.id}`);
+        }
+
+        const nextRunAt = calculateNextRunTime(
+          schedule.frequency,
+          schedule.dayOfWeek || undefined,
+          schedule.dayOfMonth || undefined,
+          schedule.timeOfDay
+        );
+        await prisma.reportSchedule.update({
+          where: { id: schedule.id },
+          data: {
+            lastRunAt: now,
+            nextRunAt,
+          },
+        });
+      } catch (error: any) {
+        console.error(`[Report Scheduler] ✗ Failed to process PPC schedule ${schedule.id} for client ${schedule.clientId}:`, error);
       }
     }
 

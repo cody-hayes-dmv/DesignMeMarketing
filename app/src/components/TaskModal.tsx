@@ -70,6 +70,13 @@ const activityConfig: Record<ActivityType, { icon: React.ReactNode; label: strin
     },
 };
 
+const normalizeUrlInput = (value: string): string => {
+    const raw = value.trim();
+    if (!raw) throw new Error("Invalid URL");
+    const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return new URL(candidate).toString();
+};
+
 const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task }) => {
     const dispatch = useDispatch();
     const { clients } = useSelector((state: RootState) => state.client);
@@ -240,21 +247,20 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const handleAddUrl = () => {
         if (!urlInput.trim()) return;
 
-        // Validate URL
         try {
-            new URL(urlInput);
+            const normalizedUrl = normalizeUrlInput(urlInput);
             setProof((prev) => [
                 ...prev,
                 {
                     type: urlType,
-                    value: urlInput.trim(),
-                    name: urlInput.trim(),
+                    value: normalizedUrl,
+                    name: normalizedUrl,
                 },
             ]);
             setUrlInput("");
             toast.success("URL added successfully!");
         } catch {
-            toast.error("Please enter a valid URL");
+            toast.error("Please enter a valid URL (e.g. www.example.com or https://example.com)");
         }
     };
 
@@ -1024,10 +1030,10 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                         <option value="video">Video URL</option>
                                     </select>
                                     <input
-                                        type="url"
+                                        type="text"
                                         value={urlInput}
                                         onChange={(e) => setUrlInput(e.target.value)}
-                                        placeholder="Enter URL (e.g., https://example.com/image.png)"
+                                        placeholder="Enter URL (e.g., www.example.com/image.png)"
                                         className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     />
                                     <button

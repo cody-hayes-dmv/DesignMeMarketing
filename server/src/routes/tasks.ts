@@ -19,9 +19,24 @@ function isMissingTaskCommentTypeColumn(error: any) {
   );
 }
 
+function normalizeProofUrl(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) throw new Error("Invalid URL");
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  const parsed = new URL(candidate);
+  return parsed.toString();
+}
+
 const proofItemSchema = z.object({
   type: z.enum(["image", "video", "url"]),
-  value: z.string().url(), // URL to the file or external URL
+  value: z.string().transform((value, ctx) => {
+    try {
+      return normalizeProofUrl(value);
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid URL" });
+      return z.NEVER;
+    }
+  }), // URL to the file or external URL (accepts www.* by normalizing to https://)
   name: z.string().optional(), // Optional name/description
 });
 

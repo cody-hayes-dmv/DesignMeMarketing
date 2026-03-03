@@ -1171,21 +1171,25 @@ router.post('/', authenticateToken, async (req, res) => {
         // Normalize domain (strip protocol/www/path)
         const normalizedDomain = normalizeDomainInput(domain);
 
-        // Check if client with this domain or name already exists
-        const existingDomain = await prisma.client.findUnique({
-            where: { domain: normalizedDomain },
+        // Allow shared client names/domains across different companies.
+        // Only block exact duplicates for the same creator account.
+        const trimmedName = name.trim();
+        const existingForSameOwner = await prisma.client.findFirst({
+            where: {
+                userId: req.user.userId,
+                OR: [
+                    { domain: normalizedDomain },
+                    { name: trimmedName },
+                ],
+            },
+            select: { id: true, name: true, domain: true },
         });
 
-        if (existingDomain) {
-            return res.status(400).json({ message: 'Client with this domain already exists' });
-        }
-
-        const existingName = await prisma.client.findUnique({
-            where: { name },
-        });
-
-        if (existingName) {
-            return res.status(400).json({ message: 'Client with this name already exists' });
+        if (existingForSameOwner) {
+            if (existingForSameOwner.domain === normalizedDomain) {
+                return res.status(400).json({ message: 'You already have a client with this domain.' });
+            }
+            return res.status(400).json({ message: 'You already have a client with this name.' });
         }
 
         // Status lifecycle: Agency creates dashboard → DASHBOARD_ONLY. SUPER_ADMIN creates → ACTIVE.
@@ -1198,7 +1202,7 @@ router.post('/', authenticateToken, async (req, res) => {
         // Create client
         const client = await prisma.client.create({
             data: {
-                name,
+                name: trimmedName,
                 domain: normalizedDomain,
                 industry,
                 targets: Array.isArray(targets) ? JSON.stringify(targets) : null,
@@ -1713,6 +1717,19 @@ router.patch('/:id/reactivate', authenticateToken, async (req, res) => {
 import { getGA4AuthUrl, exchangeCodeForTokens, isGA4Connected, listGA4Properties } from '../lib/ga4.js';
 // Google Ads Connection Routes
 import { getGoogleAdsAuthUrl, exchangeCodeForTokens as exchangeGoogleAdsCodeForTokens, isGoogleAdsConnected, listGoogleAdsCustomers, listGoogleAdsClientAccounts, listChildAccountsUnderManager, fetchGoogleAdsCampaigns, fetchGoogleAdsAdGroups, fetchGoogleAdsKeywords, fetchGoogleAdsConversions } from '../lib/googleAds.js';
+
+function resolveRequestOrigin(req: express.Request): string {
+    const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0]?.trim();
+    const forwardedHost = String(req.get('x-forwarded-host') || '').split(',')[0]?.trim();
+    const protocol = forwardedProto || req.protocol || 'http';
+    const host = forwardedHost || req.get('host');
+    if (host) return `${protocol}://${host}`;
+    return String(process.env.BACKEND_URL || 'http://localhost:5000').replace(/\/+$/, '');
+}
+
+function resolveGoogleAdsCallbackUrl(req: express.Request): string {
+    return `${resolveRequestOrigin(req)}/api/clients/google-ads/callback`;
+}
 
 // GA4 OAuth callback (no auth required - handled via state parameter)
 router.get('/ga4/callback', async (req, res) => {
@@ -2733,7 +2750,11 @@ router.get('/google-ads/callback', async (req, res) => {
         }
 
         try {
-            const { accessToken, refreshToken, email } = await exchangeGoogleAdsCodeForTokens(code as string);
+            const runtimeRedirectUri = resolveGoogleAdsCallbackUrl(req);
+            const { accessToken, refreshToken, email } = await exchangeGoogleAdsCodeForTokens(
+                code as string,
+                runtimeRedirectUri
+            );
 
             if (!refreshToken) {
                 console.error('[Google Ads OAuth Callback] No refresh token from Google');
@@ -2892,8 +2913,10 @@ router.get('/:id/google-ads/auth', authenticateToken, async (req, res) => {
         }
 
         const isPopup = req.query.popup === 'true' || req.query.popup === '1';
-        const authUrl = getGoogleAdsAuthUrl(clientId, { popup: isPopup });
-        res.json({ authUrl });
+        const redirectUri = resolveGoogleAdsCallbackUrl(req);
+        const authUrl = getGoogleAdsAuthUrl(clientId, { popup: isPopup, redirectUri });
+        const oauthClientId = String(process.env.GOOGLE_ADS_CLIENT_ID || "").trim() || null;
+        res.json({ authUrl, redirectUri, oauthClientId });
     } catch (error: any) {
         console.error('Google Ads auth URL error:', error);
         res.status(500).json({ message: error.message || 'Internal server error' });

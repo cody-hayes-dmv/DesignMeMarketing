@@ -31,7 +31,9 @@ function isGoogleAdsRevokedCached(clientId: string): boolean {
 const GOOGLE_ADS_CALLBACK_PATH = '/api/clients/google-ads/callback';
 
 /** Single source of redirect URI so auth URL and token exchange always match (required for refresh_token). */
-function getGoogleAdsRedirectUri(): string {
+function getGoogleAdsRedirectUri(overrideRedirectUri?: string): string {
+  const fromOverride = String(overrideRedirectUri || "").trim();
+  if (fromOverride) return fromOverride;
   return (
     process.env.GOOGLE_ADS_REDIRECT_URI ||
     `${process.env.BACKEND_URL || 'http://localhost:5000'}${GOOGLE_ADS_CALLBACK_PATH}`
@@ -56,10 +58,10 @@ function getGoogleAdsDeveloperToken(): string {
 /**
  * Get OAuth2 client for Google Ads (uses same redirect_uri as auth URL for valid token exchange)
  */
-function getOAuth2Client() {
+function getOAuth2Client(overrideRedirectUri?: string) {
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
-  const redirectUri = getGoogleAdsRedirectUri();
+  const redirectUri = getGoogleAdsRedirectUri(overrideRedirectUri);
 
   if (!clientId || !clientSecret) {
     const errorMsg = 'Google Ads credentials not configured. Please set GOOGLE_ADS_CLIENT_ID and GOOGLE_ADS_CLIENT_SECRET environment variables in server/.env file.\n\n' +
@@ -79,8 +81,8 @@ function getOAuth2Client() {
  * @param clientId - Client ID to store tokens for
  * @param options.popup - If true, state includes "popup" so callback sends postMessage + closes instead of redirecting
  */
-export function getGoogleAdsAuthUrl(clientId: string, options?: { popup?: boolean }): string {
-  const oauth2Client = getOAuth2Client();
+export function getGoogleAdsAuthUrl(clientId: string, options?: { popup?: boolean; redirectUri?: string }): string {
+  const oauth2Client = getOAuth2Client(options?.redirectUri);
   const scopes = [
     'https://www.googleapis.com/auth/adwords', // Google Ads API scope
     'https://www.googleapis.com/auth/userinfo.email', // Required to get user email
@@ -92,20 +94,20 @@ export function getGoogleAdsAuthUrl(clientId: string, options?: { popup?: boolea
     scope: scopes,
     prompt: 'consent', // Force consent to get refresh token
     state,
-    redirect_uri: getGoogleAdsRedirectUri(),
+    redirect_uri: getGoogleAdsRedirectUri(options?.redirectUri),
   });
 }
 
 /**
  * Exchange authorization code for tokens
  */
-export async function exchangeCodeForTokens(code: string): Promise<{
+export async function exchangeCodeForTokens(code: string, redirectUriOverride?: string): Promise<{
   accessToken: string;
   refreshToken: string;
   email?: string;
 }> {
-  const oauth2Client = getOAuth2Client();
-  const redirectUri = getGoogleAdsRedirectUri();
+  const redirectUri = getGoogleAdsRedirectUri(redirectUriOverride);
+  const oauth2Client = getOAuth2Client(redirectUri);
 
   let tokens;
   try {
@@ -866,6 +868,9 @@ export async function fetchGoogleAdsAdGroups(
         metrics.ctr
       FROM ad_group
       WHERE segments.date BETWEEN '${startDateStr}' AND '${endDateStr}'
+        AND ad_group.status = 'ENABLED'
+        AND campaign.status = 'ENABLED'
+        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0)
     `;
 
     if (campaignId) {
@@ -976,6 +981,10 @@ export async function fetchGoogleAdsKeywords(
       FROM keyword_view
       WHERE segments.date BETWEEN '${startDateStr}' AND '${endDateStr}'
         AND ad_group_criterion.type = 'KEYWORD'
+        AND ad_group_criterion.status = 'ENABLED'
+        AND ad_group.status = 'ENABLED'
+        AND campaign.status = 'ENABLED'
+        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0)
     `;
 
     if (campaignId) {
@@ -1070,20 +1079,21 @@ export async function fetchGoogleAdsConversions(
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
 
-    // Query for conversion actions and their performance
+    // Query campaign conversions for the selected date range.
+    // This avoids returning stale all-time entities and ensures totals reflect
+    // actual conversion activity in the selected period.
     const query = `
       SELECT
         segments.date,
-        segments.conversion_action_name,
-        segments.conversion_action,
         campaign.id,
         campaign.name,
         metrics.conversions,
         metrics.conversions_value,
         metrics.cost_micros,
         metrics.clicks
-      FROM conversion_action
+      FROM campaign
       WHERE segments.date BETWEEN '${startDateStr}' AND '${endDateStr}'
+        AND campaign.status = 'ENABLED'
         AND metrics.conversions > 0
       ORDER BY segments.date DESC, metrics.conversions DESC
     `;
@@ -1112,7 +1122,7 @@ export async function fetchGoogleAdsConversions(
 
     if (results.length > 0) {
       for (const row of results) {
-        const conversionName = row.segments?.conversionActionName || row.segments?.conversion_action_name || 'Unknown Conversion';
+        const conversionName = 'All conversions';
         const date = row.segments?.date || '';
         const campaignName = row.campaign?.name || 'Unknown Campaign';
         const conversionsCount = parseFloat(row.metrics?.conversions || '0');

@@ -138,7 +138,8 @@ export default function AssignClientToAgencyModal({
                             </div>
                           )}
                           <div className="text-xs text-gray-500 mt-1">
-                            {agency.memberCount} member{agency.memberCount !== 1 ? "s" : ""}
+                            {agency.memberCount} member{agency.memberCount !== 1 ? "s" : ""} •{" "}
+                            {agency.clientCount ?? 0} client{(agency.clientCount ?? 0) !== 1 ? "s" : ""}
                           </div>
                         </div>
                         <button

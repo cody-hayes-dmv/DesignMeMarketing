@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import Sidebar from "./Sidebar";
 import NotificationBell from "./NotificationBell";
+import AgencyOnboardingModal from "./AgencyOnboardingModal";
 import api from "@/lib/api";
 import { logout } from "@/store/slices/authSlice";
 import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare, Menu, ChevronLeft, LogOut, Settings } from "lucide-react";
@@ -19,6 +20,28 @@ interface AgencyMe {
   /** "trial" = No Charge during 7 days trial */
   billingType?: string | null;
   trialDaysLeft?: number | null;
+  onboardingCompleted?: boolean;
+  website?: string | null;
+  industry?: string | null;
+  agencySize?: string | null;
+  numberOfClients?: number | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  contactJobTitle?: string | null;
+  streetAddress?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string | null;
+  onboardingData?: {
+    referralSource?: string;
+    referralSourceOther?: string;
+    primaryGoals?: string[];
+    primaryGoalsOther?: string;
+    currentTools?: string;
+    submittedAt?: string;
+  } | null;
 }
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
@@ -249,6 +272,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const isTrialBilling = agencyMe?.billingType === "trial";
   const trialDaysLeft = agencyMe?.trialDaysLeft ?? 0;
   const trialActive = isAgencyRoute && isTrialBilling && trialDaysLeft > 0 && !trialExpired;
+  const showAgencyOnboardingModal =
+    isAgencyRoute &&
+    user?.role === "AGENCY" &&
+    agencyMe?.id &&
+    agencyMe?.onboardingCompleted === false;
 
   // Restrict access when trial expired: only Subscription page is allowed
   if (trialExpired && !onSubscriptionPage) {
@@ -310,6 +338,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
           {children}
         </div>
       </div>
+      <AgencyOnboardingModal
+        open={!!showAgencyOnboardingModal}
+        initialData={agencyMe}
+        onSaved={() => {
+          refetchAgencyMe();
+        }}
+      />
     </div>
   );
 };

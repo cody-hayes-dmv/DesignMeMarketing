@@ -119,7 +119,7 @@ interface ClientReport {
     traffic: number;
   };
   clientId: string;
-  scheduleKind?: "seo" | "local_map" | "campaign_wins";
+  scheduleKind?: "seo" | "local_map" | "ppc" | "campaign_wins";
 }
 
 type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
@@ -279,6 +279,7 @@ const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
 };
 
 const LOCAL_MAP_SCHEDULE_PREFIX = "[LOCAL_MAP] ";
+const PPC_SCHEDULE_PREFIX = "[PPC] ";
 
 const parseLocalMapGridData = (raw: string): Array<{ rank: number | null }> => {
   try {
@@ -843,6 +844,7 @@ const ClientDashboardPage: React.FC = () => {
     fetchingSummary: false,
   });
   const [sendingReport, setSendingReport] = useState(false);
+  const [sendingPpcReport, setSendingPpcReport] = useState(false);
   const [expandedPageUrls, setExpandedPageUrls] = useState<Set<string>>(new Set());
   const [pageKeywords, setPageKeywords] = useState<Record<string, Array<{
     keyword: string;
@@ -869,7 +871,15 @@ const ClientDashboardPage: React.FC = () => {
   const [viewClientForm, setViewClientForm] = useState(EMPTY_CLIENT_FORM);
   const [viewClientSaving, setViewClientSaving] = useState(false);
   const [clientReportFrequency, setClientReportFrequency] = useState<
-    "weekly" | "biweekly" | "monthly" | "campaign_wins" | "local_map_biweekly" | "local_map_monthly"
+    | "weekly"
+    | "biweekly"
+    | "monthly"
+    | "ppc_weekly"
+    | "ppc_biweekly"
+    | "ppc_monthly"
+    | "campaign_wins"
+    | "local_map_biweekly"
+    | "local_map_monthly"
   >("monthly");
   const [clientReportDayOfWeek, setClientReportDayOfWeek] = useState(1); // Monday
   const [clientReportDayOfMonth, setClientReportDayOfMonth] = useState(1);
@@ -3826,6 +3836,9 @@ const ClientDashboardPage: React.FC = () => {
           typeof serverReport?.scheduleEmailSubject === "string"
           && String(serverReport.scheduleEmailSubject).startsWith(LOCAL_MAP_SCHEDULE_PREFIX)
             ? "local_map"
+            : typeof serverReport?.scheduleEmailSubject === "string"
+            && String(serverReport.scheduleEmailSubject).startsWith(PPC_SCHEDULE_PREFIX)
+              ? "ppc"
             : "seo",
       };
     }
@@ -3901,17 +3914,27 @@ const ClientDashboardPage: React.FC = () => {
       } else {
         const isLocalMapSchedule =
           clientReportFrequency === "local_map_biweekly" || clientReportFrequency === "local_map_monthly";
+        const isPpcSchedule =
+          clientReportFrequency === "ppc_weekly" ||
+          clientReportFrequency === "ppc_biweekly" ||
+          clientReportFrequency === "ppc_monthly";
         const resolvedFrequency =
           clientReportFrequency === "local_map_biweekly"
             ? "biweekly"
             : clientReportFrequency === "local_map_monthly"
+            ? "monthly"
+            : clientReportFrequency === "ppc_weekly"
+            ? "weekly"
+            : clientReportFrequency === "ppc_biweekly"
+            ? "biweekly"
+            : clientReportFrequency === "ppc_monthly"
             ? "monthly"
             : clientReportFrequency;
 
         // 1) Create or update schedule for this client
         await api.post(`/seo/reports/${clientId}/schedule`, {
           frequency: resolvedFrequency,
-          reportKind: isLocalMapSchedule ? "local_map" : "seo",
+          reportKind: isLocalMapSchedule ? "local_map" : isPpcSchedule ? "ppc" : "seo",
           dayOfWeek: resolvedFrequency !== "monthly" ? clientReportDayOfWeek : undefined,
           dayOfMonth: resolvedFrequency === "monthly" ? clientReportDayOfMonth : undefined,
           timeOfDay: clientReportTimeOfDay,
@@ -3920,8 +3943,8 @@ const ClientDashboardPage: React.FC = () => {
           isActive: true,
         }, { timeout: 15000 });
 
-        // 2) Generate initial SEO report immediately; Local Map schedules are sent after map-run days.
-        if (!isLocalMapSchedule) {
+        // 2) Generate initial SEO report immediately; Local Map and PPC schedules are handled by scheduler runs.
+        if (!isLocalMapSchedule && !isPpcSchedule) {
           await api.post(`/seo/reports/${clientId}/generate`, {
             period: resolvedFrequency,
           }, { timeout: 90000 });
@@ -3930,6 +3953,8 @@ const ClientDashboardPage: React.FC = () => {
         toast.success(
           isLocalMapSchedule
             ? "Local Map report schedule saved successfully"
+            : isPpcSchedule
+            ? "PPC report schedule saved successfully"
             : "Report created and schedule saved successfully"
         );
       }
@@ -4058,6 +4083,30 @@ const ClientDashboardPage: React.FC = () => {
       setSendingReport(false);
     }
   }, [singleReportForClient, loadReport, includedClientReadOnly]);
+
+  const handleSendPpcReportNow = useCallback(async () => {
+    if (!clientId) {
+      toast.error("Client ID is missing");
+      return;
+    }
+    if (!canModifyClientSettings) {
+      toast.error("Included clients are view-only.");
+      return;
+    }
+    try {
+      setSendingPpcReport(true);
+      await api.post(`/seo/reports/${clientId}/ppc/send`, {});
+      toast.success("PPC report sent successfully");
+    } catch (error: any) {
+      console.error("Failed to send PPC report", error);
+      const msg =
+        error?.response?.data?.message ||
+        "Failed to send PPC report. Create a PPC schedule with recipients first.";
+      toast.error(msg);
+    } finally {
+      setSendingPpcReport(false);
+    }
+  }, [clientId, canModifyClientSettings]);
 
   const handleDeleteReport = useCallback(async () => {
     if (includedClientReadOnly) return;
@@ -4341,6 +4390,15 @@ const ClientDashboardPage: React.FC = () => {
       setGoogleAdsConnecting(true);
       const res = await api.get(`/clients/${clientId}/google-ads/auth`, { params: { popup: '1' } });
       const authUrl = res.data?.authUrl;
+      const redirectUri = res.data?.redirectUri;
+      const oauthClientId = res.data?.oauthClientId;
+      if (redirectUri) {
+        console.info("[Google Ads] OAuth redirect URI:", redirectUri);
+        toast.success(`Google Ads callback: ${redirectUri}`, { duration: 5000 });
+      }
+      if (oauthClientId) {
+        console.info("[Google Ads] OAuth client ID:", oauthClientId);
+      }
       if (authUrl) {
         const width = 500;
         const height = 600;
@@ -7003,13 +7061,23 @@ const ClientDashboardPage: React.FC = () => {
                                 </p>
                               )}
                             </div>
-                            <button
-                              onClick={handleDisconnectGoogleAds}
-                              disabled={googleAdsConnecting}
-                              className="text-sm text-red-600 hover:text-red-700 disabled:opacity-60"
-                            >
-                              Disconnect
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={handleSendPpcReportNow}
+                                disabled={sendingPpcReport || googleAdsConnecting || !canModifyClientSettings}
+                                className="text-sm text-emerald-700 hover:text-emerald-800 disabled:opacity-60"
+                                title={canModifyClientSettings ? "Send PPC report now" : "Included clients are view-only"}
+                              >
+                                {sendingPpcReport ? "Sending..." : "Send PPC Report Now"}
+                              </button>
+                              <button
+                                onClick={handleDisconnectGoogleAds}
+                                disabled={googleAdsConnecting}
+                                className="text-sm text-red-600 hover:text-red-700 disabled:opacity-60"
+                              >
+                                Disconnect
+                              </button>
+                            </div>
                           </div>
                           <nav className="flex space-x-2 border-b border-gray-200 mb-4">
                             {[
@@ -10439,10 +10507,16 @@ const ClientDashboardPage: React.FC = () => {
                                     className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                                       singleReportForClient.scheduleKind === "local_map"
                                         ? "bg-violet-100 text-violet-700"
+                                        : singleReportForClient.scheduleKind === "ppc"
+                                        ? "bg-sky-100 text-sky-700"
                                         : "bg-emerald-100 text-emerald-700"
                                     }`}
                                   >
-                                    {singleReportForClient.scheduleKind === "local_map" ? "Local Map" : "SEO"}
+                                    {singleReportForClient.scheduleKind === "local_map"
+                                      ? "Local Map"
+                                      : singleReportForClient.scheduleKind === "ppc"
+                                      ? "PPC"
+                                      : "SEO"}
                                   </span>
                                   {serverReport?.campaignWinsEnabled ? (
                                     <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[11px] font-semibold">
@@ -10536,6 +10610,9 @@ const ClientDashboardPage: React.FC = () => {
                             | "weekly"
                             | "biweekly"
                             | "monthly"
+                            | "ppc_weekly"
+                            | "ppc_biweekly"
+                            | "ppc_monthly"
                             | "campaign_wins"
                             | "local_map_biweekly"
                             | "local_map_monthly"
@@ -10546,6 +10623,9 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="weekly">Weekly</option>
                       <option value="biweekly">Biweekly</option>
                       <option value="monthly">Monthly</option>
+                      <option value="ppc_weekly">PPC - Weekly</option>
+                      <option value="ppc_biweekly">PPC - Biweekly</option>
+                      <option value="ppc_monthly">PPC - Monthly</option>
                       <option value="local_map_biweekly">Local Map Rankings - Biweekly</option>
                       <option value="local_map_monthly">Local Map Rankings - Monthly</option>
                       <option value="campaign_wins">Campaign Wins Report</option>
@@ -10562,7 +10642,8 @@ const ClientDashboardPage: React.FC = () => {
                   )}
                   {clientReportFrequency !== "campaign_wins" &&
                   clientReportFrequency !== "monthly" &&
-                  clientReportFrequency !== "local_map_monthly" ? (
+                  clientReportFrequency !== "local_map_monthly" &&
+                  clientReportFrequency !== "ppc_monthly" ? (
                     <div>
                       <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Week</label>
                       <select
@@ -10579,7 +10660,7 @@ const ClientDashboardPage: React.FC = () => {
                         )}
                       </select>
                     </div>
-                  ) : clientReportFrequency === "monthly" || clientReportFrequency === "local_map_monthly" ? (
+                  ) : clientReportFrequency === "monthly" || clientReportFrequency === "local_map_monthly" || clientReportFrequency === "ppc_monthly" ? (
                     <div>
                       <label className="block text-sm font-semibold text-amber-800 mb-2">Day of Month</label>
                       <input
@@ -10648,6 +10729,8 @@ const ClientDashboardPage: React.FC = () => {
                         ? "Save Campaign Wins"
                         : clientReportFrequency.startsWith("local_map_")
                         ? "Save Local Map Schedule"
+                        : clientReportFrequency.startsWith("ppc_")
+                        ? "Save PPC Schedule"
                         : "Create Report"}
                     </button>
                   </div>

@@ -114,15 +114,15 @@ interface SubscriptionData {
 }
 
 const defaultSubscription: SubscriptionData = {
-  currentPlan: "starter",
-  currentPlanPrice: 297,
-  nextBillingDate: "2026-03-03",
-  paymentMethod: { last4: "4242", brand: "Visa" },
+  currentPlan: "solo",
+  currentPlanPrice: null,
+  nextBillingDate: "",
+  paymentMethod: null,
   usage: {
-    clientDashboards: { used: 8, limit: 10 },
-    keywordsTracked: { used: 387, limit: 500 },
-    researchCredits: { used: 87, limit: 150 },
-    teamMembers: { used: 2, limit: 2 },
+    clientDashboards: { used: 0, limit: 0 },
+    keywordsTracked: { used: 0, limit: 0 },
+    researchCredits: { used: 0, limit: 0 },
+    teamMembers: { used: 0, limit: 0 },
   },
 };
 
@@ -149,7 +149,7 @@ const SubscriptionPage = () => {
     setData({
       currentPlan: (resData.currentPlan as string) ?? defaultSubscription.currentPlan,
       currentPlanPrice: (resData.currentPlanPrice as number | null) ?? defaultSubscription.currentPlanPrice,
-      nextBillingDate: (resData.nextBillingDate as string) ?? defaultSubscription.nextBillingDate,
+      nextBillingDate: (resData.nextBillingDate as string) ?? "",
       paymentMethod,
       trialEndsAt: (resData.trialEndsAt as string | null) ?? null,
       trialDaysLeft: (resData.trialDaysLeft as number | null) ?? null,
@@ -378,6 +378,14 @@ const SubscriptionPage = () => {
     : "N/A";
   const hasTrial = data.trialDaysLeft != null && data.trialDaysLeft > 0;
   const trialExpired = data.trialExpired === true;
+  const trialEndsFormatted =
+    hasTrial && data.trialEndsAt
+      ? new Date(data.trialEndsAt).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+      : null;
   const billingManagedByAdmin = data.billingType === "custom";
   // No charge during 7-day trial or Free account: only "Activate Subscription" is allowed; all other billing buttons disabled.
   const isTrialFreeTier =
@@ -524,6 +532,11 @@ const SubscriptionPage = () => {
                 <div>
                   <p className="text-sm font-medium text-gray-500">Next Billing</p>
                   <p className="text-xl font-bold text-gray-900">{nextBillingFormatted}</p>
+                  {trialEndsFormatted && (
+                    <p className="mt-1 text-xs font-medium text-amber-700">
+                      Trial ends on {trialEndsFormatted}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Payment Method</p>

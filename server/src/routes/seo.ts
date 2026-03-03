@@ -5,9 +5,10 @@ import { prisma } from "../lib/prisma.js";
 import { authenticateToken, optionalAuthenticateToken, getJwtSecret } from "../middleware/auth.js";
 import { requireAgencyTrialNotExpired } from "../middleware/requireAgencyTrialNotExpired.js";
 import jwt from "jsonwebtoken";
-import { getAgencyTierContext, canAddTargetKeyword, hasResearchCredits, useResearchCredits } from "../lib/agencyLimits.js";
+import { getAgencyTierContext, canAddKeywords, canAddTargetKeyword, hasResearchCredits, useResearchCredits } from "../lib/agencyLimits.js";
 import { getTierConfig, getRankRefreshIntervalMs, getAiRefreshIntervalMs } from "../lib/tiers.js";
 import { syncAgencyTierFromStripe } from "../lib/stripeTierSync.js";
+import { getStripe } from "../lib/stripe.js";
 import {
   buildReportEmailSubject,
   normalizeReportPeriod,
@@ -3225,6 +3226,14 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Keyword already exists for this client" });
     }
 
+    const tierCtx = await getAgencyTierContext(req.user.userId, req.user.role);
+    const keywordLimitCheck = canAddKeywords(tierCtx, clientId, 1);
+    if (!keywordLimitCheck.allowed) {
+      return res.status(403).json({
+        message: keywordLimitCheck.message || "Keyword limit reached for your plan.",
+      });
+    }
+
     // Fetch data from DataForSEO if requested
     let serpData: any = null;
     let serpRankData: any = null;
@@ -5341,6 +5350,133 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
   }
 });
 
+// AI Search Visibility for direct domain search (no GA4 required).
+// Uses DataForSEO AI Optimization APIs to return best-effort platform mentions and cited sources.
+router.get("/ai-search-visibility-any", authenticateToken, async (req, res) => {
+  try {
+    const rawDomain = String(req.query.domain || "").trim();
+    if (!rawDomain) {
+      return res.status(400).json({ message: "Domain is required" });
+    }
+    const normalizeDomain = (d: string) =>
+      d.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0].toLowerCase().trim();
+    const domain = normalizeDomain(rawDomain);
+    if (!domain) {
+      return res.status(400).json({ message: "Valid domain is required" });
+    }
+
+    const locationCode = Number(req.query.locationCode) || 2840;
+    const languageCode = typeof req.query.languageCode === "string" ? req.query.languageCode : "en";
+
+    const [aggregated, searchMentions] = await Promise.all([
+      fetchAiAggregatedMetrics(domain, "domain", locationCode, languageCode).catch(() => null),
+      fetchAiSearchMentions(domain, "domain", locationCode, languageCode, 100).catch(() => []),
+    ]);
+
+    const platformMap: Record<string, { mentions: number; aiSearchVol: number }> = {};
+    const addToPlatform = (key: string, mentions: number, aiSearchVol: number) => {
+      if (!platformMap[key]) platformMap[key] = { mentions: 0, aiSearchVol: 0 };
+      platformMap[key].mentions += Math.max(0, Number(mentions || 0));
+      platformMap[key].aiSearchVol += Math.max(0, Number(aiSearchVol || 0));
+    };
+    const normalizePlatformKey = (value: string) => {
+      const v = String(value || "").toLowerCase();
+      if (v.includes("chat_gpt") || v.includes("chatgpt")) return "chatgpt";
+      if (v.includes("gemini")) return "gemini";
+      if (v.includes("google")) return "google_ai";
+      if (v.includes("perplexity")) return "perplexity";
+      if (v.includes("copilot")) return "copilot";
+      return "other";
+    };
+
+    const platformArr = Array.isArray((aggregated as any)?.total?.platform) ? (aggregated as any).total.platform : [];
+    for (const p of platformArr) {
+      const key = normalizePlatformKey(String(p?.key || ""));
+      addToPlatform(key, Number(p?.mentions || 0), Number(p?.ai_search_volume || 0));
+    }
+
+    // Fallback derivation from search mentions when aggregated metrics are sparse.
+    if (Object.keys(platformMap).length === 0 && Array.isArray(searchMentions) && searchMentions.length > 0) {
+      for (const item of searchMentions as any[]) {
+        const platformKey = normalizePlatformKey(String(item?.platform || ""));
+        const sources = Array.isArray(item?.sources) ? item.sources : [];
+        const mentionCount = sources.filter((s: any) => {
+          const src = normalizeDomain(String(s?.domain || ""));
+          return src === domain || src.endsWith(`.${domain}`) || domain.endsWith(`.${src}`);
+        }).length || 1;
+        addToPlatform(platformKey, mentionCount, Number(item?.ai_search_volume || 0));
+      }
+    }
+
+    const rowsFromPlatforms = [
+      { key: "chatgpt", name: "ChatGPT" },
+      { key: "gemini", name: "Gemini" },
+      { key: "google_ai", name: "Google AI" },
+      { key: "perplexity", name: "Perplexity" },
+      { key: "copilot", name: "Copilot" },
+    ]
+      .map(({ key, name }) => ({
+        name,
+        visibility: 0,
+        mentions: platformMap[key]?.mentions ?? 0,
+        citedPages: 0,
+      }))
+      .filter((r) => r.mentions > 0);
+
+    const totalMentions = rowsFromPlatforms.reduce((s, r) => s + (r.mentions || 0), 0);
+
+    const platformCitedPages: Record<string, Set<string>> = {};
+    const sourceCounts = new Map<string, number>();
+    for (const item of (searchMentions as any[]) || []) {
+      const platformKey = normalizePlatformKey(String(item?.platform || ""));
+      if (!platformCitedPages[platformKey]) platformCitedPages[platformKey] = new Set<string>();
+      const sources = Array.isArray(item?.sources) ? item.sources : [];
+      for (const s of sources) {
+        const sourceDomain = normalizeDomain(String(s?.domain || ""));
+        if (!sourceDomain) continue;
+        sourceCounts.set(sourceDomain, (sourceCounts.get(sourceDomain) ?? 0) + 1);
+        // Count only pages that cite the requested domain for "Cited Pages".
+        if (sourceDomain === domain || sourceDomain.endsWith(`.${domain}`) || domain.endsWith(`.${sourceDomain}`)) {
+          const sourceUrl = String(s?.url || s?.page_url || s?.link || "").trim();
+          if (sourceUrl) {
+            platformCitedPages[platformKey].add(sourceUrl);
+          }
+        }
+      }
+    }
+
+    const rows = rowsFromPlatforms.map((r) => {
+      const key = normalizePlatformKey(r.name);
+      const citedPages = platformCitedPages[key]?.size ?? 0;
+      return {
+        ...r,
+        citedPages,
+        visibility: totalMentions > 0 ? Math.round((r.mentions / totalMentions) * 100) : 0,
+      };
+    });
+    const topCitedSources = Array.from(sourceCounts.entries())
+      .map(([sourceDomain, mentions]) => ({ domain: sourceDomain, mentions }))
+      .sort((a, b) => b.mentions - a.mentions)
+      .slice(0, 20);
+
+    const payload = {
+      rows,
+      topCitedSources,
+      distributionByCountry: [],
+      otherSerpFeaturesCount: 0,
+      meta: {
+        ga4Connected: false,
+        sourceMode: "direct_domain_dataforseo",
+        targetDomain: domain,
+      },
+    };
+    return res.json(enforceAiVisibilityAccuracy(payload, "ai_search_visibility"));
+  } catch (error: any) {
+    console.error("AI Search visibility (direct domain) error:", error);
+    return res.status(500).json({ message: "Failed to fetch AI Search Visibility for this domain" });
+  }
+});
+
 // DataForSEO AI Optimization API helpers
 async function fetchAiAggregatedMetrics(
   target: string,
@@ -7135,7 +7271,14 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       return res.json(cachedClientOverview);
     }
 
-    const [trafficSources, historyRows, topKeywordsDb, keywordsWithSerpFeatures, backlinks, topPagesPaid, targetKeywordsWithIntent] = await Promise.all([
+    const normalizedClientDomain = String(client.domain || "")
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/\/.*$/, "")
+      .toLowerCase()
+      .trim();
+
+    const [trafficSources, historyRows, topKeywordsDb, keywordsWithSerpFeatures, backlinks, topPagesPaid, targetKeywordsWithIntent, measuredHistoryRows] = await Promise.all([
       prisma.trafficSource.findMany({ where: { clientId } }),
       prisma.rankedKeywordsHistory.findMany({
         where: { clientId },
@@ -7180,6 +7323,12 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
         select: { keyword: true, keywordInfo: true },
         take: 500,
       }),
+      normalizedClientDomain
+        ? fetchHistoricalRankOverviewFromDataForSEO(normalizedClientDomain).catch((err: any) => {
+            console.warn("[domain-overview] historical rank fetch failed:", err?.message || err);
+            return [];
+          })
+        : Promise.resolve([]),
     ]);
 
     const findTrafficByName = (matcher: RegExp) => trafficSources.find((ts) => matcher.test((ts.name || "").toLowerCase()));
@@ -7267,9 +7416,44 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       }
     }
 
+    const parseNum = (value: unknown): number => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const monthlyTrafficByKey = new Map<string, number>();
+    for (const h of measuredHistoryRows || []) {
+      const y = Number((h as any)?.year);
+      const m = Number((h as any)?.month);
+      if (!Number.isFinite(y) || !Number.isFinite(m) || y <= 0 || m <= 0) continue;
+      const key = `${y}-${String(m).padStart(2, "0")}`;
+      const etv =
+        parseNum((h as any)?.rawData?.metrics?.organic?.etv) ||
+        parseNum((h as any)?.metrics?.organic?.etv) ||
+        parseNum((h as any)?.organic?.etv);
+      monthlyTrafficByKey.set(key, Math.max(0, Math.round(etv)));
+    }
+
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1;
+    const currentMonthKey = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
+    const currentTrafficMeasured = monthlyTrafficByKey.get(currentMonthKey);
+    const latestMeasuredTraffic = (() => {
+      if (monthlyTrafficByKey.size === 0) return null;
+      const sorted = Array.from(monthlyTrafficByKey.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, value]) => value)
+        .filter((value) => Number.isFinite(value) && value > 0);
+      return sorted.length > 0 ? sorted[sorted.length - 1] : null;
+    })();
+    const measuredTrafficCurrent =
+      typeof currentTrafficMeasured === "number" && currentTrafficMeasured > 0
+        ? currentTrafficMeasured
+        : latestMeasuredTraffic;
+    if (typeof measuredTrafficCurrent === "number" && measuredTrafficCurrent > 0) {
+      organicTraffic = measuredTrafficCurrent;
+    }
     const historyByKey: Record<string, { year: number; month: number; totalKeywords: number; top3: number; top10: number; page2: number; pos21_30: number; pos31_50: number; pos51Plus: number }> = {};
     historyRows.forEach((r) => {
       const key = `${r.year}-${String(r.month).padStart(2, "0")}`;
@@ -7573,12 +7757,50 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
           };
         });
 
+    const organicTrafficOverTimeSeries = monthlyTrafficByKey.size > 0
+      ? organicKeywordsOverTime.map((m) => {
+          const key = `${m.year}-${String(m.month).padStart(2, "0")}`;
+          const isCurrent = m.year === currentYear && m.month === currentMonth;
+          return {
+            month: key,
+            traffic: monthlyTrafficByKey.get(key) ?? (isCurrent ? Math.round(organicTraffic) : 0),
+          };
+        })
+      : strictAccuracy
+      ? organicKeywordsOverTime.map((m) => ({
+          month: `${m.year}-${String(m.month).padStart(2, "0")}`,
+          // Strict accuracy: no modeled historical traffic without true month-level source data.
+          traffic: 0,
+        }))
+      : (() => {
+          const totalKeywordsSum = organicKeywordsOverTime.reduce((s, m) => s + m.keywords, 0);
+          if (totalKeywordsSum > 0) {
+            return organicKeywordsOverTime.map((m) => ({
+              month: `${m.year}-${String(m.month).padStart(2, "0")}`,
+              traffic: Math.round((organicTraffic * m.keywords) / totalKeywordsSum),
+            }));
+          }
+          return organicKeywordsOverTime.map((m) => ({
+            month: `${m.year}-${String(m.month).padStart(2, "0")}`,
+            traffic: Math.round(organicTraffic / 12),
+          }));
+        })();
+
+    const latestOrganicTraffic30d =
+      organicTrafficOverTimeSeries.length > 0
+        ? Number(organicTrafficOverTimeSeries[organicTrafficOverTimeSeries.length - 1]?.traffic ?? 0)
+        : Math.round(organicTraffic);
+    const latestOrganicKeywords30d =
+      organicKeywordsOverTime.length > 0
+        ? Number(organicKeywordsOverTime[organicKeywordsOverTime.length - 1]?.keywords ?? organicKeywords)
+        : organicKeywords;
+
     const response = {
       client: { id: client.id, name: client.name, domain: client.domain },
       metrics: {
         organicSearch: {
-          keywords: organicKeywords,
-          traffic: Math.round(organicTraffic),
+          keywords: latestOrganicKeywords30d,
+          traffic: latestOrganicTraffic30d,
           trafficCost: trafficCost,
         },
         paidSearch: {
@@ -7593,27 +7815,12 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
         authorityScore,
         trafficShare: strictAccuracy ? 0 : (trafficTotal > 0 ? Math.round((organicTraffic / trafficTotal) * 100) : 0),
       },
+      metricsPeriodDays: 30,
+      metricsPeriodLabel: "Last 30 days",
+      organicTrafficSourceLabel: monthlyTrafficByKey.size > 0 ? "Measured (DataForSEO ETV)" : "Estimated",
       marketTrendsChannels,
       backlinksList,
-      organicTrafficOverTime: strictAccuracy
-        ? organicKeywordsOverTime.map((m) => ({
-            month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-            // Strict accuracy: no modeled historical traffic without true month-level source data.
-            traffic: 0,
-          }))
-        : (() => {
-            const totalKeywordsSum = organicKeywordsOverTime.reduce((s, m) => s + m.keywords, 0);
-            if (totalKeywordsSum > 0) {
-              return organicKeywordsOverTime.map((m) => ({
-                month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-                traffic: Math.round((organicTraffic * m.keywords) / totalKeywordsSum),
-              }));
-            }
-            return organicKeywordsOverTime.map((m) => ({
-              month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-              traffic: Math.round(organicTraffic / 12),
-            }));
-          })(),
+      organicTrafficOverTime: organicTrafficOverTimeSeries,
       organicKeywordsOverTime,
       organicPositionsOverTime,
       positionDistribution: {
@@ -7731,7 +7938,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
 router.get("/domain-overview-any", authenticateToken, async (req, res) => {
   try {
     // Direct domain search should return only measured values (no extrapolated fallback math).
-    const strictAccuracy = false;
+    const strictAccuracy = true;
     const forceLive = coerceBoolean(req.query.live);
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
@@ -8068,20 +8275,42 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
 
     const currentMonthKey = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
     const currentTrafficMeasured = monthlyTrafficByKey.get(currentMonthKey);
+    const latestMeasuredTraffic = (() => {
+      if (monthlyTrafficByKey.size === 0) return null;
+      const sorted = Array.from(monthlyTrafficByKey.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, value]) => value)
+        .filter((value) => Number.isFinite(value) && value > 0);
+      return sorted.length > 0 ? sorted[sorted.length - 1] : null;
+    })();
     const organicTrafficCurrent =
       typeof currentTrafficMeasured === "number" && currentTrafficMeasured > 0
         ? currentTrafficMeasured
-        : scaledTraffic;
+        : strictAccuracy
+          ? (latestMeasuredTraffic ?? 0)
+          : scaledTraffic;
+
+    const latestOrganicTraffic30d =
+      organicTrafficOverTime.length > 0
+        ? Number(organicTrafficOverTime[organicTrafficOverTime.length - 1]?.traffic ?? organicTrafficCurrent)
+        : organicTrafficCurrent;
+    const latestOrganicKeywords30d =
+      organicKeywordsOverTime.length > 0
+        ? Number(organicKeywordsOverTime[organicKeywordsOverTime.length - 1]?.keywords ?? rankedKwData.totalCount)
+        : rankedKwData.totalCount;
 
     const result = {
       client: { id: "external", name: domain, domain },
       metrics: {
-        organicSearch: { keywords: rankedKwData.totalCount, traffic: organicTrafficCurrent, trafficCost: 0 },
+        organicSearch: { keywords: latestOrganicKeywords30d, traffic: latestOrganicTraffic30d, trafficCost: 0 },
         paidSearch: { keywords: 0, traffic: 0, trafficCost: 0 },
         backlinks: { referringDomains: referringDomainsCount, totalBacklinks },
         authorityScore: Math.round(avgDr),
         trafficShare: 0,
       },
+      metricsPeriodDays: 30,
+      metricsPeriodLabel: "Last 30 days",
+      organicTrafficSourceLabel: monthlyTrafficByKey.size > 0 ? "Measured (DataForSEO ETV)" : "Estimated",
       marketTrendsChannels: [
         { name: "Direct", value: 0, pct: 0 },
         { name: "AI traffic", value: 0, pct: 0 },
@@ -8508,7 +8737,7 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
     const { clientId } = req.params;
     const scheduleData = z.object({
       frequency: z.enum(["weekly", "biweekly", "monthly"]),
-      reportKind: z.enum(["seo", "local_map"]).optional().default("seo"),
+      reportKind: z.enum(["seo", "local_map", "ppc"]).optional().default("seo"),
       dayOfWeek: z.number().min(0).max(6).optional(),
       dayOfMonth: z.number().min(1).max(31).optional(),
       timeOfDay: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).default("09:00"),
@@ -8550,10 +8779,17 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const { LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX } = await import("../lib/reportScheduler.js");
+    const { LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX, PPC_SCHEDULE_SUBJECT_PREFIX } = await import("../lib/reportScheduler.js");
     const isLocalMapSchedule = reportKind === "local_map";
+    const isPpcSchedule = reportKind === "ppc";
     if (isLocalMapSchedule && scheduleData.frequency === "weekly") {
       return res.status(400).json({ message: "Local Map schedules support biweekly or monthly only." });
+    }
+    if (
+      isPpcSchedule &&
+      (!client.googleAdsRefreshToken || !client.googleAdsCustomerId || !client.googleAdsConnectedAt)
+    ) {
+      return res.status(400).json({ message: "Google Ads must be connected before scheduling PPC reports." });
     }
 
     // Calculate next run time
@@ -8572,10 +8808,17 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
         frequency: scheduleFields.frequency,
         ...(isLocalMapSchedule
           ? { emailSubject: { startsWith: LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX } }
+          : isPpcSchedule
+          ? { emailSubject: { startsWith: PPC_SCHEDULE_SUBJECT_PREFIX } }
           : {
               OR: [
                 { emailSubject: null },
-                { emailSubject: { not: { startsWith: LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX } } },
+                {
+                  AND: [
+                    { emailSubject: { not: { startsWith: LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX } } },
+                    { emailSubject: { not: { startsWith: PPC_SCHEDULE_SUBJECT_PREFIX } } },
+                  ],
+                },
               ],
             }),
       }
@@ -8583,6 +8826,8 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
 
     const storedEmailSubject = isLocalMapSchedule
       ? `${LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX}${(scheduleFields.emailSubject || "").trim()}`
+      : isPpcSchedule
+      ? `${PPC_SCHEDULE_SUBJECT_PREFIX}${(scheduleFields.emailSubject || "").trim()}`
       : scheduleFields.emailSubject;
 
     const schedule = existing
@@ -8608,7 +8853,7 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
         });
 
     // Update report status to "scheduled" if report exists and schedule is active
-    if (schedule.isActive) {
+    if (schedule.isActive && !isLocalMapSchedule && !isPpcSchedule) {
       const existingReport = await prisma.seoReport.findUnique({
         where: { clientId }
       });
@@ -9227,6 +9472,111 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
   } catch (error: any) {
     console.error("Send report error:", error);
     res.status(500).json({ message: error.message || "Internal server error" });
+  }
+});
+
+// Send PPC report immediately (without waiting for scheduler window)
+router.post("/reports/:clientId/ppc/send", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { recipients, emailSubject, period } = req.body ?? {};
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+
+    if (!hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    if (!client.googleAdsRefreshToken || !client.googleAdsCustomerId || !client.googleAdsConnectedAt) {
+      return res.status(400).json({ message: "Google Ads is not connected for this client" });
+    }
+
+    const { PPC_SCHEDULE_SUBJECT_PREFIX } = await import("../lib/reportScheduler.js");
+    const activePpcSchedule = await prisma.reportSchedule.findFirst({
+      where: {
+        clientId,
+        isActive: true,
+        emailSubject: { startsWith: PPC_SCHEDULE_SUBJECT_PREFIX },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    const recipientsList: string[] =
+      Array.isArray(recipients) && recipients.length > 0
+        ? normalizeEmailRecipients(recipients)
+        : normalizeEmailRecipients(activePpcSchedule?.recipients);
+
+    if (!recipientsList || recipientsList.length === 0) {
+      return res.status(400).json({ message: "No recipients specified for PPC report" });
+    }
+
+    const requestedPeriod = normalizeReportPeriod(String(period || activePpcSchedule?.frequency || "monthly"));
+    const { autoGeneratePpcReport, generatePpcReportEmailHtml, generatePpcReportPdfBuffer } = await import(
+      "../lib/reportScheduler.js"
+    );
+    const { sendEmail } = await import("../lib/email.js");
+
+    const ppcReport = await autoGeneratePpcReport(clientId, requestedPeriod);
+    const html = generatePpcReportEmailHtml(client.name, ppcReport);
+    const pdfBuffer = await generatePpcReportPdfBuffer(client.name, ppcReport);
+
+    const subjectFromSchedule = String(activePpcSchedule?.emailSubject || "")
+      .replace(PPC_SCHEDULE_SUBJECT_PREFIX, "")
+      .trim();
+    const resolvedSubject =
+      emailSubject ||
+      subjectFromSchedule ||
+      `PPC Report - ${buildReportEmailSubject(client.name, requestedPeriod)}`;
+
+    await Promise.all(
+      recipientsList.map((to: string) =>
+        sendEmail({
+          to,
+          subject: resolvedSubject,
+          html,
+          attachments: [
+            {
+              filename: `ppc-report-${client.name.replace(/\s+/g, "-").toLowerCase()}-${requestedPeriod}.pdf`,
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ],
+        })
+      )
+    );
+
+    return res.json({
+      message: "PPC report sent successfully",
+      recipients: recipientsList,
+      period: requestedPeriod,
+    });
+  } catch (error: any) {
+    console.error("Send PPC report error:", error);
+    return res.status(500).json({ message: error?.message || "Internal server error" });
   }
 });
 
@@ -11679,9 +12029,6 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
       clientsWithActiveManagedServices = new Set(msRows.map((r) => r.clientId)).size;
     }
 
-    const nextBilling = new Date();
-    nextBilling.setDate(nextBilling.getDate() + 26);
-
     const currentPlanPrice =
       tierCtx.tierConfig?.priceMonthlyUsd ?? (tierCtx.tierConfig?.id === "enterprise" ? null : 147);
 
@@ -11690,12 +12037,16 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     let billingType: string | null = null;
     let trialExpired = false;
     let accountActivated = false;
+    let stripeCustomerId: string | null = null;
+    let stripeSubscriptionId: string | null = null;
     if (tierCtx.agencyId) {
       const agency = await prisma.agency.findUnique({
         where: { id: tierCtx.agencyId },
-        select: { trialEndsAt: true, billingType: true, stripeCustomerId: true },
+        select: { trialEndsAt: true, billingType: true, stripeCustomerId: true, stripeSubscriptionId: true },
       });
       accountActivated = !!agency?.stripeCustomerId;
+      stripeCustomerId = agency?.stripeCustomerId ?? null;
+      stripeSubscriptionId = agency?.stripeSubscriptionId ?? null;
       if (agency?.trialEndsAt && agency.trialEndsAt > new Date()) {
         trialEndsAt = agency.trialEndsAt.toISOString();
         trialDaysLeft = Math.max(0, Math.ceil((agency.trialEndsAt.getTime() - Date.now()) / 86400000));
@@ -11707,14 +12058,79 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
         (agency?.billingType === "free" || agency?.billingType === "trial");
     }
 
+    // Resolve billing info from Stripe when available; otherwise leave as null.
+    // This avoids misleading placeholder values (e.g., fake dates/card 4242).
+    let nextBillingDate: string | null = null;
+    let paymentMethod: { last4: string; brand: string } | null = null;
+
+    // During trial/free, "next billing" should align with trial end date.
+    if (trialEndsAt && (billingType === "trial" || billingType === "free")) {
+      nextBillingDate = trialEndsAt.split("T")[0] ?? null;
+    }
+
+    const stripe = getStripe();
+    if (stripe && (stripeCustomerId || stripeSubscriptionId)) {
+      try {
+        let subscription: any = null;
+        if (stripeSubscriptionId) {
+          subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId, {
+            expand: ["default_payment_method"],
+          });
+        } else if (stripeCustomerId) {
+          const subs = await stripe.subscriptions.list({
+            customer: stripeCustomerId,
+            status: "all",
+            limit: 5,
+          });
+          subscription =
+            subs.data.find((s) => s.status === "active" || s.status === "trialing") ??
+            subs.data[0] ??
+            null;
+        }
+
+        if (subscription?.current_period_end) {
+          nextBillingDate = new Date(subscription.current_period_end * 1000).toISOString().split("T")[0];
+        }
+
+        let stripePm: any = null;
+        const subPm = subscription?.default_payment_method;
+        if (subPm && typeof subPm === "object") {
+          stripePm = subPm;
+        } else if (typeof subPm === "string") {
+          stripePm = await stripe.paymentMethods.retrieve(subPm);
+        }
+
+        if (!stripePm && stripeCustomerId) {
+          const customer: any = await stripe.customers.retrieve(stripeCustomerId, {
+            expand: ["invoice_settings.default_payment_method"],
+          });
+          const custPm = customer?.invoice_settings?.default_payment_method;
+          if (custPm && typeof custPm === "object") {
+            stripePm = custPm;
+          } else if (typeof custPm === "string") {
+            stripePm = await stripe.paymentMethods.retrieve(custPm);
+          }
+        }
+
+        if (stripePm?.card?.last4) {
+          paymentMethod = {
+            last4: String(stripePm.card.last4),
+            brand: String(stripePm.card.brand || "Card"),
+          };
+        }
+      } catch (stripeErr: any) {
+        console.warn("Failed to resolve Stripe billing details:", stripeErr?.message);
+      }
+    }
+
     res.json({
       currentPlan: tierCtx.tierConfig?.id ?? "solo",
       accountActivated,
       billingType: billingType ?? undefined,
       trialExpired: trialExpired || undefined,
       currentPlanPrice: currentPlanPrice ?? undefined,
-      nextBillingDate: nextBilling.toISOString().split("T")[0],
-      paymentMethod: { last4: "4242", brand: "Visa" },
+      nextBillingDate: nextBillingDate ?? undefined,
+      paymentMethod: paymentMethod ?? undefined,
       isBusinessTier: tierCtx.tierConfig?.type === "business",
       trialEndsAt,
       trialDaysLeft,
