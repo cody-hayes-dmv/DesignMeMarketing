@@ -62,6 +62,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/agency/financial-overview") return "Financial Overview";
     if (path === "/agency/clients") return "Clients";
     if (path === "/agency/tasks") return "Tasks";
+    if (path === "/agency/web-design") return "Web Design";
     if (path === "/agency/research" || path === "/agnecy/research" || path === "/admin/research" || path === "/superadmin/research") return "Research";
     if (path === "/agency/rankings") return "Rankings";
     if (path === "/agency/reports") return "Reports";
@@ -89,7 +90,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/specialist/tasks") return "Tasks";
     if (path === "/specialist/settings") return "Settings";
 
+    if (path === "/designer/web-design") return "Web Design";
+    if (path === "/designer/settings") return "Settings";
+
     if (path.startsWith("/client/dashboard")) return "Dashboard";
+    if (path.startsWith("/client/web-design")) return "Web Design";
     if (path === "/client/tasks") return "Tasks";
     if (path === "/client/settings") return "Settings";
     if (path === "/client/report" || path.startsWith("/client/report/")) return "Report";
@@ -106,6 +111,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
     const clientNavItems = [
       { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks", label: "Dashboard", icon: LayoutDashboard },
+      { path: firstClientId ? `/client/web-design/${firstClientId}` : "/client/tasks", label: "Web Design", icon: LayoutDashboard },
       { path: "/client/tasks", label: "Tasks", icon: CheckSquare },
       { path: "/client/settings", label: "Settings", icon: Settings },
     ];

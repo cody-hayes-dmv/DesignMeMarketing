@@ -73,6 +73,7 @@ const SettingsPage = () => {
     rankingAlerts: true,
     weeklyDigest: false,
     teamUpdates: true,
+    webDesign: true,
   };
   const [notificationSettings, setNotificationSettings] = useState(defaults);
   const [notificationSaving, setNotificationSaving] = useState(false);
@@ -122,13 +123,13 @@ const SettingsPage = () => {
   const [agenciesList, setAgenciesList] = useState<Array<{ id: string; name: string }>>([]);
 
   const tabs = [
-    { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
+    { id: "profile", label: "Profile", icon: User, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER", "SPECIALIST", "USER"] },
     { id: "enterprise-calculator", label: "Enterprise Calculator", icon: Calculator, roles: ["SUPER_ADMIN"] },
     { id: "ai-commands", label: "AI Commands", icon: Sparkles, roles: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
     { id: "agency", label: "Agency", icon: Building2, roles: ["AGENCY"] },
     { id: "templates", label: "Templates", icon: FileText, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY"] },
-    { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
-    { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"] },
+    { id: "notifications", label: "Notifications", icon: Bell, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER", "SPECIALIST", "USER"] },
+    { id: "security", label: "Security", icon: Shield, roles: ["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER", "SPECIALIST", "USER"] },
   ];
 
   // Fetch agency data on mount if user is an agency member
@@ -157,6 +158,7 @@ const SettingsPage = () => {
         rankingAlerts: user.notificationPreferences.rankingAlerts ?? true,
         weeklyDigest: user.notificationPreferences.weeklyDigest ?? false,
         teamUpdates: user.notificationPreferences.teamUpdates ?? true,
+        webDesign: user.notificationPreferences.webDesign ?? true,
       });
     }
   }, [user?.notificationPreferences]);
@@ -964,6 +966,8 @@ const SettingsPage = () => {
                           "Weekly summary of all projects"}
                         {key === "teamUpdates" &&
                           "Updates about team member activities"}
+                        {key === "webDesign" &&
+                          "Email and in-app notifications for web design project updates"}
                       </p>
                     </div>
                     <button

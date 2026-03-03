@@ -27,6 +27,7 @@ import {
   CreditCard,
   FolderPlus,
   MapPin,
+  PenTool,
   type LucideIcon,
 } from "lucide-react";
 
@@ -97,6 +98,8 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
           ? "Admin Panel"
           : user?.role === "SPECIALIST"
             ? "Specialist Panel"
+            : user?.role === "DESIGNER"
+              ? "Designer Panel"
             : user?.role
               ? `${user.role} Panel`
               : "Panel";
@@ -298,6 +301,20 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       path: "/specialist/settings",
       hasSubMenu: false,
       roles: ["SPECIALIST"],
+    },
+    {
+      icon: PenTool,
+      label: "Web Design",
+      path: "/designer/web-design",
+      hasSubMenu: false,
+      roles: ["DESIGNER"],
+    },
+    {
+      icon: Settings,
+      label: "Settings",
+      path: "/designer/settings",
+      hasSubMenu: false,
+      roles: ["DESIGNER"],
     },
   ];
 

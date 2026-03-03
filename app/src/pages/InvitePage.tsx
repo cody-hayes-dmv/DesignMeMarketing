@@ -52,6 +52,7 @@ const InvitePage = () => {
       return firstClientId ? `/client/dashboard/${encodeURIComponent(firstClientId)}` : "/login";
     }
     if (user.role === "SPECIALIST") return "/specialist/dashboard";
+    if (user.role === "DESIGNER") return "/designer/web-design";
     if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") return "/superadmin/dashboard";
     return "/agency/dashboard";
   };
@@ -128,7 +129,12 @@ const InvitePage = () => {
       await dispatch(checkAuth() as any);
 
       if (redirect?.type === "TEAM") {
-        const dashboardPath = userRole === "SPECIALIST" ? "/specialist/dashboard" : "/agency/dashboard";
+        const dashboardPath =
+          userRole === "SPECIALIST"
+            ? "/specialist/dashboard"
+            : userRole === "DESIGNER"
+            ? "/designer/web-design"
+            : "/agency/dashboard";
         navigate(dashboardPath, { replace: true });
         return;
       }

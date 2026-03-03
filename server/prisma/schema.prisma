@@ -31,6 +31,10 @@ model User {
   clientUsers    ClientUser[]
   invitedClientUsers ClientUser[] @relation("ClientUserInvitedBy")
   onDemandSnapshotRuns OnDemandSnapshotLog[] @relation("OnDemandSnapshotRunBy")
+  webDesignProjectsActivated WebDesignProject[] @relation("WebDesignActivatedBy")
+  webDesignProjectsAssigned WebDesignProject[] @relation("WebDesignAssignedDesigner")
+  webDesignPageVersionsUploaded WebDesignPageVersion[] @relation("WebDesignVersionUploadedBy")
+  webDesignComments WebDesignComment[] @relation("WebDesignCommentAuthor")
 
   @@map("users")
 }
@@ -101,6 +105,7 @@ model Agency {
   includedClients       ClientAgencyIncluded[]
   gridKeywords          GridKeyword[]
   onDemandSnapshotLogs  OnDemandSnapshotLog[]
+  webDesignProjects     WebDesignProject[]
 
   @@map("agencies")
 }
@@ -290,6 +295,7 @@ model Client {
   campaignWinKeywordStates CampaignWinKeywordState[]
   gridKeywords          GridKeyword[]
   onDemandSnapshotLogs  OnDemandSnapshotLog[]
+  webDesignProjects     WebDesignProject[]
 
   @@index([name, domain])
   @@index([userId], map: "clients_userId_fkey")
@@ -910,10 +916,84 @@ model OnDemandSnapshotLog {
   @@map("on_demand_snapshot_logs")
 }
 
+model WebDesignProject {
+  id            String                 @id @default(cuid())
+  projectName   String                 @map("project_name")
+  clientId      String                 @map("client_id")
+  activatedById String                 @map("activated_by_id")
+  agencyId      String?                @map("agency_id")
+  designerId    String                 @map("designer_id")
+  status        WebDesignProjectStatus @default(active)
+  createdAt     DateTime               @default(now()) @map("created_at")
+  completedAt   DateTime?              @map("completed_at")
+  client        Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  activatedBy   User                   @relation("WebDesignActivatedBy", fields: [activatedById], references: [id], onDelete: Cascade)
+  agency        Agency?                @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  designer      User                   @relation("WebDesignAssignedDesigner", fields: [designerId], references: [id], onDelete: Cascade)
+  pages         WebDesignPage[]
+
+  @@index([clientId])
+  @@index([agencyId, status])
+  @@index([designerId, status])
+  @@map("web_design_projects")
+}
+
+model WebDesignPage {
+  id          String              @id @default(cuid())
+  projectId   String              @map("project_id")
+  pageName    String              @map("page_name")
+  status      WebDesignPageStatus @default(pending_upload)
+  approvedAt  DateTime?           @map("approved_at")
+  sortOrder   Int                 @default(0) @map("sort_order")
+  figmaLink   String?             @map("figma_link") @db.VarChar(2048)
+  createdAt   DateTime            @default(now()) @map("created_at")
+  project     WebDesignProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions    WebDesignPageVersion[]
+  comments    WebDesignComment[]
+
+  @@index([projectId, sortOrder])
+  @@map("web_design_pages")
+}
+
+model WebDesignPageVersion {
+  id            String        @id @default(cuid())
+  pageId         String        @map("page_id")
+  versionNumber  Int           @map("version_number")
+  fileUrl        String        @map("file_url") @db.VarChar(2048)
+  uploadedById   String        @map("uploaded_by_id")
+  uploadedAt     DateTime      @default(now()) @map("uploaded_at")
+  page           WebDesignPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  uploadedBy     User          @relation("WebDesignVersionUploadedBy", fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, versionNumber])
+  @@index([pageId, uploadedAt])
+  @@map("web_design_page_versions")
+}
+
+model WebDesignComment {
+  id          String                  @id @default(cuid())
+  pageId       String                  @map("page_id")
+  parentId     String?                 @map("parent_id")
+  authorId     String                  @map("author_id")
+  authorRole   WebDesignCommentAuthorRole @map("author_role")
+  message      String                  @db.Text
+  actionTaken  WebDesignCommentAction?
+  createdAt    DateTime                @default(now()) @map("created_at")
+  page         WebDesignPage           @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  parent       WebDesignComment?       @relation("WebDesignCommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies      WebDesignComment[]      @relation("WebDesignCommentReplies")
+  author       User                    @relation("WebDesignCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, createdAt])
+  @@index([parentId])
+  @@map("web_design_comments")
+}
+
 enum Role {
   SUPER_ADMIN
   ADMIN
   AGENCY
+  DESIGNER
   SPECIALIST
   USER
 }
@@ -1023,4 +1103,27 @@ enum SnapshotCreditSource {
   monthly_allowance
   purchased_credits
   super_admin
+}
+
+enum WebDesignProjectStatus {
+  active
+  complete
+}
+
+enum WebDesignPageStatus {
+  pending_upload
+  needs_review
+  revision_requested
+  approved
+}
+
+enum WebDesignCommentAuthorRole {
+  client
+  designer
+  admin
+}
+
+enum WebDesignCommentAction {
+  revision_requested
+  approved
 }

@@ -80,6 +80,7 @@ import type { WorkLogRecurringRuleForEdit } from "@/components/WorkLogRecurringM
 import InfoTooltip from "@/components/InfoTooltip";
 import GoogleBusinessSearch, { type GoogleBusinessSelection } from "@/components/GoogleBusinessSearch";
 import { formatReportPeriodLabel, getReportStatusBadgeClass, toDisplayReportStatus } from "@/lib/reportPresentation";
+import WebDesignWorkspace from "@/components/WebDesignWorkspace";
 
 interface TrafficSourceSlice {
   name: string;
@@ -338,7 +339,12 @@ const ClientDashboardPage: React.FC = () => {
   const { user } = useSelector((state: RootState) => state.auth);
   const isClientPortal = location.pathname.startsWith("/client/");
   const clientPortalMode = isClientPortal && user?.role === "USER";
-  const navState = location.state as { reportOnly?: boolean; includedReadOnly?: boolean } | null;
+  const navState = location.state as {
+    reportOnly?: boolean;
+    includedReadOnly?: boolean;
+    projectId?: string;
+    pageId?: string;
+  } | null;
   // When in client portal, we show only the Dashboard view for the invited client.
   const reportOnly = Boolean(navState?.reportOnly);
   const includedReadOnlyFromState = Boolean(navState?.includedReadOnly);
@@ -347,18 +353,19 @@ const ClientDashboardPage: React.FC = () => {
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
   const [includedClientIds, setIncludedClientIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  type ClientDashboardTopTab = "dashboard" | "report" | "users" | "keywords" | "integration";
+  type ClientDashboardTopTab = "dashboard" | "report" | "users" | "keywords" | "integration" | "web-design";
   type ClientDashboardSection = "seo" | "ai-intelligence" | "local-map" | "ppc" | "backlinks" | "worklog";
 
   const initialNav = (() => {
     if (clientPortalMode) {
       return { tab: "dashboard" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     }
-    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration" } | null)?.tab;
+    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration" | "web-design" } | null)?.tab;
     if (requested === "report") return { tab: "report" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "users") return { tab: "users" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "keywords") return { tab: "keywords" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "integration") return { tab: "integration" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+    if (requested === "web-design") return { tab: "web-design" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "backlinks") return { tab: "dashboard" as ClientDashboardTopTab, section: "backlinks" as ClientDashboardSection };
     if (requested === "worklog") return { tab: "dashboard" as ClientDashboardTopTab, section: "worklog" as ClientDashboardSection };
     return { tab: (reportOnly ? "report" : "dashboard") as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
@@ -366,6 +373,7 @@ const ClientDashboardPage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<ClientDashboardTopTab>(initialNav.tab);
   const [dashboardSection, setDashboardSection] = useState<ClientDashboardSection>(initialNav.section);
+  const [hasWebDesignProjects, setHasWebDesignProjects] = useState(false);
   const includedClientReadOnly =
     user?.role === "AGENCY" &&
     (includedReadOnlyFromState || (!!clientId && includedClientIds.includes(clientId)));
@@ -2637,7 +2645,7 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
     const state = location.state as {
-      tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration";
+      tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration" | "web-design";
       section?: ClientDashboardSection;
     };
     if (!state?.tab && !state?.section) return;
@@ -2662,6 +2670,11 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
 
+    if (state?.tab === "web-design") {
+      setActiveTab("web-design");
+      return;
+    }
+
     if (state?.tab === "backlinks") {
       setActiveTab("dashboard");
       setDashboardSection("backlinks");
@@ -2679,6 +2692,20 @@ const ClientDashboardPage: React.FC = () => {
       if (state.section) setDashboardSection(state.section);
     }
   }, [clientPortalMode, location.state]);
+
+  useEffect(() => {
+    if (!clientId) {
+      setHasWebDesignProjects(false);
+      return;
+    }
+    api
+      .get("/web-design/projects", { _silent: true } as any)
+      .then((res) => {
+        const rows = Array.isArray(res.data) ? res.data : [];
+        setHasWebDesignProjects(rows.some((p: any) => String(p?.clientId) === String(clientId)));
+      })
+      .catch(() => setHasWebDesignProjects(false));
+  }, [clientId]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -5156,13 +5183,17 @@ const ClientDashboardPage: React.FC = () => {
           <div className="flex items-end justify-between gap-6">
             <nav className="-mb-px flex space-x-8">
               {(clientPortalMode
-                ? [{ id: "dashboard", label: "Dashboard", icon: Users }]
+                ? [
+                    { id: "dashboard", label: "Dashboard", icon: Users },
+                    ...(hasWebDesignProjects ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
+                  ]
                 : [
                     { id: "dashboard", label: "Dashboard", icon: Users },
                     { id: "report", label: "Report", icon: FileText },
                     { id: "users", label: "Users", icon: UserPlus },
                     { id: "keywords", label: "Keywords", icon: Target },
                     { id: "integration", label: "Integrations", icon: Plug },
+                    { id: "web-design", label: "Web Design", icon: FileText },
                   ]
               ).map((tab) => (
                 <button
@@ -5484,6 +5515,8 @@ const ClientDashboardPage: React.FC = () => {
               ) : activeTab === "keywords" ? (
                 null
               ) : activeTab === "integration" ? (
+                null
+              ) : activeTab === "web-design" ? (
                 null
               ) : (
                 <button
@@ -9557,6 +9590,14 @@ const ClientDashboardPage: React.FC = () => {
                     ) : null}
                   </div>
                 </div>
+              )}
+              {!reportOnly && activeTab === "web-design" && (
+                <WebDesignWorkspace
+                  embedded
+                  clientId={clientId}
+                  initialProjectId={navState?.projectId}
+                  initialPageId={navState?.pageId}
+                />
               )}
               {!reportOnly && activeTab === "users" && (
                 <div className="space-y-6">

@@ -7,6 +7,7 @@ export interface NotificationPreferences {
   rankingAlerts: boolean;
   weeklyDigest: boolean;
   teamUpdates: boolean;
+  webDesign?: boolean;
 }
 
 export interface AgencyBranding {
@@ -83,7 +84,7 @@ export const register = createAsyncThunk(
     email: string;
     password: string;
     name: string;
-    role: "ADMIN" | "AGENCY" | "USER" | "SPECIALIST";
+    role: "ADMIN" | "AGENCY" | "USER" | "SPECIALIST" | "DESIGNER";
   }) => {
     try {
       const response = await api.post("/auth/register", {

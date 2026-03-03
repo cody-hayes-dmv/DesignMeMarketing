@@ -37,6 +37,7 @@ import InvitePage from "./pages/InvitePage";
 import ClientUsersPage from "./pages/ClientUsersPage";
 import FinancialOverviewPage from "./pages/FinancialOverviewPage";
 import AuthLandingPage from "./pages/AuthLandingPage";
+import WebDesignPage from "./pages/WebDesignPage";
 
 function App() {
   const dispatch = useDispatch();
@@ -96,6 +97,7 @@ function App() {
     AGENCY: "/agency/dashboard",
     // Restore previous specialist portal landing
     SPECIALIST: "/specialist/dashboard",
+    DESIGNER: "/designer/web-design",
     // Client-portal user: redirect handled dynamically (see getRedirectUrl)
     USER: "/client/dashboard",
   };
@@ -118,6 +120,7 @@ function App() {
     { path: "/agency/clients/:clientId", component: ClientDashboardPage },
     { path: "/agency/settings", component: SettingsPage },
     { path: "/agency/tasks", component: TasksPage },
+    { path: "/agency/web-design", component: WebDesignPage },
   ];
 
   // Specialist routes
@@ -128,9 +131,15 @@ function App() {
     { path: "/specialist/settings", component: SettingsPage },
   ];
 
+  const designerRoutes = [
+    { path: "/designer/web-design", component: WebDesignPage },
+    { path: "/designer/settings", component: SettingsPage },
+  ];
+
   // Client portal routes (client users)
   const clientRoutes = [
     { path: "/client/dashboard/:clientId", component: ClientDashboardPage },
+    { path: "/client/web-design/:clientId", component: WebDesignPage },
     { path: "/client/tasks", component: TasksPage },
     { path: "/client/settings", component: SettingsPage },
     // Back-compat: keep report portal paths if still used
@@ -232,6 +241,32 @@ function App() {
             ) : !user || !user.verified ? (
               <Navigate to="/login" replace />
             ) : user.role !== "SPECIALIST" ? (
+              <Navigate to={getRedirectUrl()} replace />
+            ) : (
+              <DashboardLayout>
+                <Component />
+              </DashboardLayout>
+            )
+          }
+        />
+      ))}
+
+      {/* Designer routes */}
+      {designerRoutes.map(({ path, component: Component }) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            (token && !user) ? (
+              <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500">Loading...</p>
+                </div>
+              </div>
+            ) : !user || !user.verified ? (
+              <Navigate to="/login" replace />
+            ) : user.role !== "DESIGNER" ? (
               <Navigate to={getRedirectUrl()} replace />
             ) : (
               <DashboardLayout>

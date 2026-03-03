@@ -43,7 +43,7 @@ const TeamPage = () => {
   const [inviteForm, setInviteForm] = useState({
     email: "",
     name: "",
-    role: "SPECIALIST" as "SPECIALIST" | "ADMIN",
+    role: "SPECIALIST" as "SPECIALIST" | "DESIGNER" | "ADMIN",
     specialties: [] as string[],
     sendInvitationEmail: true,
   });
@@ -58,7 +58,7 @@ const TeamPage = () => {
   const [submittingInvite, setSubmittingInvite] = useState(false);
   const [editForm, setEditForm] = useState({
     name: "",
-    role: "SPECIALIST" as "SPECIALIST" | "AGENCY" | "ADMIN",
+    role: "SPECIALIST" as "SPECIALIST" | "DESIGNER" | "AGENCY" | "ADMIN",
     newPassword: "",
     confirmPassword: "",
   });
@@ -161,7 +161,7 @@ const TeamPage = () => {
     setSelectedMember(member);
     setEditForm({
       name: member.name,
-      role: member.role as "SPECIALIST" | "AGENCY" | "ADMIN",
+      role: member.role as "SPECIALIST" | "DESIGNER" | "AGENCY" | "ADMIN",
       newPassword: "",
       confirmPassword: "",
     });
@@ -240,6 +240,7 @@ const TeamPage = () => {
     const styles = {
       AGENCY: "bg-primary-100 text-primary-800",
       SPECIALIST: "bg-secondary-100 text-secondary-800",
+      DESIGNER: "bg-purple-100 text-purple-800",
       ADMIN: "bg-accent-100 text-accent-800",
     };
     return styles[role as keyof typeof styles] || "bg-gray-100 text-gray-800";
@@ -278,7 +279,7 @@ const TeamPage = () => {
   };
 
   const myTeamMembers = teamMembers.filter((member) =>
-    ["ADMIN", "SUPER_ADMIN", "SPECIALIST"].includes(member.role)
+    ["ADMIN", "SUPER_ADMIN", "SPECIALIST", "DESIGNER"].includes(member.role)
   );
   const agencyAdmins = teamMembers.filter((member) => member.role === "AGENCY");
   const totalUsers = allUsers ?? teamMembers;
@@ -330,7 +331,7 @@ const TeamPage = () => {
               <p className="text-2xl font-bold text-primary-600 mt-1">
                 {loading ? "..." : myTeamMembers.length}
               </p>
-              <p className="text-xs text-gray-500 mt-1">Admins + Specialists</p>
+              <p className="text-xs text-gray-500 mt-1">Admins + Specialists + Designers</p>
             </div>
             <Users className="h-8 w-8 text-primary-600" />
           </div>
@@ -385,7 +386,7 @@ const TeamPage = () => {
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
-            {activeView === "myTeam" ? "My Team (Admins + Specialists)" : activeView === "agencyAccess" ? "Agency Access" : "All Users"}
+            {activeView === "myTeam" ? "My Team (Admins + Specialists + Designers)" : activeView === "agencyAccess" ? "Agency Access" : "All Users"}
           </h2>
         </div>
         <div className="overflow-x-auto">
@@ -436,7 +437,7 @@ const TeamPage = () => {
                           member.role
                         )}`}
                       >
-                        {member.role === "SUPER_ADMIN" ? "Super Admin" : member.role === "ADMIN" ? "Admin" : member.role === "SPECIALIST" ? "Specialist" : member.role}
+                        {member.role === "SUPER_ADMIN" ? "Super Admin" : member.role === "ADMIN" ? "Admin" : member.role === "SPECIALIST" ? "Specialist" : member.role === "DESIGNER" ? "Designer" : member.role}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -519,7 +520,7 @@ const TeamPage = () => {
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/20">
                   <UserPlus className="h-5 w-5" />
                 </div>
-                <h2 className="text-xl font-bold">Invite New Specialist</h2>
+                <h2 className="text-xl font-bold">Invite Team Member</h2>
               </div>
               <button
                 type="button"
@@ -584,7 +585,7 @@ const TeamPage = () => {
                         onChange={(e) =>
                           setInviteForm({
                             ...inviteForm,
-                            role: e.target.value as "SPECIALIST" | "ADMIN",
+                            role: e.target.value as "SPECIALIST" | "DESIGNER" | "ADMIN",
                           })
                         }
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -592,6 +593,7 @@ const TeamPage = () => {
                         required
                       >
                         <option value="SPECIALIST">Specialist</option>
+                        <option value="DESIGNER">Designer</option>
                         <option value="ADMIN">Admin</option>
                       </select>
                     </div>
@@ -700,11 +702,12 @@ const TeamPage = () => {
                 <select
                   value={editForm.role}
                   onChange={(e) =>
-                    setEditForm({ ...editForm, role: e.target.value as "SPECIALIST" | "AGENCY" | "ADMIN" })
+                    setEditForm({ ...editForm, role: e.target.value as "SPECIALIST" | "DESIGNER" | "AGENCY" | "ADMIN" })
                   }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
                   <option value="SPECIALIST">Specialist</option>
+                  <option value="DESIGNER">Designer</option>
                   <option value="AGENCY">Agency Admin</option>
                   {(user?.role === "ADMIN" || user?.role === "SUPER_ADMIN") && (
                     <option value="ADMIN">Admin</option>

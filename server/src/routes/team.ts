@@ -32,7 +32,7 @@ const SPECIALTY_KEYS = ['ON_PAGE_SEO', 'LINK_BUILDING', 'CONTENT_WRITING', 'TECH
 const inviteTeamMemberSchema = z.object({
     email: z.string().email(),
     name: z.string().min(1),
-    role: z.enum(['SPECIALIST', 'AGENCY', 'ADMIN']).default('SPECIALIST'),
+    role: z.enum(['SPECIALIST', 'DESIGNER', 'AGENCY', 'ADMIN']).default('SPECIALIST'),
     agencyId: z.string().optional(),
     specialties: z.array(z.enum(SPECIALTY_KEYS)).optional().default([]),
     sendInvitationEmail: z.boolean().optional().default(true),
@@ -40,7 +40,7 @@ const inviteTeamMemberSchema = z.object({
 
 const updateTeamMemberSchema = z.object({
     name: z.string().min(1).optional(),
-    role: z.enum(['SPECIALIST', 'AGENCY', 'ADMIN', 'SUPER_ADMIN']).optional(),
+    role: z.enum(['SPECIALIST', 'DESIGNER', 'AGENCY', 'ADMIN', 'SUPER_ADMIN']).optional(),
     agencyRole: z.enum(['SPECIALIST', 'MANAGER', 'OWNER']).optional(),
     newPassword: z.string().min(6).optional(),
 });
@@ -56,8 +56,8 @@ router.get('/', authenticateToken, async (req, res) => {
             const scope = String(req.query.scope || "");
             const includeAll = scope === "all";
             const roles: Role[] = includeAll
-                ? [Role.SPECIALIST, Role.AGENCY, Role.ADMIN, Role.SUPER_ADMIN, Role.USER]
-                : [Role.SPECIALIST, Role.AGENCY, Role.ADMIN, Role.SUPER_ADMIN];
+                ? [Role.SPECIALIST, Role.DESIGNER, Role.AGENCY, Role.ADMIN, Role.SUPER_ADMIN, Role.USER]
+                : [Role.SPECIALIST, Role.DESIGNER, Role.AGENCY, Role.ADMIN, Role.SUPER_ADMIN];
             // Super admin and admin can see all users
             const users: UserWithMemberships[] = await prisma.user.findMany({
                 where: {
@@ -370,7 +370,9 @@ router.post('/invite', authenticateToken, async (req, res) => {
                     html: `
           <h1>You're invited to ${escapeHtml(companyName)}!</h1>
           <p>Hi ${escapeHtml(name)},</p>
-          <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(teamLabel)} as a ${role === 'ADMIN' ? 'Admin' : 'Specialist'}.</p>
+          <p>${escapeHtml(inviterName)} has invited you to join the ${escapeHtml(teamLabel)} as a ${
+                    role === 'ADMIN' ? 'Admin' : role === 'DESIGNER' ? 'Designer' : 'Specialist'
+                }.</p>
           <p>Click the link below to set your password and access your dashboard:</p>
           <p><a href="${inviteUrl}">Secure Setup Link – expires in 7 days</a></p>
           <p>Once you're in, you'll be able to:</p>

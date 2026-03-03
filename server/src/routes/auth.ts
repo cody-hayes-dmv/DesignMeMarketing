@@ -324,8 +324,9 @@ router.get("/me", authenticateToken, async (req, res) => {
         rankingAlerts: prefs.rankingAlerts ?? true,
         weeklyDigest: prefs.weeklyDigest ?? false,
         teamUpdates: prefs.teamUpdates ?? true,
+        webDesign: prefs.webDesign ?? true,
       }
-      : { emailReports: true, rankingAlerts: true, weeklyDigest: false, teamUpdates: true };
+      : { emailReports: true, rankingAlerts: true, weeklyDigest: false, teamUpdates: true, webDesign: true };
 
     let specialties: string[] = [];
     if (user.specialties && user.role === "SPECIALIST") {
@@ -406,6 +407,7 @@ const notificationSettingsSchema = z.object({
   rankingAlerts: z.boolean().optional(),
   weeklyDigest: z.boolean().optional(),
   teamUpdates: z.boolean().optional(),
+  webDesign: z.boolean().optional(),
 });
 
 // Update current user notification preferences
@@ -426,6 +428,7 @@ router.patch("/me/notification-settings", authenticateToken, async (req, res) =>
       rankingAlerts: body.data.rankingAlerts ?? current.rankingAlerts ?? true,
       weeklyDigest: body.data.weeklyDigest ?? current.weeklyDigest ?? false,
       teamUpdates: body.data.teamUpdates ?? current.teamUpdates ?? true,
+      webDesign: body.data.webDesign ?? current.webDesign ?? true,
     };
     await prisma.user.update({
       where: { id: req.user.userId },

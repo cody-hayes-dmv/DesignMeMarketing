@@ -16,6 +16,7 @@ import financialRoutes from "./routes/financial.js";
 import aiCommandRoutes from "./routes/aiCommands.js";
 import stripeWebhookRoutes from "./routes/stripeWebhook.js";
 import localMapRoutes from "./routes/localMap.js";
+import webDesignRoutes from "./routes/webDesign.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { resolveAgencyDomainContext } from "./middleware/resolveAgencyDomainContext.js";
 
@@ -86,6 +87,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/financial", financialRoutes);
 app.use("/api/ai-commands", aiCommandRoutes);
 app.use("/api/local-map", localMapRoutes);
+app.use("/api/web-design", webDesignRoutes);
 app.use("/uploads", express.static("uploads")); // Serve uploaded files
 
 // Health check

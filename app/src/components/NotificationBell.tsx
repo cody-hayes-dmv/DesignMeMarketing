@@ -45,6 +45,12 @@ const NotificationBell: React.FC = () => {
   const notificationsUrl = isSuperOrAdmin ? "/seo/super-admin/notifications" : "/agencies/me/notifications";
   const markReadUrl = isSuperOrAdmin ? "/seo/super-admin/notifications/mark-read" : "/agencies/me/notifications/mark-read";
 
+  const parseWebDesignLink = (link: string): { projectId: string; pageId: string } | null => {
+    const match = String(link || "").match(/^\/web-design\/projects\/([^/]+)\/pages\/([^/?#]+)/);
+    if (!match) return null;
+    return { projectId: decodeURIComponent(match[1]), pageId: decodeURIComponent(match[2]) };
+  };
+
   const fetchNotifications = async () => {
     setLoading(true);
     try {
@@ -107,6 +113,32 @@ const NotificationBell: React.FC = () => {
       }
     }
     setOpen(false);
+    const webDesignTarget = parseWebDesignLink(item.link || "");
+    if (webDesignTarget) {
+      if (isClientUser) {
+        if (!firstClientId) {
+          navigate("/client/tasks");
+          return;
+        }
+        navigate(`/client/dashboard/${firstClientId}`, {
+          state: {
+            tab: "web-design",
+            projectId: webDesignTarget.projectId,
+            pageId: webDesignTarget.pageId,
+          },
+        });
+        return;
+      }
+      if (isSuperOrAdmin || user?.role === "AGENCY") {
+        const query = new URLSearchParams({
+          projectId: webDesignTarget.projectId,
+          pageId: webDesignTarget.pageId,
+        }).toString();
+        navigate(`/agency/web-design?${query}`);
+        return;
+      }
+    }
+
     // Client portal: respect notification deep-links (e.g. /client/tasks?taskId=...).
     if (isClientUser) {
       navigate(item.link || "/client/tasks");
