@@ -4,6 +4,13 @@ import { getStripe } from "../lib/stripe.js";
 import { prisma } from "../lib/prisma.js";
 import { normalizeTierId, getTierConfig } from "../lib/tiers.js";
 import { getTierFromSubscriptionItems } from "../lib/stripeTierSync.js";
+import { sendEmail } from "../lib/email.js";
+import { resolveSuperAdminNotificationRecipients } from "../lib/superAdminNotifications.js";
+import {
+  sendAgencyPlanCancellationEmail,
+  sendAgencyPlanChangeEmail,
+} from "../lib/agencyPlanEmails.js";
+import { renderBillingEmailTemplate } from "../lib/billingEmailTemplates.js";
 
 const router = express.Router();
 
@@ -11,6 +18,30 @@ function tierLevel(tier: string | null): number {
   const cfg = getTierConfig(tier);
   return cfg?.priceMonthlyUsd ?? 0;
 }
+
+const resolveSuperAdminNotificationEmails = async (): Promise<string[]> => {
+  const superAdmins = await prisma.user.findMany({
+    where: { role: "SUPER_ADMIN" },
+    select: { email: true, notificationPreferences: true },
+  });
+  return resolveSuperAdminNotificationRecipients(superAdmins, {
+    superAdminNotifyEmail: process.env.SUPER_ADMIN_NOTIFY_EMAIL,
+    managedServiceNotifyEmail: process.env.MANAGED_SERVICE_NOTIFY_EMAIL,
+    johnnyEmail: process.env.JOHNNY_EMAIL,
+  });
+};
+
+const notifySuperAdminsByEmail = async (options: { subject: string; html: string }) => {
+  const recipients = await resolveSuperAdminNotificationEmails();
+  if (!recipients.length) return;
+  await Promise.all(
+    recipients.map((to) =>
+      sendEmail({ to, subject: options.subject, html: options.html }).catch((err: any) => {
+        console.warn("[Stripe webhook] Super admin email failed:", to, err?.message);
+      })
+    )
+  );
+};
 
 /**
  * Stripe webhook handler. Expects raw body (mount with express.raw).
@@ -48,7 +79,7 @@ router.post("/", async (req, res) => {
 
   const agency = await prisma.agency.findFirst({
     where: { stripeCustomerId: customerId },
-    select: { id: true, name: true, subscriptionTier: true },
+    select: { id: true, name: true, subscriptionTier: true, billingType: true, trialEndsAt: true },
   });
 
   if (!agency) {
@@ -115,7 +146,12 @@ router.post("/", async (req, res) => {
       const oldTierName = getTierConfig(agency.subscriptionTier)?.name ?? agency.subscriptionTier ?? "Unknown";
       await prisma.agency.update({
         where: { id: agency.id },
-        data: { subscriptionTier: null, stripeSubscriptionId: null },
+        data: {
+          subscriptionTier: "free",
+          billingType: "free",
+          stripeSubscriptionId: null,
+          trialEndsAt: null,
+        },
       });
 
       // Notify the agency
@@ -140,6 +176,34 @@ router.post("/", async (req, res) => {
         },
       }).catch((e) => console.warn("[Stripe webhook] Create SA cancellation notification failed:", e?.message));
 
+      const canceledAt = new Date();
+      await sendAgencyPlanCancellationEmail({
+        agencyId: agency.id,
+        canceledPlanName: oldTierName,
+        billingType: "free",
+        statusLabel: "Canceled - Free",
+      }).catch((e: any) => console.warn("[Stripe webhook] Agency cancellation email failed:", e?.message));
+
+      await notifySuperAdminsByEmail({
+        subject: `Agency subscription canceled - ${agency.name}`,
+        html: renderBillingEmailTemplate({
+          title: "Agency subscription canceled",
+          introLines: [`${agency.name} canceled their subscription.`],
+          sections: [
+            {
+              title: "Current account status",
+              rows: [
+                { label: "Agency", value: agency.name },
+                { label: "Canceled Plan", value: oldTierName },
+                { label: "Current Status", value: "Canceled - Free" },
+                { label: "Billing Type", value: "free" },
+                { label: "Canceled At", value: canceledAt.toISOString() },
+              ],
+            },
+          ],
+        }),
+      }).catch((e: any) => console.warn("[Stripe webhook] SA cancellation email failed:", e?.message));
+
       return res.status(200).json({ received: true });
     }
 
@@ -147,21 +211,29 @@ router.post("/", async (req, res) => {
       const sub = event.data.object as Stripe.Subscription;
       const subscriptionId = sub.id;
       const oldTier = agency.subscriptionTier ?? null;
-      if (sub.status === "active") {
+      if (sub.status === "active" || sub.status === "trialing") {
         const items = sub.items?.data ?? [];
         const tierId = getTierFromSubscriptionItems(items);
         const normalized = tierId ? normalizeTierId(tierId) : null;
+        const trialEndsAt = typeof sub.trial_end === "number" ? new Date(sub.trial_end * 1000) : null;
         await prisma.agency.update({
           where: { id: agency.id },
           data: {
             subscriptionTier: normalized,
+            billingType: "paid",
             stripeSubscriptionId: subscriptionId,
+            trialEndsAt,
           },
         });
         if (event.type === "customer.subscription.updated" && oldTier !== normalized) {
           const tierName = getTierConfig(normalized)?.name ?? normalized ?? "your plan";
           const oldTierName = getTierConfig(oldTier)?.name ?? oldTier ?? "Free";
           const isUpgrade = tierLevel(normalized) > tierLevel(oldTier);
+          const trialDaysLeft = trialEndsAt
+            ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86400000))
+            : null;
+          const currentStatusLabel =
+            trialDaysLeft != null && trialDaysLeft > 0 ? "Active - Trialing" : "Active - Paid";
 
           // Skip if the change-plan endpoint already created a notification in the last 60s
           const recentNotif = await prisma.notification.findFirst({
@@ -197,12 +269,51 @@ router.post("/", async (req, res) => {
                 link: "/agency/agencies",
               },
             }).catch((e) => console.warn("[Stripe webhook] Create SA plan change notification failed:", e?.message));
+
+            await sendAgencyPlanChangeEmail({
+              agencyId: agency.id,
+              oldTierName,
+              newTierName: tierName,
+              isUpgrade,
+              billingType: "paid",
+              statusLabel: currentStatusLabel,
+              trialEndsAtIso: trialEndsAt?.toISOString() ?? null,
+              trialDaysLeft,
+            }).catch((e: any) => console.warn("[Stripe webhook] Agency plan-change email failed:", e?.message));
+
+            await notifySuperAdminsByEmail({
+              subject: `${isUpgrade ? "Agency plan upgraded" : "Agency plan changed"} - ${agency.name}`,
+              html: renderBillingEmailTemplate({
+                title: isUpgrade ? "Agency plan upgraded" : "Agency plan changed",
+                introLines: [`${agency.name} has ${isUpgrade ? "upgraded" : "changed"} their plan.`],
+                sections: [
+                  {
+                    title: "Current account status",
+                    rows: [
+                      { label: "Agency", value: agency.name },
+                      { label: "Previous Plan", value: oldTierName },
+                      { label: "Current Plan", value: tierName },
+                      { label: "Current Status", value: currentStatusLabel },
+                      { label: "Billing Type", value: "paid" },
+                      { label: "Trial Ends", value: trialEndsAt ? trialEndsAt.toLocaleString("en-US") : "N/A" },
+                      { label: "Days Until First Charge", value: trialDaysLeft != null ? String(trialDaysLeft) : "N/A" },
+                      { label: "Changed At", value: new Date().toISOString() },
+                    ],
+                  },
+                ],
+              }),
+            }).catch((e: any) => console.warn("[Stripe webhook] SA plan-change email failed:", e?.message));
           }
         }
       } else {
         await prisma.agency.update({
           where: { id: agency.id },
-          data: { subscriptionTier: null, stripeSubscriptionId: null },
+          data: {
+            subscriptionTier: "free",
+            billingType: "free",
+            stripeSubscriptionId: null,
+            trialEndsAt: null,
+          },
         });
       }
     }

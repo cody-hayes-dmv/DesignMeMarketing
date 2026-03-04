@@ -39,7 +39,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
         password,
       });
       toast.success(
-        "Please check your email to verify your account. After verification, you can sign in and use the Free tier for 7 days."
+        "Please check your email to verify your account. After verification, you can sign in and use the Free tier"
       );
       setFirstName("");
       setLastName("");
@@ -170,7 +170,7 @@ const AgencyRegisterModal: React.FC<AgencyRegisterModalProps> = ({
             disabled={!canSubmit}
             className="w-full py-3.5 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-600 hover:from-emerald-500 hover:via-teal-400 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-teal-500/25 hover:shadow-teal-500/30"
           >
-            {submitting ? "Sending..." : "Start 7-days Free Trial"}
+            {submitting ? "Sending..." : "Start Free Trial"}
           </button>
 
           <p className="text-xs text-slate-500 mt-4 text-center">

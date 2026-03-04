@@ -3126,7 +3126,8 @@ function googleAdsApiErrorStatus(error: any): { status: number; message: string 
 router.get('/:id/google-ads/campaigns', authenticateToken, async (req, res) => {
     try {
         const clientId = req.params.id;
-        const { start, end, period } = req.query;
+        const { start, end, period, activeOnly } = req.query;
+        const includeActiveOnly = String(activeOnly ?? "true").toLowerCase() !== "false";
 
         // Check access
         const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
@@ -3159,7 +3160,7 @@ router.get('/:id/google-ads/campaigns', authenticateToken, async (req, res) => {
         }
 
         // Fetch Google Ads campaigns data
-        const data = await fetchGoogleAdsCampaigns(clientId, startDate, endDate);
+        const data = await fetchGoogleAdsCampaigns(clientId, startDate, endDate, includeActiveOnly);
 
         res.json({
             success: true,
@@ -3185,7 +3186,8 @@ router.get('/:id/google-ads/campaigns', authenticateToken, async (req, res) => {
 router.get('/:id/google-ads/ad-groups', authenticateToken, async (req, res) => {
     try {
         const clientId = req.params.id;
-        const { start, end, period, campaignId } = req.query;
+        const { start, end, period, campaignId, activeOnly } = req.query;
+        const includeActiveOnly = String(activeOnly ?? "true").toLowerCase() !== "false";
 
         // Check access
         const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
@@ -3213,7 +3215,13 @@ router.get('/:id/google-ads/ad-groups', authenticateToken, async (req, res) => {
             startDate.setDate(startDate.getDate() - 30);
         }
 
-        const data = await fetchGoogleAdsAdGroups(clientId, startDate, endDate, campaignId as string | undefined);
+        const data = await fetchGoogleAdsAdGroups(
+            clientId,
+            startDate,
+            endDate,
+            campaignId as string | undefined,
+            includeActiveOnly
+        );
 
         res.json({
             success: true,
@@ -3234,7 +3242,8 @@ router.get('/:id/google-ads/ad-groups', authenticateToken, async (req, res) => {
 router.get('/:id/google-ads/keywords', authenticateToken, async (req, res) => {
     try {
         const clientId = req.params.id;
-        const { start, end, period, campaignId, adGroupId } = req.query;
+        const { start, end, period, campaignId, adGroupId, activeOnly } = req.query;
+        const includeActiveOnly = String(activeOnly ?? "true").toLowerCase() !== "false";
 
         // Check access
         const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
@@ -3262,7 +3271,14 @@ router.get('/:id/google-ads/keywords', authenticateToken, async (req, res) => {
             startDate.setDate(startDate.getDate() - 30);
         }
 
-        const data = await fetchGoogleAdsKeywords(clientId, startDate, endDate, campaignId as string | undefined, adGroupId as string | undefined);
+        const data = await fetchGoogleAdsKeywords(
+            clientId,
+            startDate,
+            endDate,
+            campaignId as string | undefined,
+            adGroupId as string | undefined,
+            includeActiveOnly
+        );
 
         res.json({
             success: true,
@@ -3283,7 +3299,8 @@ router.get('/:id/google-ads/keywords', authenticateToken, async (req, res) => {
 router.get('/:id/google-ads/conversions', authenticateToken, async (req, res) => {
     try {
         const clientId = req.params.id;
-        const { start, end, period } = req.query;
+        const { start, end, period, activeOnly } = req.query;
+        const includeActiveOnly = String(activeOnly ?? "true").toLowerCase() !== "false";
 
         // Check access
         const { client, hasAccess } = await canStaffAccessClient(req.user, clientId, true);
@@ -3311,7 +3328,7 @@ router.get('/:id/google-ads/conversions', authenticateToken, async (req, res) =>
             startDate.setDate(startDate.getDate() - 30);
         }
 
-        const data = await fetchGoogleAdsConversions(clientId, startDate, endDate);
+        const data = await fetchGoogleAdsConversions(clientId, startDate, endDate, includeActiveOnly);
 
         res.json({
             success: true,

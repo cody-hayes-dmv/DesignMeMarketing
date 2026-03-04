@@ -631,6 +631,8 @@ const ClientDashboardPage: React.FC = () => {
     customerName: string;
     currencyCode: string;
     timeZone: string;
+    managerCustomerId?: string | null;
+    status?: string;
     isManager?: boolean;
   }>>([]);
   const [loadingGoogleAdsCustomers, setLoadingGoogleAdsCustomers] = useState(false);
@@ -642,6 +644,62 @@ const ClientDashboardPage: React.FC = () => {
   const [ppcData, setPpcData] = useState<any>(null);
   const [ppcLoading, setPpcLoading] = useState(false);
   const [ppcError, setPpcError] = useState<string | null>(null);
+  const [ppcScheduleMeta, setPpcScheduleMeta] = useState<{
+    hasSchedule: boolean;
+    scheduleId: string | null;
+    isActive: boolean;
+    frequency: string | null;
+    lastRunAt: string | null;
+    nextRunAt: string | null;
+    recipients: string[];
+  }>({
+    hasSchedule: false,
+    scheduleId: null,
+    isActive: false,
+    frequency: null,
+    lastRunAt: null,
+    nextRunAt: null,
+    recipients: [],
+  });
+  const [ppcReportDeleteConfirm, setPpcReportDeleteConfirm] = useState<{
+    isOpen: boolean;
+    scheduleId: string | null;
+    label: string | null;
+  }>({
+    isOpen: false,
+    scheduleId: null,
+    label: null,
+  });
+  const [campaignWinsMeta, setCampaignWinsMeta] = useState<{
+    enabled: boolean;
+    recipients: string[];
+    lastSent: string | null;
+  }>({
+    enabled: false,
+    recipients: [],
+    lastSent: null,
+  });
+  const [sendingCampaignWinsReport, setSendingCampaignWinsReport] = useState(false);
+  const [campaignWinsDeleteConfirm, setCampaignWinsDeleteConfirm] = useState<{
+    isOpen: boolean;
+    label: string | null;
+  }>({
+    isOpen: false,
+    label: null,
+  });
+  const [campaignWinsPreviewModal, setCampaignWinsPreviewModal] = useState<{
+    open: boolean;
+    clientName: string;
+    subject: string;
+    recipients: string[];
+    html: string;
+  }>({
+    open: false,
+    clientName: "",
+    subject: "",
+    recipients: [],
+    html: "",
+  });
   const [localMapSummary, setLocalMapSummary] = useState<{
     total: number;
     active: number;
@@ -3788,13 +3846,37 @@ const ClientDashboardPage: React.FC = () => {
     try {
       setReportLoading(true);
       setReportError(null);
-      const res = await api.get(`/seo/reports/${clientId}`, { params: { period: "monthly", ensureFresh } });
-      setServerReport(res.data || null);
+      const [reportRes, campaignWinsRes] = await Promise.all([
+        api.get(`/seo/reports/${clientId}`, { params: { period: "monthly", ensureFresh } }),
+        api.get(`/seo/reports/${clientId}/campaign-wins`, { _silent: true } as any).catch(() => null),
+      ]);
+      setServerReport(reportRes.data || null);
+      if (campaignWinsRes?.data) {
+        const recipients = Array.isArray(campaignWinsRes.data.recipients)
+          ? campaignWinsRes.data.recipients.filter((r: unknown): r is string => typeof r === "string" && r.trim().length > 0)
+          : [];
+        setCampaignWinsMeta({
+          enabled: Boolean(campaignWinsRes.data.enabled),
+          recipients,
+          lastSent: campaignWinsRes.data.lastSent ? String(campaignWinsRes.data.lastSent) : null,
+        });
+      } else {
+        setCampaignWinsMeta({
+          enabled: false,
+          recipients: [],
+          lastSent: null,
+        });
+      }
     } catch (error: any) {
       console.error("Failed to load report", error);
       const msg = error?.response?.data?.message || "Unable to load report";
       setReportError(msg);
       setServerReport(null);
+      setCampaignWinsMeta({
+        enabled: false,
+        recipients: [],
+        lastSent: null,
+      });
     } finally {
       setReportLoading(false);
     }
@@ -3846,6 +3928,62 @@ const ClientDashboardPage: React.FC = () => {
     return null;
   }, [serverReport, clientId]);
 
+  const ppcReportForClient: ClientReport | null = useMemo(() => {
+    if (!ppcScheduleMeta.hasSchedule) return null;
+    const frequency = String(ppcScheduleMeta.frequency || "monthly");
+    const typeLabel =
+      frequency === "weekly"
+        ? "PPC Weekly"
+        : frequency === "biweekly"
+        ? "PPC Biweekly"
+        : "PPC Monthly";
+    const status: ClientReport["status"] =
+      !ppcScheduleMeta.isActive ? "Draft" : ppcScheduleMeta.lastRunAt ? "Sent" : "Scheduled";
+    return {
+      id: `ppc-report-${clientId || "client"}`,
+      clientId: clientId || "",
+      name: "Client PPC Report",
+      type: typeLabel,
+      lastGenerated: ppcScheduleMeta.lastRunAt ? format(new Date(ppcScheduleMeta.lastRunAt), "yyyy-MM-dd") : "—",
+      status,
+      recipients: ppcScheduleMeta.recipients || [],
+      metrics: {
+        keywords: 0,
+        avgPosition: 0,
+        traffic: 0,
+      },
+      scheduleKind: "ppc",
+    };
+  }, [ppcScheduleMeta, clientId]);
+
+  const campaignWinsReportForClient: ClientReport | null = useMemo(() => {
+    if (!campaignWinsMeta.enabled) return null;
+    const status: ClientReport["status"] = campaignWinsMeta.lastSent ? "Sent" : "Scheduled";
+    return {
+      id: `campaign-wins-report-${clientId || "client"}`,
+      clientId: clientId || "",
+      name: "Campaign Wins Report",
+      type: "Event-driven",
+      lastGenerated: campaignWinsMeta.lastSent ? format(new Date(campaignWinsMeta.lastSent), "yyyy-MM-dd") : "—",
+      status,
+      recipients: campaignWinsMeta.recipients || [],
+      metrics: {
+        keywords: 0,
+        avgPosition: 0,
+        traffic: 0,
+      },
+      scheduleKind: "campaign_wins",
+    };
+  }, [campaignWinsMeta, clientId]);
+
+  const reportRows: ClientReport[] = useMemo(() => {
+    const rows: ClientReport[] = [];
+    if (singleReportForClient) rows.push(singleReportForClient);
+    if (ppcReportForClient) rows.push(ppcReportForClient);
+    if (campaignWinsReportForClient) rows.push(campaignWinsReportForClient);
+    return rows;
+  }, [singleReportForClient, ppcReportForClient, campaignWinsReportForClient]);
+
   const handleCreateReportClick = useCallback(() => {
     if (includedClientReadOnly) return;
     if (!clientId) {
@@ -3878,7 +4016,7 @@ const ClientDashboardPage: React.FC = () => {
     setModalEmailSubject(serverReport?.scheduleEmailSubject ?? clientReportEmailSubject ?? "");
   }, [showClientReportModal, serverReport?.scheduleRecipients, serverReport?.recipients, serverReport?.scheduleEmailSubject, serverReport?.campaignWinsEmails, serverReport?.campaignWinsEnabled, clientReportRecipients, clientReportEmailSubject]);
 
-  const handleSubmitClientReport = useCallback(async () => {
+  const handleSubmitClientReport = async () => {
     if (!clientId) {
       toast.error("Client ID is missing");
       return;
@@ -3910,6 +4048,11 @@ const ClientDashboardPage: React.FC = () => {
           enabled: true,
           recipients: recipientsList,
         }, { timeout: 15000 });
+        setCampaignWinsMeta((prev) => ({
+          enabled: true,
+          recipients: recipientsList,
+          lastSent: prev.lastSent,
+        }));
         toast.success("Campaign Wins report enabled successfully");
       } else {
         const isLocalMapSchedule =
@@ -3918,6 +4061,22 @@ const ClientDashboardPage: React.FC = () => {
           clientReportFrequency === "ppc_weekly" ||
           clientReportFrequency === "ppc_biweekly" ||
           clientReportFrequency === "ppc_monthly";
+
+        // PPC schedules require an active Google Ads connection.
+        // Guard on the client before submitting so users get a clear action message instead of a generic 400 failure.
+        if (isPpcSchedule) {
+          try {
+            const gaRes = await api.get(`/clients/${clientId}/google-ads/status`, { _silent: true } as any);
+            if (!gaRes?.data?.connected) {
+              toast.error("Please connect Google Ads first before creating a PPC report.");
+              return;
+            }
+          } catch {
+            toast.error("Unable to verify Google Ads connection. Please connect Google Ads and try again.");
+            return;
+          }
+        }
+
         const resolvedFrequency =
           clientReportFrequency === "local_map_biweekly"
             ? "biweekly"
@@ -3932,7 +4091,7 @@ const ClientDashboardPage: React.FC = () => {
             : clientReportFrequency;
 
         // 1) Create or update schedule for this client
-        await api.post(`/seo/reports/${clientId}/schedule`, {
+        const scheduleRes = await api.post(`/seo/reports/${clientId}/schedule`, {
           frequency: resolvedFrequency,
           reportKind: isLocalMapSchedule ? "local_map" : isPpcSchedule ? "ppc" : "seo",
           dayOfWeek: resolvedFrequency !== "monthly" ? clientReportDayOfWeek : undefined,
@@ -3942,6 +4101,23 @@ const ClientDashboardPage: React.FC = () => {
           emailSubject: modalEmailSubject || undefined,
           isActive: true,
         }, { timeout: 15000 });
+
+        // Keep Report tab in sync immediately after PPC schedule save (no browser refresh required).
+        if (isPpcSchedule) {
+          const savedSchedule = scheduleRes?.data?.schedule;
+          setPpcScheduleMeta({
+            hasSchedule: true,
+            scheduleId: typeof savedSchedule?.id === "string" ? savedSchedule.id : ppcScheduleMeta.scheduleId,
+            isActive: savedSchedule?.isActive == null ? true : Boolean(savedSchedule.isActive),
+            frequency:
+              typeof savedSchedule?.frequency === "string"
+                ? savedSchedule.frequency
+                : resolvedFrequency,
+            lastRunAt: savedSchedule?.lastRunAt ? String(savedSchedule.lastRunAt) : ppcScheduleMeta.lastRunAt,
+            nextRunAt: savedSchedule?.nextRunAt ? String(savedSchedule.nextRunAt) : ppcScheduleMeta.nextRunAt,
+            recipients: recipientsList,
+          });
+        }
 
         // 2) Generate initial SEO report immediately; Local Map and PPC schedules are handled by scheduler runs.
         if (!isLocalMapSchedule && !isPpcSchedule) {
@@ -3969,25 +4145,19 @@ const ClientDashboardPage: React.FC = () => {
       // Close modal
       setShowClientReportModal(false);
     } catch (error: any) {
-      console.error("Failed to create report and schedule", error);
+      const status = Number(error?.response?.status || 0);
       const isTimeout = error?.code === "ECONNABORTED" || error?.message?.toLowerCase().includes("timeout");
       const msg = isTimeout
         ? "Request timed out. Report generation can take up to a minute. Please try again."
         : (error?.response?.data?.message || "Failed to create report and schedule");
+      if (!(status === 400 && /google ads/i.test(String(msg)))) {
+        console.error("Failed to create report and schedule", error);
+      }
       toast.error(msg);
     } finally {
       setClientReportSubmitting(false);
     }
-  }, [
-    clientId,
-    clientReportDayOfMonth,
-    clientReportDayOfWeek,
-    clientReportFrequency,
-    clientReportTimeOfDay,
-    loadReport,
-    modalEmailSubject,
-    modalRecipients,
-  ]);
+  };
 
   const handleViewReport = (report: ClientReport) => {
     setSelectedReport(report);
@@ -4011,6 +4181,14 @@ const ClientDashboardPage: React.FC = () => {
 
   useEffect(() => {
     if (!viewReportModalOpen || !clientId) return;
+    if (selectedReport?.scheduleKind === "ppc") {
+      setReportPreviewTargetKeywords([]);
+      setReportPreviewShareUrl(null);
+      setReportPreviewTargetKeywordsError(null);
+      setReportPreviewTargetKeywordsLoading(false);
+      setReportPreviewShareLoading(false);
+      return;
+    }
     let cancelled = false;
 
     const run = async () => {
@@ -4054,7 +4232,7 @@ const ClientDashboardPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [clientId, viewReportModalOpen]);
+  }, [clientId, viewReportModalOpen, selectedReport?.scheduleKind]);
 
   const handleSendReport = useCallback(async () => {
     if (includedClientReadOnly) return;
@@ -4108,6 +4286,92 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [clientId, canModifyClientSettings]);
 
+  const handleViewCampaignWinsHtml = useCallback(async () => {
+    if (!clientId) {
+      toast.error("Client ID is missing");
+      return;
+    }
+    try {
+      const res = await api.get(`/seo/reports/${clientId}/campaign-wins/preview`, { _silent: true } as any);
+      const html = String(res?.data?.html || "");
+      if (!html) {
+        toast.error("Campaign Wins preview is unavailable.");
+        return;
+      }
+      setCampaignWinsPreviewModal({
+        open: true,
+        clientName: client?.name || "Client",
+        subject: String(res?.data?.subject || ""),
+        recipients: Array.isArray(res?.data?.recipients) ? res.data.recipients : [],
+        html,
+      });
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Failed to load Campaign Wins HTML preview";
+      toast.error(msg);
+    }
+  }, [clientId, client?.name]);
+
+  const handleSendCampaignWinsNow = useCallback(async () => {
+    if (!clientId) {
+      toast.error("Client ID is missing");
+      return;
+    }
+    if (!canModifyClientSettings) {
+      toast.error("Included clients are view-only.");
+      return;
+    }
+    try {
+      setSendingCampaignWinsReport(true);
+      await api.post(`/seo/reports/${clientId}/campaign-wins/instant-send`, {});
+      setCampaignWinsMeta((prev) => ({
+        ...prev,
+        lastSent: new Date().toISOString(),
+      }));
+      toast.success("Campaign Wins report sent successfully");
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Failed to send Campaign Wins report";
+      toast.error(msg);
+    } finally {
+      setSendingCampaignWinsReport(false);
+    }
+  }, [clientId, canModifyClientSettings]);
+
+  const handleDeleteCampaignWinsReport = useCallback(() => {
+    if (!canModifyClientSettings) {
+      toast.error("Included clients are view-only.");
+      return;
+    }
+    if (!campaignWinsMeta.enabled) {
+      toast.error("No Campaign Wins report to delete.");
+      return;
+    }
+    setCampaignWinsDeleteConfirm({
+      isOpen: true,
+      label: "Campaign Wins Report",
+    });
+  }, [canModifyClientSettings, campaignWinsMeta.enabled]);
+
+  const confirmDeleteCampaignWinsReport = useCallback(async () => {
+    if (!clientId) {
+      setCampaignWinsDeleteConfirm({ isOpen: false, label: null });
+      return;
+    }
+    try {
+      await api.delete(`/seo/reports/${clientId}/campaign-wins`);
+      setCampaignWinsMeta({
+        enabled: false,
+        recipients: [],
+        lastSent: null,
+      });
+      toast.success("Campaign Wins report deleted successfully");
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Failed to delete Campaign Wins report";
+      toast.error(msg);
+    } finally {
+      setCampaignWinsDeleteConfirm({ isOpen: false, label: null });
+    }
+  }, [clientId]);
+
   const handleDeleteReport = useCallback(async () => {
     if (includedClientReadOnly) return;
     if (!singleReportForClient) {
@@ -4120,6 +4384,39 @@ const ClientDashboardPage: React.FC = () => {
       label: singleReportForClient.name,
     });
   }, [singleReportForClient, includedClientReadOnly]);
+
+  const handleDeletePpcReport = useCallback(() => {
+    if (!canModifyClientSettings) {
+      toast.error("Included clients are view-only.");
+      return;
+    }
+    if (!ppcScheduleMeta.scheduleId) {
+      toast.error("No PPC report schedule to delete.");
+      return;
+    }
+    setPpcReportDeleteConfirm({
+      isOpen: true,
+      scheduleId: ppcScheduleMeta.scheduleId,
+      label: "Client PPC Report",
+    });
+  }, [canModifyClientSettings, ppcScheduleMeta.scheduleId]);
+
+  const confirmDeletePpcReport = async () => {
+    if (!ppcReportDeleteConfirm.scheduleId) {
+      setPpcReportDeleteConfirm({ isOpen: false, scheduleId: null, label: null });
+      return;
+    }
+    try {
+      await api.delete(`/seo/reports/schedules/${ppcReportDeleteConfirm.scheduleId}`);
+      toast.success("PPC report deleted successfully");
+      await loadPpcScheduleMeta();
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Failed to delete PPC report";
+      toast.error(msg);
+    } finally {
+      setPpcReportDeleteConfirm({ isOpen: false, scheduleId: null, label: null });
+    }
+  };
 
   const confirmDeleteReport = useCallback(async () => {
     if (!reportDeleteConfirm.reportId) {
@@ -4394,7 +4691,6 @@ const ClientDashboardPage: React.FC = () => {
       const oauthClientId = res.data?.oauthClientId;
       if (redirectUri) {
         console.info("[Google Ads] OAuth redirect URI:", redirectUri);
-        toast.success(`Google Ads callback: ${redirectUri}`, { duration: 5000 });
       }
       if (oauthClientId) {
         console.info("[Google Ads] OAuth client ID:", oauthClientId);
@@ -4478,18 +4774,26 @@ const ClientDashboardPage: React.FC = () => {
       setLoadingGoogleAdsCustomers(true);
       setGoogleAdsSelectedManager(null);
       setGoogleAdsChildAccounts([]);
-      // Fetch raw list (managers + standalone) so we can show manager -> client picker when needed
+      // Fetch flattened client accounts list (no manager rows) for simpler PPC connection.
       const res = await api.get(`/clients/${clientId}/google-ads/customers`, {
-        params: { clientOnly: 'false' },
+        params: { clientOnly: 'true' },
       });
-      const customers = res.data?.customers || [];
+      const customers = Array.isArray(res.data?.customers)
+        ? res.data.customers.filter((c: any) => !c?.status || String(c.status).toUpperCase() === "ENABLED")
+        : [];
+      const sortedCustomers = [...customers].sort((a: any, b: any) => {
+        const nameA = String(a?.customerName || "").toLowerCase();
+        const nameB = String(b?.customerName || "").toLowerCase();
+        if (nameA !== nameB) return nameA.localeCompare(nameB);
+        return String(a?.customerId || "").localeCompare(String(b?.customerId || ""));
+      });
       
-      if (customers.length === 0) {
-        toast.error("No Google Ads accounts found. Please make sure you have access to at least one Google Ads account.");
+      if (sortedCustomers.length === 0) {
+        toast.error("No active PPC accounts found. Connect an account that has at least one enabled campaign.");
         return;
       }
       
-      setGoogleAdsCustomers(customers);
+      setGoogleAdsCustomers(sortedCustomers);
       setShowGoogleAdsModal(true);
     } catch (error: any) {
       console.error("Failed to fetch Google Ads customers:", error);
@@ -4599,6 +4903,7 @@ const ClientDashboardPage: React.FC = () => {
       const params: any = {
         start: startDate.toISOString().split('T')[0],
         end: endDate.toISOString().split('T')[0],
+        activeOnly: "true",
       };
       
       if (ppcSubSection === 'campaigns') {
@@ -4612,7 +4917,7 @@ const ClientDashboardPage: React.FC = () => {
       }
       
       if (endpoint) {
-        const res = await api.get(endpoint, { params });
+        const res = await api.get(endpoint, { params, _silent: true } as any);
         setPpcData(res.data);
         if (res.data?.success === false && res.data?.message) {
           setPpcError(res.data.message);
@@ -4627,19 +4932,107 @@ const ClientDashboardPage: React.FC = () => {
         error.response?.data?.error ??
         error.message ??
         "Failed to load PPC data";
-      setPpcError(typeof message === "string" ? message : "Failed to load PPC data");
+      const normalizedMessage = typeof message === "string" ? message : "Failed to load PPC data";
+      const status = Number(error?.response?.status || 0);
+      const notConnected =
+        /google ads is not connected/i.test(normalizedMessage) ||
+        error?.response?.data?.connected === false;
+      const inactiveAccount = /isn'?t active|not yet enabled|deactivated|customer_not_enabled/i.test(normalizedMessage);
+
+      if (status === 400 && notConnected) {
+        setGoogleAdsConnected(false);
+        setPpcData(null);
+        setPpcError("Google Ads is not connected for this client. Please reconnect Google Ads.");
+        return;
+      }
+
+      if (status === 400 && inactiveAccount) {
+        setPpcData(null);
+        setPpcError(
+          "The connected Google Ads account isn't active. Disconnect and reconnect an active Google Ads account."
+        );
+        return;
+      }
+
+      setPpcError(normalizedMessage);
     } finally {
       setPpcLoading(false);
     }
   };
 
+  const loadPpcScheduleMeta = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      const res = await api.get(`/seo/reports/${clientId}/schedules`);
+      const schedules = Array.isArray(res.data) ? res.data : [];
+      const parseRecipients = (value: unknown): string[] => {
+        if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+        if (value == null) return [];
+        const raw = String(value).trim();
+        if (!raw) return [];
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+          }
+        } catch {
+          // ignore and fall back to comma split
+        }
+        if (raw.includes(",")) return raw.split(",").map((s) => s.trim()).filter(Boolean);
+        return [raw];
+      };
+      const ppcSchedule = schedules.find((s: any) =>
+        typeof s?.emailSubject === "string" && String(s.emailSubject).startsWith(PPC_SCHEDULE_PREFIX)
+      );
+      if (!ppcSchedule) {
+        setPpcScheduleMeta({
+          hasSchedule: false,
+          scheduleId: null,
+          isActive: false,
+          frequency: null,
+          lastRunAt: null,
+          nextRunAt: null,
+          recipients: [],
+        });
+        return;
+      }
+      setPpcScheduleMeta({
+        hasSchedule: true,
+        scheduleId: typeof ppcSchedule.id === "string" ? ppcSchedule.id : null,
+        isActive: Boolean(ppcSchedule.isActive),
+        frequency: typeof ppcSchedule.frequency === "string" ? ppcSchedule.frequency : null,
+        lastRunAt: ppcSchedule.lastRunAt ? String(ppcSchedule.lastRunAt) : null,
+        nextRunAt: ppcSchedule.nextRunAt ? String(ppcSchedule.nextRunAt) : null,
+        recipients: parseRecipients(ppcSchedule.recipients),
+      });
+    } catch {
+      setPpcScheduleMeta({
+        hasSchedule: false,
+        scheduleId: null,
+        isActive: false,
+        frequency: null,
+        lastRunAt: null,
+        nextRunAt: null,
+        recipients: [],
+      });
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    if (reportOnly || activeTab === "report") {
+      void loadPpcScheduleMeta();
+    }
+  }, [clientId, reportOnly, activeTab, loadPpcScheduleMeta]);
+
   // Load PPC data when subsection or date range changes
   useEffect(() => {
     if (dashboardSection === "ppc" && googleAdsConnected && clientId) {
       loadPpcData();
+      loadPpcScheduleMeta();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId]);
+  }, [ppcSubSection, dashboardSection, googleAdsConnected, clientId, loadPpcScheduleMeta]);
 
   // When Google Ads is disconnected, leave PPC section so we don't show a hidden section
   useEffect(() => {
@@ -7055,21 +7448,8 @@ const ClientDashboardPage: React.FC = () => {
                           <div className="flex items-center justify-between mb-4">
                             <div>
                               <h2 className="text-xl font-semibold text-gray-900">PPC</h2>
-                              {googleAdsAccountEmail && (
-                                <p className="text-sm text-gray-500 mt-1">
-                                  Account: {googleAdsAccountEmail}
-                                </p>
-                              )}
                             </div>
                             <div className="flex items-center gap-2">
-                              <button
-                                onClick={handleSendPpcReportNow}
-                                disabled={sendingPpcReport || googleAdsConnecting || !canModifyClientSettings}
-                                className="text-sm text-emerald-700 hover:text-emerald-800 disabled:opacity-60"
-                                title={canModifyClientSettings ? "Send PPC report now" : "Included clients are view-only"}
-                              >
-                                {sendingPpcReport ? "Sending..." : "Send PPC Report Now"}
-                              </button>
                               <button
                                 onClick={handleDisconnectGoogleAds}
                                 disabled={googleAdsConnecting}
@@ -10491,90 +10871,143 @@ const ClientDashboardPage: React.FC = () => {
                             <tr>
                               <td colSpan={6} className="px-6 py-8 text-center text-sm text-rose-600 bg-rose-50/50">{reportError}</td>
                             </tr>
-                          ) : !singleReportForClient ? (
+                          ) : reportRows.length === 0 ? (
                             <tr>
                               <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500 bg-amber-50/50">
                                 No reports yet for this client.
                               </td>
                             </tr>
                           ) : (
-                            <tr key={singleReportForClient.id} className="bg-white hover:bg-primary-50/50 transition-colors">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{singleReportForClient.name}</td>
+                            reportRows.map((reportRow) => (
+                            <tr key={reportRow.id} className="bg-white hover:bg-primary-50/50 transition-colors">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{reportRow.name}</td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">
                                 <div className="inline-flex items-center gap-2">
-                                  <span>{singleReportForClient.type}</span>
+                                  <span>{reportRow.type}</span>
                                   <span
                                     className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                      singleReportForClient.scheduleKind === "local_map"
+                                      reportRow.scheduleKind === "local_map"
                                         ? "bg-violet-100 text-violet-700"
-                                        : singleReportForClient.scheduleKind === "ppc"
+                                        : reportRow.scheduleKind === "ppc"
                                         ? "bg-sky-100 text-sky-700"
+                                        : reportRow.scheduleKind === "campaign_wins"
+                                        ? "bg-amber-100 text-amber-700"
                                         : "bg-emerald-100 text-emerald-700"
                                     }`}
                                   >
-                                    {singleReportForClient.scheduleKind === "local_map"
+                                    {reportRow.scheduleKind === "local_map"
                                       ? "Local Map"
-                                      : singleReportForClient.scheduleKind === "ppc"
+                                      : reportRow.scheduleKind === "ppc"
                                       ? "PPC"
+                                      : reportRow.scheduleKind === "campaign_wins"
+                                      ? "Campaign Wins"
                                       : "SEO"}
                                   </span>
-                                  {serverReport?.campaignWinsEnabled ? (
-                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[11px] font-semibold">
-                                      Campaign Wins On
-                                    </span>
-                                  ) : null}
                                 </div>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{singleReportForClient.lastGenerated}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{reportRow.lastGenerated}</td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <span
-                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getReportStatusBadgeClass(singleReportForClient.status)}`}
+                                  className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getReportStatusBadgeClass(reportRow.status)}`}
                                 >
-                                  {toDisplayReportStatus(singleReportForClient.status)}
+                                  {toDisplayReportStatus(reportRow.status)}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-sm text-violet-800/90 max-w-xs break-words">
-                                {singleReportForClient.recipients.join(", ")}
+                                {reportRow.recipients.join(", ")}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div className="inline-flex items-center gap-1 justify-end">
                                   <button
-                                    onClick={() => handleViewReport(singleReportForClient)}
+                                    onClick={
+                                      reportRow.scheduleKind === "campaign_wins"
+                                        ? handleViewCampaignWinsHtml
+                                        : () => handleViewReport(reportRow)
+                                    }
                                     className="p-2 rounded-lg text-gray-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
-                                    title="View report"
-                                    aria-label="View report"
+                                    title={reportRow.scheduleKind === "campaign_wins" ? "View HTML" : "View report"}
+                                    aria-label={reportRow.scheduleKind === "campaign_wins" ? "View HTML" : "View report"}
                                   >
                                     <Eye className="h-4 w-4" />
                                   </button>
-                                  <button
-                                    onClick={handleShare}
-                                    className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                                    title="Share dashboard"
-                                    aria-label="Share dashboard"
-                                  >
-                                    <Share2 className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={handleSendReport}
-                                    disabled={sendingReport || !canModifyClientSettings}
-                                    className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                    title={canModifyClientSettings ? "Send report via email" : "Included clients are view-only"}
-                                    aria-label="Send report"
-                                  >
-                                    <Send className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={handleDeleteReport}
-                                    disabled={!canModifyClientSettings}
-                                    className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                    title={canModifyClientSettings ? "Delete report" : "Included clients are view-only"}
-                                    aria-label="Delete report"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
+                                  {reportRow.scheduleKind !== "campaign_wins" && (
+                                    <button
+                                      onClick={handleShare}
+                                      className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                      title="Share dashboard"
+                                      aria-label="Share dashboard"
+                                    >
+                                      <Share2 className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                  {reportRow.scheduleKind === "ppc" ? (
+                                    <>
+                                      <button
+                                        onClick={handleSendPpcReportNow}
+                                        disabled={sendingPpcReport || !canModifyClientSettings}
+                                        className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                        title={canModifyClientSettings ? "Send PPC report via email" : "Included clients are view-only"}
+                                        aria-label="Send PPC report"
+                                      >
+                                        <Send className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        onClick={handleDeletePpcReport}
+                                        disabled={!canModifyClientSettings || !ppcScheduleMeta.scheduleId}
+                                        className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                        title={canModifyClientSettings ? "Delete report" : "Included clients are view-only"}
+                                        aria-label="Delete report"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  ) : reportRow.scheduleKind === "campaign_wins" ? (
+                                    <>
+                                      <button
+                                        onClick={handleSendCampaignWinsNow}
+                                        disabled={sendingCampaignWinsReport || !canModifyClientSettings}
+                                        className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                        title={canModifyClientSettings ? "Instant send Campaign Wins report" : "Included clients are view-only"}
+                                        aria-label="Instant send Campaign Wins report"
+                                      >
+                                        <Send className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        onClick={handleDeleteCampaignWinsReport}
+                                        disabled={!canModifyClientSettings}
+                                        className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                        title={canModifyClientSettings ? "Delete Campaign Wins report" : "Included clients are view-only"}
+                                        aria-label="Delete Campaign Wins report"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        onClick={handleSendReport}
+                                        disabled={sendingReport || !canModifyClientSettings}
+                                        className="p-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                        title={canModifyClientSettings ? "Send report via email" : "Included clients are view-only"}
+                                        aria-label="Send report"
+                                      >
+                                        <Send className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        onClick={handleDeleteReport}
+                                        disabled={!canModifyClientSettings}
+                                        className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                        title={canModifyClientSettings ? "Delete report" : "Included clients are view-only"}
+                                        aria-label="Delete report"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               </td>
                             </tr>
+                            ))
                           )}
                         </tbody>
                       </table>
@@ -11883,6 +12316,87 @@ const ClientDashboardPage: React.FC = () => {
         variant="danger"
       />
 
+      <ConfirmDialog
+        isOpen={ppcReportDeleteConfirm.isOpen}
+        onClose={() => setPpcReportDeleteConfirm({ isOpen: false, scheduleId: null, label: null })}
+        onConfirm={() => void confirmDeletePpcReport()}
+        title="Delete report"
+        message={`Are you sure you want to delete "${ppcReportDeleteConfirm.label || "this report"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      <ConfirmDialog
+        isOpen={campaignWinsDeleteConfirm.isOpen}
+        onClose={() => setCampaignWinsDeleteConfirm({ isOpen: false, label: null })}
+        onConfirm={() => void confirmDeleteCampaignWinsReport()}
+        title="Delete report"
+        message={`Are you sure you want to delete "${campaignWinsDeleteConfirm.label || "this report"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+
+      {campaignWinsPreviewModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Campaign Wins Email Preview</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  {campaignWinsPreviewModal.clientName}
+                </p>
+                <p className="text-sm text-gray-700 mt-2">
+                  <span className="font-medium">Subject:</span> {campaignWinsPreviewModal.subject || "N/A"}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  To: {campaignWinsPreviewModal.recipients.length > 0 ? campaignWinsPreviewModal.recipients.join(", ") : "No recipients"}
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setCampaignWinsPreviewModal({
+                    open: false,
+                    clientName: "",
+                    subject: "",
+                    recipients: [],
+                    html: "",
+                  })
+                }
+                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                title="Close preview"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 bg-gray-50 flex-1 overflow-auto">
+              <iframe
+                title="Campaign Wins email HTML preview"
+                srcDoc={campaignWinsPreviewModal.html}
+                className="w-full h-[65vh] rounded-lg border border-gray-200 bg-white"
+              />
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() =>
+                  setCampaignWinsPreviewModal({
+                    open: false,
+                    clientName: "",
+                    subject: "",
+                    recipients: [],
+                    html: "",
+                  })
+                }
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* View Report Modal */}
       {viewReportModalOpen && selectedReport && createPortal(
         <div className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-50 z-50 m-0 p-0">
@@ -11904,7 +12418,9 @@ const ClientDashboardPage: React.FC = () => {
                   <div className="text-center">
                     <div className="flex items-center justify-center mb-3">
                       <FileText className="h-8 w-8 mr-3" />
-                      <h1 className="text-3xl font-bold">SEO Analytics Report</h1>
+                      <h1 className="text-3xl font-bold">
+                        {selectedReport?.scheduleKind === "ppc" ? "PPC Analytics Report" : "SEO Analytics Report"}
+                      </h1>
                     </div>
                     <p className="text-primary-100 text-lg mt-2">
                       {(serverReport?.period ? String(serverReport.period) : String(selectedReport.type)).charAt(0).toUpperCase() +
@@ -12745,7 +13261,12 @@ const ClientDashboardPage: React.FC = () => {
                      pdf.setFontSize(11);
                      pdf.setTextColor(148, 163, 184);
                      const labelY = pageHeight * 0.32;
-                     pdf.text("SEO ANALYTICS REPORT", pageWidth / 2, labelY, { align: "center" });
+                    pdf.text(
+                      selectedReport?.scheduleKind === "ppc" ? "PPC ANALYTICS REPORT" : "SEO ANALYTICS REPORT",
+                      pageWidth / 2,
+                      labelY,
+                      { align: "center" }
+                    );
                      const lineW = 50;
                      pdf.setDrawColor(59, 130, 246);
                      pdf.setLineWidth(0.6);
@@ -13105,7 +13626,7 @@ const ClientDashboardPage: React.FC = () => {
             ) : (
               <>
                 <p className="text-sm text-gray-600 mb-4">
-                  Select a Google Ads account to connect. Manager accounts will show their client accounts for selection. Standalone accounts connect directly.
+                  Select the active Google Ads account for this client. Each row shows account name and customer ID.
                 </p>
                 {loadingGoogleAdsCustomers ? (
                   <div className="flex items-center justify-center py-8">
@@ -13132,6 +13653,9 @@ const ClientDashboardPage: React.FC = () => {
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-gray-900">{customer.customerName}</span>
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+                                    {String(customer.status || "PPC Active")}
+                                  </span>
                                   {customer.isManager && (
                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
                                       Manager account

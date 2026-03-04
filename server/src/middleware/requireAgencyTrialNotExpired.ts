@@ -9,6 +9,7 @@ const ALLOWED_WHEN_TRIAL_EXPIRED: Array<{ path: string; methods: string[] }> = [
   { path: "/api/agencies/me", methods: ["GET", "PUT"] },
   { path: "/api/seo/agency/subscription", methods: ["GET"] },
   { path: "/api/agencies/activate-trial-subscription", methods: ["POST"] },
+  { path: "/api/agencies/activate-free-account", methods: ["POST"] },
   { path: "/api/agencies/setup-intent-for-activation", methods: ["POST"] },
 ];
 

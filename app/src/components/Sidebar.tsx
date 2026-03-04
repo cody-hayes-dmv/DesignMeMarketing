@@ -221,14 +221,14 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       label: "Local Map Snapshot",
       path: "/agency/local-map-snapshot",
       hasSubMenu: false,
-      roles: ["AGENCY", "SUPER_ADMIN"],
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: MapPin,
       label: "Prospect Snapshot",
       path: "/superadmin/prospect-snapshot",
       hasSubMenu: false,
-      roles: ["SUPER_ADMIN"],
+      roles: ["ADMIN", "SUPER_ADMIN"],
     },
     {
       icon: Briefcase,

@@ -3,8 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchAgencies } from "@/store/slices/agencySlice";
 import { fetchClients } from "@/store/slices/clientSlice";
-import Layout from "@/components/Layout";
-import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle, Loader2, RefreshCw, ListTodo, ChevronRight } from "lucide-react";
+import { Building2, Users, Activity, Globe, CheckCircle, AlertCircle, Loader2, RefreshCw, ListTodo, ChevronRight, LayoutDashboard } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
@@ -149,6 +148,7 @@ const SuperAdminDashboard = () => {
     activeAgencies: number;
     activeManagedClients: number;
     totalDashboards: number;
+    dashboardOnlyClients?: number;
     pendingRequests: number;
   } | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -173,7 +173,29 @@ const SuperAdminDashboard = () => {
   const activeManagedClients =
     stats?.activeManagedClients ??
     clients.filter((c) => c.status === "ACTIVE").length;
+  const dashboardOnlyClients =
+    stats?.dashboardOnlyClients ??
+    clients.filter((c) => c.status === "DASHBOARD_ONLY").length;
   const pendingRequests = stats?.pendingRequests ?? pendingManagedServices.length;
+
+  const goToTotalAgencies = () => {
+    navigate("/agency/agencies", { state: { agenciesMetricFilter: "all" } });
+  };
+  const goToActiveAgencies = () => {
+    navigate("/agency/agencies", { state: { agenciesMetricFilter: "active" } });
+  };
+  const goToActiveClients = () => {
+    navigate("/agency/clients", { state: { statusFilter: "active" } });
+  };
+  const goToTotalDashboards = () => {
+    navigate("/agency/clients", { state: { statusFilter: "total" } });
+  };
+  const goToDashboardOnlyClients = () => {
+    navigate("/agency/clients", { state: { statusFilter: "dashboard_only" } });
+  };
+  const goToPendingRequests = () => {
+    navigate("/agency/clients", { state: { statusFilter: "pending" } });
+  };
 
   // Recent agencies (last 5)
   const recentAgencies = [...agencies]
@@ -300,7 +322,7 @@ const SuperAdminDashboard = () => {
       {/* All Tasks (Me) */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm border-l-4 border-l-violet-500">
         <div className="p-6 border-b border-gray-200 bg-violet-50/30 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">All Tasks (Me)</h2>
+          <h2 className="text-lg font-semibold text-gray-900">All Tasks</h2>
           <button
             type="button"
             onClick={() => navigate("/agency/tasks?assigneeMe=true&status=all")}
@@ -368,8 +390,7 @@ const SuperAdminDashboard = () => {
   const dashboardTitle = user?.role === "ADMIN" ? "Admin Dashboard" : "Super Admin Dashboard";
 
   return (
-    <Layout title={dashboardTitle}>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 space-y-10 p-8 -m-8">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 space-y-10 p-8">
         {/* Header Banner */}
         <div className="relative rounded-2xl bg-gradient-to-r from-primary-600 via-blue-600 to-indigo-500 p-8 shadow-lg overflow-hidden">
           <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuNSIgZmlsbD0id2hpdGUiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-50" />
@@ -384,9 +405,13 @@ const SuperAdminDashboard = () => {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6 lg:gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-6 lg:gap-8">
           {/* Total Agencies */}
-          <div className="bg-white rounded-2xl border border-primary-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <button
+            type="button"
+            onClick={goToTotalAgencies}
+            className="w-full bg-white rounded-2xl border border-primary-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative"
+          >
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-primary-400/20 to-primary-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -402,10 +427,14 @@ const SuperAdminDashboard = () => {
                 <Building2 className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Active Agencies */}
-          <div className="bg-white rounded-2xl border border-green-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <button
+            type="button"
+            onClick={goToActiveAgencies}
+            className="w-full bg-white rounded-2xl border border-green-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative"
+          >
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-green-400/20 to-green-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -421,10 +450,14 @@ const SuperAdminDashboard = () => {
                 <CheckCircle className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Active Clients */}
-          <div className="bg-white rounded-2xl border border-indigo-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <button
+            type="button"
+            onClick={goToActiveClients}
+            className="w-full bg-white rounded-2xl border border-indigo-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative"
+          >
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-400/20 to-indigo-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -440,10 +473,14 @@ const SuperAdminDashboard = () => {
                 <Users className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Total Dashboards */}
-          <div className="bg-white rounded-2xl border border-blue-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <button
+            type="button"
+            onClick={goToTotalDashboards}
+            className="w-full bg-white rounded-2xl border border-blue-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative"
+          >
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-400/20 to-blue-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -459,10 +496,37 @@ const SuperAdminDashboard = () => {
                 <Activity className="h-6 w-6 text-white" />
               </div>
             </div>
-          </div>
+          </button>
 
           {/* Pending Requests */}
-          <div className="bg-white rounded-2xl border border-rose-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative">
+          <button
+            type="button"
+            onClick={goToDashboardOnlyClients}
+            className="w-full bg-white rounded-2xl border border-violet-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-violet-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative"
+          >
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-violet-400/20 to-violet-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
+            <div className="flex items-start justify-between gap-4 relative">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Dashboard Only</p>
+                <p className="text-4xl font-extrabold text-gray-900 tabular-nums tracking-tight">
+                  {statsLoading ? "—" : dashboardOnlyClients}
+                </p>
+                {!statsLoading && (
+                  <p className="text-sm text-gray-500 mt-3">Reporting only, no managed services</p>
+                )}
+              </div>
+              <div className="bg-gradient-to-br from-violet-500 to-violet-700 p-3 rounded-xl shrink-0 shadow-lg shadow-violet-200" aria-hidden>
+                <LayoutDashboard className="h-6 w-6 text-white" />
+              </div>
+            </div>
+          </button>
+
+          {/* Pending Requests */}
+          <button
+            type="button"
+            onClick={goToPendingRequests}
+            className="w-full bg-white rounded-2xl border border-rose-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/50 transition-all duration-200 overflow-hidden group text-left p-6 relative"
+          >
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-rose-400/20 to-rose-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
             <div className="flex items-start justify-between gap-4 relative">
               <div className="min-w-0 flex-1">
@@ -483,7 +547,7 @@ const SuperAdminDashboard = () => {
                 )}
               </div>
             </div>
-          </div>
+          </button>
         </div>
 
         {/* Admin-first task management */}
@@ -823,7 +887,6 @@ const SuperAdminDashboard = () => {
           </div>
         </div>
       </div>
-    </Layout>
   );
 };
 

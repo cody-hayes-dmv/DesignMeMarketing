@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchAgencies, inviteAgency } from "@/store/slices/agencySlice";
-import Layout from "@/components/Layout";
 import { Plus, Users, Building2, Mail } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -24,8 +23,7 @@ const AdminDashboard = () => {
   };
 
   return (
-    <Layout title="Admin Dashboard">
-      <div className="space-y-8">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 p-8 space-y-8">
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>
@@ -227,7 +225,6 @@ const AdminDashboard = () => {
           </div>
         )}
       </div>
-    </Layout>
   );
 };
 

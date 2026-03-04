@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { fetchClients } from "@/store/slices/clientSlice";
@@ -90,6 +90,19 @@ interface DashboardStats {
   nextBillingDate?: string;
 }
 
+interface SubscriptionUsage {
+  clientDashboards?: { used: number; limit: number };
+  keywordsTracked?: { used: number; limit: number };
+  researchCredits?: { used: number; limit: number };
+}
+
+interface SubscriptionSummaryResponse {
+  currentPlan?: string;
+  currentPlanPrice?: number | null;
+  nextBillingDate?: string;
+  usage?: SubscriptionUsage;
+}
+
 const defaultGa4Summary: AgencyGa4Summary = {
   websiteVisitors: 0,
   organicSessions: 0,
@@ -149,6 +162,16 @@ const mapDashboardResponse = (payload: any): DashboardStats => ({
 });
 
 const defaultDashboardStats: DashboardStats = mapDashboardResponse({});
+const PLAN_LABELS: Record<string, string> = {
+  free: "Free",
+  solo: "Solo",
+  starter: "Starter",
+  growth: "Growth",
+  pro: "Pro",
+  enterprise: "Enterprise",
+  business_lite: "Business Lite",
+  business_pro: "Business Pro",
+};
 
 const AgencyDashboardPage = () => {
   const dispatch = useDispatch();
@@ -161,35 +184,85 @@ const AgencyDashboardPage = () => {
     dispatch(fetchClients() as any);
   }, [dispatch]);
 
+  const fetchDashboardData = useCallback(async () => {
+    const res = await api.get("/seo/agency/dashboard", {
+      params: { period: "30" },
+    });
+    setStats((prev) => ({
+      ...prev,
+      ...mapDashboardResponse(res.data),
+    }));
+  }, []);
+
+  const fetchSubscriptionSummary = useCallback(async () => {
+    const res = await api.get<SubscriptionSummaryResponse>("/seo/agency/subscription");
+    const summary = res.data || {};
+    const planKey = String(summary.currentPlan || "").trim().toLowerCase();
+    const usage = summary.usage || {};
+    const dashboardsUsage = usage.clientDashboards;
+    const keywordsUsage = usage.keywordsTracked;
+    const creditsUsage = usage.researchCredits;
+
+    setStats((prev) => ({
+      ...prev,
+      currentTier: PLAN_LABELS[planKey] || prev.currentTier || "Free",
+      monthlySpend:
+        summary.currentPlanPrice == null
+          ? prev.monthlySpend
+          : String(summary.currentPlanPrice),
+      nextBillingDate: summary.nextBillingDate || prev.nextBillingDate,
+      totalProjects:
+        dashboardsUsage?.used ?? prev.totalProjects,
+      tierLimit:
+        dashboardsUsage?.limit != null
+          ? Math.max(0, dashboardsUsage.limit - 1)
+          : prev.tierLimit,
+      totalKeywords:
+        keywordsUsage?.used ?? prev.totalKeywords,
+      keywordLimit:
+        keywordsUsage?.limit ?? prev.keywordLimit,
+      researchCredits:
+        creditsUsage && typeof creditsUsage.used === "number" && typeof creditsUsage.limit === "number"
+          ? {
+              used: creditsUsage.used,
+              limit: creditsUsage.limit,
+              resetsInDays: prev.researchCredits?.resetsInDays ?? 30,
+            }
+          : prev.researchCredits,
+    }));
+  }, []);
+
   useEffect(() => {
-    const fetchDashboardData = async () => {
+    const loadAll = async () => {
       try {
         setLoading(true);
-        const res = await api.get("/seo/agency/dashboard", {
-          params: { period: "30" },
-        });
-        setStats(mapDashboardResponse(res.data));
+        await Promise.all([fetchDashboardData(), fetchSubscriptionSummary()]);
       } catch (error: any) {
         console.error("Failed to fetch dashboard data", error);
-        // Toast is already shown by API interceptor
       } finally {
         setLoading(false);
       }
     };
+    loadAll();
+  }, [fetchDashboardData, fetchSubscriptionSummary]);
 
-    fetchDashboardData();
-  }, []);
+  useEffect(() => {
+    const onSubscriptionChanged = () => {
+      fetchSubscriptionSummary().catch(() => {});
+      fetchDashboardData().catch(() => {});
+    };
+    window.addEventListener("subscription-changed", onSubscriptionChanged);
+    return () => {
+      window.removeEventListener("subscription-changed", onSubscriptionChanged);
+    };
+  }, [fetchDashboardData, fetchSubscriptionSummary]);
 
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
       await api.post("/seo/agency/dashboard/refresh");
       toast.success("Agency dashboard data refreshed successfully!");
-      // Refetch dashboard data
-      const res = await api.get("/seo/agency/dashboard", {
-        params: { period: "30" },
-      });
-      setStats(mapDashboardResponse(res.data));
+      await Promise.all([fetchDashboardData(), fetchSubscriptionSummary()]);
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
     } finally {
@@ -275,7 +348,7 @@ const AgencyDashboardPage = () => {
 
           {/* Card 2 - Total Keywords Tracked (Green/Teal) */}
           <Link
-            to="/agency/research"
+            to="/agency/add-ons"
             className="group relative overflow-hidden rounded-2xl border border-teal-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-teal-100/50"
           >
             <div className="absolute right-0 top-0 h-24 w-24 translate-x-6 -translate-y-6 rounded-full bg-gradient-to-br from-teal-400/20 to-secondary-600/20 transition-transform group-hover:scale-150" />
@@ -324,7 +397,7 @@ const AgencyDashboardPage = () => {
               })()}
             </div>
             <p className="mt-4 flex items-center gap-1 text-xs font-semibold text-teal-600 group-hover:text-teal-700">
-              Keyword breakdown <ArrowUpRight className="h-3.5 w-3.5" />
+              Manage keyword add-ons <ArrowUpRight className="h-3.5 w-3.5" />
             </p>
           </Link>
 

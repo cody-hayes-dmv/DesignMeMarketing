@@ -5,6 +5,8 @@ export interface Agency {
   id: string;
   name: string;
   subdomain?: string;
+  subscriptionTier?: string | null;
+  trialEndsAt?: string | null;
   createdAt: string;
   memberCount: number;
   clientCount?: number;

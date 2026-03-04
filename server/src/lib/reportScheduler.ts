@@ -1933,32 +1933,114 @@ export function generatePpcReportEmailHtml(clientName: string, report: Awaited<R
   const topCampaigns = report.campaigns.slice(0, 10);
   const topAdGroups = report.adGroups.slice(0, 10);
   const topKeywords = report.keywords.slice(0, 10);
+  const topConversions = report.conversions.slice(0, 10);
+  const money = (value: number) =>
+    Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const renderCompactRows = (
+    rows: any[],
+    emptyText: string,
+    formatter: (row: any) => string
+  ) =>
+    rows.length > 0
+      ? `
+        <ul style="margin: 0; padding-left: 18px;">
+          ${rows.map((row) => `<li style="margin: 0 0 6px;">${formatter(row)}</li>`).join("")}
+        </ul>
+      `
+      : `<p style="margin: 0; color: #6b7280;">${escapeHtml(emptyText)}</p>`;
+
   return `
-    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
-      <h2 style="margin: 0 0 8px;">PPC Performance Report</h2>
-      <p style="margin: 0 0 4px;">Client: <strong>${escapeHtml(clientName)}</strong></p>
-      <p style="margin: 0 0 14px;">Period: ${escapeHtml(periodLabel)} (${escapeHtml(report.dateRange.start)} to ${escapeHtml(report.dateRange.end)})</p>
-      <h3 style="margin: 12px 0 6px;">Summary</h3>
-      <ul style="margin: 0 0 12px; padding-left: 18px;">
-        <li>Clicks: ${report.campaignSummary.clicks.toLocaleString()}</li>
-        <li>Impressions: ${report.campaignSummary.impressions.toLocaleString()}</li>
-        <li>Cost: $${report.campaignSummary.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
-        <li>Conversions: ${report.conversionSummary.totalConversions.toLocaleString()}</li>
-        <li>Conversion Value: $${report.conversionSummary.conversionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>
-      </ul>
-      <h3 style="margin: 12px 0 6px;">Top Campaigns</h3>
-      <ul style="margin: 0 0 10px; padding-left: 18px;">
-        ${topCampaigns.map((row: any) => `<li>${escapeHtml(row.name || "Unnamed")} — ${Number(row.clicks || 0).toLocaleString()} clicks, ${Number(row.conversions || 0).toLocaleString()} conv</li>`).join("") || "<li>No campaign activity in this period.</li>"}
-      </ul>
-      <h3 style="margin: 12px 0 6px;">Top Ad Groups</h3>
-      <ul style="margin: 0 0 10px; padding-left: 18px;">
-        ${topAdGroups.map((row: any) => `<li>${escapeHtml(row.name || "Unnamed")} — ${Number(row.clicks || 0).toLocaleString()} clicks, ${Number(row.conversions || 0).toLocaleString()} conv</li>`).join("") || "<li>No ad group activity in this period.</li>"}
-      </ul>
-      <h3 style="margin: 12px 0 6px;">Top Keywords</h3>
-      <ul style="margin: 0; padding-left: 18px;">
-        ${topKeywords.map((row: any) => `<li>${escapeHtml(row.keyword || "Unknown")} — ${Number(row.clicks || 0).toLocaleString()} clicks, ${Number(row.conversions || 0).toLocaleString()} conv</li>`).join("") || "<li>No keyword activity in this period.</li>"}
-      </ul>
-    </div>
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${BRAND_DISPLAY_NAME} PPC Report - ${escapeHtml(clientName)}</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #111827; background-color: #f3f4f6; margin: 0; padding: 24px;">
+        <div style="max-width: 900px; margin: 0 auto; background-color: #ffffff;">
+          <div style="background-color: #2563eb; border-radius: 12px 12px 0 0; padding: 32px; color: #ffffff; text-align: center;">
+            <h1 style="margin: 0 0 12px 0; font-size: 28px; font-weight: 700; color: #ffffff;">PPC Performance Report</h1>
+            <p style="margin: 0; font-size: 16px; color: #bfdbfe;">${escapeHtml(periodLabel)} report for ${escapeHtml(clientName)}</p>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: #dbeafe;">
+              ${escapeHtml(report.dateRange.start)} to ${escapeHtml(report.dateRange.end)}
+            </p>
+          </div>
+
+          <div style="padding: 24px;">
+            <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+              <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #111827;">
+                <span style="display: inline-block; width: 4px; height: 20px; background-color: #3b82f6; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>
+                PPC Summary
+              </h2>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">
+                <tr>
+                  <td width="25%" align="center" valign="top" style="padding: 8px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;">
+                      <tr><td style="padding: 16px; text-align: center;"><div style="font-size: 11px; font-weight: 600; color: #1e40af; margin-bottom: 4px;">Clicks</div><div style="font-size: 22px; font-weight: 700; color: #1e3a8a;">${report.campaignSummary.clicks.toLocaleString()}</div></td></tr>
+                    </table>
+                  </td>
+                  <td width="25%" align="center" valign="top" style="padding: 8px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;">
+                      <tr><td style="padding: 16px; text-align: center;"><div style="font-size: 11px; font-weight: 600; color: #166534; margin-bottom: 4px;">Impressions</div><div style="font-size: 22px; font-weight: 700; color: #14532d;">${report.campaignSummary.impressions.toLocaleString()}</div></td></tr>
+                    </table>
+                  </td>
+                  <td width="25%" align="center" valign="top" style="padding: 8px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px;">
+                      <tr><td style="padding: 16px; text-align: center;"><div style="font-size: 11px; font-weight: 600; color: #6b21a8; margin-bottom: 4px;">Spend</div><div style="font-size: 22px; font-weight: 700; color: #581c87;">$${money(report.campaignSummary.cost)}</div></td></tr>
+                    </table>
+                  </td>
+                  <td width="25%" align="center" valign="top" style="padding: 8px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;">
+                      <tr><td style="padding: 16px; text-align: center;"><div style="font-size: 11px; font-weight: 600; color: #9a3412; margin-bottom: 4px;">Conversions</div><div style="font-size: 22px; font-weight: 700; color: #7c2d12;">${report.conversionSummary.totalConversions.toLocaleString()}</div></td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 14px 0 0; color: #475569; font-size: 12px;">
+                Conversion Value: <strong>$${money(report.conversionSummary.conversionValue)}</strong> •
+                Avg CPC: <strong>$${money(report.campaignSummary.avgCpc)}</strong> •
+                Cost / Conversion: <strong>$${money(report.conversionSummary.costPerConversion)}</strong>
+              </p>
+            </div>
+
+            <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+              <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;"><span style="display: inline-block; width: 4px; height: 20px; background-color: #2563eb; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>Top Campaigns</h2>
+              ${renderCompactRows(topCampaigns, "No campaign activity in this period.", (row) =>
+                `${escapeHtml(row?.name || "Unnamed")} — ${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conversions`
+              )}
+            </div>
+
+            <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+              <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;"><span style="display: inline-block; width: 4px; height: 20px; background-color: #8b5cf6; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>Top Ad Groups</h2>
+              ${renderCompactRows(topAdGroups, "No ad group activity in this period.", (row) =>
+                `${escapeHtml(row?.name || "Unnamed")} — ${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conversions`
+              )}
+            </div>
+
+            <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+              <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;"><span style="display: inline-block; width: 4px; height: 20px; background-color: #0ea5e9; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>Top Keywords</h2>
+              ${renderCompactRows(topKeywords, "No keyword activity in this period.", (row) =>
+                `${escapeHtml(row?.keyword || "Unknown")} — ${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conversions`
+              )}
+            </div>
+
+            <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+              <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #111827;"><span style="display: inline-block; width: 4px; height: 20px; background-color: #f59e0b; border-radius: 2px; margin-right: 8px; vertical-align: middle;"></span>Top Conversion Actions</h2>
+              ${renderCompactRows(topConversions, "No conversion rows in this period.", (row) =>
+                `${escapeHtml(row?.conversionAction || "All conversions")} — ${Number(row?.conversions || 0).toLocaleString()} conversions, $${money(Number(row?.conversionValue || 0))} value`
+              )}
+            </div>
+          </div>
+
+          <div style="background-color: #f9fafb; border-top: 1px solid #e5e7eb; padding: 16px; text-align: center;">
+            <p style="margin: 0; color: #6b7280; font-size: 12px;">
+              This is an automated report generated by ${BRAND_DISPLAY_NAME}.
+            </p>
+          </div>
+        </div>
+      </body>
+    </html>
   `;
 }
 
@@ -1967,57 +2049,92 @@ export async function generatePpcReportPdfBuffer(
   report: Awaited<ReturnType<typeof autoGeneratePpcReport>>
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 40, size: "A4" });
+    const doc = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", (err: Error) => reject(err));
 
     const periodLabel = report.period.charAt(0).toUpperCase() + report.period.slice(1);
-    doc.fontSize(20).text("PPC Performance Report");
+    const money = (value: number) =>
+      Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const brandColor = "#2563eb";
+    const pageLeft = 40;
+    const pageRight = 555;
+    const cardWidth = pageRight - pageLeft;
+    const bottomLimit = 770;
+    const ensureSpace = (height: number) => {
+      if (doc.y + height > bottomLimit) doc.addPage();
+    };
+    const drawSectionHeader = (title: string, accent = brandColor) => {
+      ensureSpace(30);
+      const y = doc.y;
+      doc.save();
+      doc.roundedRect(pageLeft, y, cardWidth, 24, 4).fill("#f8fafc");
+      doc.rect(pageLeft, y, 4, 24).fill(accent);
+      doc.restore();
+      doc.fontSize(11).fillColor("#0f172a").text(title, pageLeft + 12, y + 7);
+      doc.fillColor("#000000");
+      doc.moveDown(1.6);
+    };
+    const drawMetricRow = (label: string, value: string) => {
+      ensureSpace(20);
+      const y = doc.y;
+      doc.fontSize(10.5).fillColor("#475569").text(label, pageLeft, y, { width: cardWidth * 0.6, align: "left" });
+      doc.fontSize(10.5).fillColor("#0f172a").text(value, pageLeft, y, { width: cardWidth, align: "right" });
+      doc.strokeColor("#e2e8f0").moveTo(pageLeft, y + 15).lineTo(pageRight, y + 15).stroke();
+      doc.fillColor("#000000");
+      doc.moveDown(0.7);
+    };
+
+    doc.fontSize(22).fillColor("#0f172a").text("PPC Performance Report", { align: "center" });
     doc.moveDown(0.5);
-    doc.fontSize(11).fillColor("#334155").text(`Client: ${clientName}`);
-    doc.text(`Period: ${periodLabel}`);
+    doc.fontSize(12).fillColor("#334155").text(`${periodLabel} report for ${clientName}`, { align: "center" });
+    doc.moveDown(0.7);
+    doc.fontSize(10.5).fillColor("#475569").text(`Client: ${clientName}`);
     doc.text(`Date range: ${report.dateRange.start} to ${report.dateRange.end}`);
     doc.fillColor("#000000");
     doc.moveDown();
 
-    doc.fontSize(14).text("Summary");
-    doc.fontSize(11);
-    doc.text(`Clicks: ${report.campaignSummary.clicks.toLocaleString()}`);
-    doc.text(`Impressions: ${report.campaignSummary.impressions.toLocaleString()}`);
-    doc.text(
-      `Cost: $${report.campaignSummary.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    );
-    doc.text(`Conversions: ${report.conversionSummary.totalConversions.toLocaleString()}`);
-    doc.text(
-      `Conversion Value: $${report.conversionSummary.conversionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    );
+    drawSectionHeader("PPC Summary");
+    drawMetricRow("Clicks", report.campaignSummary.clicks.toLocaleString());
+    drawMetricRow("Impressions", report.campaignSummary.impressions.toLocaleString());
+    drawMetricRow("Spend", `$${money(report.campaignSummary.cost)}`);
+    drawMetricRow("Conversions", report.conversionSummary.totalConversions.toLocaleString());
+    drawMetricRow("Conversion Value", `$${money(report.conversionSummary.conversionValue)}`);
+    drawMetricRow("Avg CPC", `$${money(report.campaignSummary.avgCpc)}`);
+    drawMetricRow("Cost / Conversion", `$${money(report.conversionSummary.costPerConversion)}`);
     doc.moveDown();
 
-    const writeTopRows = (title: string, rows: any[], label: (row: any) => string) => {
-      doc.fontSize(13).text(title);
-      doc.fontSize(10);
+    const writeTopRows = (title: string, rows: any[], label: (row: any) => string, accent: string) => {
+      drawSectionHeader(title, accent);
+      doc.fontSize(10.5).fillColor("#111827");
       if (!rows.length) {
-        doc.text("No activity in this period.");
+        doc.text("No activity in this period.", pageLeft, doc.y, { width: cardWidth });
         doc.moveDown(0.6);
+        doc.fillColor("#000000");
         return;
       }
       for (const row of rows.slice(0, 12)) {
-        doc.text(`- ${label(row)}`);
+        ensureSpace(16);
+        doc.text(`- ${label(row)}`, pageLeft, doc.y, { width: cardWidth });
       }
+      doc.fillColor("#000000");
       doc.moveDown(0.6);
     };
 
     writeTopRows("Top Campaigns", report.campaigns, (row) =>
       `${String(row?.name || "Unnamed")} (${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conv)`
-    );
+    , "#2563eb");
     writeTopRows("Top Ad Groups", report.adGroups, (row) =>
       `${String(row?.name || "Unnamed")} (${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conv)`
-    );
+    , "#8b5cf6");
     writeTopRows("Top Keywords", report.keywords, (row) =>
       `${String(row?.keyword || "Unknown")} (${Number(row?.clicks || 0).toLocaleString()} clicks, ${Number(row?.conversions || 0).toLocaleString()} conv)`
-    );
+    , "#0ea5e9");
+    writeTopRows("Top Conversion Actions", report.conversions, (row) =>
+      `${String(row?.conversionAction || "All conversions")} (${Number(row?.conversions || 0).toLocaleString()} conv, $${money(Number(row?.conversionValue || 0))} value)`
+    , "#f59e0b");
 
     doc.end();
   });

@@ -987,6 +987,11 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(6),
 });
 
+const emailDeliverabilityTestSchema = z.object({
+  to: z.string().email(),
+  subject: z.string().min(1).max(200).optional(),
+});
+
 router.put("/password", authenticateToken, async (req, res) => {
   try {
     const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
@@ -1022,6 +1027,79 @@ router.put("/password", authenticateToken, async (req, res) => {
     }
     console.error("Change password error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Deliverability diagnostic: send a test invite-style email and return metadata.
+router.post("/email-deliverability-test", authenticateToken, async (req, res) => {
+  try {
+    const requesterRole = String(req.user?.role || "");
+    if (requesterRole !== "SUPER_ADMIN" && requesterRole !== "ADMIN" && requesterRole !== "AGENCY") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const { to, subject } = emailDeliverabilityTestSchema.parse(req.body || {});
+    const frontendUrl = String(process.env.FRONTEND_URL || "http://localhost:3001").trim();
+    const sampleUrl = `${frontendUrl}/invite?token=deliverability-test`;
+    const finalSubject = subject || `${BRAND_DISPLAY_NAME} email deliverability test`;
+
+    const sendResult = await sendEmail({
+      to,
+      subject: finalSubject,
+      html: `
+        <h1>${BRAND_DISPLAY_NAME} - Deliverability Test</h1>
+        <p>This is a diagnostic test email from your dashboard.</p>
+        <p>If this lands in spam/junk, your sending domain/authentication likely needs adjustment.</p>
+        <p>Sample invite-style link: <a href="${sampleUrl}">${sampleUrl}</a></p>
+        <p style="color:#6b7280;font-size:12px;">Sent at: ${new Date().toISOString()}</p>
+      `,
+    });
+
+    const smtpFromRaw = String(process.env.SMTP_FROM || "").trim();
+    const smtpUserRaw = String(process.env.SMTP_USER || "").trim();
+    const extractDomain = (value: string): string | null => {
+      if (!value) return null;
+      const emailMatch = value.match(/<([^>]+)>/);
+      const email = (emailMatch?.[1] || value).trim().toLowerCase();
+      const atIdx = email.lastIndexOf("@");
+      if (atIdx < 0 || atIdx === email.length - 1) return null;
+      return email.slice(atIdx + 1);
+    };
+
+    const fromDomain = extractDomain(sendResult?.from || smtpFromRaw);
+    const smtpUserDomain = extractDomain(smtpUserRaw);
+
+    return res.json({
+      success: true,
+      message: "Deliverability test email sent",
+      email: {
+        to,
+        subject: finalSubject,
+        messageId: sendResult?.messageId || null,
+        from: sendResult?.from || null,
+        replyTo: sendResult?.replyTo || null,
+      },
+      diagnostics: {
+        emailDisabled: String(process.env.EMAIL_DISABLED || "false").toLowerCase() === "true",
+        smtpHostConfigured: Boolean(process.env.SMTP_HOST),
+        smtpPortConfigured: Boolean(process.env.SMTP_PORT),
+        smtpUserConfigured: Boolean(process.env.SMTP_USER),
+        smtpFromConfigured: Boolean(process.env.SMTP_FROM),
+        fromDomain,
+        smtpUserDomain,
+        fromMatchesSmtpUserDomain: Boolean(fromDomain && smtpUserDomain && fromDomain === smtpUserDomain),
+        recommendation:
+          fromDomain && smtpUserDomain && fromDomain !== smtpUserDomain
+            ? "SMTP_FROM domain differs from SMTP_USER domain. Align domains and ensure SPF/DKIM/DMARC are configured."
+            : "Check SPF, DKIM, DMARC for the sending domain and monitor mailbox placement.",
+      },
+    });
+  } catch (error: any) {
+    if (error?.name === "ZodError") {
+      return res.status(400).json({ message: "Invalid input", errors: error.errors });
+    }
+    console.error("Email deliverability test error:", error);
+    return res.status(500).json({ message: error?.message || "Failed to send deliverability test email" });
   }
 });
 

@@ -17,10 +17,29 @@ interface EmailOptions {
   attachments?: EmailAttachment[];
 }
 
+export interface EmailSendResult {
+  messageId: string | null;
+  from: string;
+  replyTo: string | null;
+  to: string;
+  subject: string;
+}
+
 const EMAIL_DISABLED = process.env.EMAIL_DISABLED === "true";
 
 // Lazy-load transporter to ensure env vars are loaded
 let transporter: nodemailer.Transporter | null = null;
+
+function htmlToPlainText(html: string): string {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function getTransporter(): nodemailer.Transporter {
   if (transporter) {
@@ -60,28 +79,39 @@ function getTransporter(): nodemailer.Transporter {
   return transporter;
 }
 
-export const sendEmail = async ({ to, subject, html, attachments }: EmailOptions) => {
+export const sendEmail = async ({ to, subject, html, attachments }: EmailOptions): Promise<EmailSendResult | null> => {
   try {
     if (EMAIL_DISABLED) {
       console.log(
         `[Email] EMAIL_DISABLED=true, skipping send to ${to}. Subject: "${subject}"`
       );
-      return;
+      return null;
     }
 
     const emailTransporter = getTransporter();
     const from = getWhitelabelFromAddress();
     const normalizedSubject = normalizeWhitelabelText(subject);
     const normalizedHtml = normalizeWhitelabelText(html);
+    const normalizedText = htmlToPlainText(normalizedHtml);
+    const replyTo = String(process.env.SMTP_REPLY_TO || "").trim() || undefined;
     console.log(`[Email] Attempting send to ${to}, subject: "${subject.slice(0, 50)}..."`);
     const result = await emailTransporter.sendMail({
       from,
+      replyTo,
       to,
       subject: normalizedSubject,
       html: normalizedHtml,
+      text: normalizedText,
       attachments,
     });
     console.log(`[Email] Sent successfully to ${to}, messageId: ${result.messageId || "n/a"}`);
+    return {
+      messageId: result.messageId || null,
+      from,
+      replyTo: replyTo || null,
+      to,
+      subject: normalizedSubject,
+    };
   } catch (error: any) {
     console.error("[Email] Send failed:", error?.message || error);
     console.error("[Email] To:", to, "Subject:", subject?.slice(0, 40));

@@ -18,6 +18,7 @@ import {
   sendAgencyPlanActivationEmail,
   sendAgencyPlanChangeEmail,
 } from '../lib/agencyPlanEmails.js';
+import { renderBillingEmailTemplate } from '../lib/billingEmailTemplates.js';
 import {
   generateDomainVerificationToken,
   getDomainVerificationInstructions,
@@ -153,6 +154,17 @@ const parseAgencyOnboardingData = (raw: string | null | undefined) => {
   }
 };
 
+const markLegacyOnboardingSchema = z
+  .object({
+    cutoffDate: z.string().datetime().optional(),
+    agencyIds: z.array(z.string().min(1)).optional(),
+    dryRun: z.boolean().optional(),
+  })
+  .refine(
+    (value) => Boolean(value.cutoffDate) || (Array.isArray(value.agencyIds) && value.agencyIds.length > 0),
+    { message: "Provide cutoffDate or agencyIds." }
+  );
+
 // Get all agencies (Admin only)
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -222,6 +234,8 @@ router.get('/', authenticateToken, async (req, res) => {
         id: agency.id,
         name: agency.name,
         subdomain: agency.subdomain,
+        subscriptionTier: agency.subscriptionTier ?? null,
+        trialEndsAt: agency.trialEndsAt ?? null,
         brandDisplayName: agency.brandDisplayName ?? null,
         customDomain: agency.customDomain ?? null,
         domainStatus: toDomainStatus(agency.domainStatus),
@@ -235,6 +249,89 @@ router.get('/', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Fetch agencies error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// One-time maintenance helper: mark legacy agencies as onboarding-complete.
+router.post('/admin/mark-legacy-onboarding-complete', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only Super Admin can run this operation.' });
+    }
+
+    const body = markLegacyOnboardingSchema.parse(req.body ?? {});
+    const dryRun = body.dryRun ?? false;
+    const nowIso = new Date().toISOString();
+
+    const where: any = {};
+    if (body.cutoffDate) {
+      where.createdAt = { lte: new Date(body.cutoffDate) };
+    }
+    if (Array.isArray(body.agencyIds) && body.agencyIds.length > 0) {
+      where.id = { in: body.agencyIds };
+    }
+
+    const agencies = await prisma.agency.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        createdAt: true,
+        onboardingData: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const toUpdate = agencies
+      .map((agency) => {
+        const existing = parseAgencyOnboardingData(agency.onboardingData) ?? {};
+        const alreadyCompleted = Boolean(existing?.submittedAt);
+        if (alreadyCompleted) return null;
+        return {
+          id: agency.id,
+          name: agency.name,
+          createdAt: agency.createdAt.toISOString(),
+          onboardingData: JSON.stringify({
+            ...existing,
+            submittedAt: nowIso,
+          }),
+        };
+      })
+      .filter(Boolean) as Array<{ id: string; name: string; createdAt: string; onboardingData: string }>;
+
+    if (!dryRun && toUpdate.length > 0) {
+      await prisma.$transaction(
+        toUpdate.map((item) =>
+          prisma.agency.update({
+            where: { id: item.id },
+            data: { onboardingData: item.onboardingData },
+          })
+        )
+      );
+    }
+
+    return res.json({
+      success: true,
+      dryRun,
+      filters: {
+        cutoffDate: body.cutoffDate ?? null,
+        agencyIds: body.agencyIds ?? [],
+      },
+      scanned: agencies.length,
+      updated: dryRun ? 0 : toUpdate.length,
+      wouldUpdate: toUpdate.length,
+      sample: toUpdate.slice(0, 20).map((item) => ({
+        id: item.id,
+        name: item.name,
+        createdAt: item.createdAt,
+      })),
+    });
+  } catch (error: any) {
+    if (error?.name === 'ZodError') {
+      return res.status(400).json({ message: 'Invalid input', errors: error.errors });
+    }
+    console.error('Mark legacy onboarding complete error:', error);
+    return res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -483,6 +580,7 @@ const registerAgencySchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
   passwordConfirm: z.string().min(1, 'Please confirm your password'),
   paymentMethodId: z.string().min(1, 'Payment method is required to activate your 7-day free trial'),
+  tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise', 'business_lite', 'business_pro']).optional(),
   referralSource: z.string().optional(),
   referralSourceOther: z.string().optional(),
   primaryGoals: z.array(z.string()).optional(),
@@ -522,7 +620,7 @@ router.post('/setup-intent-public', async (req, res) => {
   }
 });
 
-// Free trial signup schema: no payment, just verification email. After verify, user gets 7-day Free tier.
+// Free Trial plan signup schema: no payment, just verification email.
 const registerFreeTrialSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
@@ -530,7 +628,7 @@ const registerFreeTrialSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
-// Public: Start 7-day free trial (no credit card). Sends verification email. After verify, agency gets Free tier for 7 days.
+// Public: Start Free Trial plan (no credit card). Sends verification email.
 router.post('/register-free-trial', async (req, res) => {
   try {
     const body = registerFreeTrialSchema.parse(req.body);
@@ -630,7 +728,7 @@ router.post('/register-free-trial', async (req, res) => {
       },
     });
 
-    const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify?token=${encodeURIComponent(verificationToken)}`;
+    const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/verify?token=${encodeURIComponent(verificationToken)}`;
     try {
       await sendEmail({
         to: contactEmail,
@@ -638,7 +736,7 @@ router.post('/register-free-trial', async (req, res) => {
         html: `
           <h1>Verify your ${BRAND_DISPLAY_NAME} account</h1>
           <p>Hi ${contactName},</p>
-          <p>Thanks for signing up for your <strong>7-day free trial</strong>. Please verify your email by clicking the link below (expires in 24 hours):</p>
+          <p>Thanks for signing up. Please verify your email by clicking the link below (expires in 24 hours):</p>
           <p><a href="${verifyUrl}">Verify my email</a></p>
           <p>If the link doesn't work, copy and paste this URL into your browser:</p>
           <p style="word-break:break-all">${verifyUrl}</p>
@@ -648,31 +746,30 @@ router.post('/register-free-trial', async (req, res) => {
       console.warn('Agency register-free-trial: verification email failed', emailErr?.message);
     }
 
-    // Notify super admins
-    await prisma.notification.create({
-      data: {
-        agencyId: null,
-        type: 'free_trial_started',
-        title: 'Free trial started',
-        message: `${agencyName} started a 7-day free trial.`,
-        link: '/agency/agencies',
-      },
+    // Notify agency + super admins about signup status (new agency sign-up milestone)
+    const currentStatusLabel = 'Pending Verification - Free Trial Plan';
+    await createNotificationOnce({
+      agencyId: null,
+      userId: null,
+      type: 'free_trial_started',
+      title: 'New Agency signup',
+      message: `${agencyName} signed up. Status: ${currentStatusLabel}.`,
+      link: '/agency/agencies',
     }).catch((e) => console.warn('Create signup notification failed:', e?.message));
 
     await notifySuperAdminsByEmail({
-      subject: `Free trial started - ${agencyName}`,
+      subject: `New Agency signup - ${agencyName}`,
       html: `
-        <h2>A new agency started a 7-day free trial</h2>
+        <h2>New agency signup</h2>
         <p><strong>Agency:</strong> ${agencyName}</p>
         <p><strong>Contact:</strong> ${contactName}</p>
         <p><strong>Email:</strong> ${contactEmail}</p>
-        <p><strong>Plan:</strong> Free 7-day trial</p>
         <p><strong>Created:</strong> ${new Date().toISOString()}</p>
       `,
     });
 
     res.status(201).json({
-      message: 'Please check your email to verify your account. After verification, you can sign in and use the Free tier for 7 days.',
+      message: 'Please check your email to verify your account. After verification, you can sign in and start using your Free Trial plan.',
     });
   } catch (error: any) {
     if (error.name === 'ZodError') {
@@ -730,6 +827,38 @@ router.post('/setup-intent-for-activation', authenticateToken, async (req, res) 
   } catch (err: any) {
     console.error('SetupIntent for activation error:', err);
     res.status(500).json({ message: err?.message || 'Failed to create setup intent' });
+  }
+});
+
+// After Stripe redirect/3DS: retrieve payment method from a SetupIntent created for activation.
+router.post('/setup-intent-for-activation/retrieve', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const setupIntentId = String(req.body?.setupIntentId || "");
+    if (!setupIntentId || !setupIntentId.startsWith('seti_')) {
+      return res.status(400).json({ message: 'Valid setupIntentId is required' });
+    }
+
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+
+    const si = await stripe.setupIntents.retrieve(setupIntentId);
+    if (si.status !== 'succeeded' && si.status !== 'processing') {
+      return res.status(400).json({ message: 'Card setup is not complete yet. Please try again.' });
+    }
+    const pm = si.payment_method;
+    const paymentMethodId = typeof pm === 'string' ? pm : (pm as { id?: string } | null)?.id;
+    if (!paymentMethodId) {
+      return res.status(400).json({ message: 'SetupIntent has no payment method' });
+    }
+    res.json({ paymentMethodId });
+  } catch (err: any) {
+    console.error('SetupIntent for activation retrieve error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to retrieve payment method' });
   }
 });
 
@@ -804,6 +933,7 @@ router.post('/register', async (req, res) => {
       subdomain,
       password,
       paymentMethodId,
+      tier,
       referralSource,
       referralSourceOther,
       primaryGoals,
@@ -842,14 +972,14 @@ router.post('/register', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const websiteNormalized = website.trim().startsWith('http') ? website.trim() : `https://${website.trim()}`;
-    const onboardingData = (referralSource || (primaryGoals && primaryGoals.length) || currentTools || referralSourceOther || primaryGoalsOther)
-      ? JSON.stringify({
-          referralSource: referralSource === 'referral' ? referralSourceOther : referralSource,
-          primaryGoals: primaryGoals || [],
-          primaryGoalsOther: primaryGoalsOther || undefined,
-          currentTools: currentTools || undefined,
-        })
-      : null;
+    const onboardingPayload: Record<string, unknown> = {};
+    if (referralSource || referralSourceOther) {
+      onboardingPayload.referralSource = referralSource === 'referral' ? referralSourceOther : referralSource;
+    }
+    if (primaryGoals && primaryGoals.length) onboardingPayload.primaryGoals = primaryGoals;
+    if (primaryGoalsOther) onboardingPayload.primaryGoalsOther = primaryGoalsOther;
+    if (currentTools) onboardingPayload.currentTools = currentTools;
+    const onboardingData = Object.keys(onboardingPayload).length ? JSON.stringify(onboardingPayload) : null;
 
     // Create user first (unique email). Prevents double-submit from creating two Stripe customers:
     // a second request fails here and never reaches Stripe, so no orphan customer without payment method.
@@ -876,13 +1006,13 @@ router.post('/register', async (req, res) => {
       throw userErr;
     }
 
-    // 7-day free trial for reporting features only; CC required so we can auto-bill after trial.
+    // 7-day free trial with selected plan; CC required so we can auto-bill after trial.
     const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    const reportingTier: TierId = 'solo';
+    const reportingTier: TierId = (tier as TierId | undefined) ?? 'solo';
     const tierPriceId = getPriceIdForTier(reportingTier);
     if (!tierPriceId || !tierPriceId.startsWith('price_')) {
       await prisma.user.delete({ where: { id: agencyUser.id } }).catch(() => {});
-      console.error('[agencies] register: missing STRIPE_PRICE_PLAN_SOLO for reporting trial');
+      console.error('[agencies] register: missing Stripe price for selected tier', reportingTier);
       return res.status(503).json({ message: 'Signup is temporarily unavailable. Please try again later or contact support.' });
     }
 
@@ -1037,13 +1167,13 @@ router.post('/register', async (req, res) => {
     }).catch((e) => console.warn('Create signup notification failed:', e?.message));
 
     await notifySuperAdminsByEmail({
-      subject: `New agency sign-up (Paid) - ${name}`,
+      subject: `New agency sign-up (${reportingTier}) - ${name}`,
       html: `
         <h2>New agency signed up with paid account</h2>
         <p><strong>Agency:</strong> ${name}</p>
         <p><strong>Contact:</strong> ${contactName || '-'}</p>
         <p><strong>Email:</strong> ${contactEmail}</p>
-        <p><strong>Plan:</strong> Paid signup</p>
+        <p><strong>Plan:</strong> ${reportingTier}</p>
         <p><strong>Created:</strong> ${new Date().toISOString()}</p>
       `,
     });
@@ -1141,14 +1271,17 @@ router.post('/', authenticateToken, async (req, res) => {
       : billingOption === 'free_account' ? 'free'
       : billingOption === 'no_charge' ? 'trial'
       : 'custom';
-    const onboardingData = (referralSource || (primaryGoals && primaryGoals.length) || currentTools || referralSourceOther || primaryGoalsOther)
-      ? JSON.stringify({
-          referralSource: referralSource === 'referral' ? referralSourceOther : referralSource,
-          primaryGoals: primaryGoals || [],
-          primaryGoalsOther: primaryGoalsOther || undefined,
-          currentTools: currentTools || undefined,
-        })
-      : null;
+    const onboardingPayload: Record<string, unknown> = {};
+    if (referralSource || referralSourceOther) {
+      onboardingPayload.referralSource = referralSource === 'referral' ? referralSourceOther : referralSource;
+    }
+    if (primaryGoals && primaryGoals.length) onboardingPayload.primaryGoals = primaryGoals;
+    if (primaryGoalsOther) onboardingPayload.primaryGoalsOther = primaryGoalsOther;
+    if (currentTools) onboardingPayload.currentTools = currentTools;
+    // Super Admin "Charge to Card" agencies are already provisioned with billing + plan,
+    // so onboarding should be considered complete at first login.
+    if (billingOption === 'charge') onboardingPayload.submittedAt = new Date().toISOString();
+    const onboardingData = Object.keys(onboardingPayload).length ? JSON.stringify(onboardingPayload) : null;
 
     // Super Admin–created agencies: 7-day trial only when "No Charge during 7 days trial" (free_account = free forever, no trial)
     const trialEndsAt =
@@ -1364,6 +1497,38 @@ router.post('/', authenticateToken, async (req, res) => {
       } catch (emailErr: any) {
         console.warn('Set-password email failed:', emailErr?.message);
       }
+    } else if (billingOption === 'free_account' || billingOption === 'no_charge') {
+      const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/login`;
+      const defaultStep4PathLabel =
+        billingOption === 'free_account'
+          ? 'Continue with free account'
+          : 'Add credit card + choose a plan (7-day free trial)';
+      const currentStatusLabel =
+        billingOption === 'free_account'
+          ? 'Active - Free Account'
+          : 'Trial - No Charge (7 days)';
+      try {
+        await sendEmail({
+          to: contactEmail,
+          subject: `Your agency account is ready - ${BRAND_DISPLAY_NAME}`,
+          html: `
+            <h1>Your ${BRAND_DISPLAY_NAME} agency account is ready</h1>
+            <p>Hi ${contactName || 'there'},</p>
+            <p>A Super Admin created your agency account. You can sign in immediately with the credentials below.</p>
+            <h3>Account details</h3>
+            <p><strong>Agency:</strong> ${name}</p>
+            <p><strong>Email:</strong> ${contactEmail}</p>
+            <p><strong>Password:</strong> ${resetPassword}</p>
+            <p><strong>Billing setup:</strong> ${billingOption === 'free_account' ? 'Free Account' : 'No Charge during 7 days trial'}</p>
+            <p><strong>Current status:</strong> ${currentStatusLabel}</p>
+            <p><a href="${loginUrl}">Sign in</a></p>
+            <p>If the button doesn't work, copy and paste this URL into your browser:</p>
+            <p style="word-break:break-all">${loginUrl}</p>
+          `,
+        });
+      } catch (emailErr: any) {
+        console.warn('Agency credentials email failed:', emailErr?.message);
+      }
     }
 
     await prisma.notification.create({
@@ -1459,21 +1624,36 @@ router.get('/me', authenticateToken, async (req, res) => {
 
     const tierId = tierConfig?.id ?? null;
     const accountActivated = !!(membership.agency as { stripeCustomerId?: string | null }).stripeCustomerId;
-    const onboardingData = parseAgencyOnboardingData(membership.agency.onboardingData);
-    const onboardingCompleted = Boolean(
-      onboardingData?.submittedAt ||
-      membership.agency.website ||
-      membership.agency.industry ||
-      membership.agency.agencySize ||
-      membership.agency.numberOfClients ||
-      membership.agency.contactPhone ||
-      membership.agency.contactJobTitle ||
-      membership.agency.streetAddress ||
-      membership.agency.city ||
-      membership.agency.state ||
-      membership.agency.zip ||
-      membership.agency.country
-    );
+    let onboardingData = parseAgencyOnboardingData(membership.agency.onboardingData);
+    // Legacy agencies created before onboarding rollout should not be blocked by onboarding modal.
+    // Use env override when needed; default cutoff keeps all already-existing agencies treated as legacy.
+    const legacyOnboardingCutoffIso = process.env.LEGACY_ONBOARDING_CUTOFF_ISO || '2026-03-03T00:00:00.000Z';
+    const legacyOnboardingCutoff = new Date(legacyOnboardingCutoffIso);
+    const hasValidLegacyCutoff = !Number.isNaN(legacyOnboardingCutoff.getTime());
+    const isLegacyAgency =
+      hasValidLegacyCutoff &&
+      membership.agency.createdAt <= legacyOnboardingCutoff;
+
+    // Onboarding is considered complete only after explicit submission.
+    // For legacy agencies, auto-backfill submittedAt once so they never see onboarding unexpectedly.
+    let onboardingCompleted = Boolean(onboardingData?.submittedAt);
+    if (!onboardingCompleted && isLegacyAgency && user.role === 'AGENCY') {
+      const submittedAt = new Date().toISOString();
+      const patchedOnboardingData = {
+        ...(onboardingData ?? {}),
+        submittedAt,
+      };
+      try {
+        await prisma.agency.update({
+          where: { id: membership.agency.id },
+          data: { onboardingData: JSON.stringify(patchedOnboardingData) },
+        });
+        onboardingData = patchedOnboardingData;
+        onboardingCompleted = true;
+      } catch (patchErr: any) {
+        console.warn('Legacy onboarding backfill failed:', membership.agency.id, patchErr?.message);
+      }
+    }
     const domainInstructions =
       membership.agency.customDomain && membership.agency.domainVerificationToken
         ? getDomainVerificationInstructions(membership.agency.customDomain, membership.agency.domainVerificationToken)
@@ -1783,20 +1963,7 @@ router.put('/me', authenticateToken, async (req, res) => {
       data: payload,
     });
     const onboardingData = parseAgencyOnboardingData(updatedAgency.onboardingData);
-    const onboardingCompleted = Boolean(
-      onboardingData?.submittedAt ||
-      updatedAgency.website ||
-      updatedAgency.industry ||
-      updatedAgency.agencySize ||
-      updatedAgency.numberOfClients ||
-      updatedAgency.contactPhone ||
-      updatedAgency.contactJobTitle ||
-      updatedAgency.streetAddress ||
-      updatedAgency.city ||
-      updatedAgency.state ||
-      updatedAgency.zip ||
-      updatedAgency.country
-    );
+    const onboardingCompleted = Boolean(onboardingData?.submittedAt);
     const domainInstructions =
       updatedAgency.customDomain && updatedAgency.domainVerificationToken
         ? getDomainVerificationInstructions(updatedAgency.customDomain, updatedAgency.domainVerificationToken)
@@ -2992,10 +3159,24 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     await stripe.subscriptionItems.update(basePlan.itemId, { price: targetPriceId });
     await syncAgencyTierFromStripe(agency.id);
 
-    const updatedAgency = await prisma.agency.findUnique({ where: { id: agency.id }, select: { name: true, subscriptionTier: true } });
+    const updatedAgency = await prisma.agency.findUnique({
+      where: { id: agency.id },
+      select: { name: true, subscriptionTier: true, billingType: true, trialEndsAt: true },
+    });
     const newTierName = getTierConfig(targetPlan)?.name ?? targetPlan;
     const newPrice = getTierConfig(targetPlan)?.priceMonthlyUsd ?? 0;
     const isUpgrade = newPrice > oldPrice;
+    const trialDaysLeft = updatedAgency?.trialEndsAt
+      ? Math.max(0, Math.ceil((updatedAgency.trialEndsAt.getTime() - Date.now()) / 86400000))
+      : null;
+    const currentStatusLabel =
+      updatedAgency?.billingType === 'paid'
+        ? (trialDaysLeft != null && trialDaysLeft > 0 ? 'Active - Trialing' : 'Active - Paid')
+        : updatedAgency?.billingType === 'free'
+          ? 'Free'
+          : updatedAgency?.billingType === 'trial'
+            ? 'Trial'
+            : String(updatedAgency?.billingType || 'Unknown');
 
     const agencyNotifMessage = isUpgrade
       ? `Your subscription has been upgraded to ${newTierName}.`
@@ -3028,6 +3209,10 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
         oldTierName,
         newTierName,
         isUpgrade,
+        billingType: String(updatedAgency?.billingType || 'paid'),
+        statusLabel: currentStatusLabel,
+        trialEndsAtIso: updatedAgency?.trialEndsAt?.toISOString() ?? null,
+        trialDaysLeft,
         fallbackUserId: req.user.userId,
       });
     }
@@ -3035,13 +3220,27 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     if (createdSaNotif) {
       await notifySuperAdminsByEmail({
         subject: `${isUpgrade ? 'Agency plan upgraded' : 'Agency plan changed'} - ${updatedAgency?.name ?? 'Agency'}`,
-        html: `
-          <h2>${isUpgrade ? 'Agency plan upgraded' : 'Agency plan changed'}</h2>
-          <p><strong>Agency:</strong> ${updatedAgency?.name ?? agency.id}</p>
-          <p><strong>Previous plan:</strong> ${oldTierName}</p>
-          <p><strong>Current plan:</strong> ${newTierName}</p>
-          <p><strong>Changed:</strong> ${new Date().toISOString()}</p>
-        `,
+        html: renderBillingEmailTemplate({
+          title: isUpgrade ? 'Agency plan upgraded' : 'Agency plan changed',
+          introLines: [
+            `${updatedAgency?.name ?? 'An agency'} has ${isUpgrade ? 'upgraded' : 'changed'} their plan.`,
+          ],
+          sections: [
+            {
+              title: 'Current account status',
+              rows: [
+                { label: 'Agency', value: updatedAgency?.name ?? agency.id },
+                { label: 'Previous Plan', value: oldTierName },
+                { label: 'Current Plan', value: newTierName },
+                { label: 'Current Status', value: currentStatusLabel },
+                { label: 'Billing Type', value: String(updatedAgency?.billingType ?? '-') },
+                { label: 'Trial Ends', value: updatedAgency?.trialEndsAt ? updatedAgency.trialEndsAt.toLocaleString("en-US") : 'N/A' },
+                { label: 'Days Until First Charge', value: trialDaysLeft != null ? String(trialDaysLeft) : 'N/A' },
+                { label: 'Changed At', value: new Date().toISOString() },
+              ],
+            },
+          ],
+        }),
       });
     }
 
@@ -3206,7 +3405,7 @@ const activateTrialSubscriptionSchema = z.object({
   tier: z.enum(['solo', 'starter', 'growth', 'pro', 'enterprise', 'business_lite', 'business_pro']),
 });
 
-// Activate subscription for agency on 7-day trial: create Stripe customer, attach card, create subscription, update agency to paid
+// Activate subscription from onboarding/trial/free: attach card + selected plan, give 7-day free trial, charge starts after trial.
 router.post('/activate-trial-subscription', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
@@ -3270,7 +3469,7 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
       customer: stripeCustomerId,
       items: [{ price: tierPriceId }],
       default_payment_method: paymentMethodId,
-      payment_behavior: 'error_if_incomplete',
+      trial_period_days: 7,
       payment_settings: { save_default_payment_method: 'on_subscription' },
     });
 
@@ -3281,9 +3480,14 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
       });
     }
 
-    // Switch agency from Free (trial) to selected subscription tier and "Charge to Card" behavior:
-    // subscriptionTier = chosen plan (solo/starter/growth/pro/enterprise), billingType = 'paid',
-    // trialEndsAt = null so limits and features use the paid tier like any other card-charged agency.
+    const trialEndsAt =
+      typeof subscription.trial_end === 'number'
+        ? new Date(subscription.trial_end * 1000)
+        : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const trialDaysLeft = Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86400000));
+    const currentStatusLabel = trialDaysLeft > 0 ? 'Active - Trialing' : 'Active - Paid';
+
+    // Move agency to selected paid tier immediately while deferring first charge by 7 days.
     await prisma.agency.update({
       where: { id: agency.id },
       data: {
@@ -3291,7 +3495,7 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
         stripeSubscriptionId: subscription.id,
         subscriptionTier: tier,
         billingType: 'paid',
-        trialEndsAt: null,
+        trialEndsAt,
       },
     });
 
@@ -3299,37 +3503,65 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
     console.log('[agencies] Trial activated for agency', agency.id, 'tier=', tier);
 
     const tierName = getTierConfig(tier as TierId)?.name ?? tier;
-    await prisma.notification.create({
-      data: {
-        agencyId: null,
-        type: 'subscription_activated',
-        title: 'Subscription activated',
-        message: `${agency.name} activated the ${tierName} plan.`,
-        link: '/agency/agencies',
-      },
+    await createNotificationOnce({
+      agencyId: agency.id,
+      userId: null,
+      type: 'subscription_activated',
+      title: 'Subscription activated',
+      message: `Your ${tierName} plan is active. Status: ${currentStatusLabel}.`,
+      link: '/agency/subscription',
+    }).catch((e) => console.warn('Create agency activation notification failed:', e?.message));
+    await createNotificationOnce({
+      agencyId: null,
+      userId: null,
+      type: 'subscription_activated',
+      title: 'Subscription activated',
+      message: `${agency.name} activated ${tierName}. Status: ${currentStatusLabel}.`,
+      link: '/agency/agencies',
     }).catch((e) => console.warn('Create activation notification failed:', e?.message));
 
     await sendAgencyPlanActivationEmail({
       agencyId: agency.id,
       tierName,
+      billingType: 'paid',
+      statusLabel: currentStatusLabel,
+      trialEndsAtIso: trialEndsAt.toISOString(),
+      trialDaysLeft,
       fallbackUserId: req.user.userId,
     });
 
     await notifySuperAdminsByEmail({
       subject: `Agency activated plan - ${agency.name}`,
-      html: `
-        <h2>Agency plan activated</h2>
-        <p><strong>Agency:</strong> ${agency.name}</p>
-        <p><strong>Contact:</strong> ${agency.contactName || '-'}</p>
-        <p><strong>Email:</strong> ${agency.contactEmail || '-'}</p>
-        <p><strong>Activated plan:</strong> ${tierName}</p>
-        <p><strong>Activated:</strong> ${new Date().toISOString()}</p>
-      `,
+      html: renderBillingEmailTemplate({
+        title: 'Agency plan activated',
+        introLines: [
+          `${agency.name} completed plan activation.`,
+        ],
+        sections: [
+          {
+            title: 'Current account status',
+            rows: [
+              { label: 'Agency', value: agency.name },
+              { label: 'Contact', value: agency.contactName || '-' },
+              { label: 'Email', value: agency.contactEmail || '-' },
+              { label: 'Activated Plan', value: tierName },
+              { label: 'Current Status', value: currentStatusLabel },
+              { label: 'Billing Type', value: 'paid' },
+              { label: 'Trial Ends', value: trialEndsAt.toLocaleString("en-US") },
+              { label: 'Days Until First Charge', value: String(trialDaysLeft) },
+              { label: 'Stripe Customer ID', value: stripeCustomerId },
+              { label: 'Stripe Subscription ID', value: subscription.id },
+              { label: 'Activated At', value: new Date().toISOString() },
+            ],
+          },
+        ],
+      }),
     });
 
     res.json({
       success: true,
-      message: 'Subscription activated successfully.',
+      message: 'Subscription activated successfully. You will be charged after your 7-day trial ends.',
+      trialEndsAt: trialEndsAt.toISOString(),
     });
   } catch (err: any) {
     if (err?.name === 'ZodError') {
@@ -3349,6 +3581,115 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
     res.status(500).json({
       message: err?.message || 'Failed to activate subscription. Please try again.',
     });
+  }
+});
+
+// Onboarding free-account path: no card, free tier, with starter research credits for testing.
+router.post('/activate-free-account', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'Agency not found' });
+    }
+
+    const agency = membership.agency;
+    if (agency.stripeSubscriptionId) {
+      return res.status(400).json({
+        message: 'Your agency already has an active subscription. Use Subscription to manage your plan.',
+      });
+    }
+
+    await prisma.agency.update({
+      where: { id: agency.id },
+      data: {
+        billingType: 'free',
+        subscriptionTier: 'free',
+        trialEndsAt: null,
+        enterpriseCreditsPerMonth: 10,
+      },
+    });
+
+    const currentStatusLabel = 'Active - Free Account';
+    await createNotificationOnce({
+      agencyId: agency.id,
+      userId: null,
+      type: 'free_account_activated',
+      title: 'Free account activated',
+      message: `Your free account is active with 10 research credits. Status: ${currentStatusLabel}.`,
+      link: '/agency/subscription',
+    }).catch((e) => console.warn('Create agency free-account notification failed:', e?.message));
+    await createNotificationOnce({
+      agencyId: null,
+      userId: null,
+      type: 'free_account_activated',
+      title: 'Agency free account activated',
+      message: `${agency.name} activated Free Account. Status: ${currentStatusLabel}.`,
+      link: '/agency/agencies',
+    }).catch((e) => console.warn('Create SA free-account notification failed:', e?.message));
+
+    const agencyRecipient = await resolveAgencyEmailRecipient(agency.id, req.user.userId);
+    if (agencyRecipient.recipientEmail) {
+      await sendEmail({
+        to: agencyRecipient.recipientEmail,
+        subject: `Free account activated - ${BRAND_DISPLAY_NAME}`,
+        html: renderBillingEmailTemplate({
+          title: 'Your free account is active',
+          introLines: [
+            `Hi ${agencyRecipient.recipientName},`,
+            `Your agency ${agencyRecipient.agencyName} is now on the Free Account path.`,
+          ],
+          sections: [
+            {
+              title: 'Current account status',
+              rows: [
+                { label: 'Plan', value: 'Free' },
+                { label: 'Current Status', value: currentStatusLabel },
+                { label: 'Research Credits', value: '10 included credits' },
+                { label: 'Activated At', value: new Date().toISOString() },
+              ],
+            },
+          ],
+          footerLines: ['You can add a card and upgrade to a paid plan anytime from Subscription.'],
+        }),
+      }).catch((e: any) => console.warn('Agency free-account email failed:', e?.message));
+    }
+
+    await notifySuperAdminsByEmail({
+      subject: `Agency free account activated - ${agency.name}`,
+      html: renderBillingEmailTemplate({
+        title: 'Agency free account activated',
+        introLines: [`${agency.name} selected the free-account path in onboarding.`],
+        sections: [
+          {
+            title: 'Current account status',
+            rows: [
+              { label: 'Agency', value: agency.name },
+              { label: 'Contact', value: agency.contactName || '-' },
+              { label: 'Email', value: agency.contactEmail || '-' },
+              { label: 'Plan', value: 'Free' },
+              { label: 'Current Status', value: currentStatusLabel },
+              { label: 'Research Credits', value: '10 included credits' },
+              { label: 'Activated At', value: new Date().toISOString() },
+            ],
+          },
+        ],
+      }),
+    });
+
+    res.json({
+      success: true,
+      message: 'Free account activated with 10 research credits.',
+    });
+  } catch (err: any) {
+    console.error('Activate free account error:', err);
+    res.status(500).json({ message: err?.message || 'Failed to activate free account.' });
   }
 });
 
@@ -3395,7 +3736,11 @@ router.post('/managed-services', authenticateToken, async (req, res) => {
         message: 'Activate your account first. Add a payment method in Subscription & Billing to unlock managed services.',
       });
     }
-    const onFreeTrial = agency.trialEndsAt && agency.trialEndsAt > new Date();
+    const onFreeTrial =
+      agency.trialEndsAt &&
+      agency.trialEndsAt > new Date() &&
+      (((membership!.agency as { billingType?: string | null }).billingType === 'trial') ||
+        ((membership!.agency as { billingType?: string | null }).billingType === 'free'));
     if (onFreeTrial) {
       return res.status(403).json({
         message: 'Managed services are not available during the 7-day free trial. Subscribe to a plan or wait until your trial ends to request managed services.',
@@ -3980,7 +4325,11 @@ router.post('/add-ons', authenticateToken, async (req, res) => {
         message: 'Activate your account first. Add a payment method in Subscription & Billing to add add-ons.',
       });
     }
-    const onFreeTrial = agency.trialEndsAt && agency.trialEndsAt > new Date();
+    const onFreeTrial =
+      agency.trialEndsAt &&
+      agency.trialEndsAt > new Date() &&
+      (((membership!.agency as { billingType?: string | null }).billingType === 'trial') ||
+        ((membership!.agency as { billingType?: string | null }).billingType === 'free'));
     if (onFreeTrial) {
       return res.status(403).json({
         message: 'Add-ons are not available during the 7-day free trial. Subscribe to a plan or wait until your trial ends to add add-ons.',

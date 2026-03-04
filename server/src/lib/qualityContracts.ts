@@ -42,9 +42,13 @@ export function getWhitelabelFromAddress(): string {
   const rawFrom = String(process.env.SMTP_FROM || "").trim();
   const emailMatch = rawFrom.match(/<([^>]+)>/);
   const configuredFromEmail = (emailMatch?.[1] || rawFrom).trim().toLowerCase();
-  const fromEmail = configuredFromEmail.endsWith("@yourmarketingdashboard.com")
+  const smtpUserEmail = String(process.env.SMTP_USER || "").trim().toLowerCase();
+  const looksLikeEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  const fromEmail = looksLikeEmail(configuredFromEmail)
     ? configuredFromEmail
-    : BRAND_DEFAULT_FROM_EMAIL;
+    : looksLikeEmail(smtpUserEmail)
+      ? smtpUserEmail
+      : BRAND_DEFAULT_FROM_EMAIL;
   return `"${BRAND_DISPLAY_NAME}" <${fromEmail}>`;
 }
 

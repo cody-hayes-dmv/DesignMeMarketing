@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useImperativeHandle, forwardRef } from "react";
+import React, { useEffect, useState } from "react";
 import {
   CreditCard,
   Users,
@@ -9,52 +9,12 @@ import {
   Download,
   ChevronUp,
   ChevronDown,
-  X,
   Check,
   Briefcase,
   Building2,
 } from "lucide-react";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-
-const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
-const stripePromise = stripePk ? loadStripe(stripePk) : null;
-
-type StripePaymentHandle = { confirmAndGetPaymentMethod: () => Promise<string | null> };
-
-const StripePaymentSection = forwardRef<StripePaymentHandle, { clientSecret: string }>(function StripePaymentSection({ clientSecret }, ref) {
-  const stripe = useStripe();
-  const elements = useElements();
-  useImperativeHandle(ref, () => ({
-    async confirmAndGetPaymentMethod() {
-      if (!stripe || !elements) return null;
-      const { error: submitError } = await elements.submit();
-      if (submitError) throw new Error(submitError.message ?? "Please complete the card details.");
-      const result = await stripe.confirmSetup({
-        elements,
-        clientSecret,
-        confirmParams: { return_url: window.location.href },
-      });
-      if (result.error) throw new Error(result.error.message ?? "Payment failed");
-      const setupIntent = (result as { setupIntent?: { payment_method?: string | { id?: string } } }).setupIntent;
-      const pm = setupIntent?.payment_method;
-      return typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id ?? null;
-    },
-  }));
-  return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-      <PaymentElement
-        options={{
-          layout: "tabs",
-          paymentMethodOrder: ["card"],
-          wallets: { applePay: "never", googlePay: "never" },
-        }}
-      />
-    </div>
-  );
-});
 
 const AGENCY_PLANS = [
   {
@@ -92,8 +52,6 @@ const BUSINESS_PLANS = [
 
 const ALL_PLANS = [...AGENCY_PLANS, ...BUSINESS_PLANS];
 const PLANS = AGENCY_PLANS;
-const ACTIVATE_AGENCY_PLANS = AGENCY_PLANS.filter((p) => p.id !== "enterprise");
-const ACTIVATE_PLANS = [...BUSINESS_PLANS, ...ACTIVATE_AGENCY_PLANS];
 
 interface SubscriptionData {
   currentPlan: string;
@@ -131,17 +89,28 @@ const SubscriptionPage = () => {
   const [data, setData] = useState<SubscriptionData>(defaultSubscription);
   const [portalLoading, setPortalLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
-  const [showActivateModal, setShowActivateModal] = useState(false);
-  const [activateSetupSecret, setActivateSetupSecret] = useState<string | null>(null);
-  const [activateTier, setActivateTier] = useState<string>("solo");
-  const [activateSubmitting, setActivateSubmitting] = useState(false);
-  const activatePaymentRef = useRef<StripePaymentHandle>(null);
 
   useEffect(() => {
     if (window.location.hash === "#invoices") {
       document.getElementById("invoices")?.scrollIntoView({ behavior: "smooth" });
     }
   }, [loading]);
+
+  useEffect(() => {
+    // Some browser extensions block Stripe telemetry (r.stripe.com), which can throw noisy
+    // unhandled promise rejections even when payment flows still function.
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as { message?: string } | string | undefined;
+      const message = typeof reason === "string" ? reason : reason?.message ?? "";
+      if (message.includes("r.stripe.com/b") && message.includes("Failed to fetch")) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, []);
 
   const applySubscriptionData = (resData: Record<string, unknown>) => {
     const u = (resData.usage || {}) as Record<string, unknown>;
@@ -178,107 +147,9 @@ const SubscriptionPage = () => {
     }
   };
 
-  const ACTIVATION_TIER_KEY = "activationTier";
-
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const clientSecret = params.get("setup_intent_client_secret");
-
-    if (clientSecret && stripePromise) {
-      // Return from Stripe redirect (e.g. 3D Secure): complete activation then refetch
-      let cancelled = false;
-      setLoading(true);
-      (async () => {
-        try {
-          const stripe = await stripePromise;
-          if (!stripe || cancelled) return;
-          const { setupIntent } = await stripe.retrieveSetupIntent(clientSecret);
-          const pm = setupIntent?.payment_method;
-          const paymentMethodId = typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id;
-          const tier = sessionStorage.getItem(ACTIVATION_TIER_KEY) || "solo";
-          if (!paymentMethodId || setupIntent?.status !== "succeeded") {
-            toast.error("Payment was not completed. Please try again.");
-            return;
-          }
-          await api.post("/agencies/activate-trial-subscription", {
-            paymentMethodId,
-            tier: tier as "solo" | "starter" | "growth" | "pro" | "enterprise" | "business_lite" | "business_pro",
-          });
-          sessionStorage.removeItem(ACTIVATION_TIER_KEY);
-          window.history.replaceState({}, "", window.location.pathname + window.location.hash || "");
-          window.dispatchEvent(new Event("subscription-changed"));
-          const res = await api.get("/seo/agency/subscription");
-          if (res?.data && typeof res.data === "object") applySubscriptionData(res.data as Record<string, unknown>);
-          toast.success("Subscription activated successfully!");
-        } catch (e: any) {
-          toast.error(e?.response?.data?.message ?? e?.message ?? "Failed to complete activation.");
-        } finally {
-          if (!cancelled) setLoading(false);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }
-
     fetchSubscription(true);
   }, []);
-
-  useEffect(() => {
-    if (!showActivateModal || !stripePk) {
-      setActivateSetupSecret(null);
-      return;
-    }
-    let cancelled = false;
-    api.post("/agencies/setup-intent-for-activation")
-      .then((res) => {
-        if (!cancelled && res.data?.clientSecret) setActivateSetupSecret(res.data.clientSecret);
-      })
-      .catch(() => {
-        if (!cancelled) toast.error("Could not load payment form.");
-        setShowActivateModal(false);
-      });
-    return () => { cancelled = true; };
-  }, [showActivateModal]);
-
-  const handleActivateSubscription = async () => {
-    if (!activatePaymentRef.current || !activateSetupSecret) {
-      toast.error("Please wait for the payment form to load.");
-      return;
-    }
-    const tierToActivate = ACTIVATE_PLANS.some((p) => p.id === activateTier) ? activateTier : "solo";
-    setActivateSubmitting(true);
-    sessionStorage.setItem(ACTIVATION_TIER_KEY, tierToActivate);
-    try {
-      const paymentMethodId = await activatePaymentRef.current.confirmAndGetPaymentMethod();
-      if (!paymentMethodId) {
-        toast.error("Please complete the card details.");
-        return;
-      }
-      await api.post("/agencies/activate-trial-subscription", {
-        paymentMethodId,
-        tier: tierToActivate,
-      });
-      sessionStorage.removeItem(ACTIVATION_TIER_KEY);
-      toast.success("Subscription activated successfully!");
-      setShowActivateModal(false);
-      window.dispatchEvent(new Event("subscription-changed"));
-      setLoading(true);
-      try {
-        const res = await api.get("/seo/agency/subscription");
-        if (res?.data && typeof res.data === "object") applySubscriptionData(res.data as Record<string, unknown>);
-      } catch {
-        toast("Subscription activated. Refreshing the page will show your plan.", { icon: "✅" });
-      } finally {
-        setLoading(false);
-      }
-    } catch (e: any) {
-      const msg = e?.response?.data?.message ?? e?.message ?? "Failed to activate subscription.";
-      toast.error(msg);
-    } finally {
-      setActivateSubmitting(false);
-    }
-  };
 
   const openBillingPortal = async (options?: { flow?: "subscription_update" }) => {
     setPortalLoading(true);
@@ -444,15 +315,6 @@ const SubscriptionPage = () => {
               <p className="text-sm font-medium text-amber-800">
                 Your free trial has ended. Contact your administrator for plan or billing questions.
               </p>
-              <p className="text-sm font-medium text-amber-800 mt-2">You can also activate a paid subscription below.</p>
-              <button
-                type="button"
-                onClick={() => setShowActivateModal(true)}
-                disabled={!stripePk}
-                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
-              >
-                Activate Subscription
-              </button>
             </div>
           )}
           {hasTrial && !trialExpired && data.billingType === "free" && (
@@ -460,30 +322,6 @@ const SubscriptionPage = () => {
               <p className="text-sm font-medium text-amber-800">
                 You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Your account is set up as No Charge; billing and plan changes are managed by your administrator after the trial.
               </p>
-              <p className="text-sm font-medium text-amber-800 mt-2">You can also activate a paid subscription below.</p>
-              <button
-                type="button"
-                onClick={() => setShowActivateModal(true)}
-                disabled={!stripePk}
-                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
-              >
-                Activate Subscription
-              </button>
-            </div>
-          )}
-          {data.billingType === "free" && !hasTrial && !trialExpired && (
-            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
-              <p className="text-sm font-medium text-amber-800">
-                Your account is set up as a <strong>Free account</strong>. You can activate a paid subscription below to get more features and higher limits.
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowActivateModal(true)}
-                disabled={!stripePk}
-                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
-              >
-                Activate Subscription
-              </button>
             </div>
           )}
           {hasTrial && !trialExpired && data.billingType === "trial" && (
@@ -491,28 +329,20 @@ const SubscriptionPage = () => {
               <p className="text-sm font-medium text-amber-800">
                 You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Choose a paid plan before it ends to keep your account active.
               </p>
-              <button
-                type="button"
-                onClick={() => setShowActivateModal(true)}
-                disabled={!stripePk}
-                className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
-              >
-                Activate Subscription
-              </button>
             </div>
           )}
           {hasTrial && !trialExpired && data.billingType !== "free" && data.billingType !== "trial" && (
             <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
               <p className="text-sm font-medium text-amber-800">
-                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Choose a paid plan before it ends to keep your account active.
+                Your selected plan is active with a <strong>{data.trialDaysLeft} day{data.trialDaysLeft === 1 ? "" : "s"}</strong> free trial. You will be charged on the next billing date shown below unless you cancel before then.
               </p>
               <button
                 type="button"
-                onClick={handleUpgradePlan}
+                onClick={handleManageBilling}
                 disabled={portalLoading}
                 className="mt-3 px-4 py-2 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60"
               >
-                Choose a plan
+                Manage Billing
               </button>
             </div>
           )}
@@ -855,209 +685,6 @@ const SubscriptionPage = () => {
             </button>
           </section>
 
-          {/* Activate Subscription Modal (7-day trial agencies) */}
-          {showActivateModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl shadow-2xl ring-1 ring-gray-200/80 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
-                {/* Header */}
-                <div className="relative overflow-hidden px-8 py-6 bg-gradient-to-r from-primary-600 via-primary-500 to-emerald-500 shrink-0">
-                  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3QgZmlsbD0idXJsKCNnKSIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjwvc3ZnPg==')] opacity-50" />
-                  <div className="relative flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-bold text-white">Activate Your Subscription</h3>
-                      <p className="mt-1 text-sm text-white/80">Choose a plan and add your payment method to get started</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowActivateModal(false)}
-                      className="p-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 overflow-y-auto p-8 space-y-8">
-                  {/* Plan Selector Cards */}
-                  <div className="space-y-6">
-                    <label className="block text-sm font-semibold text-gray-800">Select Your Plan</label>
-
-                    {/* Business Plans */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Business Plans</span>
-                        <span className="text-[10px] text-gray-400">Track your own SEO</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        {BUSINESS_PLANS.map((plan) => {
-                          const isSelected = activateTier === plan.id;
-                          return (
-                            <button
-                              key={plan.id}
-                              type="button"
-                              onClick={() => setActivateTier(plan.id)}
-                              className={`relative text-left rounded-xl border-2 p-4 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                                isSelected
-                                  ? "border-primary-500 bg-primary-50/70 shadow-md shadow-primary-100"
-                                  : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
-                              }`}
-                            >
-                              {isSelected && (
-                                <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 shadow-sm">
-                                  <Check className="h-3.5 w-3.5 text-white" />
-                                </span>
-                              )}
-                              <p className={`text-sm font-bold ${isSelected ? "text-primary-700" : "text-gray-900"}`}>
-                                {plan.name}
-                              </p>
-                              <p className="mt-1">
-                                <span className={`text-xl font-bold ${isSelected ? "text-primary-600" : "text-gray-900"}`}>
-                                  {plan.priceLabel}
-                                </span>
-                                <span className="text-xs text-gray-500">/mo</span>
-                              </p>
-                              <p className={`mt-1 text-xs font-medium ${isSelected ? "text-primary-600" : "text-gray-500"}`}>
-                                {plan.clientsLabel}
-                              </p>
-                              <ul className="mt-3 space-y-1">
-                                {plan.features.map((f) => (
-                                  <li key={f} className="flex items-start gap-1.5 text-[11px] text-gray-500">
-                                    <Check className={`mt-0.5 h-3 w-3 shrink-0 ${isSelected ? "text-primary-500" : "text-gray-400"}`} />
-                                    <span>{f}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Agency Plans */}
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Agency Plans</span>
-                        <span className="text-[10px] text-gray-400">White-label + Client Portal</span>
-                      </div>
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        {ACTIVATE_AGENCY_PLANS.map((plan) => {
-                          const isSelected = activateTier === plan.id;
-                          return (
-                            <button
-                              key={plan.id}
-                              type="button"
-                              onClick={() => setActivateTier(plan.id)}
-                              className={`relative text-left rounded-xl border-2 p-4 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                                isSelected
-                                  ? "border-primary-500 bg-primary-50/70 shadow-md shadow-primary-100"
-                                  : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
-                              }`}
-                            >
-                              {isSelected && (
-                                <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 shadow-sm">
-                                  <Check className="h-3.5 w-3.5 text-white" />
-                                </span>
-                              )}
-                              <p className={`text-sm font-bold ${isSelected ? "text-primary-700" : "text-gray-900"}`}>
-                                {plan.name}
-                              </p>
-                              <p className="mt-1">
-                                <span className={`text-xl font-bold ${isSelected ? "text-primary-600" : "text-gray-900"}`}>
-                                  {plan.priceLabel}
-                                </span>
-                                <span className="text-xs text-gray-500">/mo</span>
-                              </p>
-                              <p className={`mt-1 text-xs font-medium ${isSelected ? "text-primary-600" : "text-gray-500"}`}>
-                                {plan.clientsLabel}
-                              </p>
-                              <ul className="mt-3 space-y-1">
-                                {plan.features.map((f) => (
-                                  <li key={f} className="flex items-start gap-1.5 text-[11px] text-gray-500">
-                                    <Check className={`mt-0.5 h-3 w-3 shrink-0 ${isSelected ? "text-primary-500" : "text-gray-400"}`} />
-                                    <span>{f}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Selected Plan Summary */}
-                  {(() => {
-                    const selected = ACTIVATE_PLANS.find((p) => p.id === activateTier);
-                    if (!selected) return null;
-                    return (
-                      <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-primary-50 to-emerald-50 border border-primary-100 p-4">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-600 shadow-sm">
-                          <CreditCard className="h-5 w-5 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900">
-                            {selected.name} — {selected.priceLabel}/month
-                          </p>
-                          <p className="text-xs text-gray-500 mt-0.5">
-                            {selected.clientsLabel} · Billed monthly · Cancel anytime
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Payment Form */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-800 mb-3">Payment Method</label>
-                    {!stripePk ? (
-                      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        Stripe is not configured. Contact support.
-                      </p>
-                    ) : activateSetupSecret && stripePromise ? (
-                      <Elements stripe={stripePromise} options={{ clientSecret: activateSetupSecret }}>
-                        <StripePaymentSection ref={activatePaymentRef} clientSecret={activateSetupSecret} />
-                      </Elements>
-                    ) : (
-                      <div className="flex items-center justify-center py-8 rounded-lg border border-gray-200 bg-gray-50">
-                        <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
-                        <span className="text-sm text-gray-500">Loading payment form…</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="shrink-0 flex items-center justify-between gap-4 px-8 py-5 border-t border-gray-200 bg-gray-50/80">
-                  <button
-                    type="button"
-                    onClick={() => setShowActivateModal(false)}
-                    className="px-5 py-2.5 border border-gray-300 rounded-xl text-gray-700 bg-white hover:bg-gray-50 font-medium text-sm transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleActivateSubscription}
-                    disabled={activateSubmitting || !activateSetupSecret}
-                    className="inline-flex items-center gap-2 px-8 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-primary-600 to-emerald-500 hover:from-primary-700 hover:to-emerald-600 shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed transition-all text-sm"
-                  >
-                    {activateSubmitting ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Activating…
-                      </>
-                    ) : (
-                      <>
-                        <CreditCard className="h-4 w-4" />
-                        Activate Subscription
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>

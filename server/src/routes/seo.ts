@@ -312,7 +312,7 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
     }
     const now = new Date();
 
-    const [totalAgencies, activeAgenciesCount, activeClientsCount, totalDashboards, pendingRequests] = await Promise.all([
+    const [totalAgencies, activeAgenciesCount, activeClientsCount, totalDashboards, dashboardOnlyClients, pendingRequests] = await Promise.all([
       prisma.agency.count(),
       prisma.agency.count({
         where: {
@@ -322,6 +322,7 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
       }),
       prisma.client.count({ where: { status: "ACTIVE" } }),
       prisma.client.count(),
+      prisma.client.count({ where: { status: "DASHBOARD_ONLY" } }),
       prisma.managedService.count({ where: { status: "PENDING" } }),
     ]);
 
@@ -330,6 +331,7 @@ router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
       activeAgencies: activeAgenciesCount,
       activeManagedClients: activeClientsCount,
       totalDashboards,
+      dashboardOnlyClients,
       pendingRequests,
     });
   } catch (err: any) {
@@ -9576,6 +9578,73 @@ router.post("/reports/:clientId/ppc/send", authenticateToken, async (req, res) =
     });
   } catch (error: any) {
     console.error("Send PPC report error:", error);
+    return res.status(500).json({ message: error?.message || "Internal server error" });
+  }
+});
+
+// Download latest PPC report PDF on demand
+router.get("/reports/:clientId/ppc/latest-pdf", authenticateToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const requestedPeriodRaw = req.query.period;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: {
+        user: {
+          include: {
+            memberships: {
+              select: { agencyId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
+    const userMemberships = await prisma.userAgency.findMany({
+      where: { userId: req.user.userId },
+      select: { agencyId: true },
+    });
+    const userAgencyIds = userMemberships.map((m) => m.agencyId);
+    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+    const hasAgencyAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+
+    if (!hasAgencyAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    if (!client.googleAdsRefreshToken || !client.googleAdsCustomerId || !client.googleAdsConnectedAt) {
+      return res.status(400).json({ message: "Google Ads is not connected for this client" });
+    }
+
+    const { PPC_SCHEDULE_SUBJECT_PREFIX } = await import("../lib/reportScheduler.js");
+    const activePpcSchedule = await prisma.reportSchedule.findFirst({
+      where: {
+        clientId,
+        isActive: true,
+        emailSubject: { startsWith: PPC_SCHEDULE_SUBJECT_PREFIX },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    const requestedPeriod = normalizeReportPeriod(
+      String(requestedPeriodRaw || activePpcSchedule?.frequency || "monthly")
+    );
+    const { autoGeneratePpcReport, generatePpcReportPdfBuffer } = await import("../lib/reportScheduler.js");
+    const ppcReport = await autoGeneratePpcReport(clientId, requestedPeriod);
+    const pdfBuffer = await generatePpcReportPdfBuffer(client.name, ppcReport);
+    const filename = `ppc-report-${client.name.replace(/\s+/g, "-").toLowerCase()}-${requestedPeriod}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.send(pdfBuffer);
+  } catch (error: any) {
+    console.error("Download latest PPC report PDF error:", error);
     return res.status(500).json({ message: error?.message || "Internal server error" });
   }
 });

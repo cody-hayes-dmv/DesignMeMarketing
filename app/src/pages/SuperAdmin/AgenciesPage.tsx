@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useImperativeHandle, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { useNavigate } from "react-router-dom";
-import { loadStripe } from "@stripe/stripe-js";
+import { useLocation, useNavigate } from "react-router-dom";
+import { loadStripe } from "@/lib/stripe";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { RootState } from "@/store";
 import { fetchAgencies, createAgency, updateAgency, deleteAgency, assignClientToAgency, removeClientFromAgency } from "@/store/slices/agencySlice";
@@ -14,7 +14,12 @@ import api from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
-const stripePromise = stripePk ? loadStripe(stripePk) : null;
+let superAdminAgenciesStripePromise: ReturnType<typeof loadStripe> | null = null;
+const getSuperAdminAgenciesStripePromise = () => {
+  if (!stripePk) return null;
+  if (!superAdminAgenciesStripePromise) superAdminAgenciesStripePromise = loadStripe(stripePk);
+  return superAdminAgenciesStripePromise;
+};
 
 const CREATE_AGENCY_DRAFT_KEY = "createAgencyDraft";
 
@@ -92,6 +97,7 @@ interface AgencyClient {
 
 const AgenciesPage = () => {
     const dispatch = useDispatch();
+    const location = useLocation();
     const { user } = useSelector((state: RootState) => state.auth);
     const { agencies, loading } = useSelector((state: RootState) => state.agency);
     const isSuperAdmin = user?.role === "SUPER_ADMIN";
@@ -106,6 +112,21 @@ const AgenciesPage = () => {
     useEffect(() => {
         if (showEditAgencyModal) setEditModalStep(1);
     }, [showEditAgencyModal]);
+    useEffect(() => {
+        // Some browser extensions block Stripe telemetry (r.stripe.com), which can throw noisy
+        // unhandled promise rejections even when payment flows still function.
+        const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+            const reason = event.reason as { message?: string } | string | undefined;
+            const message = typeof reason === "string" ? reason : reason?.message ?? "";
+            if (message.includes("r.stripe.com/b") && message.includes("Failed to fetch")) {
+                event.preventDefault();
+            }
+        };
+        window.addEventListener("unhandledrejection", onUnhandledRejection);
+        return () => {
+            window.removeEventListener("unhandledrejection", onUnhandledRejection);
+        };
+    }, []);
     const [editingAgency, setEditingAgency] = useState<{ id: string; name: string } | null>(null);
     const [editingAgencyHasStripeCustomer, setEditingAgencyHasStripeCustomer] = useState(false);
     const [showMembersModal, setShowMembersModal] = useState(false);
@@ -154,6 +175,7 @@ const AgenciesPage = () => {
     const [sortField, setSortField] = useState<"agency" | "subdomain" | "clients">("agency");
     const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
     const [agenciesSearch, setAgenciesSearch] = useState("");
+    const [agenciesMetricFilter, setAgenciesMetricFilter] = useState<"all" | "active" | "withClients">("all");
     const initialCreateForm = {
         name: "",
         website: "",
@@ -1049,14 +1071,37 @@ const AgenciesPage = () => {
         return 0;
     });
 
+    const isAgencyActive = (agency: { subscriptionTier?: string | null; trialEndsAt?: string | null }) => {
+        // Match Dashboard rule: tier is set + trial not expired (or no trial end date).
+        const hasTier = agency.subscriptionTier != null;
+        const trialEndsAt = agency.trialEndsAt ? new Date(agency.trialEndsAt).getTime() : null;
+        return hasTier && (trialEndsAt == null || trialEndsAt > Date.now());
+    };
+
+    const activeAgenciesCount = agencies.filter((agency) => isAgencyActive(agency)).length;
+    const totalClientsCount = agencies.reduce((sum, a) => sum + (a.clientCount || 0), 0);
+
+    const metricFilteredAgencies =
+        agenciesMetricFilter === "active"
+            ? sortedAgencies.filter((agency) => isAgencyActive(agency))
+            : agenciesMetricFilter === "withClients"
+                ? sortedAgencies.filter((agency) => (agency.clientCount || 0) > 0)
+                : sortedAgencies;
+
     const filteredAgencies = agenciesSearch.trim()
-        ? sortedAgencies.filter((agency) => {
+        ? metricFilteredAgencies.filter((agency) => {
             const q = agenciesSearch.trim().toLowerCase();
             const name = (agency.name || "").toLowerCase();
             const subdomain = (agency.subdomain || "").toLowerCase();
             return name.includes(q) || subdomain.includes(q);
           })
-        : sortedAgencies;
+        : metricFilteredAgencies;
+
+    useEffect(() => {
+        const requested = (location.state as { agenciesMetricFilter?: "all" | "active" | "withClients" } | null)?.agenciesMetricFilter;
+        if (!requested) return;
+        setAgenciesMetricFilter(requested);
+    }, [location.state]);
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-primary-50/30 p-8">
@@ -1096,7 +1141,15 @@ const AgenciesPage = () => {
 
             {/* Stat Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-                <div className="bg-white p-6 rounded-2xl border border-primary-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary-100/50 transition-all duration-200 relative overflow-hidden group">
+                <button
+                    type="button"
+                    onClick={() => setAgenciesMetricFilter("all")}
+                    className={`text-left bg-white p-6 rounded-2xl border shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group ${
+                        agenciesMetricFilter === "all"
+                            ? "border-primary-300 ring-2 ring-primary-200/70 shadow-primary-100/60"
+                            : "border-primary-100 hover:shadow-primary-100/50"
+                    }`}
+                >
                     <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-primary-400/20 to-primary-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
                     <div className="flex items-center justify-between relative">
                         <div>
@@ -1107,31 +1160,47 @@ const AgenciesPage = () => {
                             <BuildingIcon className="h-6 w-6 text-white" />
                         </div>
                     </div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl border border-blue-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-100/50 transition-all duration-200 relative overflow-hidden group">
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setAgenciesMetricFilter("active")}
+                    className={`text-left bg-white p-6 rounded-2xl border shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group ${
+                        agenciesMetricFilter === "active"
+                            ? "border-blue-300 ring-2 ring-blue-200/70 shadow-blue-100/60"
+                            : "border-blue-100 hover:shadow-blue-100/50"
+                    }`}
+                >
                     <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-400/20 to-blue-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
                     <div className="flex items-center justify-between relative">
                         <div>
-                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Total Members</p>
-                            <p className="text-3xl font-extrabold text-gray-900">{agencies.reduce((sum, a) => sum + (a.memberCount || 0), 0)}</p>
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Active Agencies</p>
+                            <p className="text-3xl font-extrabold text-gray-900">{activeAgenciesCount}</p>
                         </div>
                         <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-3 rounded-xl shadow-lg shadow-blue-200">
                             <Users className="h-6 w-6 text-white" />
                         </div>
                     </div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-100/50 transition-all duration-200 relative overflow-hidden group">
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setAgenciesMetricFilter("withClients")}
+                    className={`text-left bg-white p-6 rounded-2xl border shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group ${
+                        agenciesMetricFilter === "withClients"
+                            ? "border-indigo-300 ring-2 ring-indigo-200/70 shadow-indigo-100/60"
+                            : "border-indigo-100 hover:shadow-indigo-100/50"
+                    }`}
+                >
                     <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-400/20 to-indigo-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
                     <div className="flex items-center justify-between relative">
                         <div>
                             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Total Clients</p>
-                            <p className="text-3xl font-extrabold text-gray-900">{agencies.reduce((sum, a) => sum + (a.clientCount || 0), 0)}</p>
+                            <p className="text-3xl font-extrabold text-gray-900">{totalClientsCount}</p>
                         </div>
                         <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 p-3 rounded-xl shadow-lg shadow-indigo-200">
                             <Users className="h-6 w-6 text-white" />
                         </div>
                     </div>
-                </div>
+                </button>
             </div>
 
             {/* Agencies Table */}
@@ -1191,7 +1260,13 @@ const AgenciesPage = () => {
                             ) : filteredAgencies.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-8 text-center text-gray-500 bg-amber-50/50">
-                                        {agenciesSearch.trim() ? "No agencies match your search." : "No agencies found. Create your first agency."}
+                                        {agenciesSearch.trim()
+                                            ? "No agencies match your search."
+                                            : agenciesMetricFilter === "active"
+                                                ? "No active agencies found."
+                                                : agenciesMetricFilter === "withClients"
+                                                    ? "No agencies with clients found."
+                                                : "No agencies found. Create your first agency."}
                                     </td>
                                 </tr>
                             ) : (
@@ -1742,8 +1817,8 @@ const AgenciesPage = () => {
                                                 <label className="block text-sm font-medium text-gray-700 mb-2">Card details *</label>
                                                 {!stripePk ? (
                                                     <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Add <code className="px-1 bg-amber-100 rounded">VITE_STRIPE_PUBLISHABLE_KEY</code> to the app environment to collect payment methods.</p>
-                                                ) : setupIntentClientSecret && stripePromise ? (
-                                                    <Elements stripe={stripePromise} options={{ clientSecret: setupIntentClientSecret }}>
+                                                ) : setupIntentClientSecret ? (
+                                                    <Elements stripe={getSuperAdminAgenciesStripePromise()} options={{ clientSecret: setupIntentClientSecret }}>
                                                         <StripePaymentSection ref={stripePaymentRef} clientSecret={setupIntentClientSecret} />
                                                     </Elements>
                                                 ) : (
@@ -2180,8 +2255,8 @@ const AgenciesPage = () => {
                                                 <label className="block text-sm font-medium text-gray-700 mb-2">Card details *</label>
                                                 {!stripePk ? (
                                                     <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Add <code className="px-1 bg-amber-100 rounded">VITE_STRIPE_PUBLISHABLE_KEY</code> to the app environment to collect payment methods.</p>
-                                                ) : editSetupIntentClientSecret && stripePromise ? (
-                                                    <Elements stripe={stripePromise} options={{ clientSecret: editSetupIntentClientSecret }}>
+                                                ) : editSetupIntentClientSecret ? (
+                                                    <Elements stripe={getSuperAdminAgenciesStripePromise()} options={{ clientSecret: editSetupIntentClientSecret }}>
                                                         <StripePaymentSection ref={editStripePaymentRef} clientSecret={editSetupIntentClientSecret} />
                                                     </Elements>
                                                 ) : (

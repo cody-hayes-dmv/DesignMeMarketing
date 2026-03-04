@@ -18,6 +18,15 @@ function isGoogleAdsInvalidGrant(error: any): boolean {
   );
 }
 
+function getGoogleAdsReconnectMessage(error: any): string {
+  const respErr = String(error?.response?.data?.error || "").toLowerCase();
+  const msg = String(error?.message || "").toLowerCase();
+  if (respErr === "unauthorized_client" || msg.includes("unauthorized_client")) {
+    return "Google Ads OAuth client is not authorized for this refresh token (unauthorized_client). This usually means OAuth client credentials changed or mismatch. Reconnect Google Ads using the current GOOGLE_ADS_CLIENT_ID/SECRET.";
+  }
+  return "Google Ads token expired or revoked. Please reconnect Google Ads.";
+}
+
 function isGoogleAdsRevokedCached(clientId: string): boolean {
   const ts = googleAdsRevokedClientCache.get(clientId);
   if (!ts) return false;
@@ -221,7 +230,7 @@ export async function getGoogleAdsClient(clientId: string) {
           disconnectErr?.message || disconnectErr
         );
       }
-      throw new Error('Google Ads token expired or revoked. Please reconnect Google Ads.');
+      throw new Error(getGoogleAdsReconnectMessage(error));
     }
 
     console.warn(
@@ -488,8 +497,61 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
       return match ? match[1] : null;
     }).filter((id: string | null) => id !== null);
 
+    const resolveProfileViaSearch = async (customerId: string): Promise<{
+      customerName?: string;
+      currencyCode?: string;
+      timeZone?: string;
+      isManager?: boolean;
+    } | null> => {
+      try {
+        const profileQuery = `
+          SELECT
+            customer.id,
+            customer.descriptive_name,
+            customer.currency_code,
+            customer.time_zone,
+            customer.manager
+          FROM customer
+          LIMIT 1
+        `;
+        const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, profileQuery);
+        if (!response.ok) return null;
+        let parsed: any;
+        try {
+          parsed = JSON.parse(responseText);
+        } catch {
+          const batches = responseText
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => {
+              try {
+                return JSON.parse(line);
+              } catch {
+                return null;
+              }
+            })
+            .filter(Boolean);
+          parsed = batches.length === 1 ? batches[0] : batches;
+        }
+        const rows = getSearchStreamResults(parsed);
+        const customer = rows?.[0]?.customer;
+        if (!customer) return null;
+        return {
+          customerName: customer.descriptiveName || customer.descriptive_name || undefined,
+          currencyCode: customer.currencyCode || customer.currency_code || undefined,
+          timeZone: customer.timeZone || customer.time_zone || undefined,
+          isManager: customer.manager === true || customer.manager === "true",
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    const formatId = (rawId: string): string =>
+      rawId.length === 10 ? `${rawId.slice(0, 3)}-${rawId.slice(3, 6)}-${rawId.slice(6)}` : rawId;
+
     // Fetch details for each customer
-    // Note: We'll use a simplified approach - fetch basic info for each customer
     const customers = await Promise.all(
       customerIds.map(async (customerId: string) => {
         try {
@@ -510,37 +572,31 @@ export async function listGoogleAdsCustomers(clientId: string): Promise<Array<{
             const isManager = !!(customerData.manager === true || customerData.manager === 'true');
             return {
               customerId: customerId,
-              customerName: customerData.descriptiveName || `Account ${customerId}`,
+              customerName: customerData.descriptiveName || `Account ${formatId(customerId)}`,
               currencyCode: customerData.currencyCode || 'USD',
               timeZone: customerData.timeZone || 'America/New_York',
               isManager,
             };
           } else {
-            // If detailed fetch fails, return basic info
-            const formattedId = customerId.length === 10 
-              ? `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
-              : customerId;
+            const fallbackProfile = await resolveProfileViaSearch(customerId);
             return {
               customerId: customerId,
-              customerName: `Account ${formattedId}`,
-              currencyCode: 'USD',
-              timeZone: 'America/New_York',
-              isManager: false,
+              customerName: fallbackProfile?.customerName || `Account ${formatId(customerId)}`,
+              currencyCode: fallbackProfile?.currencyCode || 'USD',
+              timeZone: fallbackProfile?.timeZone || 'America/New_York',
+              isManager: fallbackProfile?.isManager ?? false,
             };
           }
         } catch (err: any) {
           console.warn(`[Google Ads] Failed to fetch details for customer ${customerId}:`, err.message);
-          // Return basic info even if detail fetch fails
-          const formattedId = customerId.length === 10 
-              ? `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
-              : customerId;
-            return {
-              customerId: customerId,
-              customerName: `Account ${formattedId}`,
-              currencyCode: 'USD',
-              timeZone: 'America/New_York',
-              isManager: false,
-            };
+          const fallbackProfile = await resolveProfileViaSearch(customerId);
+          return {
+            customerId: customerId,
+            customerName: fallbackProfile?.customerName || `Account ${formatId(customerId)}`,
+            currencyCode: fallbackProfile?.currencyCode || 'USD',
+            timeZone: fallbackProfile?.timeZone || 'America/New_York',
+            isManager: fallbackProfile?.isManager ?? false,
+          };
         }
       })
     );
@@ -580,13 +636,69 @@ export async function listGoogleAdsClientAccounts(clientId: string): Promise<Arr
     managerCustomerId: string | null;
   }> = [];
   const seenIds = new Set<string>();
+  const hasActiveCampaignCache = new Map<string, boolean>();
+
+  const hasEnabledCampaign = async (customerId: string): Promise<boolean> => {
+    const normalizedId = String(customerId || "").replace(/-/g, "");
+    if (!normalizedId) return false;
+    if (hasActiveCampaignCache.has(normalizedId)) {
+      return hasActiveCampaignCache.get(normalizedId) === true;
+    }
+    try {
+      const { oauth2Client } = await getGoogleAdsClient(clientId);
+      const accessToken = oauth2Client.credentials.access_token;
+      if (!accessToken) {
+        hasActiveCampaignCache.set(normalizedId, false);
+        return false;
+      }
+      const query = `
+        SELECT campaign.id
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+        LIMIT 1
+      `;
+      const { response, responseText } = await googleAdsSearchStream(clientId, normalizedId, accessToken, query);
+      if (!response.ok) {
+        hasActiveCampaignCache.set(normalizedId, false);
+        return false;
+      }
+      let parsed: any;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch {
+        const batches = responseText
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
+        parsed = batches.length === 1 ? batches[0] : batches;
+      }
+      const rows = getSearchStreamResults(parsed);
+      const active = Array.isArray(rows) && rows.length > 0;
+      hasActiveCampaignCache.set(normalizedId, active);
+      return active;
+    } catch {
+      hasActiveCampaignCache.set(normalizedId, false);
+      return false;
+    }
+  };
 
   for (const account of all) {
     if (account.isManager) {
       try {
         const children = await listChildAccountsUnderManager(clientId, account.customerId);
         for (const child of children) {
-          if (child.customerId && !seenIds.has(child.customerId)) {
+          if (!child.customerId || seenIds.has(child.customerId)) continue;
+          const hasActivePpc = await hasEnabledCampaign(child.customerId);
+          if (!hasActivePpc) continue;
+          if (!seenIds.has(child.customerId)) {
             seenIds.add(child.customerId);
             result.push({
               customerId: child.customerId,
@@ -601,6 +713,8 @@ export async function listGoogleAdsClientAccounts(clientId: string): Promise<Arr
         console.warn('[Google Ads] Skipping children for manager', account.customerId, err);
       }
     } else {
+      const hasActivePpc = await hasEnabledCampaign(account.customerId);
+      if (!hasActivePpc) continue;
       if (!seenIds.has(account.customerId)) {
         seenIds.add(account.customerId);
         result.push({
@@ -638,7 +752,7 @@ export async function listChildAccountsUnderManager(
     const query = `
     SELECT customer_client.id, customer_client.client_customer, customer_client.descriptive_name, customer_client.status, customer_client.level
     FROM customer_client
-    WHERE customer_client.status IN ('ENABLED', 'CANCELED', 'CLOSED')
+    WHERE customer_client.status = 'ENABLED'
       AND customer_client.manager = false
       AND customer_client.level > 0
   `;
@@ -702,7 +816,8 @@ export async function listChildAccountsUnderManager(
 export async function fetchGoogleAdsCampaigns(
   clientId: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  activeOnly: boolean = true
 ): Promise<any> {
   try {
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
@@ -712,6 +827,12 @@ export async function fetchGoogleAdsCampaigns(
     const endDateStr = endDate.toISOString().split('T')[0];
 
     // Google Ads API query for campaigns with metrics
+    const activeFilter = activeOnly
+      ? `
+        AND campaign.status = 'ENABLED'
+        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0 OR metrics.all_conversions > 0)
+      `
+      : "";
     const query = `
       SELECT
         campaign.id,
@@ -721,13 +842,16 @@ export async function fetchGoogleAdsCampaigns(
         metrics.impressions,
         metrics.cost_micros,
         metrics.conversions,
+        metrics.all_conversions,
         metrics.conversions_value,
+        metrics.all_conversions_value,
         metrics.average_cpc,
         metrics.ctr,
         metrics.search_impression_share,
         metrics.search_rank_lost_impression_share
       FROM campaign
       WHERE segments.date BETWEEN '${startDateStr}' AND '${endDateStr}'
+        ${activeFilter}
       ORDER BY metrics.clicks DESC
     `;
 
@@ -777,7 +901,12 @@ export async function fetchGoogleAdsCampaigns(
         const impressions = parseInt(row.metrics?.impressions || '0', 10);
         // cost_micros becomes costMicros in JSON response
         const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
-        const conversions = parseFloat(row.metrics?.conversions || '0');
+        const conversions = parseFloat(
+          row.metrics?.allConversions ||
+          row.metrics?.all_conversions ||
+          row.metrics?.conversions ||
+          '0'
+        );
         // average_cpc becomes averageCpc, and it's a Money object with micros field
         const avgCpcMicros = row.metrics?.averageCpc?.micros || row.metrics?.average_cpc?.micros || 0;
         const avgCpc = typeof avgCpcMicros === 'number' ? avgCpcMicros / 1000000 : parseFloat(row.metrics?.averageCpc || row.metrics?.average_cpc || '0');
@@ -845,7 +974,8 @@ export async function fetchGoogleAdsAdGroups(
   clientId: string,
   startDate: Date,
   endDate: Date,
-  campaignId?: string
+  campaignId?: string,
+  activeOnly: boolean = true
 ): Promise<any> {
   try {
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
@@ -853,6 +983,13 @@ export async function fetchGoogleAdsAdGroups(
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
 
+    const activeFilter = activeOnly
+      ? `
+        AND ad_group.status = 'ENABLED'
+        AND campaign.status = 'ENABLED'
+        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0 OR metrics.all_conversions > 0)
+      `
+      : "";
     let query = `
       SELECT
         ad_group.id,
@@ -864,13 +1001,12 @@ export async function fetchGoogleAdsAdGroups(
         metrics.impressions,
         metrics.cost_micros,
         metrics.conversions,
+        metrics.all_conversions,
         metrics.average_cpc,
         metrics.ctr
       FROM ad_group
       WHERE segments.date BETWEEN '${startDateStr}' AND '${endDateStr}'
-        AND ad_group.status = 'ENABLED'
-        AND campaign.status = 'ENABLED'
-        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0)
+        ${activeFilter}
     `;
 
     if (campaignId) {
@@ -924,7 +1060,12 @@ export async function fetchGoogleAdsAdGroups(
         adGroup.impressions += parseInt(row.metrics?.impressions || '0', 10);
         const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
         adGroup.cost += costMicros / 1000000;
-        adGroup.conversions += parseFloat(row.metrics?.conversions || '0');
+        adGroup.conversions += parseFloat(
+          row.metrics?.allConversions ||
+          row.metrics?.all_conversions ||
+          row.metrics?.conversions ||
+          '0'
+        );
         const avgCpcMicros = row.metrics?.averageCpc?.micros || row.metrics?.average_cpc?.micros || 0;
         adGroup.avgCpc = typeof avgCpcMicros === 'number' ? avgCpcMicros / 1000000 : parseFloat(row.metrics?.averageCpc || row.metrics?.average_cpc || '0');
         adGroup.ctr = parseFloat(row.metrics?.ctr || '0');
@@ -953,7 +1094,8 @@ export async function fetchGoogleAdsKeywords(
   startDate: Date,
   endDate: Date,
   campaignId?: string,
-  adGroupId?: string
+  adGroupId?: string,
+  activeOnly: boolean = true
 ): Promise<any> {
   try {
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
@@ -961,6 +1103,14 @@ export async function fetchGoogleAdsKeywords(
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
 
+    const activeFilter = activeOnly
+      ? `
+        AND ad_group_criterion.status = 'ENABLED'
+        AND ad_group.status = 'ENABLED'
+        AND campaign.status = 'ENABLED'
+        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0 OR metrics.all_conversions > 0)
+      `
+      : "";
     let query = `
       SELECT
         ad_group_criterion.keyword.text,
@@ -974,6 +1124,7 @@ export async function fetchGoogleAdsKeywords(
         metrics.impressions,
         metrics.cost_micros,
         metrics.conversions,
+        metrics.all_conversions,
         metrics.average_cpc,
         metrics.ctr,
         metrics.search_impression_share,
@@ -981,10 +1132,7 @@ export async function fetchGoogleAdsKeywords(
       FROM keyword_view
       WHERE segments.date BETWEEN '${startDateStr}' AND '${endDateStr}'
         AND ad_group_criterion.type = 'KEYWORD'
-        AND ad_group_criterion.status = 'ENABLED'
-        AND ad_group.status = 'ENABLED'
-        AND campaign.status = 'ENABLED'
-        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0)
+        ${activeFilter}
     `;
 
     if (campaignId) {
@@ -1043,7 +1191,12 @@ export async function fetchGoogleAdsKeywords(
         keyword.impressions += parseInt(row.metrics?.impressions || '0', 10);
         const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
         keyword.cost += costMicros / 1000000;
-        keyword.conversions += parseFloat(row.metrics?.conversions || '0');
+        keyword.conversions += parseFloat(
+          row.metrics?.allConversions ||
+          row.metrics?.all_conversions ||
+          row.metrics?.conversions ||
+          '0'
+        );
         const avgCpcMicros = row.metrics?.averageCpc?.micros || row.metrics?.average_cpc?.micros || 0;
         keyword.avgCpc = typeof avgCpcMicros === 'number' ? avgCpcMicros / 1000000 : parseFloat(row.metrics?.averageCpc || row.metrics?.average_cpc || '0');
         keyword.ctr = parseFloat(row.metrics?.ctr || '0');
@@ -1071,7 +1224,8 @@ export async function fetchGoogleAdsKeywords(
 export async function fetchGoogleAdsConversions(
   clientId: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  activeOnly: boolean = true
 ): Promise<any> {
   try {
     const { customerId, accessToken } = await getGoogleAdsApiClient(clientId);
@@ -1082,20 +1236,27 @@ export async function fetchGoogleAdsConversions(
     // Query campaign conversions for the selected date range.
     // This avoids returning stale all-time entities and ensures totals reflect
     // actual conversion activity in the selected period.
+    const activeFilter = activeOnly
+      ? `
+        AND campaign.status = 'ENABLED'
+        AND (metrics.conversions > 0 OR metrics.all_conversions > 0)
+      `
+      : "";
     const query = `
       SELECT
         segments.date,
         campaign.id,
         campaign.name,
         metrics.conversions,
+        metrics.all_conversions,
         metrics.conversions_value,
+        metrics.all_conversions_value,
         metrics.cost_micros,
         metrics.clicks
       FROM campaign
       WHERE segments.date BETWEEN '${startDateStr}' AND '${endDateStr}'
-        AND campaign.status = 'ENABLED'
-        AND metrics.conversions > 0
-      ORDER BY segments.date DESC, metrics.conversions DESC
+        ${activeFilter}
+      ORDER BY segments.date DESC, metrics.all_conversions DESC
     `;
 
     const { response, responseText } = await googleAdsSearchStream(clientId, customerId, accessToken, query);
@@ -1125,8 +1286,19 @@ export async function fetchGoogleAdsConversions(
         const conversionName = 'All conversions';
         const date = row.segments?.date || '';
         const campaignName = row.campaign?.name || 'Unknown Campaign';
-        const conversionsCount = parseFloat(row.metrics?.conversions || '0');
-        const conversionValue = parseFloat(row.metrics?.conversionsValue || row.metrics?.conversions_value || '0');
+        const conversionsCount = parseFloat(
+          row.metrics?.allConversions ||
+          row.metrics?.all_conversions ||
+          row.metrics?.conversions ||
+          '0'
+        );
+        const conversionValue = parseFloat(
+          row.metrics?.allConversionsValue ||
+          row.metrics?.all_conversions_value ||
+          row.metrics?.conversionsValue ||
+          row.metrics?.conversions_value ||
+          '0'
+        );
         const costMicros = parseInt(row.metrics?.costMicros || row.metrics?.cost_micros || '0', 10);
         const cost = costMicros / 1000000;
         const clicks = parseInt(row.metrics?.clicks || '0', 10);

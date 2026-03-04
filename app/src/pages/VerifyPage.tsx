@@ -27,8 +27,18 @@ const VerifyPage = () => {
         // Do not auto-login after verification. This avoids auth token/session
         // mismatches across environments and gives a consistent explicit sign-in step.
         localStorage.removeItem("token");
+        // Notify any already-open app tab that verification succeeded.
+        // Existing tabs should close themselves, while this verification tab stays open.
+        const signal = String(Date.now());
+        localStorage.setItem("email_verified_signal", signal);
+        localStorage.removeItem("email_verified_signal");
+        if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+          const channel = new BroadcastChannel("auth_events");
+          channel.postMessage({ type: "EMAIL_VERIFIED" });
+          channel.close();
+        }
         setStatus("success");
-        setMessage("Email verified successfully. You can now sign in.");
+        setMessage("Email verified successfully. Continue to sign in from this tab.");
       })
       .catch((err: any) => {
         if (!cancelled) {

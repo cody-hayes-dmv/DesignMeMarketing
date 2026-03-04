@@ -51,6 +51,46 @@ function App() {
     }
   }, [dispatch]);
 
+  useEffect(() => {
+    const closeTabAfterVerifySignal = () => {
+      const path = window.location.pathname;
+      if (path.startsWith("/verify")) return;
+      // Try to close this (older) tab. Browsers may block close() for user-opened tabs.
+      window.close();
+      // Additional best-effort variant used by some browsers.
+      if (!window.closed) {
+        try {
+          window.open("", "_self");
+          window.close();
+        } catch {
+          // Ignore close restrictions.
+        }
+      }
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "email_verified_signal" && event.newValue) {
+        closeTabAfterVerifySignal();
+      }
+    };
+
+    let channel: BroadcastChannel | null = null;
+    if ("BroadcastChannel" in window) {
+      channel = new BroadcastChannel("auth_events");
+      channel.onmessage = (event) => {
+        if (event.data?.type === "EMAIL_VERIFIED") {
+          closeTabAfterVerifySignal();
+        }
+      };
+    }
+
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      if (channel) channel.close();
+    };
+  }, []);
+
   // Defer Toaster mount to avoid removeChild race with initial route/portals and with
   // browser extensions that inject into the DOM on production (see React #17256).
   const [toasterReady, setToasterReady] = useState(false);
@@ -399,7 +439,7 @@ function App() {
             </div>
           ) : !user || !user.verified ? (
             <Navigate to="/login" replace />
-          ) : !["AGENCY", "SUPER_ADMIN"].includes(user.role) ? (
+          ) : !["AGENCY", "ADMIN", "SUPER_ADMIN"].includes(user.role) ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
             <DashboardLayout>
@@ -421,7 +461,7 @@ function App() {
             </div>
           ) : !user || !user.verified ? (
             <Navigate to="/login" replace />
-          ) : user.role !== "SUPER_ADMIN" ? (
+          ) : !["SUPER_ADMIN", "ADMIN"].includes(user.role) ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
             <DashboardLayout>

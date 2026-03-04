@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store";
@@ -38,6 +38,7 @@ const VendastaPage = () => {
   const { agencies } = useSelector((state: RootState) => state.agency);
   const { user } = useSelector((state: RootState) => state.auth);
   const [searchTerm, setSearchTerm] = useState("");
+  const [metricFilter, setMetricFilter] = useState<"all" | "active" | "archived">("all");
   const [enabled, setEnabled] = useState(false);
   const [sortField, setSortField] = useState<"name" | "domain" | "industry">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -195,6 +196,12 @@ const VendastaPage = () => {
 
   // Filter for vendasta clients only
   const vendastaClients = clients.filter((client) => client.vendasta === true);
+  const metricFilteredClients =
+    metricFilter === "active"
+      ? vendastaClients.filter((client) => client.status === "ACTIVE")
+      : metricFilter === "archived"
+        ? vendastaClients.filter((client) => isArchivedStatus(client.status))
+        : vendastaClients;
 
   const handleSort = (field: "name" | "domain" | "industry") => {
     if (sortField === field) {
@@ -205,7 +212,7 @@ const VendastaPage = () => {
     }
   };
 
-  const filteredClients = vendastaClients
+  const filteredClients = metricFilteredClients
     .filter((client) => {
       if (!searchTerm) return true;
       const searchLower = searchTerm.toLowerCase();
@@ -255,7 +262,15 @@ const VendastaPage = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-orange-100/50 transition-all duration-200 relative overflow-hidden group">
+        <button
+          type="button"
+          onClick={() => setMetricFilter("all")}
+          className={`text-left bg-white p-6 rounded-2xl border shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group ${
+            metricFilter === "all"
+              ? "border-orange-300 ring-2 ring-orange-200/70 shadow-orange-100/60"
+              : "border-orange-100 hover:shadow-orange-100/50"
+          }`}
+        >
           <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-orange-400/20 to-orange-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
           <div className="flex items-center justify-between relative">
             <div>
@@ -266,9 +281,17 @@ const VendastaPage = () => {
               <Store className="h-6 w-6 text-white" />
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-6 rounded-2xl border border-green-100 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-green-100/50 transition-all duration-200 relative overflow-hidden group">
+        <button
+          type="button"
+          onClick={() => setMetricFilter("active")}
+          className={`text-left bg-white p-6 rounded-2xl border shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group ${
+            metricFilter === "active"
+              ? "border-green-300 ring-2 ring-green-200/70 shadow-green-100/60"
+              : "border-green-100 hover:shadow-green-100/50"
+          }`}
+        >
           <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-green-400/20 to-green-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
           <div className="flex items-center justify-between relative">
             <div>
@@ -279,9 +302,17 @@ const VendastaPage = () => {
               <Building2 className="h-6 w-6 text-white" />
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gray-100/50 transition-all duration-200 relative overflow-hidden group">
+        <button
+          type="button"
+          onClick={() => setMetricFilter("archived")}
+          className={`text-left bg-white p-6 rounded-2xl border shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 relative overflow-hidden group ${
+            metricFilter === "archived"
+              ? "border-gray-300 ring-2 ring-gray-200/80 shadow-gray-100/60"
+              : "border-gray-200 hover:shadow-gray-100/50"
+          }`}
+        >
           <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-gray-400/20 to-gray-600/20 rounded-full -mr-8 -mt-8 group-hover:scale-150 transition-transform duration-500" />
           <div className="flex items-center justify-between relative">
             <div>
@@ -292,7 +323,7 @@ const VendastaPage = () => {
               <Building2 className="h-6 w-6 text-white" />
             </div>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Filters */}

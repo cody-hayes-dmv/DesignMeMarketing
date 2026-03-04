@@ -263,6 +263,12 @@ const ClientsPage = () => {
     }
   }, [user?.role]);
 
+  useEffect(() => {
+    const requested = (location.state as { statusFilter?: ClientListFilter } | null)?.statusFilter;
+    if (!requested) return;
+    setStatusFilter(requested);
+  }, [location.state]);
+
   // Fetch included client IDs: SUPER_ADMIN (metric + filter); AGENCY/ADMIN (exclude these from Clients tab so they only appear in Included tab)
   useEffect(() => {
     if (user?.role !== "SUPER_ADMIN" && user?.role !== "AGENCY" && user?.role !== "ADMIN") return;
@@ -856,7 +862,10 @@ const ClientsPage = () => {
   const pendingCount = nonVendastaForCounts.filter((m) => m.status === "PENDING").length;
   const dashboardOnlyCount = nonVendastaForCounts.filter((m) => m.status === "DASHBOARD_ONLY").length;
   const canceledCount = nonVendastaForCounts.filter((m) => m.status === "CANCELED").length;
-  const archivedCount = nonVendastaForCounts.filter((m) => isArchivedStatus(m.status)).length;
+  const archivedCount =
+    user?.role === "AGENCY" || user?.role === "ADMIN"
+      ? nonVendasta.filter((m) => isArchivedStatus(m.status)).length
+      : nonVendastaForCounts.filter((m) => isArchivedStatus(m.status)).length;
   const includedCount = isSuperAdmin ? includedClientIds.size : 0;
 
   const handleSort = (field: "name" | "domain" | "industry") => {
@@ -894,8 +903,15 @@ const ClientsPage = () => {
 
   const filteredClients = modifiedClients
     .filter((client) => {
-      // Agency Panel: clients in the Included tab must not appear in the Clients tab
-      if ((user?.role === "AGENCY" || user?.role === "ADMIN") && includedClientIds.has(client.id)) return false;
+      // Agency/Admin: included clients stay hidden in regular Clients views,
+      // but archived included clients must still appear in the Archived section.
+      if (
+        (user?.role === "AGENCY" || user?.role === "ADMIN") &&
+        includedClientIds.has(client.id) &&
+        statusFilter !== "archived"
+      ) {
+        return false;
+      }
       // For "Active", "Total", and "Included", include Vendasta clients; for other filters show only non-Vendasta
       if (statusFilter !== "total" && statusFilter !== "active" && statusFilter !== "included" && client.vendasta) return false;
       if (statusFilter === "active") {

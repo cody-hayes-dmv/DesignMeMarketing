@@ -150,6 +150,10 @@ const NotificationBell: React.FC = () => {
       navigate(item.link || defaultDashboardPath);
       return;
     }
+    if (["free_trial_started", "new_signup", "new_agency_signup", "agency_signup"].includes(item.type)) {
+      navigate("/agency/agencies");
+      return;
+    }
     navigate(item.link);
   };
 
