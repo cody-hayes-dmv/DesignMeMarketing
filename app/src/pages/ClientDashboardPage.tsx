@@ -606,6 +606,9 @@ const ClientDashboardPage: React.FC = () => {
   const [reportPreviewTargetKeywords, setReportPreviewTargetKeywords] = useState<ReportTargetKeywordRow[]>([]);
   const [reportPreviewTargetKeywordsLoading, setReportPreviewTargetKeywordsLoading] = useState(false);
   const [reportPreviewTargetKeywordsError, setReportPreviewTargetKeywordsError] = useState<string | null>(null);
+  const [reportPreviewPpcData, setReportPreviewPpcData] = useState<any>(null);
+  const [reportPreviewPpcLoading, setReportPreviewPpcLoading] = useState(false);
+  const [reportPreviewPpcError, setReportPreviewPpcError] = useState<string | null>(null);
   const [reportPreviewShareUrl, setReportPreviewShareUrl] = useState<string | null>(null);
   const [reportPreviewShareLoading, setReportPreviewShareLoading] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -4191,9 +4194,54 @@ const ClientDashboardPage: React.FC = () => {
       setReportPreviewTargetKeywordsError(null);
       setReportPreviewTargetKeywordsLoading(false);
       setReportPreviewShareLoading(false);
-      return;
+      let cancelled = false;
+
+      const runPpcPreview = async () => {
+        try {
+          setReportPreviewPpcLoading(true);
+          setReportPreviewPpcError(null);
+
+          const endDate = new Date();
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - 30);
+          const res = await api.get(`/clients/${clientId}/google-ads/campaigns`, {
+            params: {
+              start: startDate.toISOString().split("T")[0],
+              end: endDate.toISOString().split("T")[0],
+              activeOnly: "true",
+            },
+            _silent: true,
+          } as any);
+
+          if (cancelled) return;
+          setReportPreviewPpcData(res.data ?? null);
+          if (res.data?.success === false && typeof res.data?.message === "string") {
+            setReportPreviewPpcError(res.data.message);
+          }
+        } catch (e: any) {
+          if (cancelled) return;
+          setReportPreviewPpcData(null);
+          setReportPreviewPpcError(
+            e?.response?.data?.message ||
+              e?.response?.data?.error ||
+              e?.message ||
+              "Failed to load PPC campaign data."
+          );
+        } finally {
+          if (cancelled) return;
+          setReportPreviewPpcLoading(false);
+        }
+      };
+
+      void runPpcPreview();
+      return () => {
+        cancelled = true;
+      };
     }
     let cancelled = false;
+    setReportPreviewPpcData(null);
+    setReportPreviewPpcError(null);
+    setReportPreviewPpcLoading(false);
 
     const run = async () => {
       try {
@@ -12429,9 +12477,25 @@ const ClientDashboardPage: React.FC = () => {
                       </h1>
                     </div>
                     <p className="text-primary-100 text-lg mt-2">
-                      {(serverReport?.period ? String(serverReport.period) : String(selectedReport.type)).charAt(0).toUpperCase() +
-                        (serverReport?.period ? String(serverReport.period) : String(selectedReport.type)).slice(1).toLowerCase()}{" "}
-                      report for {client?.name || "Client"}
+                      {(() => {
+                        const defaultPeriod =
+                          (serverReport?.period ? String(serverReport.period) : String(selectedReport.type))
+                            .charAt(0)
+                            .toUpperCase() +
+                          (serverReport?.period ? String(serverReport.period) : String(selectedReport.type))
+                            .slice(1)
+                            .toLowerCase();
+                        if (selectedReport?.scheduleKind !== "ppc") {
+                          return `${defaultPeriod} report for ${client?.name || "Client"}`;
+                        }
+                        const ppcType = String(selectedReport?.type || "").toLowerCase();
+                        const ppcPeriod = ppcType.includes("biweekly")
+                          ? "Biweekly"
+                          : ppcType.includes("weekly")
+                          ? "Weekly"
+                          : "Monthly";
+                        return `${ppcPeriod} report for ${client?.name || "Client"}`;
+                      })()}
                     </p>
                   </div>
 
@@ -12453,48 +12517,201 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Traffic Overview Card - aligned with SEO Overview metrics */}
-                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-                  <div className="flex items-center mb-4">
-                    <Activity className="h-5 w-5 text-blue-500 mr-2" />
-                    <h2 className="text-xl font-bold text-gray-900">Traffic Overview</h2>
-                  </div>
-                  <p className="text-sm text-gray-500 mb-4">Core visitor metrics for this reporting period.</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
-                      <div className="text-xs font-medium text-blue-600 mb-1">Web Visitors</div>
-                      <div className="text-2xl font-bold text-blue-900">{Number(serverReport?.totalUsers ?? serverReport?.activeUsers ?? 0).toLocaleString()}</div>
-                    </div>
-                    <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-                      <div className="text-xs font-medium text-green-600 mb-1">Organic Traffic</div>
-                      <div className="text-2xl font-bold text-green-900">{Number(serverReport?.organicSearchEngagedSessions ?? 0).toLocaleString()}</div>
-                    </div>
-                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
-                      <div className="text-xs font-medium text-purple-600 mb-1">First Time Visitors</div>
-                      <div className="text-2xl font-bold text-purple-900">{Number(serverReport?.newUsers ?? 0).toLocaleString()}</div>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
-                      <div className="text-xs font-medium text-orange-600 mb-1">Engaged Visitors</div>
-                      <div className="text-2xl font-bold text-orange-900">{Number(serverReport?.engagedVisitors ?? serverReport?.engagedSessions ?? 0).toLocaleString()}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Target Keywords — split by Money / Topical */}
-                {reportPreviewTargetKeywordsError && (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-                    {reportPreviewTargetKeywordsError}
-                  </div>
-                )}
-                {reportPreviewTargetKeywordsLoading ? (
+                {selectedReport?.scheduleKind === "ppc" ? (
                   <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-                    <div className="flex items-center justify-center py-8 text-gray-500">
-                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                      <span>Loading target keywords…</span>
+                    <div className="flex items-center mb-4">
+                      <Activity className="h-5 w-5 text-blue-500 mr-2" />
+                      <h2 className="text-xl font-bold text-gray-900">Campaign Performance Overview</h2>
                     </div>
+                    <p className="text-sm text-gray-500 mb-4">This report reflects the same PPC campaign data shown in the PPC dashboard.</p>
+
+                    {reportPreviewPpcLoading ? (
+                      <div className="flex items-center justify-center py-8 text-gray-500">
+                        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                        <span>Loading PPC campaign data...</span>
+                      </div>
+                    ) : reportPreviewPpcError ? (
+                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                        {reportPreviewPpcError}
+                      </div>
+                    ) : reportPreviewPpcData?.data?.campaigns?.length > 0 ? (
+                      <div className="space-y-6">
+                        {reportPreviewPpcData?.data?.summary && (
+                          <>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                                <div className="text-xs font-medium text-blue-600 mb-1">Clicks</div>
+                                <div className="text-2xl font-bold text-blue-900">
+                                  {Number(reportPreviewPpcData.data.summary.clicks ?? 0).toLocaleString()}
+                                </div>
+                              </div>
+                              <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-100">
+                                <div className="text-xs font-medium text-indigo-600 mb-1">Impressions</div>
+                                <div className="text-2xl font-bold text-indigo-900">
+                                  {Number(reportPreviewPpcData.data.summary.impressions ?? 0).toLocaleString()}
+                                </div>
+                              </div>
+                              <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                                <div className="text-xs font-medium text-green-600 mb-1">Conversions</div>
+                                <div className="text-2xl font-bold text-green-900">
+                                  {Number(reportPreviewPpcData.data.summary.conversions ?? 0).toLocaleString()}
+                                </div>
+                              </div>
+                              <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                                <div className="text-xs font-medium text-purple-600 mb-1">Cost</div>
+                                <div className="text-2xl font-bold text-purple-900">
+                                  ${Number(reportPreviewPpcData.data.summary.cost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              <div className="bg-white rounded-lg p-4 border border-gray-200">
+                                <div className="text-xs font-medium text-gray-600 mb-1">Avg CPC</div>
+                                <div className="text-xl font-semibold text-gray-900">
+                                  ${Number(reportPreviewPpcData.data.summary.avgCpc ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                              </div>
+                              <div className="bg-white rounded-lg p-4 border border-gray-200">
+                                <div className="text-xs font-medium text-gray-600 mb-1">Cost / Conversion</div>
+                                <div className="text-xl font-semibold text-gray-900">
+                                  ${Number(reportPreviewPpcData.data.summary.costPerConversion ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                              </div>
+                              <div className="bg-white rounded-lg p-4 border border-gray-200">
+                                <div className="text-xs font-medium text-gray-600 mb-1">CTR</div>
+                                <div className="text-xl font-semibold text-gray-900">
+                                  {Number(reportPreviewPpcData.data.summary.impressions ?? 0) > 0
+                                    ? ((Number(reportPreviewPpcData.data.summary.clicks ?? 0) / Number(reportPreviewPpcData.data.summary.impressions ?? 0)) * 100).toFixed(2)
+                                    : "0.00"}
+                                  %
+                                </div>
+                              </div>
+                              <div className="bg-white rounded-lg p-4 border border-gray-200">
+                                <div className="text-xs font-medium text-gray-600 mb-1">Conversion Rate</div>
+                                <div className="text-xl font-semibold text-gray-900">
+                                  {Number(reportPreviewPpcData.data.summary.conversionRate ?? 0).toFixed(2)}%
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Impressions</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CTR</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conv. Rate</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg CPC</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost/Conv.</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {reportPreviewPpcData.data.campaigns.map((campaign: any, idx: number) => {
+                                const ctr = Number(campaign.impressions ?? 0) > 0
+                                  ? ((Number(campaign.clicks ?? 0) / Number(campaign.impressions ?? 0)) * 100).toFixed(2)
+                                  : "0.00";
+                                const convRate = Number(campaign.clicks ?? 0) > 0
+                                  ? ((Number(campaign.conversions ?? 0) / Number(campaign.clicks ?? 0)) * 100).toFixed(2)
+                                  : "0.00";
+                                const cost = Number(campaign.cost ?? 0);
+                                const conversions = Number(campaign.conversions ?? 0);
+                                return (
+                                  <tr key={idx} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                      <div className="flex items-center gap-2">
+                                        <span>{campaign.name || "N/A"}</span>
+                                        {campaign.status && (
+                                          <span className={`px-2 py-0.5 rounded text-xs ${
+                                            campaign.status === "ENABLED"
+                                              ? "bg-green-100 text-green-800"
+                                              : campaign.status === "PAUSED"
+                                              ? "bg-yellow-100 text-yellow-800"
+                                              : "bg-gray-100 text-gray-800"
+                                          }`}>
+                                            {campaign.status}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{Number(campaign.clicks ?? 0).toLocaleString()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{Number(campaign.impressions ?? 0).toLocaleString()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{ctr}%</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{Number(campaign.conversions ?? 0).toLocaleString()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{convRate}%</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                                      ${cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                      ${Number(campaign.avgCpc ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                      ${conversions > 0
+                                        ? (cost / conversions).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                        : "0.00"}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-6">
+                        <p className="text-sm text-gray-500">No campaign data available.</p>
+                        <p className="text-xs text-gray-400 mt-1">Ensure your Google Ads account has active campaigns with traffic.</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <>
+                    {/* Traffic Overview Card - aligned with SEO Overview metrics */}
+                    <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                      <div className="flex items-center mb-4">
+                        <Activity className="h-5 w-5 text-blue-500 mr-2" />
+                        <h2 className="text-xl font-bold text-gray-900">Traffic Overview</h2>
+                      </div>
+                      <p className="text-sm text-gray-500 mb-4">Core visitor metrics for this reporting period.</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                          <div className="text-xs font-medium text-blue-600 mb-1">Web Visitors</div>
+                          <div className="text-2xl font-bold text-blue-900">{Number(serverReport?.totalUsers ?? serverReport?.activeUsers ?? 0).toLocaleString()}</div>
+                        </div>
+                        <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                          <div className="text-xs font-medium text-green-600 mb-1">Organic Traffic</div>
+                          <div className="text-2xl font-bold text-green-900">{Number(serverReport?.organicSearchEngagedSessions ?? 0).toLocaleString()}</div>
+                        </div>
+                        <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                          <div className="text-xs font-medium text-purple-600 mb-1">First Time Visitors</div>
+                          <div className="text-2xl font-bold text-purple-900">{Number(serverReport?.newUsers ?? 0).toLocaleString()}</div>
+                        </div>
+                        <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                          <div className="text-xs font-medium text-orange-600 mb-1">Engaged Visitors</div>
+                          <div className="text-2xl font-bold text-orange-900">{Number(serverReport?.engagedVisitors ?? serverReport?.engagedSessions ?? 0).toLocaleString()}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Target Keywords — split by Money / Topical */}
+                    {reportPreviewTargetKeywordsError && (
+                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                        {reportPreviewTargetKeywordsError}
+                      </div>
+                    )}
+                    {reportPreviewTargetKeywordsLoading ? (
+                      <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                        <div className="flex items-center justify-center py-8 text-gray-500">
+                          <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                          <span>Loading target keywords…</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
                     {/* Money Keywords */}
                     {(() => {
                       const moneyKws = reportPreviewTargetKeywords.filter((k) => (k.type || "money") === "money");
@@ -12668,39 +12885,42 @@ const ClientDashboardPage: React.FC = () => {
                         </div>
                       );
                     })()}
+                      </>
+                    )}
                   </>
                 )}
 
-                {/* Live Dashboard Card */}
-                <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-                  <div className="flex items-center mb-4">
-                    <Share2 className="h-5 w-5 text-purple-500 mr-2" />
-                    <h2 className="text-xl font-bold text-gray-900">Live Dashboard</h2>
+                {selectedReport?.scheduleKind !== "ppc" && (
+                  <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                    <div className="flex items-center mb-4">
+                      <Share2 className="h-5 w-5 text-purple-500 mr-2" />
+                      <h2 className="text-xl font-bold text-gray-900">Live Dashboard</h2>
+                    </div>
+                    <p className="text-sm text-gray-500 mb-4">Share this live report URL to provide read-only visibility.</p>
+                    {reportPreviewShareLoading ? (
+                      <div className="flex items-center justify-center py-8 text-gray-500">
+                        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                        <span>Generating share link…</span>
+                      </div>
+                    ) : reportPreviewShareUrl ? (
+                      <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                        <a
+                          className="text-purple-700 hover:text-purple-900 underline break-all font-medium flex items-center"
+                          href={reportPreviewShareUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <Share2 className="h-4 w-4 mr-2" />
+                          {reportPreviewShareUrl}
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">
+                        Share link unavailable.
+                      </div>
+                    )}
                   </div>
-                  <p className="text-sm text-gray-500 mb-4">Share this live report URL to provide read-only visibility.</p>
-                  {reportPreviewShareLoading ? (
-                    <div className="flex items-center justify-center py-8 text-gray-500">
-                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                      <span>Generating share link…</span>
-                    </div>
-                  ) : reportPreviewShareUrl ? (
-                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
-                      <a 
-                        className="text-purple-700 hover:text-purple-900 underline break-all font-medium flex items-center" 
-                        href={reportPreviewShareUrl} 
-                        target="_blank" 
-                        rel="noreferrer"
-                      >
-                        <Share2 className="h-4 w-4 mr-2" />
-                        {reportPreviewShareUrl}
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">
-                      Share link unavailable.
-                    </div>
-                  )}
-                </div>
+                )}
 
                 {/* Hide the old dashboard-style preview */}
                 <div className="hidden">
