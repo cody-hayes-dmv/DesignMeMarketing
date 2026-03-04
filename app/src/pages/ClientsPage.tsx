@@ -28,7 +28,6 @@ import {
   ArrowUp,
   ArrowDown,
   Store,
-  ArrowRight,
   LayoutDashboard,
   Clock,
   XCircle,

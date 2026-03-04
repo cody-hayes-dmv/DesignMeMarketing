@@ -1,4 +1,4 @@
-export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
+export type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL" | "CANCELLED";
 export type ROLE = "SUPER_ADMIN" | "ADMIN" | "AGENCY" | "DESIGNER" | "SPECIALIST" | "USER";
 
 export interface ProofItem {

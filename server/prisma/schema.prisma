@@ -1020,6 +1020,7 @@ enum TaskStatus {
   REVIEW
   DONE
   NEEDS_APPROVAL
+  CANCELLED
 }
 
 enum Status {

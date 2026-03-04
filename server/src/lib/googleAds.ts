@@ -830,7 +830,6 @@ export async function fetchGoogleAdsCampaigns(
     const activeFilter = activeOnly
       ? `
         AND campaign.status = 'ENABLED'
-        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0 OR metrics.all_conversions > 0)
       `
       : "";
     const query = `
@@ -987,7 +986,6 @@ export async function fetchGoogleAdsAdGroups(
       ? `
         AND ad_group.status = 'ENABLED'
         AND campaign.status = 'ENABLED'
-        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0 OR metrics.all_conversions > 0)
       `
       : "";
     let query = `
@@ -1108,7 +1106,6 @@ export async function fetchGoogleAdsKeywords(
         AND ad_group_criterion.status = 'ENABLED'
         AND ad_group.status = 'ENABLED'
         AND campaign.status = 'ENABLED'
-        AND (metrics.impressions > 0 OR metrics.clicks > 0 OR metrics.conversions > 0 OR metrics.all_conversions > 0)
       `
       : "";
     let query = `
@@ -1239,7 +1236,6 @@ export async function fetchGoogleAdsConversions(
     const activeFilter = activeOnly
       ? `
         AND campaign.status = 'ENABLED'
-        AND (metrics.conversions > 0 OR metrics.all_conversions > 0)
       `
       : "";
     const query = `

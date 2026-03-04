@@ -6841,13 +6841,6 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       });
     }
 
-    if (client.status === "ARCHIVED") {
-      return res.status(403).json({
-        message: "This client is archived. Restore it to view live data.",
-        code: "DASHBOARD_ARCHIVED",
-      });
-    }
-
     // Handle custom date range or period
     let startDate: Date;
     let endDate: Date;

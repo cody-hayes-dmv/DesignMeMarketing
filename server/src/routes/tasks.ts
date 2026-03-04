@@ -40,7 +40,7 @@ const proofItemSchema = z.object({
   name: z.string().optional(), // Optional name/description
 });
 
-const taskStatusEnum = z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE", "NEEDS_APPROVAL"]);
+const taskStatusEnum = z.enum(["TODO", "IN_PROGRESS", "REVIEW", "DONE", "NEEDS_APPROVAL", "CANCELLED"]);
 
 const createTaskSchema = z.object({
   title: z.string().min(1),
@@ -609,6 +609,7 @@ async function notifyClientUsersTaskStatusChanged(
     if (status === "TODO") return "To Do";
     if (status === "IN_PROGRESS") return "In Progress";
     if (status === "NEEDS_APPROVAL") return "Needs Approval";
+    if (status === "CANCELLED") return "Cancelled";
     return status.charAt(0) + status.slice(1).toLowerCase();
   };
 
@@ -711,6 +712,7 @@ router.get("/", authenticateToken, async (req, res) => {
       const tasks = await prisma.task.findMany({
         where: {
           assigneeId: req.user.userId,
+          status: { not: "CANCELLED" },
           ...(clientIdParam ? { clientId: clientIdParam } : {}),
         },
         include: taskInclude,
@@ -742,7 +744,10 @@ router.get("/", authenticateToken, async (req, res) => {
     if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") {
       const where: any = {};
       if (clientIdParam) where.clientId = clientIdParam;
-      if (assigneeMe) where.assigneeId = req.user.userId;
+      if (assigneeMe) {
+        where.assigneeId = req.user.userId;
+        where.status = { not: "CANCELLED" };
+      }
       tasks = await prisma.task.findMany({
         where: Object.keys(where).length ? where : undefined,
         include: taskInclude,

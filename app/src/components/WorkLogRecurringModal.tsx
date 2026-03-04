@@ -10,7 +10,7 @@ const FREQUENCIES = [
   { value: "SEMIANNUAL", label: "Every 6 months" },
 ] as const;
 
-type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
+type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL" | "CANCELLED";
 type WorkLogAttachment = { type: string; value: string; name?: string };
 
 export type WorkLogRecurringRuleForEdit = {
@@ -438,6 +438,7 @@ const WorkLogRecurringModal: React.FC<WorkLogRecurringModalProps> = ({
                 <option value="IN_PROGRESS">In Progress</option>
                 <option value="REVIEW">In Review</option>
                 <option value="NEEDS_APPROVAL">Needs Approval</option>
+                <option value="CANCELLED">Cancelled</option>
                 <option value="DONE">Completed</option>
               </select>
             </div>

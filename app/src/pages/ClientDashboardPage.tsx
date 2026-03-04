@@ -122,7 +122,7 @@ interface ClientReport {
   scheduleKind?: "seo" | "local_map" | "ppc" | "campaign_wins";
 }
 
-type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
+type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL" | "CANCELLED";
 type ActivityType = "COMMENT" | "QUESTION" | "APPROVAL_REQUEST" | "APPROVAL" | "REVISION_REQUEST";
 type WorkLogComment = {
   id: string;
@@ -1383,6 +1383,8 @@ const ClientDashboardPage: React.FC = () => {
         return "In Review";
       case "NEEDS_APPROVAL":
         return "Needs Approval";
+      case "CANCELLED":
+        return "Cancelled";
       default:
         return "Pending";
     }
@@ -1398,6 +1400,8 @@ const ClientDashboardPage: React.FC = () => {
         return "bg-purple-100 text-purple-800";
       case "NEEDS_APPROVAL":
         return "bg-amber-100 text-amber-800";
+      case "CANCELLED":
+        return "bg-red-100 text-red-800";
       default:
         return "bg-yellow-100 text-yellow-800";
     }
@@ -9078,6 +9082,7 @@ const ClientDashboardPage: React.FC = () => {
                           <option value="IN_PROGRESS">In Progress</option>
                           <option value="REVIEW">In Review</option>
                           <option value="NEEDS_APPROVAL">Needs Approval</option>
+                          <option value="CANCELLED">Cancelled</option>
                           <option value="DONE">Completed</option>
                         </select>
                         {workLogForm.status === "NEEDS_APPROVAL" && !isWorkLogFieldsReadOnly && (
@@ -11460,6 +11465,7 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="IN_PROGRESS">In Progress</option>
                       <option value="REVIEW">In Review</option>
                       <option value="NEEDS_APPROVAL">Needs Approval</option>
+                      <option value="CANCELLED">Cancelled</option>
                       <option value="DONE">Completed</option>
                     </select>
                     {workLogForm.status === "NEEDS_APPROVAL" && !isWorkLogFieldsReadOnly && (

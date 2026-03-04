@@ -17,7 +17,7 @@ const FREQUENCIES = [
   { value: "SEMIANNUAL", label: "Every 6 months" },
 ] as const;
 
-type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL";
+type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE" | "NEEDS_APPROVAL" | "CANCELLED";
 
 export type RecurringRuleForEdit = {
   id: string;
@@ -286,6 +286,7 @@ const RecurringTaskModal: React.FC<RecurringTaskModalProps> = ({ open, setOpen, 
                     <option value="IN_PROGRESS">IN_PROGRESS</option>
                     <option value="REVIEW">REVIEW</option>
                     <option value="NEEDS_APPROVAL">NEEDS_APPROVAL</option>
+                    <option value="CANCELLED">CANCELLED</option>
                     <option value="DONE">DONE</option>
                   </select>
                 </div>

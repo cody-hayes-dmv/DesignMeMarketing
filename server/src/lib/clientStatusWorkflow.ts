@@ -19,13 +19,27 @@ export async function archiveCanceledClientsPastEndDate(): Promise<{ archived: n
 
   if (toProcess.length === 0) return { archived: 0 };
 
-  await prisma.client.updateMany({
-    where: { id: { in: toProcess.map((c) => c.id) } },
-    data: {
-      status: "ARCHIVED",
-      managedServiceStatus: "archived",
-    },
-  });
+  const ids = toProcess.map((c) => c.id);
+
+  await prisma.$transaction([
+    prisma.client.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: "ARCHIVED",
+        managedServiceStatus: "archived",
+      },
+    }),
+    prisma.task.updateMany({
+      where: {
+        clientId: { in: ids },
+        status: { notIn: ["DONE", "CANCELLED"] },
+      },
+      data: {
+        status: "CANCELLED",
+        assigneeId: null,
+      },
+    }),
+  ]);
   console.log(`[Client Status] Archived ${toProcess.length} client(s) past canceled end date.`);
   return { archived: toProcess.length };
 }
@@ -58,6 +72,16 @@ export async function archiveScheduledClients(): Promise<{ archived: number }> {
     prisma.reportSchedule.updateMany({
       where: { clientId: { in: ids } },
       data: { isActive: false },
+    }),
+    prisma.task.updateMany({
+      where: {
+        clientId: { in: ids },
+        status: { notIn: ["DONE", "CANCELLED"] },
+      },
+      data: {
+        status: "CANCELLED",
+        assigneeId: null,
+      },
     }),
   ]);
 

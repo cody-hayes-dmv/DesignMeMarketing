@@ -272,6 +272,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const trialExpired = isAgencyRoute && agencyMe?.trialExpired === true;
   const onSubscriptionPage = location.pathname === "/agency/subscription";
   const isTrialBilling = agencyMe?.billingType === "trial";
+  const isFreeBilling = isAgencyRoute && user?.role === "AGENCY" && agencyMe?.billingType === "free";
   const trialDaysLeft = agencyMe?.trialDaysLeft ?? 0;
   const trialActive = isAgencyRoute && isTrialBilling && trialDaysLeft > 0 && !trialExpired;
   const showAgencyOnboardingModal =
@@ -332,6 +333,23 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
               >
                 <CreditCard className="h-4 w-4" />
                 Choose a Plan
+              </Link>
+            )}
+          </div>
+        )}
+        {isFreeBilling && (
+          <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
+            <p className="text-sm font-medium text-amber-800 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+              You are currently on the Free plan. Billing and plan changes are managed by your administrator.
+            </p>
+            {!onSubscriptionPage && (
+              <Link
+                to="/agency/subscription"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700"
+              >
+                <CreditCard className="h-4 w-4" />
+                Subscription
               </Link>
             )}
           </div>

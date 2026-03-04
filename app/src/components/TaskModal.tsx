@@ -843,6 +843,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                                 <option value="IN_PROGRESS">IN_PROGRESS</option>
                                 <option value="REVIEW">REVIEW</option>
                                 <option value="NEEDS_APPROVAL">NEEDS_APPROVAL</option>
+                                <option value="CANCELLED">CANCELLED</option>
                                 <option value="DONE">DONE</option>
                             </select>
                         </div>

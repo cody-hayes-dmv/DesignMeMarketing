@@ -1501,6 +1501,16 @@ router.patch('/:id/archive', authenticateToken, async (req, res) => {
                         where: { clientId },
                         data: { isActive: false },
                     }),
+                    prisma.task.updateMany({
+                        where: {
+                            clientId,
+                            status: { notIn: ['DONE', 'CANCELLED'] },
+                        },
+                        data: {
+                            status: 'CANCELLED',
+                            assigneeId: null,
+                        },
+                    }),
                 ]);
                 return res.json({ success: true, message: 'Client archived successfully' });
             }
@@ -1521,6 +1531,16 @@ router.patch('/:id/archive', authenticateToken, async (req, res) => {
             prisma.reportSchedule.updateMany({
                 where: { clientId },
                 data: { isActive: false },
+            }),
+            prisma.task.updateMany({
+                where: {
+                    clientId,
+                    status: { notIn: ['DONE', 'CANCELLED'] },
+                },
+                data: {
+                    status: 'CANCELLED',
+                    assigneeId: null,
+                },
             }),
         ]);
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CreditCard,
   Users,
@@ -51,7 +51,6 @@ const BUSINESS_PLANS = [
 ];
 
 const ALL_PLANS = [...AGENCY_PLANS, ...BUSINESS_PLANS];
-const PLANS = AGENCY_PLANS;
 
 interface SubscriptionData {
   currentPlan: string;
@@ -161,7 +160,7 @@ const SubscriptionPage = () => {
       const url = res.data?.url;
       const warning = res.data?.warning;
       if (url) {
-        if (warning) toast.info(warning);
+        if (warning) toast(warning, { icon: "ℹ️" });
         window.location.href = url;
       } else {
         toast.error(res.data?.message || "Billing portal is not available.");
@@ -179,7 +178,7 @@ const SubscriptionPage = () => {
     openBillingPortal({ flow: "subscription_update" });
   };
 
-  const handlePlanChange = async (planId: string, direction: "upgrade" | "downgrade") => {
+  const handlePlanChange = async (planId: string, _direction: "upgrade" | "downgrade") => {
     setPortalLoading(true);
     try {
       const res = await api.post("/agencies/change-plan", { targetPlan: planId });
@@ -261,17 +260,13 @@ const SubscriptionPage = () => {
   // No charge during 7-day trial or Free account: only "Activate Subscription" is allowed; all other billing buttons disabled.
   const isTrialFreeTier =
     (hasTrial && !trialExpired && data.billingType === "trial") || data.billingType === "free";
-  // No Charge (custom only) or Free account after trial ended: show admin-managed message. For "free" we also show Activate button.
-  const showAdminManagedMessage =
-    (data.billingType === "free" && trialExpired) || data.billingType === "custom";
+  // Only custom billing shows the admin-managed blue message.
+  const showAdminManagedMessage = data.billingType === "custom";
 
   const agencyPlanOrder = ["solo", "starter", "growth", "pro", "enterprise"];
   const businessPlanOrder = ["business_lite", "business_pro"];
   const allPlanOrder = [...businessPlanOrder, ...agencyPlanOrder];
   const currentIndex = allPlanOrder.indexOf(data.currentPlan);
-  const isOnBusinessPlan = businessPlanOrder.includes(data.currentPlan);
-  const isOnAgencyPlan = agencyPlanOrder.includes(data.currentPlan);
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-emerald-50/30 p-8">
       <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-600 via-green-600 to-teal-500 p-8 shadow-lg">
@@ -295,7 +290,7 @@ const SubscriptionPage = () => {
               </p>
             </div>
           )}
-          {trialExpired && !billingManagedByAdmin && (
+          {trialExpired && data.billingType !== "free" && !billingManagedByAdmin && (
             <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200">
               <p className="text-sm font-medium text-red-800 mb-3">
                 Your free trial has ended. Choose a paid plan below to continue using the agency panel, or contact support.
@@ -308,20 +303,6 @@ const SubscriptionPage = () => {
               >
                 Choose a paid plan
               </button>
-            </div>
-          )}
-          {trialExpired && data.billingType === "free" && (
-            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
-              <p className="text-sm font-medium text-amber-800">
-                Your free trial has ended. Contact your administrator for plan or billing questions.
-              </p>
-            </div>
-          )}
-          {hasTrial && !trialExpired && data.billingType === "free" && (
-            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
-              <p className="text-sm font-medium text-amber-800">
-                You have <strong>{data.trialDaysLeft} days</strong> left in your free trial. Your account is set up as No Charge; billing and plan changes are managed by your administrator after the trial.
-              </p>
             </div>
           )}
           {hasTrial && !trialExpired && data.billingType === "trial" && (
@@ -441,15 +422,6 @@ const SubscriptionPage = () => {
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={handleUpgradePlan}
-                  disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-60 shadow-sm"
-                >
-                  {portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronUp className="h-4 w-4" />}
-                  Upgrade Plan
-                </button>
                 <button
                   type="button"
                   onClick={handleManageBilling}
