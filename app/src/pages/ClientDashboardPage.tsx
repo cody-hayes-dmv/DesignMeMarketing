@@ -105,8 +105,6 @@ const WORKLOG_PAGE_SIZES = [25, 50, 100, 250] as const;
 
 /** Dashboard API can be slow (DataForSEO + GA4); use 2 min and retry once on timeout to reduce "Request timed out" toasts. */
 const DASHBOARD_REQUEST_TIMEOUT_MS = 120000;
-const CLIENT_DASHBOARD_AUTO_RELOAD_KEY = "client_dashboard_auto_reload_at";
-const CLIENT_DASHBOARD_AUTO_RELOAD_GUARD_MS = 5000;
 
 interface ClientReport {
   id: string;
@@ -341,20 +339,6 @@ const ClientDashboardPage: React.FC = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const isClientPortal = location.pathname.startsWith("/client/");
-  useEffect(() => {
-    if (!clientId) return;
-    const path = location.pathname || "";
-    const isDashboardRoute = path.startsWith("/agency/clients/") || path.startsWith("/client/dashboard/");
-    if (!isDashboardRoute) return;
-
-    const storageKey = `${CLIENT_DASHBOARD_AUTO_RELOAD_KEY}:${clientId}`;
-    const lastReloadAt = Number(sessionStorage.getItem(storageKey) || "0");
-    const now = Date.now();
-    if (now - lastReloadAt < CLIENT_DASHBOARD_AUTO_RELOAD_GUARD_MS) return;
-
-    sessionStorage.setItem(storageKey, String(now));
-    window.location.reload();
-  }, [clientId, location.pathname]);
   const clientPortalMode = isClientPortal && user?.role === "USER";
   const navState = location.state as {
     reportOnly?: boolean;
@@ -912,6 +896,7 @@ const ClientDashboardPage: React.FC = () => {
   const [visitorSources, setVisitorSources] = useState<Array<{ source: string; users: number }>>([]);
   const [visitorSourcesLoading, setVisitorSourcesLoading] = useState(false);
   const [visitorSourcesError, setVisitorSourcesError] = useState<string | null>(null);
+  const [seoOverviewWidgetsRefreshKey, setSeoOverviewWidgetsRefreshKey] = useState(0);
   const [refreshingTopPages, setRefreshingTopPages] = useState(false);
   const [refreshingBacklinks, setRefreshingBacklinks] = useState(false);
   const dashboardExportReadyRef = useRef({
@@ -941,6 +926,12 @@ const ClientDashboardPage: React.FC = () => {
     description?: string | null;
   }>>>({});
   const [loadingPageKeywords, setLoadingPageKeywords] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!clientId) return;
+    if (activeTab !== "dashboard" || dashboardSection !== "seo") return;
+    setSeoOverviewWidgetsRefreshKey((k) => k + 1);
+  }, [clientId, activeTab, dashboardSection]);
 
   // Client-specific report creation modal state
   const [showClientReportModal, setShowClientReportModal] = useState(false);
@@ -2288,6 +2279,9 @@ const ClientDashboardPage: React.FC = () => {
       } catch (err) {
         console.warn("Failed to refresh visitor sources:", err);
       }
+
+      // Ensure SEO widgets (Target/Ranked keywords) refetch after dashboard refresh.
+      setSeoOverviewWidgetsRefreshKey((k) => k + 1);
     } catch (error: any) {
       if (!silent) toast.error(error.response?.data?.message || "Failed to refresh dashboard data");
       
@@ -6380,6 +6374,7 @@ const ClientDashboardPage: React.FC = () => {
                 titleTooltip="Your money keywords - the most important search terms that drive qualified leads to your business. We track these daily to monitor and improve your rankings."
                 lastUpdatedLabel={formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}
                 enableRefresh={false}
+                refreshKey={seoOverviewWidgetsRefreshKey}
               />
 
               <RankedKeywordsOverview
@@ -6390,6 +6385,7 @@ const ClientDashboardPage: React.FC = () => {
                 titleTooltip="Shows every keyword you're ranking for in Google, broken down by position. Track how your visibility grows as more keywords move from page 2-3 onto page 1."
                 lastUpdatedLabel={formatLastUpdatedHours(dashboardSummary?.dataForSeoLastUpdated)}
                 enableRefresh={false}
+                refreshKey={seoOverviewWidgetsRefreshKey}
               />
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -13089,6 +13085,7 @@ const ClientDashboardPage: React.FC = () => {
                   title="Total Keywords Ranked"
                   subtitle="Monitor how many organic keywords this client ranks for and how that total changes month-to-month."
                   enableRefresh={false}
+                  refreshKey={seoOverviewWidgetsRefreshKey}
                 />
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

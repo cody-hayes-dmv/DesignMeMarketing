@@ -69,6 +69,7 @@ interface RankedKeywordsOverviewProps {
   headerActions?: React.ReactNode;
   shareToken?: string | null; // For share dashboard mode
   enableRefresh?: boolean; // Control showing the internal refresh button
+  refreshKey?: number;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -167,6 +168,7 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
   headerActions,
   shareToken,
   enableRefresh = true,
+  refreshKey = 0,
 }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [summary, setSummary] = useState<RankedKeywordsSummary | null>(null);
@@ -242,7 +244,7 @@ const RankedKeywordsOverview: React.FC<RankedKeywordsOverviewProps> = ({
     if (!clientId) return;
     fetchSummary();
     fetchHistory();
-  }, [clientId, fetchSummary, fetchHistory]);
+  }, [clientId, fetchSummary, fetchHistory, refreshKey]);
 
   const handleRefresh = useCallback(async () => {
     if (!clientId || user?.role !== "SUPER_ADMIN") return;

@@ -64,6 +64,7 @@ interface TargetKeywordsOverviewProps {
   headerActions?: React.ReactNode;
   shareToken?: string;
   enableRefresh?: boolean;
+  refreshKey?: number;
 }
 
 const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
@@ -78,6 +79,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
   headerActions,
   shareToken,
   enableRefresh = true,
+  refreshKey = 0,
 }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const isReadOnly = Boolean(shareToken);
@@ -195,7 +197,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     if (!clientId) return;
     fetchKeywords();
     return () => { abortRef.current?.abort(); };
-  }, [clientId, fetchKeywords]);
+  }, [clientId, fetchKeywords, refreshKey]);
 
   const handleRefresh = useCallback(async () => {
     if (!clientId || (user?.role !== "SUPER_ADMIN" && user?.role !== "ADMIN") || isReadOnly) return;
