@@ -872,10 +872,7 @@ const ClientsPage = () => {
   const pendingCount = nonVendastaForCounts.filter((m) => hasStatus(m.status, "PENDING")).length;
   const dashboardOnlyCount = nonVendastaForCounts.filter((m) => hasStatus(m.status, "DASHBOARD_ONLY")).length;
   const canceledCount = nonVendastaForCounts.filter((m) => hasStatus(m.status, "CANCELED")).length;
-  const archivedCount =
-    user?.role === "AGENCY" || user?.role === "ADMIN"
-      ? nonVendasta.filter((m) => isArchivedStatus(m.status)).length
-      : nonVendastaForCounts.filter((m) => isArchivedStatus(m.status)).length;
+  const archivedCount = modifiedClients.filter((m) => isArchivedStatus(m.status)).length;
   const includedCount = isSuperAdmin ? includedClientIds.size : 0;
 
   const handleSort = (field: "name" | "domain" | "industry") => {
@@ -922,8 +919,14 @@ const ClientsPage = () => {
       ) {
         return false;
       }
-      // For "Active", "Total", and "Included", include Vendasta clients; for other filters show only non-Vendasta
-      if (statusFilter !== "total" && statusFilter !== "active" && statusFilter !== "included" && client.vendasta) return false;
+      // Include Vendasta clients for Active, Total, Included, and Archived filters.
+      if (
+        statusFilter !== "total" &&
+        statusFilter !== "active" &&
+        statusFilter !== "included" &&
+        statusFilter !== "archived" &&
+        client.vendasta
+      ) return false;
       if (statusFilter === "active") return hasStatus(client.status, "ACTIVE");
       if (statusFilter === "total") return true;
       if (statusFilter === "pending") return hasStatus(client.status, "PENDING");
