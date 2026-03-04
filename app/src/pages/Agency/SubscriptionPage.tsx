@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   CreditCard,
   Users,
@@ -13,7 +13,9 @@ import {
   Briefcase,
   Building2,
 } from "lucide-react";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import api from "@/lib/api";
+import { loadStripe } from "@/lib/stripe";
 import toast from "react-hot-toast";
 
 const AGENCY_PLANS = [
@@ -51,11 +53,56 @@ const BUSINESS_PLANS = [
 ];
 
 const ALL_PLANS = [...AGENCY_PLANS, ...BUSINESS_PLANS];
+const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
+let billingStripePromise: ReturnType<typeof loadStripe> | null = null;
+const getBillingStripePromise = () => {
+  if (!stripePk) return null;
+  if (!billingStripePromise) billingStripePromise = loadStripe(stripePk, { advancedFraudSignals: false } as any);
+  return billingStripePromise;
+};
+
+type StripePaymentHandle = { confirmAndGetPaymentMethod: () => Promise<string | null> };
+const StripePaymentSection = forwardRef<StripePaymentHandle, { clientSecret: string; onReady?: () => void }>(
+  function StripePaymentSection({ clientSecret, onReady }, ref) {
+    const stripe = useStripe();
+    const elements = useElements();
+    useImperativeHandle(ref, () => ({
+      async confirmAndGetPaymentMethod() {
+        if (!stripe || !elements) return null;
+        const { error: submitError } = await elements.submit();
+        if (submitError) throw new Error(submitError.message ?? "Please complete the card details.");
+        const result = await stripe.confirmSetup({
+          elements,
+          clientSecret,
+          redirect: "if_required",
+        });
+        if (result.error) throw new Error(result.error.message ?? "Payment setup failed.");
+        const setupIntent = (result as { setupIntent?: { payment_method?: string | { id?: string } } }).setupIntent;
+        const pm = setupIntent?.payment_method;
+        return typeof pm === "string" ? pm : (pm as { id?: string } | null)?.id ?? null;
+      },
+    }));
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <PaymentElement
+          options={{
+            layout: "tabs",
+            paymentMethodOrder: ["card"],
+            wallets: { applePay: "never", googlePay: "never" },
+          }}
+          onReady={onReady}
+        />
+      </div>
+    );
+  }
+);
 
 interface SubscriptionData {
   currentPlan: string;
   currentPlanPrice: number | null;
   nextBillingDate: string;
+  cancelAtPeriodEnd?: boolean;
+  cancellationEffectiveAt?: string | null;
   paymentMethod: { last4: string; brand: string } | null;
   trialEndsAt?: string | null;
   trialDaysLeft?: number | null;
@@ -68,6 +115,21 @@ interface SubscriptionData {
     teamMembers: { used: number; limit: number };
     clientsWithActiveManagedServices?: number;
   };
+}
+
+interface BillingInvoice {
+  id: string;
+  number: string | null;
+  createdAt: string;
+  status: string | null;
+  totalCents: number;
+  amountDueCents: number;
+  amountPaidCents: number;
+  currency: string;
+  hostedInvoiceUrl: string | null;
+  invoicePdfUrl: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
 }
 
 const defaultSubscription: SubscriptionData = {
@@ -88,6 +150,18 @@ const SubscriptionPage = () => {
   const [data, setData] = useState<SubscriptionData>(defaultSubscription);
   const [portalLoading, setPortalLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
+  const [upgradeConfirmPlanId, setUpgradeConfirmPlanId] = useState<string | null>(null);
+  const [upgradeProrationAmountLabel, setUpgradeProrationAmountLabel] = useState<string | null>(null);
+  const [upgradeProrationLoading, setUpgradeProrationLoading] = useState(false);
+  const [billingManageModalOpen, setBillingManageModalOpen] = useState(false);
+  const [setupSecret, setSetupSecret] = useState<string | null>(null);
+  const [setupLoading, setSetupLoading] = useState(false);
+  const [paymentElementReady, setPaymentElementReady] = useState(false);
+  const [paymentMethodSaving, setPaymentMethodSaving] = useState(false);
+  const [cancelActionLoading, setCancelActionLoading] = useState(false);
+  const paymentRef = useRef<StripePaymentHandle>(null);
 
   useEffect(() => {
     if (window.location.hash === "#invoices") {
@@ -118,6 +192,8 @@ const SubscriptionPage = () => {
       currentPlan: (resData.currentPlan as string) ?? defaultSubscription.currentPlan,
       currentPlanPrice: (resData.currentPlanPrice as number | null) ?? defaultSubscription.currentPlanPrice,
       nextBillingDate: (resData.nextBillingDate as string) ?? "",
+      cancelAtPeriodEnd: (resData.cancelAtPeriodEnd as boolean) ?? false,
+      cancellationEffectiveAt: (resData.cancellationEffectiveAt as string | null) ?? null,
       paymentMethod,
       trialEndsAt: (resData.trialEndsAt as string | null) ?? null,
       trialDaysLeft: (resData.trialDaysLeft as number | null) ?? null,
@@ -150,11 +226,31 @@ const SubscriptionPage = () => {
     fetchSubscription(true);
   }, []);
 
-  const openBillingPortal = async (options?: { flow?: "subscription_update" }) => {
+  const fetchInvoices = async (silent = false) => {
+    setInvoicesLoading(true);
+    try {
+      const res = await api.get("/agencies/billing-invoices");
+      const rows = Array.isArray(res?.data?.items) ? (res.data.items as BillingInvoice[]) : [];
+      setInvoices(rows);
+    } catch (e: any) {
+      if (!silent) {
+        toast.error(e.response?.data?.message || "Could not load invoices.");
+      }
+      setInvoices([]);
+    } finally {
+      setInvoicesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInvoices(true);
+  }, []);
+
+  const openBillingPortal = async (options?: { flow?: "subscription_update"; returnUrl?: string }) => {
     setPortalLoading(true);
     try {
       const res = await api.post("/agencies/billing-portal", {
-        returnUrl: window.location.href,
+        returnUrl: options?.returnUrl ?? window.location.href,
         ...options,
       });
       const url = res.data?.url;
@@ -172,16 +268,16 @@ const SubscriptionPage = () => {
     }
   };
 
-  const handleManageBilling = () => openBillingPortal();
+  const handleManageBilling = () => setBillingManageModalOpen(true);
 
   const handleUpgradePlan = () => {
     openBillingPortal({ flow: "subscription_update" });
   };
 
-  const handlePlanChange = async (planId: string, _direction: "upgrade" | "downgrade") => {
+  const executePlanChange = async (planId: string) => {
     setPortalLoading(true);
     try {
-      const res = await api.post("/agencies/change-plan", { targetPlan: planId });
+      const res = await api.post("/agencies/change-plan", { targetPlan: planId }, { _silent: true } as any);
       if (res.data?.success) {
         toast.success(res.data?.message ?? "Plan updated.");
         window.dispatchEvent(new Event("subscription-changed"));
@@ -202,27 +298,160 @@ const SubscriptionPage = () => {
     openBillingPortal({ flow: "subscription_update" });
   };
 
+  const handlePlanChange = async (planId: string, direction: "upgrade" | "downgrade") => {
+    if (direction === "upgrade") {
+      setUpgradeConfirmPlanId(planId);
+      setUpgradeProrationAmountLabel(null);
+      setUpgradeProrationLoading(true);
+      api.post("/agencies/change-plan-preview", { targetPlan: planId }, { _silent: true } as any)
+        .then((res) => {
+          const cents = Number(res.data?.amountDueTodayCents ?? NaN);
+          const currency = String(res.data?.currency || "usd").toUpperCase();
+          if (Number.isFinite(cents)) {
+            const amount = new Intl.NumberFormat("en-US", {
+              style: "currency",
+              currency,
+            }).format(cents / 100);
+            setUpgradeProrationAmountLabel(amount);
+          } else {
+            setUpgradeProrationAmountLabel(null);
+          }
+        })
+        .catch(() => {
+          setUpgradeProrationAmountLabel(null);
+        })
+        .finally(() => {
+          setUpgradeProrationLoading(false);
+        });
+      return;
+    }
+    await executePlanChange(planId);
+  };
+
+  const handleConfirmUpgrade = async () => {
+    if (!upgradeConfirmPlanId) return;
+    const selectedPlanId = upgradeConfirmPlanId;
+    setUpgradeConfirmPlanId(null);
+    setUpgradeProrationAmountLabel(null);
+    setUpgradeProrationLoading(false);
+    await executePlanChange(selectedPlanId);
+  };
+
   const handleViewInvoiceHistory = async () => {
-    setInvoicesLoading(true);
-    try {
-      const res = await api.post("/agencies/billing-portal", {
-        returnUrl: `${window.location.origin}${window.location.pathname}#invoices`,
+    await fetchInvoices();
+  };
+
+  useEffect(() => {
+    if (!billingManageModalOpen || !stripePk) {
+      setSetupSecret(null);
+      setSetupLoading(false);
+      setPaymentElementReady(false);
+      return;
+    }
+    let cancelled = false;
+    setSetupLoading(true);
+    setPaymentElementReady(false);
+    api.post("/agencies/setup-intent-for-activation")
+      .then((res) => {
+        if (!cancelled) setSetupSecret(res.data?.clientSecret ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSetupSecret(null);
+          toast.error("Could not load payment form.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSetupLoading(false);
       });
-      const url = res.data?.url;
-      if (url) {
-        window.location.href = url;
-      } else {
-        toast.error(res.data?.message || "Billing portal is not available.");
+    return () => {
+      cancelled = true;
+    };
+  }, [billingManageModalOpen]);
+
+  const handleSavePaymentMethod = async () => {
+    if (!paymentRef.current || !setupSecret || !paymentElementReady) {
+      toast.error("Please wait for the payment form to load.");
+      return;
+    }
+    setPaymentMethodSaving(true);
+    try {
+      const paymentMethodId = await paymentRef.current.confirmAndGetPaymentMethod();
+      if (!paymentMethodId) {
+        toast.error("Please complete the card details.");
+        return;
       }
+      await api.post("/agencies/subscription/payment-method", { paymentMethodId });
+      toast.success("Payment method updated.");
+      await fetchSubscription(true);
+      await fetchInvoices(true);
+      setBillingManageModalOpen(false);
     } catch (e: any) {
-      toast.error(e.response?.data?.message || "Could not open billing portal.");
+      toast.error(e.response?.data?.message || e?.message || "Could not update payment method.");
     } finally {
-      setInvoicesLoading(false);
+      setPaymentMethodSaving(false);
+    }
+  };
+
+  const handleScheduleCancellation = async () => {
+    setCancelActionLoading(true);
+    try {
+      const res = await api.post("/agencies/subscription/cancel");
+      toast.success(res.data?.message || "Subscription cancellation scheduled.");
+      await fetchSubscription(true);
+      setBillingManageModalOpen(false);
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Could not schedule cancellation.");
+    } finally {
+      setCancelActionLoading(false);
+    }
+  };
+
+  const handleReactivateSubscription = async () => {
+    setCancelActionLoading(true);
+    try {
+      const res = await api.post("/agencies/subscription/reactivate");
+      toast.success(res.data?.message || "Subscription reactivated.");
+      await fetchSubscription(true);
+      setBillingManageModalOpen(false);
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Could not reactivate subscription.");
+    } finally {
+      setCancelActionLoading(false);
     }
   };
 
   const formatCurrency = (n: number | null) =>
     n != null ? `$${Number(n).toFixed(2)}` : "—";
+  const formatInvoiceAmount = (cents: number, currency: string) => {
+    const amount = Number(cents || 0) / 100;
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: (currency || "usd").toUpperCase(),
+    }).format(amount);
+  };
+  const handleDownloadInvoice = async (invoice: BillingInvoice) => {
+    setDownloadingInvoiceId(invoice.id);
+    try {
+      const res = await api.get(`/agencies/billing-invoices/${invoice.id}/download`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const safeNumber = String(invoice.number || invoice.id).replace(/[^a-zA-Z0-9_-]/g, "-");
+      a.href = url;
+      a.download = `invoice-${safeNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Could not download invoice.");
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
+  };
 
   const currentPlanMeta = ALL_PLANS.find((p) => p.id === data.currentPlan);
   const currentPriceLabel =
@@ -233,8 +462,19 @@ const SubscriptionPage = () => {
     data.billingType != null &&
     data.billingType !== "free" &&
     data.billingType !== "trial";
+  const cancellationScheduled = data.cancelAtPeriodEnd === true;
+  const cancellationEffectiveFormatted = data.cancellationEffectiveAt
+    ? new Date(data.cancellationEffectiveAt).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "N/A";
+  const billingDateLabel = cancellationScheduled ? "Subscription Ends" : "Next Billing";
   const nextBillingFormatted =
-    !hasActivatedSubscription
+    cancellationScheduled
+      ? cancellationEffectiveFormatted
+      : !hasActivatedSubscription
       ? "N/A"
       : data.nextBillingDate
         ? new Date(data.nextBillingDate).toLocaleDateString("en-US", {
@@ -267,6 +507,12 @@ const SubscriptionPage = () => {
   const businessPlanOrder = ["business_lite", "business_pro"];
   const allPlanOrder = [...businessPlanOrder, ...agencyPlanOrder];
   const currentIndex = allPlanOrder.indexOf(data.currentPlan);
+  const upgradeConfirmPlan = upgradeConfirmPlanId
+    ? ALL_PLANS.find((p) => p.id === upgradeConfirmPlanId)
+    : null;
+  const upgradeConfirmAmount =
+    upgradeProrationAmountLabel ??
+    (upgradeConfirmPlan?.price != null ? formatCurrency(upgradeConfirmPlan.price) : upgradeConfirmPlan?.priceLabel ?? "N/A");
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-emerald-50/30 p-8">
       <div className="relative mb-10 overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-600 via-green-600 to-teal-500 p-8 shadow-lg">
@@ -305,6 +551,13 @@ const SubscriptionPage = () => {
               </button>
             </div>
           )}
+          {cancellationScheduled && (
+            <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200">
+              <p className="text-sm font-medium text-red-800">
+                Your subscription is canceled and will end on <strong>{cancellationEffectiveFormatted}</strong>. No future billing day is scheduled.
+              </p>
+            </div>
+          )}
           {hasTrial && !trialExpired && data.billingType === "trial" && (
             <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
               <p className="text-sm font-medium text-amber-800">
@@ -341,7 +594,7 @@ const SubscriptionPage = () => {
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-500">Next Billing</p>
+                  <p className="text-sm font-medium text-gray-500">{billingDateLabel}</p>
                   <p className="text-xl font-bold text-gray-900">{nextBillingFormatted}</p>
                   {trialEndsFormatted && (
                     <p className="mt-1 text-xs font-medium text-amber-700">
@@ -438,7 +691,7 @@ const SubscriptionPage = () => {
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
                 >
                   {invoicesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  Download Invoices
+                  Refresh Invoices
                 </button>
               </div>
             </div>
@@ -572,6 +825,11 @@ const SubscriptionPage = () => {
                   const planIndex = allPlanOrder.indexOf(plan.id);
                   const isHigher = planIndex > currentIndex;
                   const isLower = planIndex < currentIndex && planIndex >= 0;
+                  const businessDashboardLimit = plan.id === "business_lite" || plan.id === "business_pro" ? 1 : null;
+                  const exceedsBusinessDashboardLimit =
+                    businessDashboardLimit != null && data.usage.clientDashboards.used > businessDashboardLimit;
+                  const disableBusinessSwitch =
+                    exceedsBusinessDashboardLimit || portalLoading || billingManagedByAdmin || isTrialFreeTier;
 
                   return (
                     <div
@@ -619,7 +877,7 @@ const SubscriptionPage = () => {
                           <button
                             type="button"
                             onClick={() => handlePlanChange(plan.id, "downgrade")}
-                            disabled={portalLoading || billingManagedByAdmin || isTrialFreeTier}
+                            disabled={disableBusinessSwitch}
                             className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
                           >
                             <ChevronDown className="h-4 w-4" /> Switch
@@ -634,6 +892,11 @@ const SubscriptionPage = () => {
                             Select
                           </button>
                         )}
+                        {exceedsBusinessDashboardLimit && !isCurrent && (
+                          <p className="mt-2 text-xs font-medium text-amber-700">
+                            You currently have {data.usage.clientDashboards.used} clients. {plan.name} allows 1 client dashboard.
+                          </p>
+                        )}
                       </div>
                     </div>
                   );
@@ -644,20 +907,211 @@ const SubscriptionPage = () => {
 
           <section id="invoices" className="mt-10 scroll-mt-6 pt-6 border-t border-gray-200">
             <p className="text-sm text-gray-500 mb-2">
-              {billingManagedByAdmin ? "Invoices are managed by your administrator." : "Past invoices are available in the billing portal."}
+              {billingManagedByAdmin ? "Invoices are managed by your administrator." : "Past invoices are available below."}
             </p>
-            <button
-              type="button"
-              onClick={handleViewInvoiceHistory}
-              disabled={invoicesLoading || portalLoading || billingManagedByAdmin || isTrialFreeTier}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-60"
-            >
-              {invoicesLoading || portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              Download Invoices
-            </button>
+            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                <p className="text-sm font-medium text-gray-800">Invoice History</p>
+                <button
+                  type="button"
+                  onClick={handleViewInvoiceHistory}
+                  disabled={invoicesLoading || billingManagedByAdmin || isTrialFreeTier}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {invoicesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  Refresh
+                </button>
+              </div>
+              {isTrialFreeTier || billingManagedByAdmin ? (
+                <div className="px-4 py-6 text-sm text-gray-500">
+                  {billingManagedByAdmin
+                    ? "Invoice access is managed by your administrator."
+                    : "Invoices will appear once your paid subscription is active."}
+                </div>
+              ) : invoices.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-gray-500">
+                  {invoicesLoading ? "Loading invoices..." : "No invoices available yet."}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600">Invoice</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600">Date</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-600">Amount</th>
+                        <th className="px-4 py-2 text-right font-medium text-gray-600">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {invoices.map((inv) => (
+                        <tr key={inv.id}>
+                          <td className="px-4 py-2 text-gray-800">{inv.number || inv.id}</td>
+                          <td className="px-4 py-2 text-gray-700">
+                            {new Date(inv.createdAt).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </td>
+                          <td className="px-4 py-2 text-gray-700">{inv.status || "—"}</td>
+                          <td className="px-4 py-2 text-gray-900 font-medium">
+                            {formatInvoiceAmount(inv.totalCents, inv.currency)}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            {inv.invoicePdfUrl || inv.hostedInvoiceUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadInvoice(inv)}
+                                disabled={downloadingInvoiceId === inv.id}
+                                className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                                {downloadingInvoiceId === inv.id ? "Downloading..." : "Download"}
+                              </button>
+                            ) : (
+                              <span className="text-xs text-gray-400">Unavailable</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </section>
 
         </>
+      )}
+
+      {upgradeConfirmPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">Confirm Upgrade</h3>
+            <p className="mt-3 text-sm text-gray-700">
+              You are about to upgrade to <strong>{upgradeConfirmPlan.name}</strong>.
+            </p>
+            <p className="mt-1 text-sm text-gray-700">
+              <strong>{upgradeProrationLoading ? "Calculating..." : upgradeConfirmAmount}</strong> will be billed today.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setUpgradeConfirmPlanId(null)}
+                disabled={portalLoading}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUpgrade}
+                disabled={portalLoading}
+                className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
+              >
+                {portalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirm Upgrade"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {billingManageModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">Manage Billing</h3>
+            <p className="mt-1 text-sm text-gray-600">
+              Manage payment method and subscription status directly on this page.
+            </p>
+
+            <div className="mt-5 grid gap-6 md:grid-cols-2">
+              <div>
+                <h4 className="text-sm font-semibold text-gray-800">Update Payment Method</h4>
+                <p className="mt-1 text-xs text-gray-500">Add or replace the card used for future invoices.</p>
+                <div className="mt-3">
+                  {!stripePk ? (
+                    <p className="text-sm text-red-600">Stripe publishable key is not configured.</p>
+                  ) : setupLoading ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading secure payment form...
+                    </div>
+                  ) : setupSecret ? (
+                    <Elements
+                      stripe={getBillingStripePromise()}
+                      options={{
+                        clientSecret: setupSecret,
+                        appearance: { theme: "stripe" },
+                      }}
+                    >
+                      <StripePaymentSection
+                        ref={paymentRef}
+                        clientSecret={setupSecret}
+                        onReady={() => setPaymentElementReady(true)}
+                      />
+                    </Elements>
+                  ) : (
+                    <p className="text-sm text-red-600">Could not load payment form.</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSavePaymentMethod}
+                  disabled={paymentMethodSaving || setupLoading || !setupSecret || !paymentElementReady}
+                  className="mt-3 inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
+                >
+                  {paymentMethodSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Card"}
+                </button>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold text-gray-800">Subscription Status</h4>
+                <p className="mt-1 text-xs text-gray-500">
+                  {cancellationScheduled
+                    ? "Your subscription is currently scheduled to end."
+                    : "You can schedule cancellation at period end."}
+                </p>
+                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  {cancellationScheduled
+                    ? `Scheduled to end on ${cancellationEffectiveFormatted}.`
+                    : "Subscription is active."}
+                </div>
+                {cancellationScheduled ? (
+                  <button
+                    type="button"
+                    onClick={handleReactivateSubscription}
+                    disabled={cancelActionLoading}
+                    className="mt-3 inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {cancelActionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reactivate Subscription"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleScheduleCancellation}
+                    disabled={cancelActionLoading}
+                    className="mt-3 inline-flex items-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+                  >
+                    {cancelActionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cancel at Period End"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setBillingManageModalOpen(false)}
+                disabled={paymentMethodSaving || cancelActionLoading}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -6,6 +6,7 @@ import { normalizeTierId, getTierConfig } from "../lib/tiers.js";
 import { getTierFromSubscriptionItems } from "../lib/stripeTierSync.js";
 import { sendEmail } from "../lib/email.js";
 import { resolveSuperAdminNotificationRecipients } from "../lib/superAdminNotifications.js";
+import { BRAND_DISPLAY_NAME } from "../lib/qualityContracts.js";
 import {
   sendAgencyPlanCancellationEmail,
   sendAgencyPlanChangeEmail,
@@ -18,6 +19,49 @@ function tierLevel(tier: string | null): number {
   const cfg = getTierConfig(tier);
   return cfg?.priceMonthlyUsd ?? 0;
 }
+
+const createNotificationOnce = async (data: {
+  agencyId: string | null;
+  userId?: string | null;
+  type: string;
+  title: string;
+  message: string;
+  link?: string | null;
+}, withinMs = 5 * 60 * 1000): Promise<boolean> => {
+  const recent = await prisma.notification.findFirst({
+    where: {
+      agencyId: data.agencyId,
+      userId: data.userId ?? null,
+      type: data.type,
+      title: data.title,
+      message: data.message,
+      createdAt: { gte: new Date(Date.now() - withinMs) },
+    },
+    select: { id: true },
+  });
+  if (recent) return false;
+  await prisma.notification.create({ data }).catch((e) =>
+    console.warn("[Stripe webhook] Create notification failed:", e?.message)
+  );
+  return true;
+};
+
+const getPendingUpdateTargetTier = (pendingUpdate: any): string | null => {
+  const pendingItems = Array.isArray(pendingUpdate?.subscription_items) ? pendingUpdate.subscription_items : [];
+  for (const item of pendingItems) {
+    const priceId = typeof item?.price === "string" ? item.price : item?.price?.id;
+    if (!priceId) continue;
+    const tierId = getTierFromSubscriptionItems([
+      {
+        id: "pending_item",
+        object: "subscription_item",
+        price: { id: priceId } as Stripe.Price,
+      } as unknown as Stripe.SubscriptionItem,
+    ]);
+    if (tierId) return normalizeTierId(tierId);
+  }
+  return null;
+};
 
 const resolveSuperAdminNotificationEmails = async (): Promise<string[]> => {
   const superAdmins = await prisma.user.findMany({
@@ -41,6 +85,22 @@ const notifySuperAdminsByEmail = async (options: { subject: string; html: string
       })
     )
   );
+};
+
+const resolveAgencyEmailRecipient = async (agencyId: string): Promise<string | null> => {
+  const agency = await prisma.agency.findUnique({
+    where: { id: agencyId },
+    select: { contactEmail: true },
+  });
+  const contactEmail = String(agency?.contactEmail || "").trim().toLowerCase();
+  if (contactEmail) return contactEmail;
+
+  const fallbackMember = await prisma.userAgency.findFirst({
+    where: { agencyId },
+    select: { user: { select: { email: true } } },
+  });
+  const fallbackEmail = String(fallbackMember?.user?.email || "").trim().toLowerCase();
+  return fallbackEmail || null;
 };
 
 /**
@@ -211,6 +271,95 @@ router.post("/", async (req, res) => {
       const sub = event.data.object as Stripe.Subscription;
       const subscriptionId = sub.id;
       const oldTier = agency.subscriptionTier ?? null;
+      const previousAttributes = (event.data as any)?.previous_attributes ?? {};
+      const cancellationScheduledNow =
+        event.type === "customer.subscription.updated" &&
+        sub.cancel_at_period_end === true &&
+        previousAttributes?.cancel_at_period_end === false;
+      const cancellationEffectiveAt = new Date(
+        ((sub.cancel_at ?? sub.current_period_end ?? Math.floor(Date.now() / 1000)) as number) * 1000
+      );
+
+      if (cancellationScheduledNow) {
+        const agencyName = agency.name ?? "Your agency";
+        const oldTierName = getTierConfig(oldTier)?.name ?? oldTier ?? "Current plan";
+        const effectiveAtText = cancellationEffectiveAt.toLocaleString("en-US");
+        const agencyTitle = "Cancellation scheduled";
+        const agencyMessage = `Your ${oldTierName} subscription is scheduled to cancel on ${effectiveAtText}.`;
+        const saTitle = "Agency cancellation scheduled";
+        const saMessage = `${agencyName} scheduled cancellation of their ${oldTierName} subscription on ${effectiveAtText}.`;
+
+        const createdAgencyNotif = await createNotificationOnce({
+          agencyId: agency.id,
+          userId: null,
+          type: "subscription_canceled",
+          title: agencyTitle,
+          message: agencyMessage,
+          link: "/agency/subscription",
+        }, 24 * 60 * 60 * 1000);
+
+        const createdSaNotif = await createNotificationOnce({
+          agencyId: null,
+          userId: null,
+          type: "subscription_canceled",
+          title: saTitle,
+          message: saMessage,
+          link: "/agency/agencies",
+        }, 24 * 60 * 60 * 1000);
+
+        if (createdAgencyNotif) {
+          const agencyRecipient = await resolveAgencyEmailRecipient(agency.id);
+          if (!agencyRecipient) {
+            console.warn("[Stripe webhook] Agency cancellation-scheduled email skipped: no recipient email");
+          }
+          if (agencyRecipient) {
+          await sendEmail({
+            to: agencyRecipient,
+            subject: `Subscription cancellation scheduled - ${agencyName}`,
+            html: renderBillingEmailTemplate({
+              title: "Your subscription cancellation is scheduled",
+              introLines: [
+                `Your ${BRAND_DISPLAY_NAME} subscription cancellation has been scheduled.`,
+              ],
+              sections: [
+                {
+                  title: "Cancellation details",
+                  rows: [
+                    { label: "Current Plan", value: oldTierName },
+                    { label: "Effective Date", value: effectiveAtText },
+                    { label: "Current Status", value: "Cancellation Scheduled" },
+                    { label: "Billing Type", value: "paid" },
+                  ],
+                },
+              ],
+              footerLines: ["You can manage this in Subscription & Billing before the effective date."],
+            }),
+          }).catch((e: any) => console.warn("[Stripe webhook] Agency cancellation-scheduled email failed:", e?.message));
+          }
+        }
+
+        if (createdSaNotif) {
+          await notifySuperAdminsByEmail({
+            subject: `Agency cancellation scheduled - ${agencyName}`,
+            html: renderBillingEmailTemplate({
+              title: "Agency cancellation scheduled",
+              introLines: [`${agencyName} scheduled subscription cancellation.`],
+              sections: [
+                {
+                  title: "Cancellation details",
+                  rows: [
+                    { label: "Agency", value: agencyName },
+                    { label: "Current Plan", value: oldTierName },
+                    { label: "Effective Date", value: effectiveAtText },
+                    { label: "Current Status", value: "Cancellation Scheduled" },
+                  ],
+                },
+              ],
+            }),
+          }).catch((e: any) => console.warn("[Stripe webhook] SA cancellation-scheduled email failed:", e?.message));
+        }
+      }
+
       if (sub.status === "active" || sub.status === "trialing") {
         const items = sub.items?.data ?? [];
         const tierId = getTierFromSubscriptionItems(items);
@@ -225,6 +374,17 @@ router.post("/", async (req, res) => {
             trialEndsAt,
           },
         });
+        if (oldTier !== normalized && tierLevel(normalized) > tierLevel(oldTier)) {
+          const n = new Date();
+          const endOfMonth = new Date(n.getFullYear(), n.getMonth() + 1, 0, 23, 59, 59, 999);
+          await prisma.agency.update({
+            where: { id: agency.id },
+            data: {
+              keywordResearchCreditsUsed: 0,
+              keywordResearchCreditsResetAt: endOfMonth,
+            },
+          });
+        }
         if (event.type === "customer.subscription.updated" && oldTier !== normalized) {
           const tierName = getTierConfig(normalized)?.name ?? normalized ?? "your plan";
           const oldTierName = getTierConfig(oldTier)?.name ?? oldTier ?? "Free";
@@ -249,7 +409,7 @@ router.post("/", async (req, res) => {
               data: {
                 agencyId: agency.id,
                 type: isUpgrade ? "plan_upgrade" : "plan_downgrade",
-                title: isUpgrade ? "Plan upgraded" : "Plan changed",
+                title: isUpgrade ? "Plan upgraded" : "Plan Downgrade",
                 message: isUpgrade
                   ? `Your subscription has been upgraded to ${tierName}.`
                   : `Your subscription has been changed to ${tierName}.`,
@@ -282,10 +442,10 @@ router.post("/", async (req, res) => {
             }).catch((e: any) => console.warn("[Stripe webhook] Agency plan-change email failed:", e?.message));
 
             await notifySuperAdminsByEmail({
-              subject: `${isUpgrade ? "Agency plan upgraded" : "Agency plan changed"} - ${agency.name}`,
+              subject: `${isUpgrade ? "Agency plan upgraded" : "Agency plan downgraded"} - ${agency.name}`,
               html: renderBillingEmailTemplate({
-                title: isUpgrade ? "Agency plan upgraded" : "Agency plan changed",
-                introLines: [`${agency.name} has ${isUpgrade ? "upgraded" : "changed"} their plan.`],
+                title: isUpgrade ? "Agency plan upgraded" : "Agency plan downgraded",
+                introLines: [`${agency.name} has ${isUpgrade ? "upgraded" : "downgraded"} their plan.`],
                 sections: [
                   {
                     title: "Current account status",
@@ -303,6 +463,83 @@ router.post("/", async (req, res) => {
                 ],
               }),
             }).catch((e: any) => console.warn("[Stripe webhook] SA plan-change email failed:", e?.message));
+          }
+        }
+
+        const pendingTargetTier = getPendingUpdateTargetTier((sub as any)?.pending_update);
+        const previousPendingTargetTier = getPendingUpdateTargetTier(previousAttributes?.pending_update);
+        const pendingEffectiveAt = (sub as any)?.pending_update?.effective_at
+          ? new Date(((sub as any).pending_update.effective_at as number) * 1000)
+          : null;
+        const downgradeScheduledNow =
+          event.type === "customer.subscription.updated" &&
+          !!pendingTargetTier &&
+          pendingTargetTier !== previousPendingTargetTier &&
+          tierLevel(pendingTargetTier) < tierLevel(oldTier);
+
+        if (downgradeScheduledNow) {
+          const oldTierName = getTierConfig(oldTier)?.name ?? oldTier ?? "Current plan";
+          const pendingTierName = getTierConfig(pendingTargetTier)?.name ?? pendingTargetTier;
+          const effectiveAtText = (pendingEffectiveAt ?? cancellationEffectiveAt).toLocaleString("en-US");
+
+          const agencyTitle = "Plan downgrade scheduled";
+          const agencyMessage = `Your plan will downgrade from ${oldTierName} to ${pendingTierName} on ${effectiveAtText}.`;
+          const saTitle = "Agency downgrade scheduled";
+          const saMessage = `${agency.name} scheduled a downgrade from ${oldTierName} to ${pendingTierName} on ${effectiveAtText}.`;
+
+          const createdAgencyNotif = await createNotificationOnce({
+            agencyId: agency.id,
+            userId: null,
+            type: "plan_downgrade",
+            title: agencyTitle,
+            message: agencyMessage,
+            link: "/agency/subscription",
+          }, 24 * 60 * 60 * 1000);
+
+          const createdSaNotif = await createNotificationOnce({
+            agencyId: null,
+            userId: null,
+            type: "plan_downgrade",
+            title: saTitle,
+            message: saMessage,
+            link: "/agency/agencies",
+          }, 24 * 60 * 60 * 1000);
+
+          if (createdAgencyNotif) {
+            await sendAgencyPlanChangeEmail({
+              agencyId: agency.id,
+              oldTierName,
+              newTierName: pendingTierName,
+              isUpgrade: false,
+              billingType: "paid",
+              statusLabel: "Downgrade Scheduled",
+              trialEndsAtIso: trialEndsAt?.toISOString() ?? null,
+              trialDaysLeft: trialEndsAt
+                ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86400000))
+                : null,
+            }).catch((e: any) => console.warn("[Stripe webhook] Agency downgrade-scheduled email failed:", e?.message));
+          }
+
+          if (createdSaNotif) {
+            await notifySuperAdminsByEmail({
+              subject: `Agency downgrade scheduled - ${agency.name}`,
+              html: renderBillingEmailTemplate({
+                title: "Agency downgrade scheduled",
+                introLines: [`${agency.name} scheduled a plan downgrade.`],
+                sections: [
+                  {
+                    title: "Downgrade details",
+                    rows: [
+                      { label: "Agency", value: agency.name },
+                      { label: "Previous Plan", value: oldTierName },
+                      { label: "Scheduled Plan", value: pendingTierName },
+                      { label: "Effective Date", value: effectiveAtText },
+                      { label: "Current Status", value: "Downgrade Scheduled" },
+                    ],
+                  },
+                ],
+              }),
+            }).catch((e: any) => console.warn("[Stripe webhook] SA downgrade-scheduled email failed:", e?.message));
           }
         }
       } else {

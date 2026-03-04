@@ -12,6 +12,7 @@ import { getTierConfig, DEFAULT_TIER_ID, AGENCY_TIER_IDS, type TierId } from '..
 import {
   getPriceIdForTier,
   findBasePlanSubscriptionItem,
+  getTierFromSubscriptionItems,
   syncAgencyTierFromStripe,
 } from '../lib/stripeTierSync.js';
 import {
@@ -29,6 +30,21 @@ import {
 import { resolveSuperAdminNotificationRecipients } from '../lib/superAdminNotifications.js';
 
 const router = express.Router();
+
+const CHANGEABLE_TIER_IDS: TierId[] = [
+  'solo',
+  'starter',
+  'growth',
+  'pro',
+  'enterprise',
+  'business_lite',
+  'business_pro',
+];
+
+const getCreditsResetAt = () => {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth() + 1, 0, 23, 59, 59, 999);
+};
 
 // Restrict agency users with expired trial to subscription/me/activate only
 router.use(optionalAuthenticateToken, requireAgencyTrialNotExpired);
@@ -2466,7 +2482,7 @@ router.post('/:agencyId/research-credits/adjust', authenticateToken, async (req,
 });
 
 // Get single agency - full details for edit form
-router.get('/:agencyId', authenticateToken, async (req, res) => {
+router.get('/:agencyId([a-zA-Z0-9]{16,})', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
@@ -2567,7 +2583,7 @@ const updateAgencySuperAdminSchema = z.object({
   return data.resetPassword === data.resetPasswordConfirm;
 }, { message: 'Passwords do not match', path: ['resetPasswordConfirm'] });
 
-router.put('/:agencyId', authenticateToken, async (req, res) => {
+router.put('/:agencyId([a-zA-Z0-9]{16,})', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Access denied' });
@@ -3025,8 +3041,8 @@ router.post('/validate-plan-change', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
     const targetPlan = typeof req.body?.targetPlan === 'string' ? req.body.targetPlan.trim().toLowerCase() : '';
-    if (!targetPlan || !AGENCY_TIER_IDS.includes(targetPlan as TierId)) {
-      return res.status(400).json({ message: 'Invalid target plan. Use one of: solo, starter, growth, pro, enterprise.' });
+    if (!targetPlan || !CHANGEABLE_TIER_IDS.includes(targetPlan as TierId)) {
+      return res.status(400).json({ message: 'Invalid target plan. Use one of: solo, starter, growth, pro, enterprise, business_lite, business_pro.' });
     }
     const membership = await prisma.userAgency.findFirst({
       where: { userId: req.user.userId },
@@ -3079,6 +3095,94 @@ router.post('/validate-plan-change', authenticateToken, async (req, res) => {
   }
 });
 
+// Preview proration amount due today for a plan change (used by Upgrade confirmation modal).
+router.post('/change-plan-preview', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const targetPlan = typeof req.body?.targetPlan === 'string' ? req.body.targetPlan.trim().toLowerCase() : '';
+    if (!targetPlan || !CHANGEABLE_TIER_IDS.includes(targetPlan as TierId)) {
+      return res.status(400).json({ message: 'Invalid target plan. Use one of: solo, starter, growth, pro, enterprise, business_lite, business_pro.' });
+    }
+
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'No agency found.' });
+    }
+    const agency = membership.agency as { id: string; stripeSubscriptionId: string | null; stripeCustomerId?: string | null; billingType?: string | null };
+    const subId = agency.stripeSubscriptionId;
+    const billingType = agency.billingType ?? null;
+    if (!subId) {
+      if (billingType === 'free' || billingType === 'custom') {
+        return res.status(400).json({
+          message: 'Your account uses No Charge or Manual Invoice billing. Plan changes are managed by your administrator.',
+        });
+      }
+      return res.status(400).json({ message: 'No active subscription. Subscribe to a plan first.' });
+    }
+    const targetPriceId = getPriceIdForTier(targetPlan as TierId);
+    if (!targetPriceId) {
+      return res.status(400).json({ message: `Plan "${targetPlan}" is not configured in billing. Contact support.` });
+    }
+
+    const sub = await stripe.subscriptions.retrieve(subId, { expand: ['items.data.price'] }) as any;
+    const items = sub.items?.data ?? [];
+    const basePlan = findBasePlanSubscriptionItem(items);
+    if (!basePlan) {
+      return res.status(400).json({ message: 'No plan found on this subscription.' });
+    }
+    if (basePlan.priceId === targetPriceId) {
+      return res.json({ amountDueTodayCents: 0, currency: 'usd', isUpgrade: false });
+    }
+
+    const oldTier = await prisma.agency.findUnique({ where: { id: agency.id }, select: { subscriptionTier: true } });
+    const oldPrice = getTierConfig(oldTier?.subscriptionTier)?.priceMonthlyUsd ?? 0;
+    const newPrice = getTierConfig(targetPlan)?.priceMonthlyUsd ?? 0;
+    const isUpgrade = newPrice > oldPrice;
+
+    const basePlanItemIds = items
+      .filter((item: any) => getTierFromSubscriptionItems([item]) != null)
+      .map((item: any) => item.id);
+    const extraBasePlanItemIds = basePlanItemIds.filter((id: string) => id !== basePlan.itemId);
+
+    const customerId =
+      (typeof sub.customer === 'string' ? sub.customer : sub.customer?.id) ??
+      agency.stripeCustomerId ??
+      null;
+
+    const upcoming = await stripe.invoices.retrieveUpcoming({
+      customer: customerId ?? undefined,
+      subscription: subId,
+      subscription_items: [
+        { id: basePlan.itemId, price: targetPriceId },
+        ...extraBasePlanItemIds.map((id: string) => ({ id, deleted: true })),
+      ],
+      subscription_proration_behavior: isUpgrade ? 'always_invoice' : 'none',
+    } as any);
+
+    const amountDueTodayCents = Number(upcoming?.amount_due ?? upcoming?.total ?? 0);
+    const currency = String(upcoming?.currency || 'usd').toLowerCase();
+
+    return res.json({
+      isUpgrade,
+      amountDueTodayCents,
+      currency,
+    });
+  } catch (err: any) {
+    console.error('Change plan preview error:', err);
+    return res.status(500).json({ message: err?.message || 'Failed to preview plan change' });
+  }
+});
+
 // Change base plan directly via Stripe API (works with multi-item subscriptions: only the plan item is updated).
 // Validates downgrade (client counts, managed services) then updates the subscription item for the base plan.
 router.post('/change-plan', authenticateToken, async (req, res) => {
@@ -3087,8 +3191,8 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
     const targetPlan = typeof req.body?.targetPlan === 'string' ? req.body.targetPlan.trim().toLowerCase() : '';
-    if (!targetPlan || !AGENCY_TIER_IDS.includes(targetPlan as TierId)) {
-      return res.status(400).json({ message: 'Invalid target plan. Use one of: solo, starter, growth, pro, enterprise.' });
+    if (!targetPlan || !CHANGEABLE_TIER_IDS.includes(targetPlan as TierId)) {
+      return res.status(400).json({ message: 'Invalid target plan. Use one of: solo, starter, growth, pro, enterprise, business_lite, business_pro.' });
     }
     const stripe = getStripe();
     if (!stripe || !isStripeConfigured()) {
@@ -3156,7 +3260,36 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
     const oldTierName = getTierConfig(oldTier?.subscriptionTier)?.name ?? oldTier?.subscriptionTier ?? 'Free';
     const oldPrice = getTierConfig(oldTier?.subscriptionTier)?.priceMonthlyUsd ?? 0;
 
-    await stripe.subscriptionItems.update(basePlan.itemId, { price: targetPriceId });
+    const newPrice = getTierConfig(targetPlan)?.priceMonthlyUsd ?? 0;
+    const isUpgrade = newPrice > oldPrice;
+
+    // Keep only one base-plan item on the subscription:
+    // - update the primary base item to the target price
+    // - delete any extra base-plan items so old/new plans are never stacked
+    const basePlanItemIds = items
+      .filter((item) => getTierFromSubscriptionItems([item]) != null)
+      .map((item) => item.id);
+    const extraBasePlanItemIds = basePlanItemIds.filter((id) => id !== basePlan.itemId);
+
+    await stripe.subscriptions.update(subId, {
+      items: [
+        { id: basePlan.itemId, price: targetPriceId },
+        ...extraBasePlanItemIds.map((id) => ({ id, deleted: true })),
+      ],
+      // Upgrade: bill prorated difference now.
+      // Downgrade: do not bill/credit immediately; adjustment is applied on the next cycle.
+      proration_behavior: isUpgrade ? 'always_invoice' : 'none',
+      billing_cycle_anchor: 'unchanged',
+    });
+    if (isUpgrade) {
+      await prisma.agency.update({
+        where: { id: agency.id },
+        data: {
+          keywordResearchCreditsUsed: 0,
+          keywordResearchCreditsResetAt: getCreditsResetAt(),
+        },
+      });
+    }
     await syncAgencyTierFromStripe(agency.id);
 
     const updatedAgency = await prisma.agency.findUnique({
@@ -3164,8 +3297,6 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       select: { name: true, subscriptionTier: true, billingType: true, trialEndsAt: true },
     });
     const newTierName = getTierConfig(targetPlan)?.name ?? targetPlan;
-    const newPrice = getTierConfig(targetPlan)?.priceMonthlyUsd ?? 0;
-    const isUpgrade = newPrice > oldPrice;
     const trialDaysLeft = updatedAgency?.trialEndsAt
       ? Math.max(0, Math.ceil((updatedAgency.trialEndsAt.getTime() - Date.now()) / 86400000))
       : null;
@@ -3189,7 +3320,7 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       agencyId: agency.id,
       userId: null,
       type: isUpgrade ? 'plan_upgrade' : 'plan_downgrade',
-      title: isUpgrade ? 'Plan upgraded' : 'Plan changed',
+      title: isUpgrade ? 'Plan upgraded' : 'Plan downgraded',
       message: agencyNotifMessage,
       link: '/agency/subscription',
     });
@@ -3219,11 +3350,11 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
 
     if (createdSaNotif) {
       await notifySuperAdminsByEmail({
-        subject: `${isUpgrade ? 'Agency plan upgraded' : 'Agency plan changed'} - ${updatedAgency?.name ?? 'Agency'}`,
+        subject: `${isUpgrade ? 'Agency plan upgraded' : 'Agency plan downgraded'} - ${updatedAgency?.name ?? 'Agency'}`,
         html: renderBillingEmailTemplate({
-          title: isUpgrade ? 'Agency plan upgraded' : 'Agency plan changed',
+          title: isUpgrade ? 'Agency plan upgraded' : 'Agency plan downgraded',
           introLines: [
-            `${updatedAgency?.name ?? 'An agency'} has ${isUpgrade ? 'upgraded' : 'changed'} their plan.`,
+            `${updatedAgency?.name ?? 'An agency'} has ${isUpgrade ? 'upgraded' : 'downgraded'} their plan.`,
           ],
           sections: [
             {
@@ -3244,7 +3375,12 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
       });
     }
 
-    return res.json({ success: true, message: 'Plan updated. Your subscription will reflect the change shortly.' });
+    return res.json({
+      success: true,
+      message: isUpgrade
+        ? 'Plan upgraded. Prorated difference has been applied today.'
+        : 'Plan downgrade scheduled. New pricing will apply on your next billing date.',
+    });
   } catch (err: any) {
     console.error('Change plan error:', err);
     res.status(500).json({ message: err?.message || 'Failed to change plan' });
@@ -3252,7 +3388,7 @@ router.post('/change-plan', authenticateToken, async (req, res) => {
 });
 
 // Create Stripe billing portal session (for Subscription page: Manage Billing / Upgrade / Downgrade)
-// Uses the current user's agency.stripeCustomerId (or creates one if missing). Fallback: STRIPE_AGENCY_CUSTOMER_ID. Never uses req.body for customer id.
+// Uses the current user's agency.stripeCustomerId (or creates one if missing). Never uses req.body for customer id.
 // Plan changes (upgrade/downgrade) are handled by Stripe's portal. Configure in Dashboard: Billing → Customer portal →
 // "Subscription plan changes": enable "Proration" so upgrades are charged immediately; set downgrades to "Take effect at end of billing period".
 router.post('/billing-portal', authenticateToken, async (req, res) => {
@@ -3286,22 +3422,34 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
       });
     }
 
-    let customerId = agency.stripeCustomerId ?? process.env.STRIPE_AGENCY_CUSTOMER_ID ?? null;
+    const resolvedBillingEmail = agency.contactEmail ?? (await prisma.user.findUnique({
+      where: { id: membership.userId },
+      select: { email: true },
+    }).then((u) => u?.email ?? undefined));
+    const resolvedBillingName = agency.name ?? agency.contactName ?? undefined;
+
+    let customerId = agency.stripeCustomerId ?? null;
     let didCreateCustomer = false;
     if (!customerId) {
-      const email = agency.contactEmail ?? (await prisma.user.findUnique({
-        where: { id: membership.userId },
-        select: { email: true },
-      }).then((u) => u?.email ?? undefined));
       const customer = await stripe.customers.create({
-        email: email ?? undefined,
-        name: agency.name ?? undefined,
+        email: resolvedBillingEmail ?? undefined,
+        name: resolvedBillingName,
         metadata: { agencyId: agency.id },
       });
       customerId = customer.id;
       didCreateCustomer = true;
       // Do NOT persist stripeCustomerId here. Only persist after we successfully create the portal session,
       // so that a failed "Choose a plan" click does not unlock Managed Services / Add-Ons (accountActivated).
+    } else {
+      // Keep customer-facing Stripe profile aligned to the current agency identity.
+      // Prevents stale names from appearing in hosted Stripe pages.
+      await stripe.customers.update(customerId, {
+        email: resolvedBillingEmail ?? undefined,
+        name: resolvedBillingName,
+        metadata: {
+          agencyId: agency.id,
+        },
+      }).catch(() => {});
     }
 
     const sessionParams: Parameters<typeof stripe.billingPortal.sessions.create>[0] = {
@@ -3397,6 +3545,430 @@ router.post('/billing-portal', authenticateToken, async (req, res) => {
       url: null,
       message,
     });
+  }
+});
+
+// Native invoice history for Subscription page (avoids opening Stripe portal for invoice downloads).
+router.get('/billing-invoices', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ items: [], message: 'Billing is not configured. Contact support.' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ items: [], message: 'No agency found.' });
+    }
+
+    const agency = membership.agency as { stripeCustomerId?: string | null; stripeSubscriptionId?: string | null; billingType?: string | null };
+    if (agency.billingType === 'free' || agency.billingType === 'custom') {
+      return res.json({ items: [] });
+    }
+
+    let customerId = agency.stripeCustomerId ?? null;
+    if (!customerId && agency.stripeSubscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(agency.stripeSubscriptionId);
+        customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null;
+      } catch {
+        // If subscription is not retrievable, return empty invoices list.
+      }
+    }
+    if (!customerId) {
+      return res.json({ items: [] });
+    }
+
+    const invoices = await stripe.invoices.list({
+      customer: customerId,
+      limit: 24,
+    });
+
+    const items = invoices.data.map((inv) => ({
+      id: inv.id,
+      number: inv.number ?? null,
+      createdAt: new Date(inv.created * 1000).toISOString(),
+      status: inv.status ?? null,
+      totalCents: inv.total ?? 0,
+      amountDueCents: inv.amount_due ?? 0,
+      amountPaidCents: inv.amount_paid ?? 0,
+      currency: inv.currency ?? 'usd',
+      hostedInvoiceUrl: inv.hosted_invoice_url ?? null,
+      invoicePdfUrl: inv.invoice_pdf ?? null,
+      periodStart: inv.period_start ? new Date(inv.period_start * 1000).toISOString() : null,
+      periodEnd: inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null,
+    }));
+
+    return res.json({ items });
+  } catch (err: any) {
+    console.error('Billing invoices error:', err);
+    return res.status(500).json({ items: [], message: err?.message || 'Failed to load invoices' });
+  }
+});
+
+// Download invoice PDF through our backend so users stay on platform domain.
+router.get('/billing-invoices/:invoiceId/download', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const invoiceId = String(req.params.invoiceId || '').trim();
+    if (!invoiceId.startsWith('in_')) {
+      return res.status(400).json({ message: 'Invalid invoice id.' });
+    }
+
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'No agency found.' });
+    }
+    const agency = membership.agency as { stripeCustomerId?: string | null; stripeSubscriptionId?: string | null };
+
+    let customerId = agency.stripeCustomerId ?? null;
+    if (!customerId && agency.stripeSubscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(agency.stripeSubscriptionId);
+        customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null;
+      } catch {
+        // no-op
+      }
+    }
+    if (!customerId) {
+      return res.status(400).json({ message: 'No active billing customer found for this account.' });
+    }
+
+    const invoice = await stripe.invoices.retrieve(invoiceId);
+    const invoiceCustomerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id ?? null;
+    if (!invoiceCustomerId || invoiceCustomerId !== customerId) {
+      return res.status(403).json({ message: 'Access denied to this invoice.' });
+    }
+    if (!invoice.invoice_pdf) {
+      return res.status(404).json({ message: 'Invoice PDF is not available for this invoice.' });
+    }
+
+    const upstreamRes = await fetch(invoice.invoice_pdf);
+    if (!upstreamRes.ok) {
+      return res.status(502).json({ message: 'Could not fetch invoice PDF from billing provider.' });
+    }
+
+    const arrayBuffer = await upstreamRes.arrayBuffer();
+    const fileBuffer = Buffer.from(arrayBuffer);
+    const safeInvoiceNumber = String(invoice.number || invoice.id).replace(/[^a-zA-Z0-9_-]/g, '-');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${safeInvoiceNumber}.pdf"`);
+    return res.status(200).send(fileBuffer);
+  } catch (err: any) {
+    console.error('Billing invoice download error:', err);
+    return res.status(500).json({ message: err?.message || 'Failed to download invoice' });
+  }
+});
+
+const updateSubscriptionPaymentMethodSchema = z.object({
+  paymentMethodId: z.string().min(1, 'Payment method is required'),
+});
+
+// Update default payment method for the agency's Stripe customer/subscription.
+router.post('/subscription/payment-method', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+
+    const body = updateSubscriptionPaymentMethodSchema.parse(req.body || {});
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'No agency found.' });
+    }
+
+    const agency = membership.agency as {
+      id: string;
+      stripeCustomerId: string | null;
+      stripeSubscriptionId: string | null;
+      contactEmail?: string | null;
+      name?: string | null;
+      contactName?: string | null;
+    };
+    let customerId = agency.stripeCustomerId ?? null;
+    const fallbackEmail = await prisma.user.findUnique({
+      where: { id: membership.userId },
+      select: { email: true },
+    }).then((u) => u?.email ?? undefined);
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: agency.contactEmail ?? fallbackEmail ?? undefined,
+        name: agency.name ?? agency.contactName ?? undefined,
+        metadata: { agencyId: agency.id },
+      });
+      customerId = customer.id;
+      await prisma.agency.update({
+        where: { id: agency.id },
+        data: { stripeCustomerId: customerId },
+      });
+    }
+
+    await stripe.paymentMethods.attach(body.paymentMethodId, { customer: customerId }).catch((err: any) => {
+      const msg = String(err?.message || '').toLowerCase();
+      if (!msg.includes('already') || !msg.includes('attached')) {
+        throw err;
+      }
+    });
+    await stripe.customers.update(customerId, {
+      invoice_settings: { default_payment_method: body.paymentMethodId },
+      metadata: { agencyId: agency.id },
+      email: agency.contactEmail ?? fallbackEmail ?? undefined,
+      name: agency.name ?? agency.contactName ?? undefined,
+    });
+
+    if (agency.stripeSubscriptionId) {
+      await stripe.subscriptions.update(agency.stripeSubscriptionId, {
+        default_payment_method: body.paymentMethodId,
+      }).catch(() => {});
+    }
+
+    return res.json({ success: true, message: 'Payment method updated.' });
+  } catch (err: any) {
+    console.error('Update subscription payment method error:', err);
+    return res.status(500).json({ message: err?.message || 'Failed to update payment method' });
+  }
+});
+
+// Schedule cancellation at period end.
+router.post('/subscription/cancel', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'No agency found.' });
+    }
+    const subId = membership.agency.stripeSubscriptionId;
+    if (!subId) {
+      return res.status(400).json({ message: 'No active subscription found.' });
+    }
+
+    const updated = await stripe.subscriptions.update(subId, { cancel_at_period_end: true });
+    const cancelTs = updated.cancel_at ?? updated.current_period_end ?? null;
+    const cancellationEffectiveAt = cancelTs ? new Date(cancelTs * 1000).toISOString() : null;
+    const cancellationEffectiveText = cancelTs ? new Date(cancelTs * 1000).toLocaleString('en-US') : 'N/A';
+    const oldTierName =
+      getTierConfig(membership.agency.subscriptionTier)?.name ??
+      membership.agency.subscriptionTier ??
+      'Current plan';
+    const agencyName = membership.agency.name ?? 'Your agency';
+
+    const agencyTitle = 'Cancellation scheduled';
+    const agencyMessage = `Your ${oldTierName} subscription is scheduled to cancel on ${cancellationEffectiveText}.`;
+    const saTitle = 'Agency cancellation scheduled';
+    const saMessage = `${agencyName} scheduled cancellation of their ${oldTierName} subscription on ${cancellationEffectiveText}.`;
+
+    const createdAgencyNotif = await createNotificationOnce({
+      agencyId: membership.agency.id,
+      userId: null,
+      type: 'subscription_canceled',
+      title: agencyTitle,
+      message: agencyMessage,
+      link: '/agency/subscription',
+    }, 24 * 60 * 60 * 1000);
+
+    const createdSaNotif = await createNotificationOnce({
+      agencyId: null,
+      userId: null,
+      type: 'subscription_canceled',
+      title: saTitle,
+      message: saMessage,
+      link: '/agency/agencies',
+    }, 24 * 60 * 60 * 1000);
+
+    if (createdAgencyNotif) {
+      const recipient = await resolveAgencyEmailRecipient(membership.agency.id, req.user.userId);
+      if (recipient.recipientEmail) {
+        await sendEmail({
+          to: recipient.recipientEmail,
+          subject: `Subscription cancellation scheduled - ${BRAND_DISPLAY_NAME}`,
+          html: renderBillingEmailTemplate({
+            title: 'Your subscription cancellation is scheduled',
+            introLines: [
+              `Hi ${recipient.recipientName},`,
+              `Your ${BRAND_DISPLAY_NAME} subscription for ${recipient.agencyName} is scheduled to cancel.`,
+            ],
+            sections: [
+              {
+                title: 'Cancellation details',
+                rows: [
+                  { label: 'Current Plan', value: oldTierName },
+                  { label: 'Effective Date', value: cancellationEffectiveText },
+                  { label: 'Current Status', value: 'Cancellation Scheduled' },
+                ],
+              },
+            ],
+          }),
+        }).catch((e: any) => console.warn('Agency cancellation scheduled email failed:', e?.message));
+      }
+    }
+
+    if (createdSaNotif) {
+      await notifySuperAdminsByEmail({
+        subject: `Agency cancellation scheduled - ${agencyName}`,
+        html: renderBillingEmailTemplate({
+          title: 'Agency cancellation scheduled',
+          introLines: [`${agencyName} scheduled subscription cancellation.`],
+          sections: [
+            {
+              title: 'Cancellation details',
+              rows: [
+                { label: 'Agency', value: agencyName },
+                { label: 'Current Plan', value: oldTierName },
+                { label: 'Effective Date', value: cancellationEffectiveText },
+                { label: 'Current Status', value: 'Cancellation Scheduled' },
+              ],
+            },
+          ],
+        }),
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Subscription cancellation scheduled.',
+      cancellationEffectiveAt,
+    });
+  } catch (err: any) {
+    console.error('Cancel subscription error:', err);
+    return res.status(500).json({ message: err?.message || 'Failed to schedule cancellation' });
+  }
+});
+
+// Remove scheduled cancellation before period end.
+router.post('/subscription/reactivate', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'AGENCY' && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Billing is not configured. Contact support.' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership?.agency) {
+      return res.status(404).json({ message: 'No agency found.' });
+    }
+    const subId = membership.agency.stripeSubscriptionId;
+    if (!subId) {
+      return res.status(400).json({ message: 'No active subscription found.' });
+    }
+
+    await stripe.subscriptions.update(subId, { cancel_at_period_end: false });
+
+    const tierName =
+      getTierConfig(membership.agency.subscriptionTier)?.name ??
+      membership.agency.subscriptionTier ??
+      'Current plan';
+    const agencyName = membership.agency.name ?? 'Your agency';
+
+    const createdAgencyNotif = await createNotificationOnce({
+      agencyId: membership.agency.id,
+      userId: null,
+      type: 'subscription_activated',
+      title: 'Subscription reactivated',
+      message: `Your ${tierName} subscription has been reactivated and will continue renewing.`,
+      link: '/agency/subscription',
+    });
+
+    const createdSaNotif = await createNotificationOnce({
+      agencyId: null,
+      userId: null,
+      type: 'subscription_activated',
+      title: 'Agency subscription reactivated',
+      message: `${agencyName} reactivated their ${tierName} subscription.`,
+      link: '/agency/agencies',
+    });
+
+    if (createdAgencyNotif) {
+      const recipient = await resolveAgencyEmailRecipient(membership.agency.id, req.user.userId);
+      if (recipient.recipientEmail) {
+        await sendEmail({
+          to: recipient.recipientEmail,
+          subject: `Subscription reactivated - ${BRAND_DISPLAY_NAME}`,
+          html: renderBillingEmailTemplate({
+            title: 'Your subscription has been reactivated',
+            introLines: [
+              `Hi ${recipient.recipientName},`,
+              `Your ${BRAND_DISPLAY_NAME} subscription for ${recipient.agencyName} is now active.`,
+            ],
+            sections: [
+              {
+                title: 'Current account status',
+                rows: [
+                  { label: 'Plan', value: tierName },
+                  { label: 'Status', value: 'Active - Paid' },
+                  { label: 'Reactivated At', value: new Date().toISOString() },
+                ],
+              },
+            ],
+          }),
+        }).catch((e: any) => console.warn('Agency reactivation email failed:', e?.message));
+      }
+    }
+
+    if (createdSaNotif) {
+      await notifySuperAdminsByEmail({
+        subject: `Agency subscription reactivated - ${agencyName}`,
+        html: renderBillingEmailTemplate({
+          title: 'Agency subscription reactivated',
+          introLines: [`${agencyName} reactivated their subscription.`],
+          sections: [
+            {
+              title: 'Current account status',
+              rows: [
+                { label: 'Agency', value: agencyName },
+                { label: 'Plan', value: tierName },
+                { label: 'Status', value: 'Active - Paid' },
+                { label: 'Reactivated At', value: new Date().toISOString() },
+              ],
+            },
+          ],
+        }),
+      });
+    }
+
+    return res.json({ success: true, message: 'Subscription reactivated.' });
+  } catch (err: any) {
+    console.error('Reactivate subscription error:', err);
+    return res.status(500).json({ message: err?.message || 'Failed to reactivate subscription' });
   }
 });
 
@@ -3496,6 +4068,8 @@ router.post('/activate-trial-subscription', authenticateToken, async (req, res) 
         subscriptionTier: tier,
         billingType: 'paid',
         trialEndsAt,
+        keywordResearchCreditsUsed: 0,
+        keywordResearchCreditsResetAt: getCreditsResetAt(),
       },
     });
 

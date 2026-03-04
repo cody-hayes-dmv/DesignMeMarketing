@@ -88,6 +88,8 @@ interface DashboardStats {
   currentTier?: string;
   monthlySpend?: string;
   nextBillingDate?: string;
+  cancelAtPeriodEnd?: boolean;
+  cancellationEffectiveAt?: string | null;
 }
 
 interface SubscriptionUsage {
@@ -100,6 +102,8 @@ interface SubscriptionSummaryResponse {
   currentPlan?: string;
   currentPlanPrice?: number | null;
   nextBillingDate?: string;
+  cancelAtPeriodEnd?: boolean;
+  cancellationEffectiveAt?: string | null;
   usage?: SubscriptionUsage;
 }
 
@@ -159,6 +163,8 @@ const mapDashboardResponse = (payload: any): DashboardStats => ({
   currentTier: payload?.currentTier ?? "Growth",
   monthlySpend: payload?.monthlySpend ?? "0",
   nextBillingDate: payload?.nextBillingDate ?? "",
+  cancelAtPeriodEnd: payload?.cancelAtPeriodEnd ?? false,
+  cancellationEffectiveAt: payload?.cancellationEffectiveAt ?? null,
 });
 
 const defaultDashboardStats: DashboardStats = mapDashboardResponse({});
@@ -211,6 +217,8 @@ const AgencyDashboardPage = () => {
           ? prev.monthlySpend
           : String(summary.currentPlanPrice),
       nextBillingDate: summary.nextBillingDate || prev.nextBillingDate,
+      cancelAtPeriodEnd: summary.cancelAtPeriodEnd ?? false,
+      cancellationEffectiveAt: summary.cancellationEffectiveAt ?? null,
       totalProjects:
         dashboardsUsage?.used ?? prev.totalProjects,
       tierLimit:
@@ -439,8 +447,8 @@ const AgencyDashboardPage = () => {
                   })()}
                 </p>
                 <p className="mt-1 text-xs text-gray-400">
-                  {stats.nextBillingDate
-                    ? `Next billing: ${new Date(stats.nextBillingDate).toLocaleDateString("en-US", {
+                  {(stats.cancelAtPeriodEnd ? stats.cancellationEffectiveAt : stats.nextBillingDate)
+                    ? `${stats.cancelAtPeriodEnd ? "Subscription ends" : "Next billing"}: ${new Date((stats.cancelAtPeriodEnd ? stats.cancellationEffectiveAt : stats.nextBillingDate) as string).toLocaleDateString("en-US", {
                         month: "short",
                         day: "numeric",
                       })}`

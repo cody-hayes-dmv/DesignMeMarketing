@@ -105,6 +105,8 @@ const WORKLOG_PAGE_SIZES = [25, 50, 100, 250] as const;
 
 /** Dashboard API can be slow (DataForSEO + GA4); use 2 min and retry once on timeout to reduce "Request timed out" toasts. */
 const DASHBOARD_REQUEST_TIMEOUT_MS = 120000;
+const CLIENT_DASHBOARD_AUTO_RELOAD_KEY = "client_dashboard_auto_reload_at";
+const CLIENT_DASHBOARD_AUTO_RELOAD_GUARD_MS = 5000;
 
 interface ClientReport {
   id: string;
@@ -339,6 +341,20 @@ const ClientDashboardPage: React.FC = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
   const isClientPortal = location.pathname.startsWith("/client/");
+  useEffect(() => {
+    if (!clientId) return;
+    const path = location.pathname || "";
+    const isDashboardRoute = path.startsWith("/agency/clients/") || path.startsWith("/client/dashboard/");
+    if (!isDashboardRoute) return;
+
+    const storageKey = `${CLIENT_DASHBOARD_AUTO_RELOAD_KEY}:${clientId}`;
+    const lastReloadAt = Number(sessionStorage.getItem(storageKey) || "0");
+    const now = Date.now();
+    if (now - lastReloadAt < CLIENT_DASHBOARD_AUTO_RELOAD_GUARD_MS) return;
+
+    sessionStorage.setItem(storageKey, String(now));
+    window.location.reload();
+  }, [clientId, location.pathname]);
   const clientPortalMode = isClientPortal && user?.role === "USER";
   const navState = location.state as {
     reportOnly?: boolean;

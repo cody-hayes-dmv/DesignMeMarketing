@@ -12123,6 +12123,8 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
     // Resolve billing info from Stripe when available; otherwise leave as null.
     // This avoids misleading placeholder values (e.g., fake dates/card 4242).
     let nextBillingDate: string | null = null;
+    let cancelAtPeriodEnd = false;
+    let cancellationEffectiveAt: string | null = null;
     let paymentMethod: { last4: string; brand: string } | null = null;
 
     // During trial/free, "next billing" should align with trial end date.
@@ -12150,8 +12152,15 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
             null;
         }
 
-        if (subscription?.current_period_end) {
-          nextBillingDate = new Date(subscription.current_period_end * 1000).toISOString().split("T")[0];
+        if (subscription?.cancel_at_period_end === true) {
+          cancelAtPeriodEnd = true;
+          const cancelTs = subscription?.cancel_at ?? subscription?.current_period_end ?? null;
+          if (cancelTs) {
+            cancellationEffectiveAt = new Date(cancelTs * 1000).toISOString();
+          }
+          nextBillingDate = null;
+        } else if (subscription?.current_period_end) {
+          nextBillingDate = new Date(subscription.current_period_end * 1000).toISOString();
         }
 
         let stripePm: any = null;
@@ -12192,6 +12201,8 @@ router.get("/agency/subscription", authenticateToken, async (req, res) => {
       trialExpired: trialExpired || undefined,
       currentPlanPrice: currentPlanPrice ?? undefined,
       nextBillingDate: nextBillingDate ?? undefined,
+      cancelAtPeriodEnd: cancelAtPeriodEnd || undefined,
+      cancellationEffectiveAt: cancellationEffectiveAt ?? undefined,
       paymentMethod: paymentMethod ?? undefined,
       isBusinessTier: tierCtx.tierConfig?.type === "business",
       trialEndsAt,

@@ -121,9 +121,9 @@ export async function sendAgencyPlanChangeEmail(options: {
 
   await sendEmail({
     to: recipient.recipientEmail,
-    subject: `${options.isUpgrade ? "Plan upgraded" : "Plan changed"} - ${BRAND_DISPLAY_NAME}`,
+    subject: `${options.isUpgrade ? "Plan upgraded" : "Plan downgraded"} - ${BRAND_DISPLAY_NAME}`,
     html: renderBillingEmailTemplate({
-      title: options.isUpgrade ? "Your plan has been upgraded" : "Your plan has been updated",
+      title: options.isUpgrade ? "Your plan has been upgraded" : "Your plan has been downgraded",
       introLines: [
         `Hi ${recipient.recipientName},`,
         `Your ${BRAND_DISPLAY_NAME} subscription for ${recipient.agencyName} has been updated.`,

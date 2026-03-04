@@ -19,7 +19,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "user:create-client": "tsx scripts/createClientUser.ts",
     "upload:sanitize": "tsx scripts/sanitizeUploadFilenames.ts",
-    "dataforseo:import": "tsx scripts/importDataForSeoDailySpend.ts"
+    "dataforseo:import": "tsx scripts/importDataForSeoDailySpend.ts",
+    "stripe:cleanup-base-plans": "tsx scripts/cleanupDuplicateBasePlanItems.ts"
   },
   "dependencies": {
     "@google-analytics/data": "^5.2.1",
