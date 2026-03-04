@@ -532,12 +532,15 @@ const ClientsPage = () => {
       seoRoadmapSection: String(info.seoRoadmapSection ?? ""),
       managedServicePackage: String((client as any).managedServicePackage ?? info.managedServicePackage ?? ""),
       managedServiceStatus: String((client as any).managedServiceStatus ?? "").trim() || (
-        String((client as any).status ?? "") === "ACTIVE" ? "active"
-          : String((client as any).status ?? "") === "PENDING" ? "pending"
-            : String((client as any).status ?? "") === "CANCELED" ? "canceled"
-              : String((client as any).status ?? "") === "SUSPENDED" ? "suspended"
-                : String((client as any).status ?? "") === "ARCHIVED" ? "archived"
-                  : "none"
+        (() => {
+          const normalizedStatus = String((client as any).status ?? "").trim().toUpperCase();
+          if (normalizedStatus === "ACTIVE") return "active";
+          if (normalizedStatus === "PENDING") return "pending";
+          if (normalizedStatus === "CANCELED") return "canceled";
+          if (normalizedStatus === "SUSPENDED") return "suspended";
+          if (normalizedStatus === "ARCHIVED" || normalizedStatus === "REJECTED") return "archived";
+          return "none";
+        })()
       ),
       serviceStartDate: ((client as any).managedServiceActivatedDate ?? info.serviceStartDate)
         ? String((client as any).managedServiceActivatedDate ?? info.serviceStartDate).slice(0, 10)
@@ -825,23 +828,30 @@ const ClientsPage = () => {
   // Clients already have statistics from the database
   const modifiedClients = clients
 
-  const isArchivedStatus = (status: string) => status === "ARCHIVED" || status === "REJECTED";
+  const normalizeClientStatus = (status: string | null | undefined) =>
+    String(status ?? "").trim().toUpperCase();
+  const hasStatus = (status: string | null | undefined, expected: string) =>
+    normalizeClientStatus(status) === expected;
+  const isArchivedStatus = (status: string | null | undefined) =>
+    hasStatus(status, "ARCHIVED") || hasStatus(status, "REJECTED");
   const getStatusBadge = (status: string) => {
-    if (status === "ACTIVE") return "bg-green-100 text-green-800";
-    if (status === "PENDING") return "bg-amber-100 text-amber-800";
-    if (status === "DASHBOARD_ONLY") return "bg-blue-100 text-blue-800";
-    if (status === "CANCELED") return "bg-orange-100 text-orange-800";
-    if (status === "SUSPENDED") return "bg-red-100 text-red-800";
-    if (status === "ARCHIVED" || status === "REJECTED") return "bg-gray-100 text-gray-800";
+    const normalized = normalizeClientStatus(status);
+    if (normalized === "ACTIVE") return "bg-green-100 text-green-800";
+    if (normalized === "PENDING") return "bg-amber-100 text-amber-800";
+    if (normalized === "DASHBOARD_ONLY") return "bg-blue-100 text-blue-800";
+    if (normalized === "CANCELED") return "bg-orange-100 text-orange-800";
+    if (normalized === "SUSPENDED") return "bg-red-100 text-red-800";
+    if (normalized === "ARCHIVED" || normalized === "REJECTED") return "bg-gray-100 text-gray-800";
     return "bg-gray-100 text-gray-800";
   };
   const getStatusLabel = (status: string) => {
-    if (status === "ACTIVE") return "Active";
-    if (status === "PENDING") return "Pending";
-    if (status === "DASHBOARD_ONLY") return "Dashboard Only";
-    if (status === "CANCELED") return "Canceled";
-    if (status === "SUSPENDED") return "Suspended";
-    if (status === "ARCHIVED" || status === "REJECTED") return "Archived";
+    const normalized = normalizeClientStatus(status);
+    if (normalized === "ACTIVE") return "Active";
+    if (normalized === "PENDING") return "Pending";
+    if (normalized === "DASHBOARD_ONLY") return "Dashboard Only";
+    if (normalized === "CANCELED") return "Canceled";
+    if (normalized === "SUSPENDED") return "Suspended";
+    if (normalized === "ARCHIVED" || normalized === "REJECTED") return "Archived";
     return status || "—";
   };
 
@@ -857,11 +867,11 @@ const ClientsPage = () => {
       ? clientsForClientsTab.filter((c) => !c.vendasta)
       : nonVendasta;
   // Active Clients = all clients with status ACTIVE (includes non-Vendasta and Vendasta active clients)
-  const activeCount = clientsForClientsTab.filter((m) => m.status === "ACTIVE").length;
+  const activeCount = clientsForClientsTab.filter((m) => hasStatus(m.status, "ACTIVE")).length;
   const totalCount = clientsForClientsTab.length;
-  const pendingCount = nonVendastaForCounts.filter((m) => m.status === "PENDING").length;
-  const dashboardOnlyCount = nonVendastaForCounts.filter((m) => m.status === "DASHBOARD_ONLY").length;
-  const canceledCount = nonVendastaForCounts.filter((m) => m.status === "CANCELED").length;
+  const pendingCount = nonVendastaForCounts.filter((m) => hasStatus(m.status, "PENDING")).length;
+  const dashboardOnlyCount = nonVendastaForCounts.filter((m) => hasStatus(m.status, "DASHBOARD_ONLY")).length;
+  const canceledCount = nonVendastaForCounts.filter((m) => hasStatus(m.status, "CANCELED")).length;
   const archivedCount =
     user?.role === "AGENCY" || user?.role === "ADMIN"
       ? nonVendasta.filter((m) => isArchivedStatus(m.status)).length
@@ -914,13 +924,11 @@ const ClientsPage = () => {
       }
       // For "Active", "Total", and "Included", include Vendasta clients; for other filters show only non-Vendasta
       if (statusFilter !== "total" && statusFilter !== "active" && statusFilter !== "included" && client.vendasta) return false;
-      if (statusFilter === "active") {
-        return client.status === "ACTIVE";
-      }
+      if (statusFilter === "active") return hasStatus(client.status, "ACTIVE");
       if (statusFilter === "total") return true;
-      if (statusFilter === "pending") return client.status === "PENDING";
-      if (statusFilter === "dashboard_only") return client.status === "DASHBOARD_ONLY";
-      if (statusFilter === "canceled") return client.status === "CANCELED";
+      if (statusFilter === "pending") return hasStatus(client.status, "PENDING");
+      if (statusFilter === "dashboard_only") return hasStatus(client.status, "DASHBOARD_ONLY");
+      if (statusFilter === "canceled") return hasStatus(client.status, "CANCELED");
       if (statusFilter === "archived") return isArchivedStatus(client.status);
       if (statusFilter === "included") return includedClientIds.has(client.id);
       return true;
@@ -1299,7 +1307,7 @@ const ClientsPage = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs">
                       <div className="flex items-center flex-wrap gap-1">
-                        {client.status === "PENDING" && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") ? (
+                        {hasStatus(client.status, "PENDING") && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") ? (
                           <>
                             <button
                               type="button"
@@ -1513,7 +1521,7 @@ const ClientsPage = () => {
                           }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {client.status === "PENDING" && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
+                          {hasStatus(client.status, "PENDING") && (user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && (
                             <>
                               <button
                                 className="w-full text-left px-4 py-2 text-xs hover:bg-green-50 text-green-700 first:rounded-t-md"
