@@ -7,6 +7,12 @@ import { getTierFromSubscriptionItems } from "../lib/stripeTierSync.js";
 import { sendEmail } from "../lib/email.js";
 import { resolveSuperAdminNotificationRecipients } from "../lib/superAdminNotifications.js";
 import { BRAND_DISPLAY_NAME } from "../lib/qualityContracts.js";
+import { buildSnapshotCreditPackNotificationContent } from "../lib/addOnNotifications.js";
+import {
+  applySnapshotCreditPackPurchase,
+  parseSnapshotCheckoutSession,
+  SnapshotPurchaseValidationError,
+} from "../lib/snapshotCreditPurchase.js";
 import {
   sendAgencyPlanCancellationEmail,
   sendAgencyPlanChangeEmail,
@@ -103,6 +109,52 @@ const resolveAgencyEmailRecipient = async (agencyId: string): Promise<string | n
   return fallbackEmail || null;
 };
 
+const notifySnapshotCreditPackPurchased = async (params: {
+  agencyId: string;
+  agencyName: string;
+  credits: number;
+  priceCents: number;
+}) => {
+  const { agencyId, agencyName, credits, priceCents } = params;
+  const content = buildSnapshotCreditPackNotificationContent({
+    agencyName,
+    credits,
+    priceCents,
+    brandDisplayName: BRAND_DISPLAY_NAME,
+    agencyGreetingName: "there",
+  });
+
+  const createdAgencyNotif = await createNotificationOnce({
+    agencyId,
+    userId: null,
+    ...content.agencyNotification,
+  });
+
+  const createdSaNotif = await createNotificationOnce({
+    agencyId: null,
+    userId: null,
+    ...content.superAdminNotification,
+  });
+
+  if (createdAgencyNotif) {
+    const recipient = await resolveAgencyEmailRecipient(agencyId);
+    if (recipient) {
+      await sendEmail({
+        to: recipient,
+        subject: content.agencyEmail.subject,
+        html: content.agencyEmail.html,
+      }).catch((e: any) => console.warn("[Stripe webhook] Agency snapshot credits email failed:", e?.message));
+    }
+  }
+
+  if (createdSaNotif) {
+    await notifySuperAdminsByEmail({
+      subject: content.superAdminEmail.subject,
+      html: content.superAdminEmail.html,
+    }).catch((e: any) => console.warn("[Stripe webhook] SA snapshot credits email failed:", e?.message));
+  }
+};
+
 /**
  * Stripe webhook handler. Expects raw body (mount with express.raw).
  * Syncs customer.subscription.created/updated -> agency.subscriptionTier and stripeSubscriptionId.
@@ -162,41 +214,25 @@ router.post("/", async (req, res) => {
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
-      const metadata = session.metadata ?? {};
-      if (metadata.addOnType === "local_map_snapshot_credit_pack" && metadata.agencyId) {
-        const credits = metadata.addOnOption === "25" ? 25 : metadata.addOnOption === "10" ? 10 : 5;
-        const priceCents = metadata.addOnOption === "25" ? 7400 : metadata.addOnOption === "10" ? 3400 : 1900;
-        const details = `Stripe checkout session ${session.id}`;
-
-        const existing = await prisma.agencyAddOn.findFirst({
-          where: {
-            agencyId: metadata.agencyId,
-            addOnType: "local_map_snapshot_credit_pack",
-            details,
-          },
-          select: { id: true },
+      try {
+        const parsed = parseSnapshotCheckoutSession(session as any);
+        const applied = await applySnapshotCreditPackPurchase({
+          prismaClient: prisma,
+          agencyId: parsed.agencyId,
+          option: parsed.option,
+          details: parsed.details,
         });
-
-        if (!existing) {
-          await prisma.$transaction([
-            prisma.agency.update({
-              where: { id: metadata.agencyId },
-              data: {
-                snapshotPurchasedCredits: { increment: credits },
-              },
-            }),
-            prisma.agencyAddOn.create({
-              data: {
-                agencyId: metadata.agencyId,
-                addOnType: "local_map_snapshot_credit_pack",
-                addOnOption: String(metadata.addOnOption || "5"),
-                displayName: `Local Map Snapshot Credits (${credits})`,
-                details,
-                priceCents,
-                billingInterval: "one_time",
-              },
-            }),
-          ]);
+        await notifySnapshotCreditPackPurchased({
+          agencyId: parsed.agencyId,
+          agencyName: agency.name || "Agency",
+          credits: applied.credits,
+          priceCents: applied.priceCents,
+        }).catch((e: any) => {
+          console.warn("[Stripe webhook] Snapshot credit purchase notifications failed:", e?.message);
+        });
+      } catch (err: any) {
+        if (!(err instanceof SnapshotPurchaseValidationError)) {
+          throw err;
         }
       }
       return res.status(200).json({ received: true });

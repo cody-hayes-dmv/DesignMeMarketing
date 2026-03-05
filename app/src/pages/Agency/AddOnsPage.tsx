@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { Loader2, Sparkles } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
+import { loadStripe } from "@/lib/stripe";
 
 interface ActiveAddOn {
   id: string;
@@ -36,6 +37,52 @@ const EXTRA_RESEARCH_CREDITS = [
 ];
 const EXTRA_RESEARCH_CREDITS_AVAILABLE = "All tiers";
 
+const EXTRA_GRID_KEYWORDS = [
+  {
+    option: "5",
+    label: "+5 Grid Keywords",
+    priceLabel: "$29/mo",
+    apiCostLabel: "~$7.85/mo",
+    marginLabel: "~73%",
+  },
+  {
+    option: "15",
+    label: "+15 Grid Keywords",
+    priceLabel: "$69/mo",
+    apiCostLabel: "~$23.55/mo",
+    marginLabel: "~66%",
+  },
+];
+const EXTRA_GRID_KEYWORDS_AVAILABLE = "Solo, Starter, Growth, Pro, Enterprise";
+
+const EXTRA_SNAPSHOTS = [
+  {
+    pack: "5",
+    label: "5 Snapshots",
+    priceLabel: "$19 one-time",
+    creditsLabel: "5",
+    apiCostLabel: "~$3.90",
+    marginLabel: "~79%",
+  },
+  {
+    pack: "10",
+    label: "10 Snapshots",
+    priceLabel: "$34 one-time",
+    creditsLabel: "10",
+    apiCostLabel: "~$7.80",
+    marginLabel: "~77%",
+  },
+  {
+    pack: "25",
+    label: "25 Snapshots",
+    priceLabel: "$74 one-time",
+    creditsLabel: "25",
+    apiCostLabel: "~$19.50",
+    marginLabel: "~74%",
+  },
+] as const;
+const EXTRA_SNAPSHOTS_AVAILABLE = "All paid tiers";
+
 const TIER_LABELS: Record<string, string> = {
   business_lite: "Business Lite",
   business_pro: "Business Pro",
@@ -46,10 +93,19 @@ const TIER_LABELS: Record<string, string> = {
   enterprise: "Enterprise",
 };
 
+const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "";
+let addOnsStripePromise: ReturnType<typeof loadStripe> | null = null;
+const getAddOnsStripePromise = () => {
+  if (!stripePk) return null;
+  if (!addOnsStripePromise) addOnsStripePromise = loadStripe(stripePk, { advancedFraudSignals: false } as any);
+  return addOnsStripePromise;
+};
+
 interface AllowedAddOns {
   extra_dashboards: string[];
   extra_keywords_tracked: string[];
   extra_keyword_lookups: string[];
+  local_map_rankings_extra_keywords: string[];
 }
 
 interface AgencyMe {
@@ -61,6 +117,7 @@ interface AgencyMe {
 }
 
 const AddOnsPage = () => {
+  const location = useLocation();
   const [activeAddOns, setActiveAddOns] = useState<ActiveAddOn[]>([]);
   const [loading, setLoading] = useState(true);
   const [agencyMe, setAgencyMe] = useState<AgencyMe | null>(null);
@@ -68,8 +125,16 @@ const AddOnsPage = () => {
   const [removing, setRemoving] = useState<string | null>(null);
   const [removeModalAddOn, setRemoveModalAddOn] = useState<ActiveAddOn | null>(null);
   const [showTierBreakdown, setShowTierBreakdown] = useState(false);
+  const [snapshotCheckoutPack, setSnapshotCheckoutPack] = useState<string | null>(null);
+  const [snapshotCheckoutOpen, setSnapshotCheckoutOpen] = useState(false);
+  const [snapshotCheckoutClientSecret, setSnapshotCheckoutClientSecret] = useState<string | null>(null);
+  const [snapshotCheckoutSessionId, setSnapshotCheckoutSessionId] = useState<string | null>(null);
+  const [snapshotCheckoutSessionUrl, setSnapshotCheckoutSessionUrl] = useState<string | null>(null);
+  const snapshotCheckoutMountRef = useRef<HTMLDivElement | null>(null);
+  const snapshotCheckoutInstanceRef = useRef<any>(null);
+  const snapshotPurchaseHandledRef = useRef(false);
 
-  const fetchAddOns = async () => {
+  const fetchAddOns = useCallback(async () => {
     try {
       const res = await api.get<ActiveAddOn[]>("/agencies/add-ons");
       setActiveAddOns(Array.isArray(res.data) ? res.data : []);
@@ -78,14 +143,19 @@ const AddOnsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchAgencyMe = async () => {
+  const fetchAgencyMe = useCallback(async () => {
     try {
       const res = await api.get("/agencies/me");
       setAgencyMe({
         tierId: res.data?.tierId ?? null,
-        allowedAddOns: res.data?.allowedAddOns ?? { extra_dashboards: [], extra_keywords_tracked: [], extra_keyword_lookups: [] },
+        allowedAddOns: res.data?.allowedAddOns ?? {
+          extra_dashboards: [],
+          extra_keywords_tracked: [],
+          extra_keyword_lookups: [],
+          local_map_rankings_extra_keywords: [],
+        },
         basePriceMonthlyUsd: res.data?.basePriceMonthlyUsd ?? null,
         accountActivated: res.data?.accountActivated !== false,
         trialActive: res.data?.trialActive === true,
@@ -93,14 +163,36 @@ const AddOnsPage = () => {
     } catch {
       setAgencyMe(null);
     }
-  };
-
-  useEffect(() => {
-    fetchAddOns();
-    fetchAgencyMe();
   }, []);
 
-  const addAddOn = async (addOnType: "extra_dashboards" | "extra_keywords_tracked" | "extra_keyword_lookups", addOnOption: string) => {
+  useEffect(() => {
+    void fetchAddOns();
+    void fetchAgencyMe();
+  }, [fetchAddOns, fetchAgencyMe]);
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const params = new URLSearchParams(location.search);
+    const status = params.get("snapshotCreditsPurchase");
+    if (status === "success") {
+      toast.success("Snapshot credits purchased successfully.");
+      void fetchAgencyMe();
+      void fetchAddOns();
+      timeoutId = setTimeout(() => {
+        void fetchAddOns();
+      }, 2500);
+    } else if (status === "cancelled") {
+      toast.error("Snapshot credit purchase was cancelled.");
+    }
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [location.search, fetchAddOns, fetchAgencyMe]);
+
+  const addAddOn = async (
+    addOnType: "extra_dashboards" | "extra_keywords_tracked" | "extra_keyword_lookups" | "local_map_rankings_extra_keywords",
+    addOnOption: string
+  ) => {
     const key = `${addOnType}-${addOnOption}`;
     setPurchasing(key);
     try {
@@ -113,6 +205,179 @@ const AddOnsPage = () => {
       setPurchasing(null);
     }
   };
+
+  const startSnapshotCheckout = async (pack: "5" | "10" | "25") => {
+    setSnapshotCheckoutPack(pack);
+    try {
+      const res = await api.post(
+        "/agencies/add-ons/local-map-snapshot-credits/checkout",
+        { pack, uiMode: "embedded" },
+        { _silent: true } as any
+      );
+      const clientSecret = String(res?.data?.clientSecret || "");
+      const url = String(res?.data?.url || "");
+      const sessionId = String(res?.data?.sessionId || "");
+      if (!clientSecret && !url) {
+        toast.error("Could not start checkout.");
+        return;
+      }
+      if (clientSecret) {
+        snapshotPurchaseHandledRef.current = false;
+        setSnapshotCheckoutClientSecret(clientSecret);
+        setSnapshotCheckoutSessionId(sessionId || null);
+        setSnapshotCheckoutSessionUrl(url || null);
+        setSnapshotCheckoutOpen(true);
+        return;
+      }
+      window.location.href = url;
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Failed to start checkout.");
+    } finally {
+      setSnapshotCheckoutPack(null);
+    }
+  };
+
+  const closeSnapshotCheckoutModal = () => {
+    const checkout = snapshotCheckoutInstanceRef.current;
+    snapshotCheckoutInstanceRef.current = null;
+    if (checkout && typeof checkout.destroy === "function") {
+      void checkout.destroy();
+    }
+    setSnapshotCheckoutOpen(false);
+    setSnapshotCheckoutClientSecret(null);
+    setSnapshotCheckoutSessionId(null);
+    setSnapshotCheckoutSessionUrl(null);
+  };
+
+  const waitMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  const confirmSnapshotCheckoutWithRetry = useCallback(async (sessionId: string) => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        await api.post(
+          "/agencies/add-ons/local-map-snapshot-credits/confirm",
+          { sessionId },
+          { _silent: true } as any
+        );
+        return true;
+      } catch (e: any) {
+        const status = Number(e?.response?.status || 0);
+        // 409 = Stripe payment not finalized yet. Retry shortly.
+        // 400 can happen transiently if metadata propagation is delayed.
+        if (status !== 409 && status !== 400) {
+          return false;
+        }
+      }
+      await waitMs(900);
+    }
+    return false;
+  }, []);
+
+  const refreshAfterSnapshotPackPurchase = useCallback(async () => {
+    // Webhook processing can be slightly delayed; poll briefly so Active Add-Ons updates reliably.
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await fetchAgencyMe();
+      await fetchAddOns();
+      if (attempt < 5) {
+        await waitMs(1200);
+      }
+    }
+  }, [fetchAddOns, fetchAgencyMe]);
+
+  const handleSnapshotPurchaseApplied = useCallback(async () => {
+    if (snapshotPurchaseHandledRef.current) return;
+    snapshotPurchaseHandledRef.current = true;
+    closeSnapshotCheckoutModal();
+    toast.success("Snapshot credits purchased successfully.");
+    await refreshAfterSnapshotPackPurchase();
+  }, [refreshAfterSnapshotPackPurchase]);
+
+  useEffect(() => {
+    if (!snapshotCheckoutOpen || !snapshotCheckoutClientSecret) return;
+    if (!snapshotCheckoutMountRef.current) return;
+    let disposed = false;
+
+    (async () => {
+      try {
+        const stripe = await getAddOnsStripePromise();
+        if (!stripe || typeof (stripe as any).initEmbeddedCheckout !== "function") {
+          throw new Error("Embedded checkout is unavailable. Please try again.");
+        }
+        const checkout = await (stripe as any).initEmbeddedCheckout({
+          fetchClientSecret: async () => snapshotCheckoutClientSecret,
+          onComplete: async () => {
+            const completedSessionId = snapshotCheckoutSessionId;
+            if (completedSessionId) {
+              await confirmSnapshotCheckoutWithRetry(completedSessionId);
+            }
+            await handleSnapshotPurchaseApplied();
+          },
+        });
+        if (disposed) {
+          if (typeof checkout.destroy === "function") await checkout.destroy();
+          return;
+        }
+        snapshotCheckoutInstanceRef.current = checkout;
+        checkout.mount(snapshotCheckoutMountRef.current);
+      } catch (e: any) {
+        toast.error(e?.message || "Could not open checkout modal.");
+        const checkout = snapshotCheckoutInstanceRef.current;
+        snapshotCheckoutInstanceRef.current = null;
+        if (checkout && typeof checkout.destroy === "function") {
+          void checkout.destroy();
+        }
+        setSnapshotCheckoutOpen(false);
+        setSnapshotCheckoutClientSecret(null);
+        setSnapshotCheckoutSessionUrl(null);
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      const checkout = snapshotCheckoutInstanceRef.current;
+      snapshotCheckoutInstanceRef.current = null;
+      if (checkout && typeof checkout.destroy === "function") {
+        void checkout.destroy();
+      }
+    };
+  }, [
+    snapshotCheckoutOpen,
+    snapshotCheckoutClientSecret,
+    snapshotCheckoutSessionId,
+    confirmSnapshotCheckoutWithRetry,
+    handleSnapshotPurchaseApplied,
+  ]);
+
+  useEffect(() => {
+    if (!snapshotCheckoutOpen || !snapshotCheckoutSessionId) return;
+    let cancelled = false;
+    let polling = false;
+    const timer = setInterval(() => {
+      if (cancelled || polling || snapshotPurchaseHandledRef.current) return;
+      polling = true;
+      void (async () => {
+        try {
+          await api.post(
+            "/agencies/add-ons/local-map-snapshot-credits/confirm",
+            { sessionId: snapshotCheckoutSessionId },
+            { _silent: true } as any
+          );
+          if (!cancelled) {
+            await handleSnapshotPurchaseApplied();
+          }
+        } catch {
+          // Keep polling until payment completes or modal closes.
+        } finally {
+          polling = false;
+        }
+      })();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [snapshotCheckoutOpen, snapshotCheckoutSessionId, handleSnapshotPurchaseApplied]);
 
   const openRemoveModal = (addOn: ActiveAddOn) => {
     setRemoveModalAddOn(addOn);
@@ -191,7 +456,7 @@ const AddOnsPage = () => {
         ) : null}
         <h2 className="text-lg font-semibold text-gray-900 mt-4 mb-2">Add-Ons by tier</h2>
         <p className="text-gray-700 text-sm">
-          Add-ons are Stripe subscription line items you can add or remove. Limits (dashboards, keywords tracked, research lookups) = base tier + active add-ons.
+          Add-ons include recurring Stripe subscription items and one-time snapshot credit packs. Limits (dashboards, keywords tracked, research lookups) = base tier + active add-ons.
         </p>
         <button
           type="button"
@@ -205,10 +470,10 @@ const AddOnsPage = () => {
             {[
               { tier: "Business Lite", price: "$79/month base", note: "Cannot add: Extra Dashboards (only tracks 1 business). Keywords +50/100/250; Research Credits +50/150/300." },
               { tier: "Business Pro", price: "$197/month base", note: "Cannot add: Extra Dashboards (only tracks 1 business). Keywords +50/100/250; Research Credits +50/150/300." },
-              { tier: "Solo", price: "$147/month base", note: "Extra Dashboards +5; Keywords +50/100/250; Research Credits +50/150/300." },
-              { tier: "Starter", price: "$297/month base", note: "Extra Dashboards +5, +10; Keywords +50/100/250; Research Credits +50/150/300." },
-              { tier: "Growth", price: "$597/month base", note: "Extra Dashboards +5, +10, +25; Keywords +50/100/250; Research Credits +50/150/300." },
-              { tier: "Pro", price: "$997/month base", note: "Extra Dashboards +5, +10, +25; Keywords +50/100/250; Research Credits +50/150/300." },
+              { tier: "Solo", price: "$147/month base", note: "Extra Dashboards +5; Keywords +50/100/250; Research Credits +50/150/300; Grid Keywords +5/+15." },
+              { tier: "Starter", price: "$297/month base", note: "Extra Dashboards +5, +10; Keywords +50/100/250; Research Credits +50/150/300; Grid Keywords +5/+15." },
+              { tier: "Growth", price: "$597/month base", note: "Extra Dashboards +5, +10, +25; Keywords +50/100/250; Research Credits +50/150/300; Grid Keywords +5/+15." },
+              { tier: "Pro", price: "$997/month base", note: "Extra Dashboards +5, +10, +25; Keywords +50/100/250; Research Credits +50/150/300; Grid Keywords +5/+15." },
               { tier: "Enterprise", price: "Custom (~$1,997+/month)", note: "All add-ons available; pricing negotiated case-by-case." },
             ].map((row) => (
               <div key={row.tier}>
@@ -222,7 +487,7 @@ const AddOnsPage = () => {
       {/* Available Add-Ons (filtered by tier) */}
       <section className="mb-12">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Available Add-Ons for your tier</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {/* Card 1 - Extra Client Dashboards */}
           <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col">
             <h3 className="text-lg font-bold text-gray-900">Add-On #1: Extra Client Dashboards</h3>
@@ -250,7 +515,7 @@ const AddOnsPage = () => {
                 ))}
               </ul>
             )}
-            <p className="mt-4 text-xs text-gray-500">Available to: Solo, Starter, Growth, Pro, Enterprise</p>
+            <p className="mt-4 text-xs text-gray-500">Available to: {EXTRA_DASHBOARDS_AVAILABLE}</p>
           </div>
 
           {/* Card 2 - Extra Keywords Tracked (Account-Wide) */}
@@ -274,7 +539,7 @@ const AddOnsPage = () => {
                 </li>
               ))}
             </ul>
-            <p className="mt-4 text-xs text-gray-500">Available to: All tiers</p>
+            <p className="mt-4 text-xs text-gray-500">Available to: {EXTRA_KEYWORDS_TRACKED_AVAILABLE}</p>
           </div>
 
           {/* Card 3 - Extra Research Credits */}
@@ -298,7 +563,69 @@ const AddOnsPage = () => {
                 </li>
               ))}
             </ul>
-            <p className="mt-4 text-xs text-gray-500">Available to: All tiers</p>
+            <p className="mt-4 text-xs text-gray-500">Available to: {EXTRA_RESEARCH_CREDITS_AVAILABLE}</p>
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Card 4 - Extra Grid Keywords */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col">
+            <h3 className="text-lg font-bold text-gray-900">Add-On #4: Extra Grid Keywords</h3>
+            {agencyMe && agencyMe.allowedAddOns.local_map_rankings_extra_keywords.length === 0 ? (
+              <p className="mt-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                Not available on your current tier.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-2 text-sm text-gray-700">
+                {EXTRA_GRID_KEYWORDS.filter(
+                  (pack) => !agencyMe || agencyMe.allowedAddOns.local_map_rankings_extra_keywords.includes(pack.option)
+                ).map((pack) => (
+                  <li key={pack.option} className="flex items-center justify-between gap-2">
+                    <span>
+                      {pack.label}: {pack.priceLabel} (API Cost {pack.apiCostLabel}, Margin {pack.marginLabel})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => addAddOn("local_map_rankings_extra_keywords", pack.option)}
+                      disabled={!!purchasing || agencyMe?.accountActivated === false || agencyMe?.trialActive === true}
+                      className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
+                    >
+                      {purchasing === `local_map_rankings_extra_keywords-${pack.option}` ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : null}
+                      Add to Plan
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-4 text-xs text-gray-500">Available to: {EXTRA_GRID_KEYWORDS_AVAILABLE}</p>
+          </div>
+
+          {/* Card 5 - Extra Snapshots */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col">
+            <h3 className="text-lg font-bold text-gray-900">Add-On #5: Extra Snapshots</h3>
+            <ul className="mt-4 space-y-2 text-sm text-gray-700">
+              {EXTRA_SNAPSHOTS.map((pack) => (
+                <li key={pack.pack} className="flex items-center justify-between gap-2">
+                  <span>
+                    {pack.label}: {pack.priceLabel} ({pack.creditsLabel} credits, API Cost {pack.apiCostLabel}, Margin {pack.marginLabel})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void startSnapshotCheckout(pack.pack)}
+                    disabled={!!snapshotCheckoutPack || agencyMe?.accountActivated === false || agencyMe?.trialActive === true}
+                    className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 flex items-center gap-1"
+                  >
+                    {snapshotCheckoutPack === pack.pack ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    Buy One-Time Pack
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 text-xs text-gray-500">Available to: {EXTRA_SNAPSHOTS_AVAILABLE}</p>
           </div>
         </div>
       </section>
@@ -357,6 +684,63 @@ const AddOnsPage = () => {
       </section>
 
       {/* Remove Add-On confirmation modal */}
+      {snapshotCheckoutOpen && (
+        <div
+          className="fixed inset-0 z-[120] bg-gradient-to-br from-indigo-950/70 via-violet-900/60 to-cyan-900/60 p-4 backdrop-blur-sm"
+          onClick={closeSnapshotCheckoutModal}
+        >
+          <div
+            className="mx-auto flex h-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-indigo-200/70 bg-white shadow-[0_18px_60px_-22px_rgba(79,70,229,0.55)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative overflow-hidden border-b border-indigo-100 bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-500 px-5 py-4 text-white">
+              <div className="pointer-events-none absolute -right-14 -top-14 h-36 w-36 rounded-full bg-white/20 blur-xl" />
+              <div className="pointer-events-none absolute -left-10 -bottom-16 h-32 w-32 rounded-full bg-fuchsia-300/30 blur-xl" />
+              <div className="relative flex items-center justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/35 bg-white/15 px-3 py-1 text-xs font-semibold tracking-wide">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Secure Stripe Checkout
+                  </div>
+                  <h3 className="mt-2 text-lg font-bold">Complete Purchase</h3>
+                  <p className="text-sm text-indigo-100">Checkout stays in this modal with encrypted payment processing.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeSnapshotCheckoutModal}
+                  className="rounded-lg border border-white/40 bg-white/15 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/25"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto bg-gradient-to-b from-indigo-50/60 via-violet-50/30 to-cyan-50/40 p-4">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-indigo-200 bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">Fast checkout</span>
+                <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700">One-time charge</span>
+                <span className="rounded-full border border-cyan-200 bg-cyan-100 px-3 py-1 text-xs font-medium text-cyan-700">Credits added instantly</span>
+              </div>
+              <div
+                ref={snapshotCheckoutMountRef}
+                className="min-h-[620px] rounded-xl border border-indigo-100 bg-white p-3 shadow-sm"
+              />
+              {snapshotCheckoutSessionUrl ? (
+                <div className="mt-3 text-right">
+                  <a
+                    href={snapshotCheckoutSessionUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-semibold text-violet-700 hover:text-violet-800"
+                  >
+                    Open Stripe checkout in new tab
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
       {removeModalAddOn && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"

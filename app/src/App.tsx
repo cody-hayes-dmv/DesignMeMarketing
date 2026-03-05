@@ -439,7 +439,7 @@ function App() {
             </div>
           ) : !user || !user.verified ? (
             <Navigate to="/login" replace />
-          ) : !["AGENCY", "ADMIN", "SUPER_ADMIN"].includes(user.role) ? (
+          ) : !["AGENCY"].includes(user.role) ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
             <DashboardLayout>

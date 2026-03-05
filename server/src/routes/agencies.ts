@@ -28,6 +28,12 @@ import {
   verifyCustomDomainViaDns,
 } from '../lib/domainProvisioning.js';
 import { resolveSuperAdminNotificationRecipients } from '../lib/superAdminNotifications.js';
+import { buildSnapshotCreditPackNotificationContent } from '../lib/addOnNotifications.js';
+import {
+  applySnapshotCreditPackPurchase,
+  parseSnapshotCheckoutSession,
+  SnapshotPurchaseValidationError,
+} from '../lib/snapshotCreditPurchase.js';
 
 const router = express.Router();
 
@@ -4883,6 +4889,55 @@ const SNAPSHOT_CREDIT_PACKS: Record<string, { credits: number; priceCents: numbe
   },
 };
 
+const notifySnapshotCreditPackPurchased = async (params: {
+  agencyId: string;
+  credits: number;
+  priceCents: number;
+  actorUserId?: string;
+}) => {
+  const { agencyId, credits, priceCents, actorUserId } = params;
+  const agencyRecord = await prisma.agency.findUnique({
+    where: { id: agencyId },
+    select: { name: true },
+  });
+  const agencyName = String(agencyRecord?.name || 'Agency');
+  const agencyRecipient = await resolveAgencyEmailRecipient(agencyId, actorUserId);
+  const content = buildSnapshotCreditPackNotificationContent({
+    agencyName,
+    credits,
+    priceCents,
+    brandDisplayName: BRAND_DISPLAY_NAME,
+    agencyGreetingName: agencyRecipient.recipientName,
+  });
+
+  const createdAgencyNotif = await createNotificationOnce({
+    agencyId,
+    userId: null,
+    ...content.agencyNotification,
+  });
+
+  const createdSaNotif = await createNotificationOnce({
+    agencyId: null,
+    userId: null,
+    ...content.superAdminNotification,
+  });
+
+  if (createdAgencyNotif && agencyRecipient.recipientEmail) {
+    await sendEmail({
+      to: agencyRecipient.recipientEmail,
+      subject: content.agencyEmail.subject,
+      html: content.agencyEmail.html,
+    }).catch((e) => console.warn('Agency snapshot credits confirmation email failed:', e?.message));
+  }
+
+  if (createdSaNotif) {
+    await notifySuperAdminsByEmail({
+      subject: content.superAdminEmail.subject,
+      html: content.superAdminEmail.html,
+    });
+  }
+};
+
 // Add-Ons: add (Stripe + DB, update limits in app when applicable). Agency must have activated account (CC on file).
 router.post('/add-ons', authenticateToken, async (req, res) => {
   try {
@@ -5039,7 +5094,10 @@ router.post('/add-ons/local-map-snapshot-credits/checkout', authenticateToken, a
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    const { pack } = z.object({ pack: z.enum(['5', '10', '25']) }).parse(req.body ?? {});
+    const { pack, uiMode } = z.object({
+      pack: z.enum(['5', '10', '25']),
+      uiMode: z.enum(['redirect', 'embedded']).optional(),
+    }).parse(req.body ?? {});
     const selectedPack = SNAPSHOT_CREDIT_PACKS[pack];
     if (!selectedPack) {
       return res.status(400).json({ message: 'Invalid credit pack' });
@@ -5059,11 +5117,10 @@ router.post('/add-ons/local-map-snapshot-credits/checkout', authenticateToken, a
 
     const frontEndBase = process.env.FRONTEND_URL || 'http://localhost:3001';
     const stripePriceId = process.env[selectedPack.stripePriceEnvKey];
-    const session = await stripe.checkout.sessions.create({
+    const isEmbeddedCheckout = uiMode === 'embedded';
+    const baseSessionData: any = {
       mode: 'payment',
       customer: customerId,
-      success_url: `${frontEndBase}/agency/add-ons?snapshotCreditsPurchase=success`,
-      cancel_url: `${frontEndBase}/agency/add-ons?snapshotCreditsPurchase=cancelled`,
       ...(stripePriceId
         ? {
             line_items: [{ price: stripePriceId, quantity: 1 }],
@@ -5088,15 +5145,77 @@ router.post('/add-ons/local-map-snapshot-credits/checkout', authenticateToken, a
         addOnType: 'local_map_snapshot_credit_pack',
         addOnOption: pack,
       },
-    });
+    };
+    if (isEmbeddedCheckout) {
+      baseSessionData.ui_mode = 'embedded';
+      baseSessionData.return_url = `${frontEndBase}/agency/add-ons?snapshotCreditsPurchase=success`;
+    } else {
+      baseSessionData.success_url = `${frontEndBase}/agency/add-ons?snapshotCreditsPurchase=success`;
+      baseSessionData.cancel_url = `${frontEndBase}/agency/add-ons?snapshotCreditsPurchase=cancelled`;
+    }
+    const session = await stripe.checkout.sessions.create(baseSessionData);
 
-    return res.status(201).json({ url: session.url, sessionId: session.id });
+    return res.status(201).json({
+      url: session.url ?? null,
+      sessionId: session.id,
+      clientSecret: (session as any).client_secret ?? null,
+    });
   } catch (err: any) {
     if (err.name === 'ZodError') {
       return res.status(400).json({ message: err.errors?.[0]?.message || 'Invalid input', errors: err.errors });
     }
     console.error('Create local map snapshot checkout error:', err);
     return res.status(500).json({ message: err?.message || 'Failed to start checkout' });
+  }
+});
+
+router.post('/add-ons/local-map-snapshot-credits/confirm', authenticateToken, async (req, res) => {
+  try {
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const { sessionId } = z.object({
+      sessionId: z.string().min(1),
+    }).parse(req.body ?? {});
+
+    const stripe = getStripe();
+    if (!stripe || !isStripeConfigured()) {
+      return res.status(400).json({ message: 'Stripe is not configured' });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const parsed = parseSnapshotCheckoutSession(session as any, membership.agencyId);
+    const applied = await applySnapshotCreditPackPurchase({
+      prismaClient: prisma,
+      agencyId: parsed.agencyId,
+      option: parsed.option,
+      details: parsed.details,
+    });
+
+    await notifySnapshotCreditPackPurchased({
+      agencyId: membership.agencyId,
+      credits: applied.credits,
+      priceCents: applied.priceCents,
+      actorUserId: req.user.userId,
+    }).catch((e: any) => {
+      console.warn('Snapshot credit purchase notifications failed:', e?.message);
+    });
+
+    return res.status(200).json({ ok: true, applied: applied.applied });
+  } catch (err: any) {
+    if (err instanceof SnapshotPurchaseValidationError) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    if (err.name === 'ZodError') {
+      return res.status(400).json({ message: err.errors?.[0]?.message || 'Invalid input', errors: err.errors });
+    }
+    console.error('Confirm local map snapshot checkout error:', err);
+    return res.status(500).json({ message: err?.message || 'Failed to confirm checkout' });
   }
 });
 

@@ -12,7 +12,7 @@ export type GoogleBusinessSelection = {
 
 type GoogleBusinessSearchProps = {
   value: GoogleBusinessSelection | null;
-  onSelect: (selection: GoogleBusinessSelection) => void;
+  onSelect: (selection: GoogleBusinessSelection | null) => void;
   onQueryChange?: (query: string) => void;
   inputId?: string;
   disabled?: boolean;
@@ -98,6 +98,9 @@ const GoogleBusinessSearch: React.FC<GoogleBusinessSearchProps> = ({
             const next = e.target.value;
             setQuery(next);
             onQueryChange?.(next);
+            if (value?.placeId && next.trim() !== value.businessName.trim()) {
+              onSelect(null);
+            }
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}

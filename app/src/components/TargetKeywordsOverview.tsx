@@ -97,9 +97,9 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
 
   const starredStorageKey = useMemo(() => {
     // Persist per-user, per-client
-    const userKey = user?.id || user?.userId || "anon";
+    const userKey = user?.id || "anon";
     return clientId ? `targetKeywords:starred:${userKey}:${clientId}` : "";
-  }, [user, clientId]);
+  }, [user?.id, clientId]);
 
   useEffect(() => {
     if (!starredStorageKey) return;
@@ -213,16 +213,6 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     }
   }, [clientId, user?.role, fetchKeywords, isReadOnly]);
 
-  const formatNumber = (num: number | null | undefined) => {
-    if (num === null || num === undefined || !Number.isFinite(num)) return "—";
-    return num.toLocaleString();
-  };
-
-  const formatCurrency = (num: number | null | undefined) => {
-    if (num === null || num === undefined || !Number.isFinite(num)) return "—";
-    return `$${num.toFixed(2)}`;
-  };
-
   const formatPosition = (position: number | null | undefined) => {
     if (position === null || position === undefined) return "—";
     if (position === 1) return "1st";
@@ -287,33 +277,37 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
     const items = toStringArray(serpItemTypes);
     if (items.length === 0) return null;
 
-    // Grey when not ranking (SERP features exist but client isn't in them); green when ranking
-    const colorClass = isRanking ? "text-green-600" : "text-gray-400";
-
-    const featureIcons: Record<string, { icon: string; label: string }> = {
-      local_pack: { icon: "📍", label: "Google Maps" },
-      featured_snippet: { icon: "📝", label: "Featured Snippet" },
-      video: { icon: "▶️", label: "Video" },
-      images: { icon: "🖼️", label: "Google Images" },
-      people_also_ask: { icon: "❓", label: "People Also Ask" },
-      related_searches: { icon: "🔍", label: "Related Searches" },
-      knowledge_graph: { icon: "📊", label: "Knowledge Graph" },
-      shopping: { icon: "🛒", label: "Shopping" },
-      organic: { icon: "🔗", label: "Organic" },
+    const featureIcons: Record<
+      string,
+      { Icon: React.ComponentType<{ className?: string }>; label: string; activeClass: string }
+    > = {
+      local_pack: { Icon: MapPin, label: "Google Maps", activeClass: "text-red-500" },
+      featured_snippet: { Icon: Star, label: "Featured Snippet", activeClass: "text-amber-500" },
+      video: { Icon: TrendingUp, label: "Video", activeClass: "text-violet-500" },
+      images: { Icon: BookOpen, label: "Google Images", activeClass: "text-sky-500" },
+      people_also_ask: { Icon: Info, label: "People Also Ask", activeClass: "text-indigo-500" },
+      related_searches: { Icon: Search, label: "Related Searches", activeClass: "text-blue-500" },
+      knowledge_graph: { Icon: BarChart3, label: "Knowledge Graph", activeClass: "text-emerald-600" },
+      shopping: { Icon: DollarSign, label: "Shopping", activeClass: "text-green-600" },
+      organic: { Icon: ExternalLink, label: "Organic", activeClass: "text-teal-600" },
     };
 
     return items
       .filter((type) => featureIcons[type])
       .slice(0, 3) // Show max 3 icons
-      .map((type) => (
-        <span
-          key={type}
-          className={`inline-block ${colorClass} cursor-help`}
-          title={isRanking ? `${featureIcons[type].label} (ranking)` : `${featureIcons[type].label} (not ranking)`}
-        >
-          {featureIcons[type].icon}
-        </span>
-      ));
+      .map((type) => {
+        const feature = featureIcons[type];
+        const Icon = feature.Icon;
+        return (
+          <span
+            key={type}
+            className="inline-flex items-center cursor-help"
+            title={isRanking ? `${feature.label} (ranking)` : `${feature.label} (not ranking)`}
+          >
+            <Icon className={`h-3.5 w-3.5 ${isRanking ? feature.activeClass : "text-gray-400"}`} />
+          </span>
+        );
+      });
   };
 
   const handleStartEdit = (keywordId: string, field: "date" | "position", keyword: TargetKeyword) => {
@@ -653,7 +647,7 @@ const TargetKeywordsOverview: React.FC<TargetKeywordsOverviewProps> = ({
                         <div className="flex items-center gap-1">
                           {getSERPFeaturesIcons(
                             keyword.serpItemTypes,
-                            keyword.googlePosition != null
+                            typeof keyword.googlePosition === "number"
                           ) || <span className="text-sm text-gray-400" title="No SERP features">—</span>}
                         </div>
                       </td>

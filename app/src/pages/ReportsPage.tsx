@@ -6,10 +6,8 @@ import {
   Mail,
   Calendar,
   Edit,
-  Filter,
   Eye,
   Share2,
-  MoreVertical,
   X,
   Copy,
   ExternalLink,
@@ -53,6 +51,7 @@ interface Report {
   averagePosition: number;
   recipients?: string[];
   scheduleRecipients?: string[];
+  emailSubject?: string;
   createdAt: string;
 }
 
@@ -85,7 +84,6 @@ const ReportsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState("");
-  const [selectedReportForShare, setSelectedReportForShare] = useState<Report | null>(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showCampaignWinsModal, setShowCampaignWinsModal] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -128,7 +126,6 @@ const ReportsPage: React.FC = () => {
     clientId: null,
     clientName: null,
   });
-  const [loadingSchedules, setLoadingSchedules] = useState(false);
   const [filterClientId, setFilterClientId] = useState<string>("all");
   const [cardFilter, setCardFilter] = useState<"total" | "active" | "sent" | "scheduled" | "draft">("active");
 
@@ -159,13 +156,12 @@ const ReportsPage: React.FC = () => {
 
   const fetchSchedules = async () => {
     try {
-      setLoadingSchedules(true);
       const schedulePromises = clients.map((client) =>
         api.get(`/seo/reports/${client.id}/schedules`).catch(() => ({ data: [] }))
       );
       const scheduleResponses = await Promise.all(schedulePromises);
       const allSchedules: ReportSchedule[] = [];
-      scheduleResponses.forEach((response, index) => {
+      scheduleResponses.forEach((response) => {
         if (response?.data && Array.isArray(response.data)) {
           response.data.forEach((schedule: ReportSchedule) => {
             allSchedules.push(schedule);
@@ -175,8 +171,6 @@ const ReportsPage: React.FC = () => {
       setSchedules(allSchedules);
     } catch (error: any) {
       console.error("Failed to fetch schedules:", error);
-    } finally {
-      setLoadingSchedules(false);
     }
   };
 
@@ -291,7 +285,6 @@ const ReportsPage: React.FC = () => {
       }
       const url = `${window.location.origin}/share/${encodeURIComponent(token)}`;
       setShareLink(url);
-      setSelectedReportForShare(report);
       setShowShareModal(true);
     } catch (error: any) {
       console.error("Share link error", error);

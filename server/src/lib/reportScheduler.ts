@@ -10,6 +10,7 @@ import {
   normalizeEmailRecipients,
   REPORT_SECTION_TITLES,
 } from "./qualityContracts.js";
+import { generateLocalMapBundlePdfBuffer } from "./localMapPdf.js";
 
 export const LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX = "[LOCAL_MAP] ";
 export const PPC_SCHEDULE_SUBJECT_PREFIX = "[PPC] ";
@@ -219,6 +220,33 @@ export function calculateNextRunTime(
   }
 
   return nextRun;
+}
+
+export function calculateNextLocalMapRunTime(
+  frequency: "biweekly" | "monthly",
+  timeOfDay: string = "09:00"
+): Date {
+  const [hours, minutes] = timeOfDay.split(":").map(Number);
+  const now = new Date();
+  const candidate = new Date(now);
+  candidate.setHours(hours, minutes, 0, 0);
+
+  if (frequency === "monthly") {
+    candidate.setDate(1);
+    if (candidate <= now) {
+      candidate.setMonth(candidate.getMonth() + 1, 1);
+    }
+    return candidate;
+  }
+
+  // Local Map biweekly runs on the 1st and 15th.
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const first = new Date(year, month, 1, hours, minutes, 0, 0);
+  const fifteenth = new Date(year, month, 15, hours, minutes, 0, 0);
+  if (first > now) return first;
+  if (fifteenth > now) return fifteenth;
+  return new Date(year, month + 1, 1, hours, minutes, 0, 0);
 }
 
 function buildKeywordTableHtml(keywords: ReportTargetKeywordRow[]): string {
@@ -2163,6 +2191,7 @@ export async function processScheduledReports(): Promise<void> {
       }
     });
 
+    const localMapDueSchedules = dueSchedules.filter((schedule) => isLocalMapScheduleSubject(schedule.emailSubject));
     const seoDueSchedules = dueSchedules.filter(
       (schedule) =>
         !isLocalMapScheduleSubject(schedule.emailSubject) && !isPpcScheduleSubject(schedule.emailSubject)
@@ -2170,10 +2199,11 @@ export async function processScheduledReports(): Promise<void> {
     const ppcDueSchedules = dueSchedules.filter((schedule) => isPpcScheduleSubject(schedule.emailSubject));
 
     console.log(`[Report Scheduler] Checking scheduled reports at ${now.toISOString()}`);
+    console.log(`[Report Scheduler] Found ${localMapDueSchedules.length} due Local Map schedule(s)`);
     console.log(`[Report Scheduler] Found ${seoDueSchedules.length} due SEO schedule(s)`);
     console.log(`[Report Scheduler] Found ${ppcDueSchedules.length} due PPC schedule(s)`);
     
-    if (seoDueSchedules.length === 0 && ppcDueSchedules.length === 0) {
+    if (localMapDueSchedules.length === 0 && seoDueSchedules.length === 0 && ppcDueSchedules.length === 0) {
       // Log all active schedules for debugging
       const allActiveSchedules = await prisma.reportSchedule.findMany({
         where: { isActive: true },
@@ -2194,6 +2224,80 @@ export async function processScheduledReports(): Promise<void> {
         })));
       }
       return;
+    }
+
+    for (const schedule of localMapDueSchedules) {
+      try {
+        console.log(`[Report Scheduler] Processing Local Map schedule ${schedule.id} for client ${schedule.client.name}`);
+        const recipients = normalizeEmailRecipients(schedule.recipients);
+
+        if (recipients && recipients.length > 0) {
+          const keywords = await prisma.gridKeyword.findMany({
+            where: { clientId: schedule.clientId, status: "active" },
+            include: { snapshots: { orderBy: { runDate: "desc" } } },
+            orderBy: { keywordText: "asc" },
+          });
+          const pdfBuffer = await generateLocalMapBundlePdfBuffer(
+            keywords.map((row) => ({
+              keyword: row,
+              snapshots: row.snapshots,
+            }))
+          );
+
+          const subjectWithoutMarker = String(schedule.emailSubject || "")
+            .replace(LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX, "")
+            .trim();
+          const emailSubject =
+            subjectWithoutMarker || `Local Map Rankings Report - ${buildReportEmailSubject(schedule.client.name, schedule.frequency)}`;
+          const emailHtml = `
+            <div style="font-family: Arial, sans-serif; color: #111827;">
+              <h2 style="margin: 0 0 12px;">Local Map Rankings Report</h2>
+              <p style="margin: 0 0 8px;">Client: <strong>${schedule.client.name}</strong></p>
+              <p style="margin: 0 0 8px;">Frequency: <strong>${schedule.frequency}</strong></p>
+              <p style="margin: 0;">Attached is the bundled Local Map Rankings PDF for all active grid keywords.</p>
+            </div>
+          `;
+
+          await Promise.all(
+            recipients.map((email: string) =>
+              sendEmail({
+                to: email,
+                subject: emailSubject,
+                html: emailHtml,
+                attachments: [
+                  {
+                    filename: `local-map-rankings-${schedule.client.name.replace(/\s+/g, "-").toLowerCase()}-${schedule.frequency}.pdf`,
+                    content: pdfBuffer,
+                    contentType: "application/pdf",
+                  },
+                ],
+              })
+            )
+          );
+          console.log(`[Report Scheduler] ✓ Local Map report sent for client ${schedule.client.name} (${schedule.frequency})`);
+        } else {
+          console.log(`[Report Scheduler] ⚠ No recipients configured for Local Map schedule ${schedule.id}`);
+        }
+
+        const nextRunAt =
+          schedule.frequency === "biweekly" || schedule.frequency === "monthly"
+            ? calculateNextLocalMapRunTime(schedule.frequency as "biweekly" | "monthly", schedule.timeOfDay)
+            : calculateNextRunTime(
+                schedule.frequency,
+                schedule.dayOfWeek || undefined,
+                schedule.dayOfMonth || undefined,
+                schedule.timeOfDay
+              );
+        await prisma.reportSchedule.update({
+          where: { id: schedule.id },
+          data: {
+            lastRunAt: now,
+            nextRunAt,
+          },
+        });
+      } catch (error: any) {
+        console.error(`[Report Scheduler] ✗ Failed to process Local Map schedule ${schedule.id} for client ${schedule.clientId}:`, error);
+      }
     }
 
     for (const schedule of seoDueSchedules) {

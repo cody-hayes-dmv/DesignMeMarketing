@@ -19,12 +19,14 @@ export type DataForSeoLocalGridResult = {
   gridData: LocalMapGridPoint[];
   ataScore: number;
   topCompetitorsCurrent: string[];
+  topDetectedBusinesses: string[];
   rawResult: unknown;
 };
 
 type DataForSeoLocalGridRequest = {
   keyword: string;
   placeId: string;
+  businessName?: string;
   centerLat: number;
   centerLng: number;
   gridSize?: number;
@@ -37,6 +39,8 @@ const DEFAULT_GRID_SPACING_MILES = 0.5;
 const NOT_RANKED_FALLBACK = 20;
 const DEFAULT_DATAFORSEO_LANGUAGE_CODE = "en";
 const DEFAULT_DATAFORSEO_DEVICE = "desktop";
+const DEFAULT_LOCAL_GRID_CONCURRENCY = 12;
+const DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS = 15000;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -134,7 +138,15 @@ function parseGridPointsFromResult(result: UnknownRecord): LocalMapGridPoint[] {
     const lng = toNumber(record.lng ?? record.longitude ?? record.x);
     if (lat == null || lng == null) continue;
 
-    const rank = normalizeMapRank(record.rank ?? record.position ?? record.absolute_rank);
+    const rank = normalizeMapRank(
+      record.rank
+      ?? record.rank_absolute
+      ?? record.rank_group
+      ?? record.rank_position
+      ?? record.position
+      ?? record.absolute_rank
+      ?? record.local_pack_position
+    );
     const competitors = parseCompetitorNames(
       record.competitors ??
       record.top_competitors ??
@@ -153,6 +165,56 @@ function parseGridPointsFromResult(result: UnknownRecord): LocalMapGridPoint[] {
   return parsed;
 }
 
+async function tryRunLocalRankTrackerGrid(
+  endpoint: string,
+  base64Auth: string,
+  input: DataForSeoLocalGridRequest,
+  languageCode: string,
+  device: string,
+  depth: number,
+  gridSize: number,
+  spacingMeters: number
+): Promise<{ gridData: LocalMapGridPoint[]; rawResult: unknown } | null> {
+  const payload = [
+    {
+      keyword: input.keyword,
+      place_id: input.placeId,
+      location_coordinate: `${input.centerLat},${input.centerLng}`,
+      grid_type: "square",
+      grid_rows: gridSize,
+      grid_cols: gridSize,
+      distance: spacingMeters,
+      language_code: languageCode,
+      device,
+      depth,
+    },
+  ];
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${base64Auth}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const json = await getJsonResponse(response);
+  if (!response.ok) {
+    return null;
+  }
+
+  const tasks = Array.isArray((json as UnknownRecord)?.tasks)
+    ? ((json as UnknownRecord).tasks as unknown[])
+    : [];
+  const firstTask = (tasks[0] as UnknownRecord | undefined) ?? {};
+  const taskResults = Array.isArray(firstTask.result) ? (firstTask.result as unknown[]) : [];
+  const firstResult = (taskResults[0] as UnknownRecord | undefined) ?? {};
+  const parsed = parseGridPointsFromResult(firstResult);
+  if (!parsed.length) return null;
+  return { gridData: parsed, rawResult: json };
+}
+
 function extractTopCompetitorsCurrent(points: LocalMapGridPoint[]): string[] {
   const counts = new Map<string, number>();
   for (const point of points) {
@@ -163,6 +225,34 @@ function extractTopCompetitorsCurrent(points: LocalMapGridPoint[]): string[] {
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
+    .map(([name]) => name);
+}
+
+function extractTopDetectedBusinessesFromRaw(rawResult: unknown[]): string[] {
+  const counts = new Map<string, number>();
+  for (const packet of rawResult) {
+    const tasks = Array.isArray((packet as UnknownRecord)?.tasks)
+      ? ((packet as UnknownRecord).tasks as unknown[])
+      : [];
+    for (const task of tasks) {
+      const results = Array.isArray((task as UnknownRecord)?.result)
+        ? ((task as UnknownRecord).result as unknown[])
+        : [];
+      for (const result of results) {
+        const items = Array.isArray((result as UnknownRecord)?.items)
+          ? ((result as UnknownRecord).items as unknown[])
+          : [];
+        for (const item of items) {
+          const title = toStringOrNull((item as UnknownRecord)?.title);
+          if (!title) continue;
+          counts.set(title, (counts.get(title) ?? 0) + 1);
+        }
+      }
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
     .map(([name]) => name);
 }
 
@@ -187,9 +277,18 @@ function normalizePlaceId(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function normalizeBusinessName(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function parseItemsForCoordinate(
   responseJson: unknown,
-  targetPlaceId: string
+  targetPlaceId: string,
+  targetBusinessName: string
 ): { rank: number | null; competitors: string[] } {
   const tasks = Array.isArray((responseJson as UnknownRecord)?.tasks)
     ? ((responseJson as UnknownRecord).tasks as unknown[])
@@ -205,21 +304,42 @@ function parseItemsForCoordinate(
   const items = Array.isArray(firstResult.items) ? (firstResult.items as unknown[]) : [];
 
   const ranked = items
-    .map((entry) => {
+    .map((entry, index) => {
       if (!entry || typeof entry !== "object") return null;
       const row = entry as UnknownRecord;
       const title = toStringOrNull(row.title) ?? "";
       const placeId = normalizePlaceId(row.place_id);
-      const rank = normalizeMapRank(row.rank_absolute ?? row.rank_group ?? row.rank);
-      return { title, placeId, rank };
+      const rank =
+        normalizeMapRank(
+          row.rank
+          ?? row.rank_absolute
+          ?? row.rank_group
+          ?? row.rank_position
+          ?? row.position
+          ?? row.absolute_rank
+          ?? row.local_pack_position
+        )
+        // If endpoint omits explicit rank fields but returns ordered items, use item order.
+        ?? (index + 1);
+      return { title, placeId, rank, index };
     })
-    .filter((entry): entry is { title: string; placeId: string; rank: number | null } => Boolean(entry));
+    .filter((entry): entry is { title: string; placeId: string; rank: number; index: number } => entry !== null);
 
   const competitors = ranked
     .slice(0, 3)
     .map((entry) => entry.title)
     .filter((name) => name.length > 0);
-  const match = ranked.find((entry) => entry.placeId && entry.placeId === targetPlaceId);
+  const normalizedTargetBusinessName = normalizeBusinessName(targetBusinessName);
+  const match = ranked.find((entry) => {
+    if (entry.placeId && entry.placeId === targetPlaceId) return true;
+    if (!normalizedTargetBusinessName) return false;
+    const normalizedTitle = normalizeBusinessName(entry.title);
+    if (!normalizedTitle) return false;
+    if (normalizedTitle === normalizedTargetBusinessName) return true;
+    if (normalizedTitle.length >= 5 && normalizedTargetBusinessName.includes(normalizedTitle)) return true;
+    if (normalizedTargetBusinessName.length >= 5 && normalizedTitle.includes(normalizedTargetBusinessName)) return true;
+    return false;
+  });
 
   return {
     rank: match?.rank ?? null,
@@ -332,10 +452,39 @@ export async function runDataForSeoLocalGrid(
   const device = process.env.DATAFORSEO_DEVICE || DEFAULT_DATAFORSEO_DEVICE;
   const depth = Math.max(20, Number(process.env.DATAFORSEO_MAPS_DEPTH ?? 20));
   const targetPlaceId = normalizePlaceId(input.placeId);
+  const targetBusinessName = String(input.businessName ?? "");
   const points = gridCoordinates(input.centerLat, input.centerLng, gridSize, spacingMeters);
+  const pointTimeoutMs = Math.max(3000, Number(process.env.DATAFORSEO_LOCAL_GRID_POINT_TIMEOUT_MS ?? DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS));
+  const concurrency = Math.max(1, Number(process.env.DATAFORSEO_LOCAL_GRID_CONCURRENCY ?? DEFAULT_LOCAL_GRID_CONCURRENCY));
 
-  const rawResult: unknown[] = [];
-  const gridData = await mapWithConcurrency(points, 8, async (point) => {
+  // Preferred mode: single Local Rank Tracker-style request with place_id + grid params.
+  // Falls back to per-point requests if endpoint/account does not support this payload.
+  const singleRun = await tryRunLocalRankTrackerGrid(
+    endpoint,
+    base64Auth,
+    input,
+    languageCode,
+    device,
+    depth,
+    gridSize,
+    spacingMeters
+  );
+
+  let rawResult: unknown[] = [];
+  let gridData: LocalMapGridPoint[] = [];
+
+  const expectedGridPoints = gridSize * gridSize;
+  if (singleRun?.gridData?.length && singleRun.gridData.length >= expectedGridPoints) {
+    rawResult = [singleRun.rawResult];
+    gridData = singleRun.gridData.slice(0, expectedGridPoints).map((p) => ({
+      lat: Number(p.lat.toFixed(7)),
+      lng: Number(p.lng.toFixed(7)),
+      rank: p.rank,
+      competitors: Array.isArray(p.competitors) ? p.competitors.slice(0, 3) : [],
+    }));
+  } else {
+    rawResult = [];
+    gridData = await mapWithConcurrency(points, concurrency, async (point) => {
     const payload = [
       {
         keyword: input.keyword,
@@ -346,7 +495,10 @@ export async function runDataForSeoLocalGrid(
       },
     ];
 
+    let timeout: ReturnType<typeof setTimeout> | null = null;
     try {
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), pointTimeoutMs);
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -354,6 +506,7 @@ export async function runDataForSeoLocalGrid(
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       const json = await getJsonResponse(response);
@@ -362,7 +515,7 @@ export async function runDataForSeoLocalGrid(
         throw new Error(`DataForSEO local grid request failed with status ${response.status}`);
       }
 
-      const parsed = parseItemsForCoordinate(json, targetPlaceId);
+      const parsed = parseItemsForCoordinate(json, targetPlaceId, targetBusinessName);
       return {
         lat: point.lat,
         lng: point.lng,
@@ -376,19 +529,24 @@ export async function runDataForSeoLocalGrid(
         rank: null,
         competitors: [],
       };
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
-  });
+    });
+  }
 
   const hasAnyRank = gridData.some((p) => p.rank != null);
   const normalizedGridData = hasAnyRank ? gridData : buildFallbackGrid(input.centerLat, input.centerLng, gridSize, spacingMeters);
 
   const ataScore = calculateAtaScore(normalizedGridData);
   const topCompetitorsCurrent = extractTopCompetitorsCurrent(normalizedGridData);
+  const topDetectedBusinesses = extractTopDetectedBusinessesFromRaw(rawResult);
 
   return {
     gridData: normalizedGridData,
     ataScore,
     topCompetitorsCurrent,
+    topDetectedBusinesses,
     rawResult,
   };
 }

@@ -72,7 +72,9 @@ app.use(
 );
 // Stripe webhook needs raw body for signature verification (must be before express.json())
 app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }), stripeWebhookRoutes);
-app.use(express.json());
+// Local Map send-now can include client-generated PDF (base64), so allow larger JSON payloads.
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || "15mb";
+app.use(express.json({ limit: jsonBodyLimit }));
 app.use(resolveAgencyDomainContext);
 
 // Routes

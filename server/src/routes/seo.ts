@@ -8788,13 +8788,18 @@ router.post("/reports/:clientId/schedule", authenticateToken, async (req, res) =
     }
 
     // Calculate next run time
-    const { calculateNextRunTime } = await import("../lib/reportScheduler.js");
-    const nextRunAt = calculateNextRunTime(
-      scheduleData.frequency,
-      scheduleFields.dayOfWeek,
-      scheduleFields.dayOfMonth,
-      scheduleFields.timeOfDay
-    );
+    const { calculateNextRunTime, calculateNextLocalMapRunTime } = await import("../lib/reportScheduler.js");
+    const nextRunAt = isLocalMapSchedule
+      ? calculateNextLocalMapRunTime(
+          scheduleData.frequency as "biweekly" | "monthly",
+          scheduleFields.timeOfDay
+        )
+      : calculateNextRunTime(
+          scheduleData.frequency,
+          scheduleFields.dayOfWeek,
+          scheduleFields.dayOfMonth,
+          scheduleFields.timeOfDay
+        );
 
     // Check if schedule already exists
     const existing = await prisma.reportSchedule.findFirst({

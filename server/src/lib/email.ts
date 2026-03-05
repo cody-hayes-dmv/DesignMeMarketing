@@ -6,7 +6,8 @@ import {
 
 interface EmailAttachment {
   filename: string;
-  content: Buffer;
+  content: Buffer | string;
+  encoding?: "base64" | "utf-8" | "utf8" | "binary" | "hex";
   contentType?: string;
 }
 

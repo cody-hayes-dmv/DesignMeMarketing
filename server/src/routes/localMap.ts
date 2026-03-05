@@ -1,5 +1,5 @@
 import express from "express";
-import { Prisma } from "@prisma/client";
+import { Prisma, type GridKeyword, type GridSnapshot } from "@prisma/client";
 import { authenticateToken } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { getTierConfig, normalizeTierId } from "../lib/tiers.js";
@@ -11,10 +11,57 @@ import { LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX, calculateNextRunTime, isLocalMapSche
 
 const router = express.Router();
 const localMapEnabled = String(process.env.ENABLE_LOCAL_MAP_RANKINGS ?? "true").toLowerCase() === "true";
+const localMapApiCostPerRunUsd = Number(process.env.LOCAL_MAP_API_COST_PER_RUN_USD ?? "0.78");
+const resolvedLocalMapApiCostPerRunUsd = Number.isFinite(localMapApiCostPerRunUsd) && localMapApiCostPerRunUsd >= 0
+  ? localMapApiCostPerRunUsd
+  : 0.78;
+const LOCAL_MAP_COST_CONFIG_KEY = "local_map_api_cost_per_run_usd";
+let platformConfigTableEnsured = false;
 
 const GRID_RUN_DAYS = new Set([1, 15]);
 const DEFAULT_GRID_SIZE = 7;
 const DEFAULT_GRID_SPACING_MILES = 0.5;
+
+async function ensurePlatformConfigTable(): Promise<void> {
+  if (platformConfigTableEnsured) return;
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS platform_configs (
+      configKey VARCHAR(191) NOT NULL PRIMARY KEY,
+      configValue VARCHAR(255) NOT NULL,
+      createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+    )
+  `);
+  platformConfigTableEnsured = true;
+}
+
+async function getConfiguredLocalMapCostPerRunUsd(): Promise<number> {
+  try {
+    await ensurePlatformConfigTable();
+    const rows = await prisma.$queryRaw<Array<{ configValue: string }>>`
+      SELECT configValue
+      FROM platform_configs
+      WHERE configKey = ${LOCAL_MAP_COST_CONFIG_KEY}
+      LIMIT 1
+    `;
+    const parsed = Number(rows?.[0]?.configValue ?? "");
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  } catch {
+    // fall through to env/default value
+  }
+  return resolvedLocalMapApiCostPerRunUsd;
+}
+
+async function setConfiguredLocalMapCostPerRunUsd(value: number): Promise<number> {
+  await ensurePlatformConfigTable();
+  const normalized = Number(value.toFixed(4));
+  await prisma.$executeRaw`
+    INSERT INTO platform_configs (configKey, configValue)
+    VALUES (${LOCAL_MAP_COST_CONFIG_KEY}, ${String(normalized)})
+    ON DUPLICATE KEY UPDATE configValue = VALUES(configValue)
+  `;
+  return normalized;
+}
 
 router.use((req, res, next) => {
   if (localMapEnabled) return next();
@@ -28,6 +75,10 @@ function isManagerRole(role: string): boolean {
 function normalizeKeywordPoolByTier(tier: string | null | undefined): number {
   const normalized = normalizeTierId(tier);
   switch (normalized) {
+    case "business_lite":
+      return 1;
+    case "business_pro":
+      return 3;
     case "solo":
       return 5;
     case "starter":
@@ -46,6 +97,10 @@ function normalizeKeywordPoolByTier(tier: string | null | undefined): number {
 function normalizeMonthlySnapshotAllowance(tier: string | null | undefined): number {
   const normalized = normalizeTierId(tier);
   switch (normalized) {
+    case "business_lite":
+      return 2;
+    case "business_pro":
+      return 5;
     case "solo":
       return 3;
     case "starter":
@@ -125,7 +180,9 @@ async function ensureAgencySnapshotCounters(agencyId: string): Promise<{
   const resetAt = ensureSnapshotCounterWindow(agency.snapshotMonthlyResetAt);
   const shouldReset = !agency.snapshotMonthlyResetAt || new Date() > agency.snapshotMonthlyResetAt;
 
-  const nextMonthlyAllowance = Math.max(agency.snapshotMonthlyAllowance, tierAllowance);
+  // Keep allowance aligned to the current subscription tier.
+  // Do not preserve historical higher values after downgrades.
+  const nextMonthlyAllowance = tierAllowance;
   const nextMonthlyUsed = shouldReset ? 0 : agency.snapshotMonthlyUsed;
 
   if (
@@ -150,6 +207,41 @@ async function ensureAgencySnapshotCounters(agencyId: string): Promise<{
     purchasedCredits: agency.snapshotPurchasedCredits,
     resetsAt: resetAt,
   };
+}
+
+async function getSnapshotPackBreakdown(agencyId: string): Promise<{
+  pack5: number;
+  pack10: number;
+  pack25: number;
+  totalPurchases: number;
+  latestPurchaseAt: Date | null;
+}> {
+  const packs = await prisma.agencyAddOn.findMany({
+    where: {
+      agencyId,
+      addOnType: "local_map_snapshot_credit_pack",
+      billingInterval: "one_time",
+    },
+    select: { addOnOption: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const breakdown = {
+    pack5: 0,
+    pack10: 0,
+    pack25: 0,
+    totalPurchases: packs.length,
+    latestPurchaseAt: packs[0]?.createdAt ?? null,
+  };
+  for (const pack of packs) {
+    if (pack.addOnOption === "25") {
+      breakdown.pack25 += 1;
+    } else if (pack.addOnOption === "10") {
+      breakdown.pack10 += 1;
+    } else {
+      breakdown.pack5 += 1;
+    }
+  }
+  return breakdown;
 }
 
 async function getMapKeywordCapacity(agencyId: string): Promise<{ total: number; active: number; remaining: number }> {
@@ -177,6 +269,179 @@ async function getMapKeywordCapacity(agencyId: string): Promise<{ total: number;
     active,
     remaining: Math.max(0, total - active),
   };
+}
+
+async function buildLocalMapClientBundlePdf(clientId: string): Promise<Buffer | null> {
+  const keywords = await getLocalMapBundleRows(clientId);
+  if (!keywords.length) return null;
+  return generateLocalMapBundlePdfBuffer(
+    keywords.map((row) => ({
+      keyword: row,
+      snapshots: row.snapshots,
+    }))
+  );
+}
+
+async function getLocalMapBundleRows(
+  clientId: string
+): Promise<Array<GridKeyword & { snapshots: GridSnapshot[] }>> {
+  return prisma.gridKeyword.findMany({
+    where: { clientId, status: "active" },
+    include: {
+      snapshots: {
+        orderBy: { runDate: "desc" },
+      },
+    },
+    orderBy: { keywordText: "asc" },
+  });
+}
+
+function escapeHtml(value: string): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function formatDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function buildLocalMapReportEmailHtml(
+  clientName: string,
+  rows: Array<GridKeyword & { snapshots: GridSnapshot[] }>
+): string {
+  const safeClientName = escapeHtml(clientName || "Client");
+  const generatedDate = formatDate(new Date());
+  const previewRows = rows.slice(0, 6).map((row) => {
+    const current = row.snapshots[0] ?? null;
+    const previous = row.snapshots[1] ?? null;
+    const currentAta = current ? current.ataScore.toFixed(2) : "N/A";
+    const runDate = current ? formatDate(current.runDate) : "N/A";
+    const trend =
+      current && previous
+        ? Number((previous.ataScore - current.ataScore).toFixed(2))
+        : null;
+    const trendLabel =
+      trend == null
+        ? "No prior run"
+        : trend > 0
+        ? `Improved by ${trend.toFixed(2)}`
+        : trend < 0
+        ? `Declined by ${Math.abs(trend).toFixed(2)}`
+        : "No change";
+    const trendColor =
+      trend == null ? "#6b7280" : trend > 0 ? "#047857" : trend < 0 ? "#b91c1c" : "#374151";
+    return `
+      <tr>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #111827;">${escapeHtml(row.keywordText)}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #111827;">${escapeHtml(row.businessName)}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #111827;">${escapeHtml(runDate)}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #065f46; font-weight: 700;">${escapeHtml(currentAta)}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: ${trendColor};">${escapeHtml(trendLabel)}</td>
+      </tr>
+    `;
+  });
+  const hasMore = rows.length > 6;
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Local Map Rankings Report</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; background-color: #f3f4f6; margin: 0; padding: 24px; color: #111827;">
+        <div style="max-width: 900px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(90deg, #4338ca, #06b6d4); padding: 24px;">
+            <h1 style="margin: 0 0 8px; color: #ffffff; font-size: 28px;">Local Map Rankings Report</h1>
+            <p style="margin: 0; color: #e0f2fe; font-size: 14px;">${safeClientName} • Generated ${escapeHtml(generatedDate)}</p>
+          </div>
+          <div style="padding: 20px;">
+            <p style="margin: 0 0 14px; color: #374151;">Your Local Map report preview is below. The full report is attached as PDF.</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+              <thead>
+                <tr style="background-color: #f9fafb;">
+                  <th align="left" style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #374151;">Keyword</th>
+                  <th align="left" style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #374151;">Business</th>
+                  <th align="left" style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #374151;">Run Date</th>
+                  <th align="left" style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #374151;">Current ATA</th>
+                  <th align="left" style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #374151;">Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${previewRows.join("") || `
+                <tr>
+                  <td colspan="5" style="padding: 16px; color: #6b7280;">No Local Map snapshots available yet.</td>
+                </tr>
+                `}
+              </tbody>
+            </table>
+            ${hasMore ? `<p style="margin: 12px 0 0; color: #6b7280; font-size: 12px;">Showing 6 of ${rows.length} keywords. See the attached PDF for full details.</p>` : ""}
+            <p style="margin: 14px 0 0; color: #6b7280; font-size: 12px;">ATA = average of all 49 grid positions; lower ATA is better.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+function resolveLocalMapEmailSubject(params: {
+  bodySubject?: string;
+  scheduleSubject?: string;
+  clientName?: string;
+  frequency?: "biweekly" | "monthly";
+}): string {
+  const bodySubject = String(params.bodySubject || "").trim();
+  const scheduleSubject = String(params.scheduleSubject || "")
+    .replace(LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX, "")
+    .trim();
+  const normalizedBody = bodySubject && !looksLikeEmail(bodySubject) ? bodySubject : "";
+  const normalizedSchedule = scheduleSubject && !looksLikeEmail(scheduleSubject) ? scheduleSubject : "";
+  return (
+    normalizedBody
+    || normalizedSchedule
+    || `Local Map Rankings - ${buildReportEmailSubject(params.clientName || "Client", params.frequency || "monthly")}`
+  );
+}
+
+function buildPdfEmailAttachment(filename: string, pdfBuffer: Buffer) {
+  const normalized = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+  if (normalized.length < 8 || normalized.subarray(0, 4).toString("ascii") !== "%PDF") {
+    throw new Error("Generated Local Map PDF is invalid");
+  }
+  console.log("[LocalMap] Prepared PDF attachment", {
+    filename,
+    bytes: normalized.length,
+    signature: normalized.subarray(0, 8).toString("ascii"),
+  });
+  return {
+    filename,
+    content: normalized.toString("base64"),
+    encoding: "base64" as const,
+    contentType: "application/pdf",
+  };
+}
+
+function parseClientProvidedPdfAttachment(rawAttachment: unknown): { filename: string; pdf: Buffer } | null {
+  if (!rawAttachment || typeof rawAttachment !== "object") return null;
+  const record = rawAttachment as Record<string, unknown>;
+  const contentBase64 = typeof record.contentBase64 === "string" ? record.contentBase64.trim() : "";
+  if (!contentBase64) return null;
+  const cleanedBase64 = contentBase64.replace(/^data:application\/pdf;base64,/i, "").replace(/\s+/g, "");
+  const pdf = Buffer.from(cleanedBase64, "base64");
+  if (!pdf.length || pdf.subarray(0, 4).toString("ascii") !== "%PDF") {
+    throw new Error("Client-provided Local Map PDF is invalid");
+  }
+  const rawFilename = typeof record.filename === "string" ? record.filename.trim() : "";
+  const filename = (rawFilename || "local-map-report.pdf").replace(/[^\w.\-]/g, "-");
+  return { filename, pdf };
 }
 
 function pickCreditSource(data: { monthlyAllowance: number; monthlyUsed: number; purchasedCredits: number }, isSuperAdmin: boolean) {
@@ -243,6 +508,7 @@ export async function runScheduledGridKeyword(gridKeywordId: string, runDate = n
   const result = await runDataForSeoLocalGrid({
     keyword: gridKeyword.keywordText,
     placeId: gridKeyword.placeId,
+    businessName: gridKeyword.businessName,
     centerLat: Number(gridKeyword.centerLat),
     centerLng: Number(gridKeyword.centerLng),
     gridSize: gridKeyword.gridSize,
@@ -284,14 +550,26 @@ function computeNextRunDate(from: Date): Date {
   return cursor;
 }
 
+function normalizeToMidnight(date: Date): Date {
+  const out = new Date(date);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function resolveScheduledRunTimestamp(now: Date): Date | null {
+  const scheduled = normalizeToMidnight(now);
+  if (!GRID_RUN_DAYS.has(scheduled.getDate())) return null;
+  return scheduled;
+}
+
 export async function processScheduledLocalMapRankings(now = new Date()): Promise<void> {
-  const isRunDay = GRID_RUN_DAYS.has(now.getDate());
-  if (!isRunDay) return;
+  const scheduledRunAt = resolveScheduledRunTimestamp(now);
+  if (!scheduledRunAt) return;
 
   const due = await prisma.gridKeyword.findMany({
     where: {
       status: "active",
-      OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }],
+      OR: [{ nextRunAt: null }, { nextRunAt: { lte: scheduledRunAt } }],
     },
     select: { id: true, clientId: true },
     take: 300,
@@ -300,14 +578,14 @@ export async function processScheduledLocalMapRankings(now = new Date()): Promis
   const touchedClientIds = new Set<string>();
   for (const row of due) {
     try {
-      await runScheduledGridKeyword(row.id, now);
+      await runScheduledGridKeyword(row.id, scheduledRunAt);
       touchedClientIds.add(row.clientId);
     } catch (error) {
       console.error("[LocalMap] scheduled run failed", row.id, error);
     }
   }
 
-  await processScheduledLocalMapEmails(Array.from(touchedClientIds), now);
+  await processScheduledLocalMapEmails(Array.from(touchedClientIds), scheduledRunAt);
 }
 
 async function processScheduledLocalMapEmails(clientIds: string[], now: Date): Promise<void> {
@@ -333,37 +611,27 @@ async function processScheduledLocalMapEmails(clientIds: string[], now: Date): P
       const recipients = normalizeEmailRecipients(schedule.recipients);
       if (!recipients.length) continue;
 
-      const keywords = await prisma.gridKeyword.findMany({
-        where: { clientId: schedule.clientId, status: "active" },
-        include: {
-          snapshots: {
-            orderBy: { runDate: "desc" },
-          },
-        },
-        orderBy: { keywordText: "asc" },
-      });
-      if (!keywords.length) continue;
-
+      const rows = await getLocalMapBundleRows(schedule.clientId);
+      if (!rows.length) continue;
       const pdf = await generateLocalMapBundlePdfBuffer(
-        keywords.map((row) => ({
+        rows.map((row) => ({
           keyword: row,
           snapshots: row.snapshots,
         }))
       );
+      const emailSubject = resolveLocalMapEmailSubject({
+        scheduleSubject: schedule.emailSubject ?? undefined,
+        clientName: schedule.client?.name || "Client",
+        frequency: schedule.frequency as "biweekly" | "monthly",
+      });
+      const html = buildLocalMapReportEmailHtml(schedule.client?.name || "Client", rows);
 
-      const subjectWithoutMarker = String(schedule.emailSubject || "")
-        .replace(LOCAL_MAP_SCHEDULE_SUBJECT_PREFIX, "")
-        .trim();
-      const emailSubject = subjectWithoutMarker
-        || `Local Map Rankings - ${buildReportEmailSubject(schedule.client?.name || "Client", schedule.frequency)}`;
-      const html = `
-        <div style="font-family: Arial, sans-serif; color: #111827;">
-          <h2 style="margin: 0 0 8px;">Local Map Rankings Report</h2>
-          <p style="margin: 0 0 10px;">Your latest Local Map Rankings bundle is attached.</p>
-          <p style="margin: 0; color: #6b7280; font-size: 12px;">Client: ${schedule.client?.name || "Unknown"}</p>
-        </div>
-      `;
-
+      console.log("[LocalMap] Sending scheduled Local Map report email", {
+        scheduleId: schedule.id,
+        clientId: schedule.clientId,
+        recipients: recipients.length,
+        subject: emailSubject,
+      });
       await Promise.all(
         recipients.map((to) =>
           sendEmail({
@@ -371,11 +639,10 @@ async function processScheduledLocalMapEmails(clientIds: string[], now: Date): P
             subject: emailSubject,
             html,
             attachments: [
-              {
-                filename: `local-map-rankings-${(schedule.client?.name || "client").replace(/\s+/g, "-").toLowerCase()}.pdf`,
-                content: pdf,
-                contentType: "application/pdf",
-              },
+              buildPdfEmailAttachment(
+                `local-map-rankings-${(schedule.client?.name || "client").replace(/\s+/g, "-").toLowerCase()}.pdf`,
+                pdf
+              ),
             ],
           })
         )
@@ -590,10 +857,126 @@ router.get("/report/:gridKeywordId", authenticateToken, async (req, res) => {
       current,
       previousThree,
       benchmark,
+      snapshots: keyword.snapshots,
       trend,
     });
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to load report" });
+  }
+});
+
+router.post("/reports/:clientId/send", authenticateToken, async (req, res) => {
+  try {
+    if (!isManagerRole(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { clientId } = req.params;
+    const canRead = await canReadClient(req.user, clientId);
+    if (!canRead) return res.status(403).json({ message: "Access denied" });
+
+    const bodyRecipients = normalizeEmailRecipients(req.body?.recipients);
+    const bodySubject = typeof req.body?.emailSubject === "string" ? req.body.emailSubject.trim() : "";
+
+    const activeSchedule = await prisma.reportSchedule.findFirst({
+      where: {
+        clientId,
+        isActive: true,
+        frequency: { in: ["biweekly", "monthly"] },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    const latestLocalMapSchedule = await prisma.reportSchedule.findFirst({
+      where: {
+        clientId,
+        frequency: { in: ["biweekly", "monthly"] },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    const scheduleCandidate = [activeSchedule, latestLocalMapSchedule]
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .find((row) => isLocalMapScheduleSubject(row.emailSubject));
+
+    if (!scheduleCandidate && !bodyRecipients.length) {
+      return res.status(400).json({
+        message: "No Local Map recipients found. Create a Local Map schedule or provide recipients.",
+      });
+    }
+
+    const recipients = bodyRecipients.length
+      ? bodyRecipients
+      : normalizeEmailRecipients(scheduleCandidate?.recipients);
+    if (!recipients.length) {
+      return res.status(400).json({ message: "No recipients configured for this Local Map report." });
+    }
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { name: true },
+    });
+    const bodyEmailHtml = typeof req.body?.emailHtml === "string" ? req.body.emailHtml.trim() : "";
+    const clientProvidedAttachment = parseClientProvidedPdfAttachment(req.body?.attachment);
+    let rows: Array<GridKeyword & { snapshots: GridSnapshot[] }> = [];
+    if (!bodyEmailHtml || !clientProvidedAttachment) {
+      rows = await getLocalMapBundleRows(clientId);
+      if (!rows.length) {
+        return res.status(400).json({ message: "No active Local Map keywords found for this client." });
+      }
+    }
+    const pdfAttachment = clientProvidedAttachment
+      ? buildPdfEmailAttachment(clientProvidedAttachment.filename, clientProvidedAttachment.pdf)
+      : buildPdfEmailAttachment(
+          `local-map-rankings-${clientId}-${new Date().toISOString().slice(0, 10)}.pdf`,
+          await generateLocalMapBundlePdfBuffer(
+            rows.map((row) => ({
+              keyword: row,
+              snapshots: row.snapshots,
+            }))
+          )
+        );
+
+    const now = new Date();
+    const emailSubject = resolveLocalMapEmailSubject({
+      bodySubject,
+      scheduleSubject: scheduleCandidate?.emailSubject ?? undefined,
+      clientName: client?.name || "Client",
+      frequency: (scheduleCandidate?.frequency as "biweekly" | "monthly" | undefined) || "monthly",
+    });
+    const html = bodyEmailHtml || buildLocalMapReportEmailHtml(client?.name || "Client", rows);
+
+    console.log("[LocalMap] Sending on-demand Local Map report email", {
+      clientId,
+      recipients: recipients.length,
+      subject: emailSubject,
+    });
+    await Promise.all(
+      recipients.map((to) =>
+        sendEmail({
+          to,
+          subject: emailSubject,
+          html,
+          attachments: [pdfAttachment],
+        })
+      )
+    );
+
+    if (activeSchedule && isLocalMapScheduleSubject(activeSchedule.emailSubject)) {
+      const nextRunAt = calculateNextRunTime(
+        activeSchedule.frequency as "biweekly" | "monthly",
+        activeSchedule.dayOfWeek ?? undefined,
+        activeSchedule.dayOfMonth ?? undefined,
+        activeSchedule.timeOfDay ?? undefined
+      );
+
+      await prisma.reportSchedule.update({
+        where: { id: activeSchedule.id },
+        data: { lastRunAt: now, nextRunAt },
+      });
+    }
+
+    return res.json({ message: "Local Map report sent successfully", recipients: recipients.length });
+  } catch (error: any) {
+    console.error("[LocalMap] send now failed", error);
+    return res.status(500).json({ message: error?.message || "Failed to send Local Map report" });
   }
 });
 
@@ -607,35 +990,37 @@ router.post("/snapshot/run", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    const isSuperAdminRun = Boolean(superAdminMode) && (req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN");
     let agencyId: string | null = null;
-    if (typeof clientId === "string" && clientId) {
-      agencyId = await resolveAgencyIdForClient(clientId, req.user.userId);
-    }
-    if (!agencyId) {
-      agencyId = await getAgencyIdForUser(req.user.userId);
-    }
-
-    if (!agencyId && !(req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN")) {
-      return res.status(400).json({ message: "Agency context not found" });
+    if (!isSuperAdminRun) {
+      if (typeof clientId === "string" && clientId) {
+        agencyId = await resolveAgencyIdForClient(clientId, req.user.userId);
+      }
+      if (!agencyId) {
+        agencyId = await getAgencyIdForUser(req.user.userId);
+      }
+      if (!agencyId) {
+        return res.status(400).json({ message: "Agency context not found" });
+      }
     }
 
     const result = await runDataForSeoLocalGrid({
       keyword: String(keyword),
       placeId: String(placeId),
+      businessName: String(businessName),
       centerLat: Number(centerLat),
       centerLng: Number(centerLng),
       gridSize: DEFAULT_GRID_SIZE,
       gridSpacingMiles: DEFAULT_GRID_SPACING_MILES,
     });
 
-    const isSuperAdminRun = Boolean(superAdminMode) && (req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN");
-    const creditSource = agencyId
-      ? await consumeOnDemandCredit(agencyId, isSuperAdminRun)
-      : "super_admin";
+    const creditSource = isSuperAdminRun
+      ? "super_admin"
+      : await consumeOnDemandCredit(agencyId as string, false);
 
     const log = await prisma.onDemandSnapshotLog.create({
       data: {
-        agencyId,
+        agencyId: isSuperAdminRun ? null : agencyId,
         clientId: clientId ? String(clientId) : null,
         runByUserId: req.user.userId,
         keywordText: String(keyword),
@@ -655,9 +1040,17 @@ router.post("/snapshot/run", authenticateToken, async (req, res) => {
       ataScore: result.ataScore,
       gridData: result.gridData,
       topCompetitorsCurrent: result.topCompetitorsCurrent,
+      topDetectedBusinesses: result.topDetectedBusinesses,
       creditSource,
     });
   } catch (error: any) {
+    console.error("[LocalMap] snapshot run failed", {
+      message: error?.message,
+      stack: error?.stack,
+      userId: req.user?.userId,
+      role: req.user?.role,
+      body: req.body,
+    });
     return res.status(500).json({ message: error?.message || "Failed to run snapshot" });
   }
 });
@@ -668,13 +1061,23 @@ router.get("/snapshot/summary", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
     const agencyId = await getAgencyIdForUser(req.user.userId);
-    if (!agencyId) return res.json({ monthlyRemaining: 0, monthlyAllowance: 0, purchasedCredits: 0, resetsAt: null });
+    if (!agencyId) {
+      return res.json({
+        monthlyRemaining: 0,
+        monthlyAllowance: 0,
+        purchasedCredits: 0,
+        purchasedPacks: { pack5: 0, pack10: 0, pack25: 0, totalPurchases: 0, latestPurchaseAt: null },
+        resetsAt: null,
+      });
+    }
     const counters = await ensureAgencySnapshotCounters(agencyId);
+    const purchasedPacks = await getSnapshotPackBreakdown(agencyId);
     return res.json({
       monthlyAllowance: counters.monthlyAllowance,
       monthlyUsed: counters.monthlyUsed,
       monthlyRemaining: Math.max(0, counters.monthlyAllowance - counters.monthlyUsed),
       purchasedCredits: counters.purchasedCredits,
+      purchasedPacks,
       resetsAt: counters.resetsAt,
     });
   } catch (error: any) {
@@ -691,6 +1094,11 @@ router.get("/admin/keywords", authenticateToken, async (req, res) => {
       include: {
         client: { select: { name: true } },
         agency: { select: { name: true } },
+        snapshots: {
+          orderBy: { runDate: "desc" },
+          take: 1,
+          select: { id: true, runDate: true, ataScore: true },
+        },
       },
       orderBy: { createdAt: "desc" },
       take: 500,
@@ -698,6 +1106,32 @@ router.get("/admin/keywords", authenticateToken, async (req, res) => {
     return res.json(rows);
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to load grid keywords" });
+  }
+});
+
+router.get("/admin/snapshots", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const rows = await prisma.gridSnapshot.findMany({
+      include: {
+        gridKeyword: {
+          select: {
+            id: true,
+            keywordText: true,
+            businessName: true,
+            client: { select: { id: true, name: true } },
+            agency: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { runDate: "desc" },
+      take: 300,
+    });
+    return res.json(rows);
+  } catch (error: any) {
+    return res.status(500).json({ message: error?.message || "Failed to load snapshots" });
   }
 });
 
@@ -756,16 +1190,33 @@ router.get("/admin/overview", authenticateToken, async (req, res) => {
       where: { createdAt: { gte: monthStart, lt: monthEnd } },
     });
 
-    const costPerRun = 0.78;
+    const costPerRunUsd = await getConfiguredLocalMapCostPerRunUsd();
     return res.json({
       month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
       scheduledRuns,
       ondemandRuns,
       totalRuns: scheduledRuns + ondemandRuns,
-      projectedApiCostUsd: Number(((scheduledRuns + ondemandRuns) * costPerRun).toFixed(2)),
+      costPerRunUsd,
+      projectedApiCostUsd: Number(((scheduledRuns + ondemandRuns) * costPerRunUsd).toFixed(2)),
     });
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to load local map overview" });
+  }
+});
+
+router.put("/admin/config/cost-per-run", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const nextValue = Number(req.body?.costPerRunUsd);
+    if (!Number.isFinite(nextValue) || nextValue < 0) {
+      return res.status(400).json({ message: "costPerRunUsd must be a valid non-negative number" });
+    }
+    const saved = await setConfiguredLocalMapCostPerRunUsd(nextValue);
+    return res.json({ costPerRunUsd: saved });
+  } catch (error: any) {
+    return res.status(500).json({ message: error?.message || "Failed to update cost per run" });
   }
 });
 
@@ -836,7 +1287,8 @@ router.get("/pdf/keyword/:gridKeywordId", authenticateToken, async (req, res) =>
     const pdf = await generateLocalMapKeywordPdfBuffer(keyword, keyword.snapshots);
     const sanitizedKeyword = keyword.keywordText.replace(/\s+/g, "-").toLowerCase();
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${sanitizedKeyword}-local-map-report.pdf"`);
+    const disposition = String(req.query?.inline ?? "").toLowerCase() === "1" ? "inline" : "attachment";
+    res.setHeader("Content-Disposition", `${disposition}; filename="${sanitizedKeyword}-local-map-report.pdf"`);
     return res.send(pdf);
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to generate PDF" });
@@ -855,7 +1307,8 @@ router.get("/pdf/snapshot/:snapshotId", authenticateToken, async (req, res) => {
     const pdf = await generateLocalMapKeywordPdfBuffer(snapshot.gridKeyword, [snapshot]);
     const sanitizedKeyword = snapshot.gridKeyword.keywordText.replace(/\s+/g, "-").toLowerCase();
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${sanitizedKeyword}-snapshot.pdf"`);
+    const disposition = String(req.query?.inline ?? "").toLowerCase() === "1" ? "inline" : "attachment";
+    res.setHeader("Content-Disposition", `${disposition}; filename="${sanitizedKeyword}-snapshot.pdf"`);
     return res.send(pdf);
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to generate PDF" });
@@ -868,22 +1321,8 @@ router.get("/pdf/dashboard/:clientId", authenticateToken, async (req, res) => {
     const canRead = await canReadClient(req.user, clientId);
     if (!canRead) return res.status(403).json({ message: "Access denied" });
 
-    const keywords = await prisma.gridKeyword.findMany({
-      where: { clientId, status: "active" },
-      include: {
-        snapshots: {
-          orderBy: { runDate: "desc" },
-        },
-      },
-      orderBy: { keywordText: "asc" },
-    });
-
-    const pdf = await generateLocalMapBundlePdfBuffer(
-      keywords.map((row) => ({
-        keyword: row,
-        snapshots: row.snapshots,
-      }))
-    );
+    const pdf = await buildLocalMapClientBundlePdf(clientId);
+    if (!pdf) return res.status(400).json({ message: "No active Local Map keywords found for this client." });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", 'attachment; filename="local-map-rankings-bundle.pdf"');
     return res.send(pdf);

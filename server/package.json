@@ -9,6 +9,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test:tasks-notifications": "node --import tsx --test src/routes/tasks.notification-routing.test.ts",
+    "test:addon-notifications": "node --import tsx --test src/lib/addOnNotifications.test.ts",
+    "test:snapshot-purchase": "node --import tsx --test src/lib/snapshotCreditPurchase.test.ts",
     "test:quality-contracts": "node --import tsx --test src/lib/qualityContracts.test.ts",
     "test:metric-accuracy": "node --import tsx --test src/lib/metricAccuracy.test.ts",
     "test:local-map": "node --import tsx --test src/lib/localMap.test.ts",
@@ -44,7 +46,8 @@
   },
   "overrides": {
     "minimatch": "^10.2.1",
-    "fast-xml-parser": "^5.3.8"
+    "fast-xml-parser": "^5.3.8",
+    "@tootallnate/once": "^3.0.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
