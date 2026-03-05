@@ -1054,7 +1054,7 @@ const ClientDashboardPage: React.FC = () => {
         return;
       }
 
-      await api.post(`/local-map/keywords/${clientId}`, {
+      const activateRes = await api.post(`/local-map/keywords/${clientId}`, {
         keywordId: localMapSelectedKeywordId,
         placeId: localMapBusinessSelection.placeId,
         businessName: localMapBusinessSelection.businessName,
@@ -1063,7 +1063,16 @@ const ClientDashboardPage: React.FC = () => {
         centerLng: localMapBusinessSelection.lng,
         locationLabel: localMapLabel.trim() || null,
       }, { _silent: true } as any);
-      toast.success("Local map keyword activated");
+      const result = activateRes?.data as
+        | { alreadyActive?: boolean; reactivated?: boolean; message?: string }
+        | undefined;
+      if (result?.alreadyActive) {
+        toast.success(result.message || "This keyword and business listing is already active.");
+      } else if (result?.reactivated) {
+        toast.success(result.message || "Local map keyword reactivated.");
+      } else {
+        toast.success("Local map keyword activated");
+      }
       setLocalMapActivationOpen(false);
       setLocalMapSelectedKeywordId("");
       setLocalMapBusinessSelection(null);

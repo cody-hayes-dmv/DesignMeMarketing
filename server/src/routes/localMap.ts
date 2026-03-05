@@ -775,6 +775,55 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Unable to resolve agency account for this dashboard." });
     }
 
+    const normalizedPlaceId = String(placeId);
+    const existing = await prisma.gridKeyword.findFirst({
+      where: {
+        clientId,
+        keywordId: keyword.id,
+        placeId: normalizedPlaceId,
+      },
+    });
+
+    if (existing) {
+      if (existing.status === "active") {
+        return res.json({
+          ...existing,
+          alreadyActive: true,
+          message: "This keyword and business listing is already active.",
+        });
+      }
+
+      const capacity = await getMapKeywordCapacity(agencyId);
+      if (capacity.remaining <= 0) {
+        return res.status(402).json({
+          code: "LOCAL_MAP_KEYWORD_CAP_REACHED",
+          message: "No grid keyword slots remaining. Upgrade or add Local Map Rankings keyword pack.",
+        });
+      }
+
+      const reactivated = await prisma.gridKeyword.update({
+        where: { id: existing.id },
+        data: {
+          agencyId,
+          keywordText: keyword.keyword,
+          businessName: String(businessName),
+          businessAddress: businessAddress ? String(businessAddress) : null,
+          centerLat: new Prisma.Decimal(Number(centerLat)),
+          centerLng: new Prisma.Decimal(Number(centerLng)),
+          locationLabel: locationLabel ? String(locationLabel) : null,
+          gridSize: DEFAULT_GRID_SIZE,
+          gridSpacingMiles: new Prisma.Decimal(DEFAULT_GRID_SPACING_MILES),
+          status: "active",
+          nextRunAt: computeNextRunDate(new Date()),
+        },
+      });
+
+      return res.json({
+        ...reactivated,
+        reactivated: true,
+      });
+    }
+
     const capacity = await getMapKeywordCapacity(agencyId);
     if (capacity.remaining <= 0) {
       return res.status(402).json({
@@ -783,26 +832,49 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       });
     }
 
-    const created = await prisma.gridKeyword.create({
-      data: {
-        agencyId,
-        clientId,
-        keywordId: keyword.id,
-        keywordText: keyword.keyword,
-        placeId: String(placeId),
-        businessName: String(businessName),
-        businessAddress: businessAddress ? String(businessAddress) : null,
-        centerLat: new Prisma.Decimal(Number(centerLat)),
-        centerLng: new Prisma.Decimal(Number(centerLng)),
-        locationLabel: locationLabel ? String(locationLabel) : null,
-        gridSize: DEFAULT_GRID_SIZE,
-        gridSpacingMiles: new Prisma.Decimal(DEFAULT_GRID_SPACING_MILES),
-        status: "active",
-        nextRunAt: computeNextRunDate(new Date()),
-      },
-    });
+    try {
+      const created = await prisma.gridKeyword.create({
+        data: {
+          agencyId,
+          clientId,
+          keywordId: keyword.id,
+          keywordText: keyword.keyword,
+          placeId: normalizedPlaceId,
+          businessName: String(businessName),
+          businessAddress: businessAddress ? String(businessAddress) : null,
+          centerLat: new Prisma.Decimal(Number(centerLat)),
+          centerLng: new Prisma.Decimal(Number(centerLng)),
+          locationLabel: locationLabel ? String(locationLabel) : null,
+          gridSize: DEFAULT_GRID_SIZE,
+          gridSpacingMiles: new Prisma.Decimal(DEFAULT_GRID_SPACING_MILES),
+          status: "active",
+          nextRunAt: computeNextRunDate(new Date()),
+        },
+      });
 
-    return res.status(201).json(created);
+      return res.status(201).json(created);
+    } catch (error: any) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const duplicate = await prisma.gridKeyword.findFirst({
+          where: {
+            clientId,
+            keywordId: keyword.id,
+            placeId: normalizedPlaceId,
+          },
+        });
+        if (duplicate) {
+          return res.json({
+            ...duplicate,
+            alreadyActive: duplicate.status === "active",
+            message:
+              duplicate.status === "active"
+                ? "This keyword and business listing is already active."
+                : "This keyword and business listing already exists.",
+          });
+        }
+      }
+      throw error;
+    }
   } catch (error: any) {
     console.error("[LocalMap] create keyword failed", error);
     return res.status(500).json({ message: error?.message || "Failed to activate grid keyword" });
