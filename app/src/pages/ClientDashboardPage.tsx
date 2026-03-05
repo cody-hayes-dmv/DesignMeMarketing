@@ -505,6 +505,31 @@ const buildPpcEmailHtmlFromReport = (
   const fmtMoney = (value: unknown) =>
     `$${Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtPct = (value: unknown, digits = 2) => `${Number(value ?? 0).toFixed(digits)}%`;
+  const fmtDate = (value: unknown) => {
+    if (!value) return "N/A";
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleDateString();
+  };
+  const hasPpcData =
+    campaigns.length > 0 || adGroups.length > 0 || keywords.length > 0 || conversions.length > 0;
+  const summaryClicks = Number(summary?.clicks ?? 0);
+  const summaryImpressions = Number(summary?.impressions ?? 0);
+  const summaryConversions = Number(summary?.conversions ?? 0);
+  const summaryCost = Number(summary?.cost ?? 0);
+  const summaryCtr = summaryImpressions > 0 ? (summaryClicks / summaryImpressions) * 100 : 0;
+  const summaryCostPerConversion =
+    summaryConversions > 0 ? summaryCost / summaryConversions : Number(summary?.costPerConversion ?? 0);
+  const campaignStatusBadge = (status: unknown) => {
+    const normalized = String(status ?? "").trim().toUpperCase();
+    if (!normalized) return "";
+    const badgeStyle =
+      normalized === "ENABLED"
+        ? "background:#dcfce7;color:#166534;"
+        : normalized === "PAUSED"
+        ? "background:#fef9c3;color:#854d0e;"
+        : "background:#f3f4f6;color:#374151;";
+    return `<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;${badgeStyle}">${esc(normalized)}</span>`;
+  };
 
   const campaignRows = campaigns
     .map((row: any) => {
@@ -517,7 +542,9 @@ const buildPpcEmailHtmlFromReport = (
       const costPerConv = conversionsCount > 0 ? cost / conversionsCount : 0;
       return `
         <tr>
-          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.name || "N/A")}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;">
+            ${esc(row?.name || "N/A")}${campaignStatusBadge(row?.status)}
+          </td>
           <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(clicks)}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(impressions)}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtPct(ctr)}</td>
@@ -573,7 +600,7 @@ const buildPpcEmailHtmlFromReport = (
   const conversionRows = conversions
     .map((row: any) => `
       <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.date ? new Date(row.date).toLocaleDateString() : "N/A")}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(fmtDate(row?.date))}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.conversionAction || "N/A")}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.campaignName || "N/A")}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.conversions)}</td>
@@ -592,36 +619,62 @@ const buildPpcEmailHtmlFromReport = (
         <div style="max-width: 980px; margin: 0 auto; background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
           <div style="padding: 20px; background: linear-gradient(90deg, #2563eb, #1d4ed8); color: #fff;">
             <h2 style="margin: 0 0 6px;">PPC Analytics Report</h2>
-            <p style="margin: 0; color: #dbeafe; font-size: 13px;">${esc(clientName || "Client")}</p>
+            <p style="margin: 0; color: #dbeafe; font-size: 13px;">Monthly report for ${esc(clientName || "Client")}</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;border-collapse:separate;border-spacing:8px 0;">
+              <tr>
+                <td style="padding:10px;border-radius:8px;background:rgba(255,255,255,0.15);font-size:12px;"><strong>Client:</strong> ${esc(clientName || "—")}</td>
+                <td style="padding:10px;border-radius:8px;background:rgba(255,255,255,0.15);font-size:12px;"><strong>Report Date:</strong> ${esc(new Date().toLocaleDateString())}</td>
+              </tr>
+            </table>
           </div>
           <div style="padding: 18px;">
-            <h3 style="margin: 0 0 10px; font-size: 14px;">Campaign Performance Overview</h3>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; margin-bottom: 12px;">
+            ${
+              hasPpcData
+                ? `
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border-spacing:8px;margin-bottom:8px;">
               <tr>
-                <td style="padding: 8px; border: 1px solid #dbeafe; background: #eff6ff;"><strong>Clicks:</strong> ${fmtInt(summary?.clicks)}</td>
-                <td style="padding: 8px; border: 1px solid #dbeafe; background: #eef2ff;"><strong>Impressions:</strong> ${fmtInt(summary?.impressions)}</td>
-                <td style="padding: 8px; border: 1px solid #d1fae5; background: #ecfdf5;"><strong>Conversions:</strong> ${fmtInt(summary?.conversions)}</td>
-                <td style="padding: 8px; border: 1px solid #e9d5ff; background: #faf5ff;"><strong>Cost:</strong> ${fmtMoney(summary?.cost)}</td>
+                <td style="width:25%;padding:12px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px;"><div style="font-size:11px;color:#2563eb;font-weight:700;text-transform:uppercase;">Clicks</div><div style="font-size:22px;color:#1e3a8a;font-weight:700;margin-top:4px;">${fmtInt(summaryClicks)}</div></td>
+                <td style="width:25%;padding:12px;border:1px solid #c7d2fe;background:#eef2ff;border-radius:8px;"><div style="font-size:11px;color:#4f46e5;font-weight:700;text-transform:uppercase;">Impressions</div><div style="font-size:22px;color:#312e81;font-weight:700;margin-top:4px;">${fmtInt(summaryImpressions)}</div></td>
+                <td style="width:25%;padding:12px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;"><div style="font-size:11px;color:#16a34a;font-weight:700;text-transform:uppercase;">Conversions</div><div style="font-size:22px;color:#14532d;font-weight:700;margin-top:4px;">${fmtInt(summaryConversions)}</div></td>
+                <td style="width:25%;padding:12px;border:1px solid #e9d5ff;background:#faf5ff;border-radius:8px;"><div style="font-size:11px;color:#9333ea;font-weight:700;text-transform:uppercase;">Cost</div><div style="font-size:22px;color:#581c87;font-weight:700;margin-top:4px;">${fmtMoney(summaryCost)}</div></td>
+              </tr>
+            </table>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border-spacing:8px;margin-bottom:12px;">
+              <tr>
+                <td style="width:25%;padding:12px;border:1px solid #e5e7eb;background:#fff;border-radius:8px;"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">Avg CPC</div><div style="font-size:18px;color:#111827;font-weight:700;margin-top:4px;">${fmtMoney(summary?.avgCpc)}</div></td>
+                <td style="width:25%;padding:12px;border:1px solid #e5e7eb;background:#fff;border-radius:8px;"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">Cost / Conversion</div><div style="font-size:18px;color:#111827;font-weight:700;margin-top:4px;">${fmtMoney(summaryCostPerConversion)}</div></td>
+                <td style="width:25%;padding:12px;border:1px solid #e5e7eb;background:#fff;border-radius:8px;"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">CTR</div><div style="font-size:18px;color:#111827;font-weight:700;margin-top:4px;">${fmtPct(summaryCtr)}</div></td>
+                <td style="width:25%;padding:12px;border:1px solid #e5e7eb;background:#fff;border-radius:8px;"><div style="font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase;">Conversion Rate</div><div style="font-size:18px;color:#111827;font-weight:700;margin-top:4px;">${fmtPct(summary?.conversionRate)}</div></td>
               </tr>
             </table>
 
-            <h3 style="margin: 12px 0 8px; font-size: 14px;">Campaigns</h3>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; margin-bottom: 12px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impr.</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Conv.</th><th align="right" style="padding:8px 10px;">Conv. Rate</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th><th align="right" style="padding:8px 10px;">Cost/Conv.</th></tr></thead><tbody>${campaignRows || `<tr><td colspan="9" style="padding:10px;color:#6b7280;">No campaign data available.</td></tr>`}</tbody></table>
+            <h3 style="margin: 12px 0 8px; font-size: 16px;">Campaigns</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 14px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impressions</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Conversions</th><th align="right" style="padding:8px 10px;">Conv. Rate</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th><th align="right" style="padding:8px 10px;">Cost/Conv.</th></tr></thead><tbody>${campaignRows || `<tr><td colspan="9" style="padding:10px;color:#6b7280;">No campaign data available.</td></tr>`}</tbody></table>
 
-            <h3 style="margin: 12px 0 8px; font-size: 14px;">Ad Groups</h3>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; margin-bottom: 12px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Ad Group</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impr.</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Conv.</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th></tr></thead><tbody>${adGroupRows || `<tr><td colspan="8" style="padding:10px;color:#6b7280;">No ad group data available.</td></tr>`}</tbody></table>
+            <h3 style="margin: 12px 0 8px; font-size: 16px;">Ad Groups</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 14px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Ad Group</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impressions</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Conversions</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th></tr></thead><tbody>${adGroupRows || `<tr><td colspan="8" style="padding:10px;color:#6b7280;">No ad group data available.</td></tr>`}</tbody></table>
 
-            <h3 style="margin: 12px 0 8px; font-size: 14px;">Keywords</h3>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; margin-bottom: 12px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Keyword</th><th align="left" style="padding:8px 10px;">Match Type</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impr.</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Imp. Share</th><th align="right" style="padding:8px 10px;">Conv.</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th></tr></thead><tbody>${keywordRows || `<tr><td colspan="10" style="padding:10px;color:#6b7280;">No keyword data available.</td></tr>`}</tbody></table>
+            <h3 style="margin: 12px 0 8px; font-size: 16px;">Keywords</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 14px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Keyword</th><th align="left" style="padding:8px 10px;">Match Type</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impressions</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Imp. Share</th><th align="right" style="padding:8px 10px;">Conversions</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th></tr></thead><tbody>${keywordRows || `<tr><td colspan="10" style="padding:10px;color:#6b7280;">No keyword data available.</td></tr>`}</tbody></table>
 
-            <h3 style="margin: 12px 0 8px; font-size: 14px;">Conversions</h3>
-            <p style="margin: 0 0 8px; font-size: 12px; color:#4b5563;">
-              <strong>Total Conversions:</strong> ${fmtInt(conversionsSummary?.totalConversions)} &nbsp;•&nbsp;
-              <strong>Conversion Value:</strong> ${fmtMoney(conversionsSummary?.conversionValue)} &nbsp;•&nbsp;
-              <strong>Conversion Rate:</strong> ${fmtPct(conversionsSummary?.conversionRate)}
-            </p>
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Date</th><th align="left" style="padding:8px 10px;">Action</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Conversions</th><th align="right" style="padding:8px 10px;">Value</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Cost/Conv.</th></tr></thead><tbody>${conversionRows || `<tr><td colspan="8" style="padding:10px;color:#6b7280;">No conversion data available.</td></tr>`}</tbody></table>
+            <h3 style="margin: 12px 0 8px; font-size: 16px;">Conversions</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;border-spacing:8px;margin-bottom:8px;">
+              <tr>
+                <td style="width:33%;padding:12px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;"><div style="font-size:11px;color:#15803d;font-weight:700;text-transform:uppercase;">Total Conversions</div><div style="font-size:22px;color:#14532d;font-weight:700;margin-top:4px;">${fmtInt(conversionsSummary?.totalConversions)}</div></td>
+                <td style="width:33%;padding:12px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px;"><div style="font-size:11px;color:#1d4ed8;font-weight:700;text-transform:uppercase;">Conversion Value</div><div style="font-size:22px;color:#1e3a8a;font-weight:700;margin-top:4px;">${fmtMoney(conversionsSummary?.conversionValue)}</div></td>
+                <td style="width:33%;padding:12px;border:1px solid #e9d5ff;background:#faf5ff;border-radius:8px;"><div style="font-size:11px;color:#7e22ce;font-weight:700;text-transform:uppercase;">Conversion Rate</div><div style="font-size:22px;color:#581c87;font-weight:700;margin-top:4px;">${fmtPct(conversionsSummary?.conversionRate)}</div></td>
+              </tr>
+            </table>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Date</th><th align="left" style="padding:8px 10px;">Conversion Action</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Conversions</th><th align="right" style="padding:8px 10px;">Value</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Cost/Conv.</th></tr></thead><tbody>${conversionRows || `<tr><td colspan="8" style="padding:10px;color:#6b7280;">No conversion data available.</td></tr>`}</tbody></table>
             <p style="margin:10px 0 0; font-size:12px; color:#6b7280;">The attached PDF matches the PPC report preview export.</p>
+                `
+                : `
+            <div style="text-align:center;padding:16px 0;">
+              <p style="margin:0;font-size:14px;color:#6b7280;">No PPC data available.</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#9ca3af;">Ensure your Google Ads account has active campaigns, ad groups, keywords, or conversions in this period.</p>
+            </div>
+                `
+            }
           </div>
         </div>
       </body>
@@ -968,6 +1021,7 @@ const ClientDashboardPage: React.FC = () => {
   const dashboardOuterScrollRef = useRef<HTMLDivElement | null>(null);
   const dashboardContentRef = useRef<HTMLDivElement>(null);
   const modalDashboardContentRef = useRef<HTMLDivElement>(null);
+  const ppcPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const [viewReportModalOpen, setViewReportModalOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ClientReport | null>(null);
   const [reportDeleteConfirm, setReportDeleteConfirm] = useState<{
@@ -2603,6 +2657,233 @@ const ClientDashboardPage: React.FC = () => {
     };
   }, [refreshingDashboard, refreshingTopPages, refreshingBacklinks, fetchingSummary]);
 
+  const fetchPpcReportPayload = useCallback(async () => {
+    if (!clientId) {
+      throw new Error("Client ID is missing");
+    }
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    const params = {
+      start: startDate.toISOString().split("T")[0],
+      end: endDate.toISOString().split("T")[0],
+      activeOnly: "true",
+    };
+    const [campaignsRes, adGroupsRes, keywordsRes, conversionsRes] = await Promise.all([
+      api.get(`/clients/${clientId}/google-ads/campaigns`, { params, _silent: true } as any),
+      api.get(`/clients/${clientId}/google-ads/ad-groups`, { params, _silent: true } as any),
+      api.get(`/clients/${clientId}/google-ads/keywords`, { params, _silent: true } as any),
+      api.get(`/clients/${clientId}/google-ads/conversions`, { params, _silent: true } as any),
+    ]);
+    return {
+      success: true,
+      data: {
+        summary: campaignsRes?.data?.data?.summary ?? null,
+        campaigns: campaignsRes?.data?.data?.campaigns ?? [],
+        adGroups: adGroupsRes?.data?.data?.adGroups ?? [],
+        keywords: keywordsRes?.data?.data?.keywords ?? [],
+        conversions: conversionsRes?.data?.data?.conversions ?? [],
+        conversionsSummary: conversionsRes?.data?.data?.summary ?? null,
+      },
+    };
+  }, [clientId]);
+
+  const generateStyledPpcPdfFromHtml = useCallback(
+    async (html: string, reportType?: string): Promise<{ blob: Blob; fileName: string }> => {
+      const iframe = document.createElement("iframe");
+      iframe.setAttribute("aria-hidden", "true");
+      iframe.style.position = "fixed";
+      iframe.style.left = "-10000px";
+      iframe.style.top = "0";
+      iframe.style.width = "1024px";
+      iframe.style.height = "1200px";
+      iframe.style.opacity = "0";
+      iframe.style.pointerEvents = "none";
+      document.body.appendChild(iframe);
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(() => reject(new Error("Timed out while preparing PPC preview content.")), 10000);
+          iframe.onload = () => {
+            window.clearTimeout(timer);
+            resolve();
+          };
+          iframe.srcdoc = html;
+        });
+
+        const iframeDoc = iframe.contentDocument;
+        const bodyEl = iframeDoc?.body;
+        if (!iframeDoc || !bodyEl) {
+          throw new Error("PPC preview content is not ready.");
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+
+        const contentWidth = Math.max(bodyEl.scrollWidth, 980);
+        const contentHeight = Math.max(bodyEl.scrollHeight, bodyEl.offsetHeight, 1200);
+        const fullCanvas = await html2canvas(bodyEl, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: "#FFFFFF",
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: contentWidth,
+          windowHeight: contentHeight,
+        });
+
+        const pdf = new jsPDF("p", "mm", "a4");
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const marginX = 12;
+        const headerH = 16;
+        const footerH = 10;
+        const contentMarginTop = headerH + 3;
+        const contentMarginBottom = footerH + 2;
+        const usableWidth = pageWidth - marginX * 2;
+        const usableHeight = pageHeight - contentMarginTop - contentMarginBottom;
+        const websiteName = client?.name || client?.domain || "PPC Report";
+        const domain = client?.domain || "";
+        const generatedDate = format(new Date(), "MMMM d, yyyy");
+        const type = String(reportType || "").toLowerCase();
+        const ppcFrequencyLabel = type.includes("biweekly") ? "Biweekly" : type.includes("weekly") ? "Weekly" : "Monthly";
+        const periodLabel = `${ppcFrequencyLabel} PPC Report`;
+
+        const drawHeader = () => {
+          pdf.setFillColor(15, 23, 42);
+          pdf.rect(0, 0, pageWidth, headerH, "F");
+          pdf.setFillColor(59, 130, 246);
+          pdf.rect(0, headerH, pageWidth, 0.8, "F");
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(11);
+          pdf.setTextColor(255, 255, 255);
+          pdf.text(websiteName, marginX, 7);
+          if (domain) {
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(8);
+            pdf.setTextColor(148, 163, 184);
+            pdf.text(domain, marginX, 12);
+          }
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+          pdf.setTextColor(148, 163, 184);
+          pdf.text(periodLabel, pageWidth - marginX, 7, { align: "right" });
+          pdf.text(generatedDate, pageWidth - marginX, 12, { align: "right" });
+        };
+
+        const drawFooter = (pageNum: number, totalPages: number) => {
+          const footerY = pageHeight - footerH / 2;
+          pdf.setDrawColor(226, 232, 240);
+          pdf.setLineWidth(0.3);
+          pdf.line(marginX, pageHeight - footerH, pageWidth - marginX, pageHeight - footerH);
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: "center" });
+          pdf.setFontSize(7);
+          pdf.setTextColor(148, 163, 184);
+          pdf.text(`Generated ${generatedDate}`, marginX, footerY);
+          pdf.text("Confidential", pageWidth - marginX, footerY, { align: "right" });
+        };
+
+        pdf.setFillColor(15, 23, 42);
+        pdf.rect(0, 0, pageWidth, pageHeight, "F");
+        pdf.setFillColor(59, 130, 246);
+        pdf.rect(0, 0, pageWidth, 3, "F");
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(11);
+        pdf.setTextColor(148, 163, 184);
+        const labelY = pageHeight * 0.32;
+        pdf.text("PPC ANALYTICS REPORT", pageWidth / 2, labelY, { align: "center" });
+        const lineW = 50;
+        pdf.setDrawColor(59, 130, 246);
+        pdf.setLineWidth(0.6);
+        pdf.line(pageWidth / 2 - lineW / 2, labelY + 4, pageWidth / 2 + lineW / 2, labelY + 4);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(28);
+        pdf.setTextColor(255, 255, 255);
+        pdf.text(websiteName, pageWidth / 2, labelY + 18, { align: "center" });
+        if (domain) {
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(12);
+          pdf.setTextColor(148, 163, 184);
+          pdf.text(domain, pageWidth / 2, labelY + 28, { align: "center" });
+        }
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`${periodLabel}  ·  ${generatedDate}`, pageWidth / 2, labelY + 42, { align: "center" });
+        pdf.setFillColor(59, 130, 246);
+        pdf.rect(0, pageHeight - 3, pageWidth, 3, "F");
+
+        const pxPerMm = fullCanvas.width / usableWidth;
+        const sliceHeightPx = Math.max(1, Math.floor(usableHeight * pxPerMm));
+        const totalSlices = Math.max(1, Math.ceil(fullCanvas.height / sliceHeightPx));
+        const totalPages = totalSlices + 1;
+
+        for (let i = 0; i < totalSlices; i++) {
+          const srcY = i * sliceHeightPx;
+          const srcH = Math.min(sliceHeightPx, fullCanvas.height - srcY);
+          const sliceCanvas = document.createElement("canvas");
+          sliceCanvas.width = fullCanvas.width;
+          sliceCanvas.height = srcH;
+          const ctx = sliceCanvas.getContext("2d");
+          if (!ctx) continue;
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+          ctx.drawImage(fullCanvas, 0, srcY, fullCanvas.width, srcH, 0, 0, fullCanvas.width, srcH);
+
+          pdf.addPage();
+          drawHeader();
+          const imgH = srcH / pxPerMm;
+          pdf.addImage(sliceCanvas.toDataURL("image/png"), "PNG", marginX, contentMarginTop, usableWidth, imgH);
+          drawFooter(i + 2, totalPages);
+        }
+
+        pdf.setPage(1);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`Page 1 of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
+
+        const sanitizedName = (client?.name || "client").replace(/[^a-z0-9]/gi, "-").toLowerCase();
+        const fileName = `${sanitizedName}-ppc-report-${format(new Date(), "yyyyMMdd")}.pdf`;
+        return { blob: pdf.output("blob"), fileName };
+      } finally {
+        iframe.remove();
+      }
+    },
+    [client?.domain, client?.name]
+  );
+
+  const exportPpcPreviewStyledPdf = useCallback(async () => {
+    const previousOverflow = document.body.style.overflow;
+    try {
+      setExportingPdf(true);
+      document.body.style.overflow = "hidden";
+      const emailHtml = buildPpcEmailHtmlFromReport(
+        reportPreviewPpcData || { success: true, data: {} },
+        client?.name || "Client"
+      );
+      const { blob, fileName } = await generateStyledPpcPdfFromHtml(emailHtml, selectedReport?.type);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      toast.success("PPC report exported successfully!");
+    } catch (error: any) {
+      console.error("Failed to export PPC preview PDF", error);
+      toast.error(error?.message || "Failed to export PPC preview PDF. Please try again.");
+    } finally {
+      document.body.style.overflow = previousOverflow;
+      setExportingPdf(false);
+    }
+  }, [client?.name, generateStyledPpcPdfFromHtml, reportPreviewPpcData, selectedReport?.type]);
+
   const handleExportPdf = useCallback(async () => {
     if (!dashboardContentRef.current) {
       toast.error("Switch to the Dashboard tab to export.");
@@ -2615,25 +2896,11 @@ const ClientDashboardPage: React.FC = () => {
     }
 
     if (dashboardSection === "ppc") {
-      if (!clientId) {
-        toast.error("Client ID is missing");
-        return;
-      }
       try {
         setExportingPdf(true);
-        const pdfRes = await api.get(`/seo/reports/${clientId}/ppc/latest-pdf`, {
-          params: { period: "monthly" },
-          responseType: "blob",
-          _silent: true,
-        } as any);
-        const blob =
-          pdfRes?.data instanceof Blob
-            ? pdfRes.data
-            : new Blob([pdfRes?.data], { type: "application/pdf" });
-        const headerValue = String(pdfRes?.headers?.["content-disposition"] || "");
-        const filenameMatch = /filename="?([^"]+)"?/i.exec(headerValue);
-        const fallbackName = `${(client?.name || "client").replace(/\s+/g, "-").toLowerCase()}-ppc-report-${format(new Date(), "yyyyMMdd")}.pdf`;
-        const fileName = filenameMatch?.[1] || fallbackName;
+        const reportPayload = await fetchPpcReportPayload();
+        const emailHtml = buildPpcEmailHtmlFromReport(reportPayload, client?.name || "Client");
+        const { blob, fileName } = await generateStyledPpcPdfFromHtml(emailHtml, "ppc_monthly");
         const objectUrl = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = objectUrl;
@@ -2642,7 +2909,7 @@ const ClientDashboardPage: React.FC = () => {
         anchor.click();
         anchor.remove();
         URL.revokeObjectURL(objectUrl);
-        toast.success("PPC dashboard exported successfully!");
+        toast.success("PPC report exported successfully!");
       } catch (error: any) {
         console.error("Failed to export PPC dashboard PDF", error);
         toast.error(error?.response?.data?.message || error?.message || "Failed to export PPC dashboard PDF.");
@@ -2924,7 +3191,7 @@ const ClientDashboardPage: React.FC = () => {
       }
       setExportingPdf(false);
     }
-  }, [activeTab, client?.name, client?.domain, clientId, dateRange, dashboardSection]);
+  }, [activeTab, client?.name, client?.domain, dateRange, dashboardSection, fetchPpcReportPayload, generateStyledPpcPdfFromHtml]);
 
   const handleRefreshDashboard = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
@@ -5160,40 +5427,15 @@ const ClientDashboardPage: React.FC = () => {
     }
     try {
       setSendingPpcReport(true);
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
-      const params = {
-        start: startDate.toISOString().split("T")[0],
-        end: endDate.toISOString().split("T")[0],
-        activeOnly: "true",
-      };
-      const [campaignsRes, adGroupsRes, keywordsRes, conversionsRes, pdfRes] = await Promise.all([
-        api.get(`/clients/${clientId}/google-ads/campaigns`, { params, _silent: true } as any),
-        api.get(`/clients/${clientId}/google-ads/ad-groups`, { params, _silent: true } as any),
-        api.get(`/clients/${clientId}/google-ads/keywords`, { params, _silent: true } as any),
-        api.get(`/clients/${clientId}/google-ads/conversions`, { params, _silent: true } as any),
-        api.get(`/seo/reports/${clientId}/ppc/latest-pdf`, { params: { period: "monthly" }, responseType: "blob", _silent: true } as any),
-      ]);
-      const reportPayload = {
-        success: true,
-        data: {
-          summary: campaignsRes?.data?.data?.summary ?? null,
-          campaigns: campaignsRes?.data?.data?.campaigns ?? [],
-          adGroups: adGroupsRes?.data?.data?.adGroups ?? [],
-          keywords: keywordsRes?.data?.data?.keywords ?? [],
-          conversions: conversionsRes?.data?.data?.conversions ?? [],
-          conversionsSummary: conversionsRes?.data?.data?.summary ?? null,
-        },
-      };
+      const reportPayload = await fetchPpcReportPayload();
       const emailHtml = buildPpcEmailHtmlFromReport(reportPayload, client?.name || "Client");
-      const pdfBlob = pdfRes?.data instanceof Blob ? pdfRes.data : new Blob([pdfRes?.data], { type: "application/pdf" });
+      const { blob: pdfBlob, fileName } = await generateStyledPpcPdfFromHtml(emailHtml, "ppc_monthly");
       const pdfBase64 = await blobToBase64(pdfBlob);
       await api.post(`/seo/reports/${clientId}/ppc/send`, {
         recipients: ppcScheduleMeta.recipients,
         emailHtml,
         attachment: {
-          filename: `ppc-analytics-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+          filename: fileName,
           contentType: "application/pdf",
           contentBase64: pdfBase64,
         },
@@ -5208,7 +5450,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setSendingPpcReport(false);
     }
-  }, [client?.name, clientId, canModifyClientSettings, ppcScheduleMeta.recipients]);
+  }, [client?.name, clientId, canModifyClientSettings, ppcScheduleMeta.recipients, fetchPpcReportPayload, generateStyledPpcPdfFromHtml]);
 
   const handleSendLocalMapReportNow = useCallback(async () => {
     if (!clientId) {
@@ -6009,6 +6251,27 @@ const ClientDashboardPage: React.FC = () => {
 
   const loadPpcScheduleMeta = useCallback(async () => {
     if (!clientId) return;
+    if (clientPortalMode || user?.role === "USER") {
+      setLocalMapScheduleMeta({
+        hasSchedule: false,
+        scheduleId: null,
+        isActive: false,
+        frequency: null,
+        lastRunAt: null,
+        nextRunAt: null,
+        recipients: [],
+      });
+      setPpcScheduleMeta({
+        hasSchedule: false,
+        scheduleId: null,
+        isActive: false,
+        frequency: null,
+        lastRunAt: null,
+        nextRunAt: null,
+        recipients: [],
+      });
+      return;
+    }
     try {
       const res = await api.get(`/seo/reports/${clientId}/schedules`);
       const schedules = Array.isArray(res.data) ? res.data : [];
@@ -6097,7 +6360,7 @@ const ClientDashboardPage: React.FC = () => {
         recipients: [],
       });
     }
-  }, [clientId]);
+  }, [clientId, clientPortalMode, user?.role]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -13698,8 +13961,28 @@ const ClientDashboardPage: React.FC = () => {
 
                 {selectedReport?.scheduleKind === "ppc" ? (
                   <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-
                     {reportPreviewPpcLoading ? (
+                      <div className="flex items-center justify-center py-8 text-gray-500">
+                        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                        <span>Loading PPC report data...</span>
+                      </div>
+                    ) : reportPreviewPpcError ? (
+                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+                        {reportPreviewPpcError}
+                      </div>
+                    ) : (
+                      <iframe
+                        ref={ppcPreviewIframeRef}
+                        title="PPC Email Body Preview"
+                        className="w-full min-h-[1200px] rounded-lg border border-gray-200 bg-white"
+                        srcDoc={buildPpcEmailHtmlFromReport(
+                          reportPreviewPpcData || { success: true, data: {} },
+                          client?.name || "Client"
+                        )}
+                      />
+                    )}
+
+                    {false && (reportPreviewPpcLoading ? (
                       <div className="flex items-center justify-center py-8 text-gray-500">
                         <Loader2 className="h-5 w-5 animate-spin mr-2" />
                         <span>Loading PPC report data...</span>
@@ -13989,7 +14272,7 @@ const ClientDashboardPage: React.FC = () => {
                         <p className="text-sm text-gray-500">No PPC data available.</p>
                         <p className="text-xs text-gray-400 mt-1">Ensure your Google Ads account has active campaigns, ad groups, keywords, or conversions in this period.</p>
                       </div>
-                    )}
+                    ))}
                   </div>
                 ) : (
                   <>
@@ -14703,6 +14986,11 @@ const ClientDashboardPage: React.FC = () => {
               </button>
               <button
                 onClick={async () => {
+                   const isPpcPreviewReport = String(selectedReport?.type || "").toLowerCase().includes("ppc");
+                   if (isPpcPreviewReport) {
+                     await exportPpcPreviewStyledPdf();
+                     return;
+                   }
                    if (!modalDashboardContentRef.current) {
                      toast.error("Unable to export. Please try again.");
                      return;
