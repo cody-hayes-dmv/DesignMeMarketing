@@ -35,11 +35,20 @@ type LocalMapSnapshotRunnerProps = {
   description: string;
 };
 
+const DEFAULT_MAP_ZOOM = 11;
+const MAP_CANVAS_SIZE_PX = 560;
+
 function colorForRank(rank: number | null): string {
-  if (rank != null && rank >= 1 && rank <= 3) return "bg-emerald-500 text-white";
-  if (rank != null && rank >= 4 && rank <= 10) return "bg-yellow-300 text-yellow-900";
-  if (rank != null && rank >= 11 && rank <= 20) return "bg-orange-300 text-orange-900";
-  return "bg-rose-300 text-rose-900";
+  if (rank != null && rank >= 1 && rank <= 3) return "bg-emerald-700 text-white shadow-emerald-800/45";
+  if (rank != null && rank >= 4 && rank <= 7) return "bg-lime-600 text-white shadow-lime-800/45";
+  if (rank != null && rank >= 8 && rank <= 10) return "bg-amber-500 text-white shadow-amber-700/45";
+  if (rank != null && rank >= 11 && rank <= 20) return "bg-orange-600 text-white shadow-orange-800/45";
+  return "bg-red-700 text-white shadow-red-900/45";
+}
+
+function rankLabel(rank: number | null): string {
+  if (rank == null || rank > 20) return "20+";
+  return String(rank);
 }
 
 const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
@@ -72,6 +81,85 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
     }
     return rows;
   }, [gridData]);
+
+  const mapCenter = useMemo(() => {
+    if (gridData.length) {
+      const valid = gridData.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+      if (valid.length) {
+        const minLat = Math.min(...valid.map((p) => p.lat));
+        const maxLat = Math.max(...valid.map((p) => p.lat));
+        const minLng = Math.min(...valid.map((p) => p.lng));
+        const maxLng = Math.max(...valid.map((p) => p.lng));
+        return { lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 };
+      }
+    }
+    if (business && Number.isFinite(business.lat) && Number.isFinite(business.lng)) {
+      return { lat: business.lat, lng: business.lng };
+    }
+    return null;
+  }, [business, gridData]);
+
+  const mapZoom = useMemo(() => {
+    const valid = gridData.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    if (valid.length < 2) return DEFAULT_MAP_ZOOM;
+
+    const toWorld0 = (lat: number, lng: number) => {
+      const x = ((lng + 180) / 360) * 256;
+      const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+      const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+      const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 256;
+      return { x, y };
+    };
+
+    const world = valid.map((p) => toWorld0(p.lat, p.lng));
+    const minX = Math.min(...world.map((p) => p.x));
+    const maxX = Math.max(...world.map((p) => p.x));
+    const minY = Math.min(...world.map((p) => p.y));
+    const maxY = Math.max(...world.map((p) => p.y));
+    const spanX = Math.max(1e-6, maxX - minX);
+    const spanY = Math.max(1e-6, maxY - minY);
+    const targetPx = MAP_CANVAS_SIZE_PX * 0.72;
+    const zoomX = Math.log2(targetPx / spanX);
+    const zoomY = Math.log2(targetPx / spanY);
+    const fitted = Math.floor(Math.min(zoomX, zoomY));
+    return Math.max(8, Math.min(16, Number.isFinite(fitted) ? fitted : DEFAULT_MAP_ZOOM));
+  }, [gridData]);
+
+  const embeddedMapUrl = useMemo(() => {
+    if (!mapCenter) return null;
+    return `https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&z=${mapZoom}&output=embed`;
+  }, [mapCenter, mapZoom]);
+
+  const mapProjectedPoints = useMemo(() => {
+    if (!mapCenter || !gridData.length) return [];
+    const toWorld = (lat: number, lng: number, zoom: number) => {
+      const scale = 256 * 2 ** zoom;
+      const x = ((lng + 180) / 360) * scale;
+      const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+      const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+      const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+      return { x, y };
+    };
+    const centerWorld = toWorld(mapCenter.lat, mapCenter.lng, mapZoom);
+    return gridData
+      .map((point, idx) => {
+        if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+        const world = toWorld(point.lat, point.lng, mapZoom);
+        const deltaX = world.x - centerWorld.x;
+        const deltaY = world.y - centerWorld.y;
+        const leftPct = 50 + (deltaX / MAP_CANVAS_SIZE_PX) * 100;
+        const topPct = 50 + (deltaY / MAP_CANVAS_SIZE_PX) * 100;
+        return {
+          id: `${idx}-${point.lat}-${point.lng}`,
+          rank: point.rank,
+          leftPct,
+          topPct,
+        };
+      })
+      .filter((point): point is { id: string; rank: number | null; leftPct: number; topPct: number } =>
+        Boolean(point && Number.isFinite(point.leftPct) && Number.isFinite(point.topPct))
+      );
+  }, [gridData, mapCenter, mapZoom]);
 
   const snapshotAllowanceBanner = useMemo(() => {
     if (superAdminMode) return null;
@@ -558,24 +646,68 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
 
       {gridRows.length > 0 && (
         <div className="local-map-snapshot-pdf-section bg-white rounded-2xl border border-gray-200 p-5 overflow-x-auto shadow-sm">
-          <div className="mb-3">
-            <p className="text-sm font-semibold text-gray-900">Map Grid Heat View</p>
-            <p className="text-xs text-gray-600">Green: 1-3, Yellow: 4-10, Orange: 11-20, Red: Not ranked / 20+</p>
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Local Rank Grid</p>
+              <p className="text-xs text-gray-600">Styled 7x7-style heat view for prospect snapshots.</p>
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-gray-600">
+              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-lime-600" />4-7</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />8-10</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-600" />11-20</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-700" />20+</span>
+            </div>
           </div>
-          <div className="space-y-1 min-w-[520px]">
-            {gridRows.map((row, rowIdx) => (
-              <div key={rowIdx} className="grid grid-cols-7 gap-1">
-                {row.map((point, colIdx) => (
+          <div
+            className="relative rounded-2xl border border-gray-200 p-4 overflow-hidden"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at center, rgba(59,130,246,0.10) 0%, rgba(148,163,184,0.06) 42%, rgba(15,23,42,0.05) 100%)",
+            }}
+          >
+            <div className="relative z-10 min-w-[560px] w-[560px] h-[560px] mx-auto rounded-xl overflow-hidden border border-gray-300">
+              {embeddedMapUrl ? (
+                <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
+                  <iframe
+                    title="Google map snapshot background"
+                    src={embeddedMapUrl}
+                    className="h-full w-full opacity-90 pointer-events-auto"
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                </div>
+              ) : null}
+              <div className="absolute inset-0 bg-white/20 pointer-events-none" />
+              <div
+                className="absolute inset-0 opacity-30 pointer-events-none"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)",
+                  backgroundSize: "14.2857% 14.2857%",
+                }}
+              />
+              {mapProjectedPoints.map((point) => {
+                const isCenter = Math.abs(point.leftPct - 50) < 0.6 && Math.abs(point.topPct - 50) < 0.6;
+                const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
+                if (!inFrame) return null;
+                return (
                   <div
-                    key={`${rowIdx}-${colIdx}`}
-                    className={`h-12 rounded text-[11px] font-semibold flex items-center justify-center ${colorForRank(point.rank)}`}
-                    title={`Rank: ${point.rank == null ? "Not Ranked" : point.rank}`}
+                    key={point.id}
+                    className={`absolute h-10 w-10 rounded-full text-[11px] font-semibold flex items-center justify-center shadow pointer-events-none ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""}`}
+                    style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
+                    title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
                   >
-                    {point.rank == null ? "NR" : point.rank}
+                    {rankLabel(point.rank)}
                   </div>
-                ))}
-              </div>
-            ))}
+                );
+              })}
+              <div
+                className="absolute h-4 w-4 rounded-full bg-blue-600 border-2 border-white shadow pointer-events-none"
+                style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+                title="Business center"
+              />
+            </div>
           </div>
         </div>
       )}
