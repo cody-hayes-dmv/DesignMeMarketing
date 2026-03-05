@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { Loader2, PersonStanding, Info, Plus, Users, ClipboardList } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
 import ClientAccountFormModal, { EMPTY_CLIENT_FORM } from "@/components/ClientAccountFormModal";
@@ -27,6 +28,7 @@ interface ClientRow {
 }
 
 const SpecialistClientsPage = () => {
+  const navigate = useNavigate();
   const user = useSelector((s: RootState) => s.auth.user);
   const canAddBacklinks = (user?.specialties ?? []).includes("LINK_BUILDING");
   const [tasks, setTasks] = useState<TaskWithClient[]>([]);
@@ -174,12 +176,27 @@ const SpecialistClientsPage = () => {
               {clients.map((client, index) => (
                 <tr
                   key={client.id}
-                  className={`transition-colors ${index % 2 === 0 ? "hover:bg-violet-50/50" : "bg-gray-50/60 hover:bg-violet-50/50"}`}
+                  onClick={() =>
+                    navigate(`/specialist/clients/${client.id}`, {
+                      state: {
+                        tab: "dashboard",
+                        section: "seo",
+                        specialistViewOnly: true,
+                        client: {
+                          id: client.id,
+                          name: client.name,
+                          domain: client.domain,
+                        },
+                      },
+                    })
+                  }
+                  className={`cursor-pointer transition-colors ${index % 2 === 0 ? "hover:bg-violet-50/50" : "bg-gray-50/60 hover:bg-violet-50/50"}`}
                 >
                   <td className="px-6 py-4 text-sm font-semibold text-gray-900">{client.name}</td>
                   <td className="px-6 py-4 text-sm">
                     {client.domain?.trim() ? (
                       <a
+                        onClick={(e) => e.stopPropagation()}
                         href={/^https?:\/\//i.test(client.domain) ? client.domain : `https://${client.domain}`}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -193,6 +210,7 @@ const SpecialistClientsPage = () => {
                   </td>
                   <td className="px-6 py-4 text-sm">
                     <Link
+                      onClick={(e) => e.stopPropagation()}
                       to={`/specialist/tasks?clientId=${client.id}`}
                       className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-800 font-medium hover:bg-emerald-200 transition-colors"
                     >
@@ -203,7 +221,10 @@ const SpecialistClientsPage = () => {
                     <td className="px-6 py-4 text-sm">
                       <button
                         type="button"
-                        onClick={() => setAddBacklinkClient({ id: client.id, domain: client.domain })}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAddBacklinkClient({ id: client.id, domain: client.domain });
+                        }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-50 text-violet-800 font-medium hover:bg-violet-100 transition-colors"
                       >
                         <Plus className="h-4 w-4" />
@@ -214,7 +235,8 @@ const SpecialistClientsPage = () => {
                   <td className="px-6 py-4 text-sm">
                     <button
                       type="button"
-                      onClick={async () => {
+                        onClick={async (e) => {
+                          e.stopPropagation();
                         setCompanyInfoClientId(client.id);
                         setLoadingCompanyInfo(true);
                         setCompanyInfoClient(null);

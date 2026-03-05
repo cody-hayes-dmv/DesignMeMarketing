@@ -2069,6 +2069,13 @@ router.get('/:id/ga4/status', authenticateToken, async (req, res) => {
             });
             hasAccess = Boolean(cu);
         }
+        if (!hasAccess && req.user.role === 'SPECIALIST') {
+            const task = await prisma.task.findFirst({
+                where: { clientId, assigneeId: req.user.userId },
+                select: { id: true },
+            });
+            hasAccess = Boolean(task);
+        }
 
         if (!hasAccess) {
             return res.status(403).json({ message: 'Access denied' });

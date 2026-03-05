@@ -124,6 +124,15 @@ const safeFormatLocalMapDate = (
   }).format(date);
 };
 
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 const ProspectSnapshotPage: React.FC = () => {
   const [overview, setOverview] = useState<LocalMapOverview | null>(null);
   const [agencyUsage, setAgencyUsage] = useState<AgencyUsageRow[]>([]);
@@ -156,8 +165,11 @@ const ProspectSnapshotPage: React.FC = () => {
     label: null,
   });
   const localMapReportContentRef = useRef<HTMLDivElement | null>(null);
+  const debouncedKeywordSearch = useDebouncedValue(keywordSearch, 180);
+  const debouncedSnapshotSearch = useDebouncedValue(snapshotSearch, 180);
+  const debouncedAgencyUsageSearch = useDebouncedValue(agencyUsageSearch, 180);
 
-  const loadAdminData = async () => {
+  const loadAdminData = useCallback(async () => {
     try {
       const [overviewRes, usageRes, keywordsRes, snapshotsRes] = await Promise.all([
         api.get("/local-map/admin/overview"),
@@ -189,7 +201,7 @@ const ProspectSnapshotPage: React.FC = () => {
     } catch (error: any) {
       toast.error(error?.response?.data?.message || "Failed to load local map admin data");
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadAdminData();
@@ -522,7 +534,7 @@ const ProspectSnapshotPage: React.FC = () => {
   };
 
   const filteredKeywords = useMemo(() => {
-    const q = keywordSearch.trim().toLowerCase();
+    const q = debouncedKeywordSearch.trim().toLowerCase();
     return keywords.filter((row) => {
       if (keywordStatusFilter !== "all" && row.status !== keywordStatusFilter) return false;
       if (!q) return true;
@@ -534,10 +546,10 @@ const ProspectSnapshotPage: React.FC = () => {
       ].join(" ").toLowerCase();
       return haystack.includes(q);
     });
-  }, [keywords, keywordSearch, keywordStatusFilter]);
+  }, [keywords, debouncedKeywordSearch, keywordStatusFilter]);
 
   const filteredSnapshots = useMemo(() => {
-    const q = snapshotSearch.trim().toLowerCase();
+    const q = debouncedSnapshotSearch.trim().toLowerCase();
     return snapshots.filter((row) => {
       if (!q) return true;
       const haystack = [
@@ -548,14 +560,14 @@ const ProspectSnapshotPage: React.FC = () => {
       ].join(" ").toLowerCase();
       return haystack.includes(q);
     });
-  }, [snapshots, snapshotSearch]);
+  }, [snapshots, debouncedSnapshotSearch]);
 
   const filteredAgencyUsage = useMemo(() => {
-    const q = agencyUsageSearch.trim().toLowerCase();
+    const q = debouncedAgencyUsageSearch.trim().toLowerCase();
     return agencyUsage
       .filter((agency) => (agencyUsageFilterId === "all" ? true : agency.id === agencyUsageFilterId))
       .filter((agency) => (q ? agency.name.toLowerCase().includes(q) : true));
-  }, [agencyUsage, agencyUsageFilterId, agencyUsageSearch]);
+  }, [agencyUsage, agencyUsageFilterId, debouncedAgencyUsageSearch]);
 
   return (
     <div className="p-6 space-y-8">

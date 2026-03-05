@@ -1856,7 +1856,13 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       });
       hasAccess = Boolean(cu);
     }
-
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -2005,6 +2011,13 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -3073,6 +3086,13 @@ router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -3208,6 +3228,13 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -3559,6 +3586,13 @@ router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -3896,6 +3930,13 @@ router.delete("/keywords/:clientId/:keywordId", authenticateToken, async (req, r
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -4516,6 +4557,13 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -4758,6 +4806,13 @@ router.post("/backlinks/:clientId/import", authenticateToken, async (req, res) =
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -4832,6 +4887,13 @@ router.delete("/backlinks/:clientId/:backlinkId", authenticateToken, async (req,
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -4890,6 +4952,13 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -6829,6 +6898,13 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -8408,6 +8484,20 @@ router.get("/events/:clientId/top", authenticateToken, async (req, res) => {
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -8507,6 +8597,20 @@ router.get("/visitor-sources/:clientId", authenticateToken, async (req, res) => 
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -8902,7 +9006,14 @@ router.get("/reports/:clientId/campaign-wins", authenticateToken, async (req, re
     });
     const userAgencyIds = userMemberships.map(m => m.agencyId);
     const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    const hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    let hasAgencyAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
+    if (!hasAgencyAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAgencyAccess = Boolean(task);
+    }
     if (!hasAgencyAccess) return res.status(403).json({ message: "Access denied" });
 
     const parseRecipientsField = (value: unknown): string[] => {
@@ -9475,11 +9586,41 @@ router.post("/reports/:reportId/send", authenticateToken, async (req, res) => {
   }
 });
 
+function buildPpcPdfEmailAttachment(filename: string, pdfBuffer: Buffer) {
+  const normalized = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+  if (normalized.length < 8 || normalized.subarray(0, 4).toString("ascii") !== "%PDF") {
+    throw new Error("Generated PPC PDF is invalid");
+  }
+  return {
+    filename,
+    content: normalized.toString("base64"),
+    encoding: "base64" as const,
+    contentType: "application/pdf",
+  };
+}
+
+function parseClientProvidedPpcPdfAttachment(rawAttachment: unknown): { filename: string; pdf: Buffer } | null {
+  if (!rawAttachment || typeof rawAttachment !== "object") return null;
+  const record = rawAttachment as Record<string, unknown>;
+  const contentBase64 = typeof record.contentBase64 === "string" ? record.contentBase64.trim() : "";
+  if (!contentBase64) return null;
+  const cleanedBase64 = contentBase64.replace(/^data:application\/pdf;base64,/i, "").replace(/\s+/g, "");
+  const pdf = Buffer.from(cleanedBase64, "base64");
+  if (!pdf.length || pdf.subarray(0, 4).toString("ascii") !== "%PDF") {
+    throw new Error("Client-provided PPC PDF is invalid");
+  }
+  const rawFilename = typeof record.filename === "string" ? record.filename.trim() : "";
+  const filename = (rawFilename || "ppc-report.pdf").replace(/[^\w.\-]/g, "-");
+  return { filename, pdf };
+}
+
 // Send PPC report immediately (without waiting for scheduler window)
 router.post("/reports/:clientId/ppc/send", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
     const { recipients, emailSubject, period } = req.body ?? {};
+    const bodyEmailHtml = typeof req.body?.emailHtml === "string" ? req.body.emailHtml.trim() : "";
+    const clientProvidedAttachment = parseClientProvidedPpcPdfAttachment(req.body?.attachment);
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -9541,8 +9682,13 @@ router.post("/reports/:clientId/ppc/send", authenticateToken, async (req, res) =
     const { sendEmail } = await import("../lib/email.js");
 
     const ppcReport = await autoGeneratePpcReport(clientId, requestedPeriod);
-    const html = generatePpcReportEmailHtml(client.name, ppcReport);
-    const pdfBuffer = await generatePpcReportPdfBuffer(client.name, ppcReport);
+    const html = bodyEmailHtml || generatePpcReportEmailHtml(client.name, ppcReport);
+    const pdfAttachment = clientProvidedAttachment
+      ? buildPpcPdfEmailAttachment(clientProvidedAttachment.filename, clientProvidedAttachment.pdf)
+      : buildPpcPdfEmailAttachment(
+          `ppc-report-${client.name.replace(/\s+/g, "-").toLowerCase()}-${requestedPeriod}.pdf`,
+          await generatePpcReportPdfBuffer(client.name, ppcReport)
+        );
 
     const subjectFromSchedule = String(activePpcSchedule?.emailSubject || "")
       .replace(PPC_SCHEDULE_SUBJECT_PREFIX, "")
@@ -9558,13 +9704,7 @@ router.post("/reports/:clientId/ppc/send", authenticateToken, async (req, res) =
           to,
           subject: resolvedSubject,
           html,
-          attachments: [
-            {
-              filename: `ppc-report-${client.name.replace(/\s+/g, "-").toLowerCase()}-${requestedPeriod}.pdf`,
-              content: pdfBuffer,
-              contentType: "application/pdf",
-            },
-          ],
+          attachments: [pdfAttachment],
         })
       )
     );
@@ -10420,6 +10560,20 @@ router.get("/ranked-keywords/:clientId", authenticateToken, async (req, res) => 
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -10520,6 +10674,13 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -10949,6 +11110,20 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -11035,6 +11210,13 @@ router.get("/top-pages/:clientId/keywords", authenticateToken, async (req, res) 
       });
       hasAccess = Boolean(cu);
     }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
+    }
 
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -11107,6 +11289,13 @@ router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -11188,6 +11377,13 @@ router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => 
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -12271,6 +12467,13 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
         select: { id: true },
       });
       hasAccess = Boolean(cu);
+    }
+    if (!hasAccess && req.user.role === "SPECIALIST") {
+      const task = await prisma.task.findFirst({
+        where: { clientId, assigneeId: req.user.userId },
+        select: { id: true },
+      });
+      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {

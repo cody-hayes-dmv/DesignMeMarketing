@@ -19,7 +19,6 @@ import ReportsPage from "./pages/ReportsPage";
 import TeamPage from "./pages/TeamPage";
 import SettingsPage from "./pages/SettingsPage";
 import TasksPage from "./pages/TasksPage";
-import PlaceholderAgencyPage from "./pages/Agency/PlaceholderAgencyPage";
 import SubscriptionPage from "./pages/Agency/SubscriptionPage";
 import ManagedServicesPage from "./pages/Agency/ManagedServicesPage";
 import AddOnsPage from "./pages/Agency/AddOnsPage";
@@ -167,6 +166,7 @@ function App() {
   const specialistRoutes = [
     { path: "/specialist/dashboard", component: SpecialistDashboard },
     { path: "/specialist/clients", component: SpecialistClientsPage },
+    { path: "/specialist/clients/:clientId", component: ClientDashboardPage },
     { path: "/specialist/tasks", component: TasksPage },
     { path: "/specialist/settings", component: SettingsPage },
   ];

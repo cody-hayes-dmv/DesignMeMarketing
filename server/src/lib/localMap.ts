@@ -39,8 +39,9 @@ const DEFAULT_GRID_SPACING_MILES = 0.5;
 const NOT_RANKED_FALLBACK = 20;
 const DEFAULT_DATAFORSEO_LANGUAGE_CODE = "en";
 const DEFAULT_DATAFORSEO_DEVICE = "desktop";
-const DEFAULT_LOCAL_GRID_CONCURRENCY = 12;
-const DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS = 15000;
+const DEFAULT_LOCAL_GRID_CONCURRENCY = 20;
+const DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS = 8000;
+const DEFAULT_LOCAL_GRID_SINGLE_RUN_TIMEOUT_MS = 12000;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -190,19 +191,32 @@ async function tryRunLocalRankTrackerGrid(
     },
   ];
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${base64Auth}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  const singleRunTimeoutMs = Math.max(
+    3000,
+    Number(process.env.DATAFORSEO_LOCAL_GRID_SINGLE_RUN_TIMEOUT_MS ?? DEFAULT_LOCAL_GRID_SINGLE_RUN_TIMEOUT_MS)
+  );
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let response: Response;
+  try {
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), singleRunTimeoutMs);
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${base64Auth}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch {
+    return null;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 
   const json = await getJsonResponse(response);
-  if (!response.ok) {
-    return null;
-  }
+  if (!response.ok) return null;
 
   const tasks = Array.isArray((json as UnknownRecord)?.tasks)
     ? ((json as UnknownRecord).tasks as unknown[])
@@ -454,8 +468,14 @@ export async function runDataForSeoLocalGrid(
   const targetPlaceId = normalizePlaceId(input.placeId);
   const targetBusinessName = String(input.businessName ?? "");
   const points = gridCoordinates(input.centerLat, input.centerLng, gridSize, spacingMeters);
-  const pointTimeoutMs = Math.max(3000, Number(process.env.DATAFORSEO_LOCAL_GRID_POINT_TIMEOUT_MS ?? DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS));
-  const concurrency = Math.max(1, Number(process.env.DATAFORSEO_LOCAL_GRID_CONCURRENCY ?? DEFAULT_LOCAL_GRID_CONCURRENCY));
+  const pointTimeoutMs = Math.max(
+    3000,
+    Number(process.env.DATAFORSEO_LOCAL_GRID_POINT_TIMEOUT_MS ?? DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS)
+  );
+  const concurrency = Math.max(
+    1,
+    Number(process.env.DATAFORSEO_LOCAL_GRID_CONCURRENCY ?? DEFAULT_LOCAL_GRID_CONCURRENCY)
+  );
 
   // Preferred mode: single Local Rank Tracker-style request with place_id + grid params.
   // Falls back to per-point requests if endpoint/account does not support this payload.

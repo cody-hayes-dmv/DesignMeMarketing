@@ -489,6 +489,146 @@ const buildLocalMapEmailHtmlFromReport = (
   `;
 };
 
+const buildPpcEmailHtmlFromReport = (
+  reportData: any,
+  clientName: string
+): string => {
+  const data = reportData?.data ?? {};
+  const summary = data?.summary ?? {};
+  const conversionsSummary = data?.conversionsSummary ?? {};
+  const campaigns = Array.isArray(data?.campaigns) ? data.campaigns : [];
+  const adGroups = Array.isArray(data?.adGroups) ? data.adGroups : [];
+  const keywords = Array.isArray(data?.keywords) ? data.keywords : [];
+  const conversions = Array.isArray(data?.conversions) ? data.conversions : [];
+  const esc = (value: unknown) => escapeLocalMapEmailHtml(String(value ?? ""));
+  const fmtInt = (value: unknown) => Number(value ?? 0).toLocaleString();
+  const fmtMoney = (value: unknown) =>
+    `$${Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtPct = (value: unknown, digits = 2) => `${Number(value ?? 0).toFixed(digits)}%`;
+
+  const campaignRows = campaigns
+    .map((row: any) => {
+      const clicks = Number(row?.clicks ?? 0);
+      const impressions = Number(row?.impressions ?? 0);
+      const conversionsCount = Number(row?.conversions ?? 0);
+      const cost = Number(row?.cost ?? 0);
+      const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+      const convRate = clicks > 0 ? (conversionsCount / clicks) * 100 : 0;
+      const costPerConv = conversionsCount > 0 ? cost / conversionsCount : 0;
+      return `
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.name || "N/A")}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(clicks)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(impressions)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtPct(ctr)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(conversionsCount)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtPct(convRate)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(cost)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.avgCpc)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(costPerConv)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  const adGroupRows = adGroups
+    .map((row: any) => {
+      const clicks = Number(row?.clicks ?? 0);
+      const impressions = Number(row?.impressions ?? 0);
+      const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+      return `
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.name || "N/A")}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.campaignName || "N/A")}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.clicks)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.impressions)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtPct(ctr)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.conversions)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.cost)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.avgCpc)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  const keywordRows = keywords
+    .map((row: any) => {
+      const impressions = Number(row?.impressions ?? 0);
+      const clicks = Number(row?.clicks ?? 0);
+      const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+      return `
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.keyword || "N/A")}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.matchType || "UNKNOWN")}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.campaignName || "N/A")}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.clicks)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.impressions)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtPct(ctr)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtPct(Number(row?.impressionShare ?? 0) * 100, 1)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.conversions)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.cost)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.avgCpc)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  const conversionRows = conversions
+    .map((row: any) => `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.date ? new Date(row.date).toLocaleDateString() : "N/A")}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.conversionAction || "N/A")}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${esc(row?.campaignName || "N/A")}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.conversions)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.conversionValue)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtInt(row?.clicks)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.cost)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtMoney(row?.costPerConversion)}</td>
+      </tr>
+    `)
+    .join("");
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>PPC Analytics Report</title></head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827; background: #f3f4f6; margin: 0; padding: 24px;">
+        <div style="max-width: 980px; margin: 0 auto; background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
+          <div style="padding: 20px; background: linear-gradient(90deg, #2563eb, #1d4ed8); color: #fff;">
+            <h2 style="margin: 0 0 6px;">PPC Analytics Report</h2>
+            <p style="margin: 0; color: #dbeafe; font-size: 13px;">${esc(clientName || "Client")}</p>
+          </div>
+          <div style="padding: 18px;">
+            <h3 style="margin: 0 0 10px; font-size: 14px;">Campaign Performance Overview</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; margin-bottom: 12px;">
+              <tr>
+                <td style="padding: 8px; border: 1px solid #dbeafe; background: #eff6ff;"><strong>Clicks:</strong> ${fmtInt(summary?.clicks)}</td>
+                <td style="padding: 8px; border: 1px solid #dbeafe; background: #eef2ff;"><strong>Impressions:</strong> ${fmtInt(summary?.impressions)}</td>
+                <td style="padding: 8px; border: 1px solid #d1fae5; background: #ecfdf5;"><strong>Conversions:</strong> ${fmtInt(summary?.conversions)}</td>
+                <td style="padding: 8px; border: 1px solid #e9d5ff; background: #faf5ff;"><strong>Cost:</strong> ${fmtMoney(summary?.cost)}</td>
+              </tr>
+            </table>
+
+            <h3 style="margin: 12px 0 8px; font-size: 14px;">Campaigns</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; margin-bottom: 12px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impr.</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Conv.</th><th align="right" style="padding:8px 10px;">Conv. Rate</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th><th align="right" style="padding:8px 10px;">Cost/Conv.</th></tr></thead><tbody>${campaignRows || `<tr><td colspan="9" style="padding:10px;color:#6b7280;">No campaign data available.</td></tr>`}</tbody></table>
+
+            <h3 style="margin: 12px 0 8px; font-size: 14px;">Ad Groups</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; margin-bottom: 12px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Ad Group</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impr.</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Conv.</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th></tr></thead><tbody>${adGroupRows || `<tr><td colspan="8" style="padding:10px;color:#6b7280;">No ad group data available.</td></tr>`}</tbody></table>
+
+            <h3 style="margin: 12px 0 8px; font-size: 14px;">Keywords</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; margin-bottom: 12px;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Keyword</th><th align="left" style="padding:8px 10px;">Match Type</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Impr.</th><th align="right" style="padding:8px 10px;">CTR</th><th align="right" style="padding:8px 10px;">Imp. Share</th><th align="right" style="padding:8px 10px;">Conv.</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Avg CPC</th></tr></thead><tbody>${keywordRows || `<tr><td colspan="10" style="padding:10px;color:#6b7280;">No keyword data available.</td></tr>`}</tbody></table>
+
+            <h3 style="margin: 12px 0 8px; font-size: 14px;">Conversions</h3>
+            <p style="margin: 0 0 8px; font-size: 12px; color:#4b5563;">
+              <strong>Total Conversions:</strong> ${fmtInt(conversionsSummary?.totalConversions)} &nbsp;•&nbsp;
+              <strong>Conversion Value:</strong> ${fmtMoney(conversionsSummary?.conversionValue)} &nbsp;•&nbsp;
+              <strong>Conversion Rate:</strong> ${fmtPct(conversionsSummary?.conversionRate)}
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; border: 1px solid #e5e7eb;"><thead><tr style="background:#f9fafb;"><th align="left" style="padding:8px 10px;">Date</th><th align="left" style="padding:8px 10px;">Action</th><th align="left" style="padding:8px 10px;">Campaign</th><th align="right" style="padding:8px 10px;">Conversions</th><th align="right" style="padding:8px 10px;">Value</th><th align="right" style="padding:8px 10px;">Clicks</th><th align="right" style="padding:8px 10px;">Cost</th><th align="right" style="padding:8px 10px;">Cost/Conv.</th></tr></thead><tbody>${conversionRows || `<tr><td colspan="8" style="padding:10px;color:#6b7280;">No conversion data available.</td></tr>`}</tbody></table>
+            <p style="margin:10px 0 0; font-size:12px; color:#6b7280;">The attached PDF matches the PPC report preview export.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+};
+
 const blobToBase64 = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -525,6 +665,33 @@ const formatPercentChange = (current: number, previous: number): { text: string;
 const formatDashboardSummary = (payload: any): DashboardSummary =>
   normalizeDashboardSummaryPayload(payload) as DashboardSummary;
 
+type SortDirection = "asc" | "desc";
+type PpcSortConfig = { key: string; direction: SortDirection };
+
+function sortPpcRows<T>(
+  rows: T[],
+  sort: PpcSortConfig,
+  getValue: (row: T, key: string) => unknown
+): T[] {
+  const data = Array.isArray(rows) ? [...rows] : [];
+  const dir = sort.direction === "asc" ? 1 : -1;
+  data.sort((a, b) => {
+    const av = getValue(a, sort.key);
+    const bv = getValue(b, sort.key);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "number" && typeof bv === "number") {
+      return (av - bv) * dir;
+    }
+    const ad = av instanceof Date ? av.getTime() : null;
+    const bd = bv instanceof Date ? bv.getTime() : null;
+    if (ad != null && bd != null) return (ad - bd) * dir;
+    return String(av).localeCompare(String(bv), undefined, { sensitivity: "base" }) * dir;
+  });
+  return data;
+}
+
 const workLogActivityConfig: Record<ActivityType, { label: string; color: string; bg: string; border: string }> = {
   COMMENT: { label: "Comment", color: "text-slate-700", bg: "bg-slate-50", border: "border-slate-200" },
   QUESTION: { label: "Question", color: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200" },
@@ -544,12 +711,14 @@ const ClientDashboardPage: React.FC = () => {
   const navState = location.state as {
     reportOnly?: boolean;
     includedReadOnly?: boolean;
+    specialistViewOnly?: boolean;
     projectId?: string;
     pageId?: string;
   } | null;
   // When in client portal, we show only the Dashboard view for the invited client.
   const reportOnly = Boolean(navState?.reportOnly);
   const includedReadOnlyFromState = Boolean(navState?.includedReadOnly);
+  const specialistReadOnlyFromState = Boolean(navState?.specialistViewOnly);
   // Client portal: list of accessible clients (for the client switcher)
   const [clientPortalClients, setClientPortalClients] = useState<Array<{ id: string; name: string }>>([]);
   const [client, setClient] = useState<Client | null>((location.state as { client?: Client })?.client || null);
@@ -577,8 +746,11 @@ const ClientDashboardPage: React.FC = () => {
   const [dashboardSection, setDashboardSection] = useState<ClientDashboardSection>(initialNav.section);
   const [hasWebDesignProjects, setHasWebDesignProjects] = useState(false);
   const includedClientReadOnly =
-    user?.role === "AGENCY" &&
-    (includedReadOnlyFromState || (!!clientId && includedClientIds.includes(clientId)));
+    specialistReadOnlyFromState ||
+    (user?.role === "SPECIALIST" && location.pathname.startsWith("/specialist/")) ||
+    (user?.role === "AGENCY" && (includedReadOnlyFromState || (!!clientId && includedClientIds.includes(clientId))));
+  const specialistSeoOverviewOnly =
+    user?.role === "SPECIALIST" && location.pathname.startsWith("/specialist/clients/");
   const canModifyClientSettings = !includedClientReadOnly;
 
   // Client portal guard: if a client user hits a clientId they don't have access to,
@@ -848,6 +1020,85 @@ const ClientDashboardPage: React.FC = () => {
   const [ppcData, setPpcData] = useState<any>(null);
   const [ppcLoading, setPpcLoading] = useState(false);
   const [ppcError, setPpcError] = useState<string | null>(null);
+  const [ppcCampaignSort, setPpcCampaignSort] = useState<PpcSortConfig>({ key: "clicks", direction: "desc" });
+  const [ppcAdGroupSort, setPpcAdGroupSort] = useState<PpcSortConfig>({ key: "clicks", direction: "desc" });
+  const [ppcKeywordSort, setPpcKeywordSort] = useState<PpcSortConfig>({ key: "clicks", direction: "desc" });
+  const [ppcConversionSort, setPpcConversionSort] = useState<PpcSortConfig>({ key: "date", direction: "desc" });
+  const togglePpcSort = useCallback(
+    (
+      key: string,
+      current: PpcSortConfig,
+      setter: React.Dispatch<React.SetStateAction<PpcSortConfig>>
+    ) => {
+      setter(
+        current.key === key
+          ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+          : { key, direction: "desc" }
+      );
+    },
+    []
+  );
+  const sortIndicator = useCallback((sort: PpcSortConfig, key: string) => {
+    if (sort.key !== key) return "↕";
+    return sort.direction === "asc" ? "▲" : "▼";
+  }, []);
+  const sortedPpcCampaigns = useMemo(
+    () =>
+      sortPpcRows(ppcData?.data?.campaigns || [], ppcCampaignSort, (campaign: any, key: string) => {
+        if (key === "ctr") {
+          const impressions = Number(campaign?.impressions ?? 0);
+          const clicks = Number(campaign?.clicks ?? 0);
+          return impressions > 0 ? (clicks / impressions) * 100 : 0;
+        }
+        if (key === "convRate") {
+          const clicks = Number(campaign?.clicks ?? 0);
+          const conversions = Number(campaign?.conversions ?? 0);
+          return clicks > 0 ? (conversions / clicks) * 100 : 0;
+        }
+        if (key === "costPerConversion") {
+          const conversions = Number(campaign?.conversions ?? 0);
+          const cost = Number(campaign?.cost ?? 0);
+          return conversions > 0 ? cost / conversions : 0;
+        }
+        return campaign?.[key];
+      }),
+    [ppcData, ppcCampaignSort]
+  );
+  const sortedPpcAdGroups = useMemo(
+    () =>
+      sortPpcRows(ppcData?.data?.adGroups || [], ppcAdGroupSort, (adGroup: any, key: string) => {
+        if (key === "ctr") {
+          const impressions = Number(adGroup?.impressions ?? 0);
+          const clicks = Number(adGroup?.clicks ?? 0);
+          return impressions > 0 ? (clicks / impressions) * 100 : 0;
+        }
+        return adGroup?.[key];
+      }),
+    [ppcData, ppcAdGroupSort]
+  );
+  const sortedPpcKeywords = useMemo(
+    () =>
+      sortPpcRows(ppcData?.data?.keywords || [], ppcKeywordSort, (keyword: any, key: string) => {
+        if (key === "ctr") {
+          const impressions = Number(keyword?.impressions ?? 0);
+          const clicks = Number(keyword?.clicks ?? 0);
+          return impressions > 0 ? (clicks / impressions) * 100 : 0;
+        }
+        if (key === "impressionShare") {
+          return Number(keyword?.impressionShare ?? 0);
+        }
+        return keyword?.[key];
+      }),
+    [ppcData, ppcKeywordSort]
+  );
+  const sortedPpcConversions = useMemo(
+    () =>
+      sortPpcRows(ppcData?.data?.conversions || [], ppcConversionSort, (conversion: any, key: string) => {
+        if (key === "date") return conversion?.date ? new Date(conversion.date) : null;
+        return conversion?.[key];
+      }),
+    [ppcData, ppcConversionSort]
+  );
   const [ppcScheduleMeta, setPpcScheduleMeta] = useState<{
     hasSchedule: boolean;
     scheduleId: string | null;
@@ -2360,6 +2611,44 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
 
+    if (dashboardSection === "ppc") {
+      if (!clientId) {
+        toast.error("Client ID is missing");
+        return;
+      }
+      try {
+        setExportingPdf(true);
+        const pdfRes = await api.get(`/seo/reports/${clientId}/ppc/latest-pdf`, {
+          params: { period: "monthly" },
+          responseType: "blob",
+          _silent: true,
+        } as any);
+        const blob =
+          pdfRes?.data instanceof Blob
+            ? pdfRes.data
+            : new Blob([pdfRes?.data], { type: "application/pdf" });
+        const headerValue = String(pdfRes?.headers?.["content-disposition"] || "");
+        const filenameMatch = /filename="?([^"]+)"?/i.exec(headerValue);
+        const fallbackName = `${(client?.name || "client").replace(/\s+/g, "-").toLowerCase()}-ppc-report-${format(new Date(), "yyyyMMdd")}.pdf`;
+        const fileName = filenameMatch?.[1] || fallbackName;
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(objectUrl);
+        toast.success("PPC dashboard exported successfully!");
+      } catch (error: any) {
+        console.error("Failed to export PPC dashboard PDF", error);
+        toast.error(error?.response?.data?.message || error?.message || "Failed to export PPC dashboard PDF.");
+      } finally {
+        setExportingPdf(false);
+      }
+      return;
+    }
+
     const element = dashboardContentRef.current;
     const previousOverflow = document.body.style.overflow;
     const outerScrollEl = dashboardOuterScrollRef.current;
@@ -2632,7 +2921,7 @@ const ClientDashboardPage: React.FC = () => {
       }
       setExportingPdf(false);
     }
-  }, [activeTab, client?.name, client?.domain, dateRange, dashboardSection]);
+  }, [activeTab, client?.name, client?.domain, clientId, dateRange, dashboardSection]);
 
   const handleRefreshDashboard = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
@@ -3025,20 +3314,20 @@ const ClientDashboardPage: React.FC = () => {
         if (found) {
           setClient(found);
         } else {
-          navigate("/agency/clients");
+          navigate(user?.role === "SPECIALIST" ? "/specialist/clients" : "/agency/clients");
         }
       } catch (error: any) {
         console.error("Failed to load client", error);
         const errorMsg = error?.response?.data?.message || error?.message || "Failed to load client data";
         toast.error(errorMsg);
-        navigate("/agency/clients");
+        navigate(user?.role === "SPECIALIST" ? "/specialist/clients" : "/agency/clients");
       } finally {
         setLoading(false);
       }
     };
 
     fetchClient();
-  }, [clientId, client, clientPortalMode, navigate]);
+  }, [clientId, client, clientPortalMode, navigate, user?.role]);
 
   // Sync view client form when modal opens (same fields as Edit Client modal)
   useEffect(() => {
@@ -3168,6 +3457,11 @@ const ClientDashboardPage: React.FC = () => {
 
   // Set active tab from location state when component mounts or location changes
   useEffect(() => {
+    if (user?.role === "SPECIALIST") {
+      setActiveTab("dashboard");
+      setDashboardSection("seo");
+      return;
+    }
     if (clientPortalMode) {
       setActiveTab("dashboard");
       setDashboardSection("seo");
@@ -3220,10 +3514,14 @@ const ClientDashboardPage: React.FC = () => {
       setActiveTab("dashboard");
       if (state.section) setDashboardSection(state.section);
     }
-  }, [clientPortalMode, location.state]);
+  }, [clientPortalMode, location.pathname, location.state, user?.role]);
 
   useEffect(() => {
     if (!clientId) {
+      setHasWebDesignProjects(false);
+      return;
+    }
+    if (user?.role === "SPECIALIST") {
       setHasWebDesignProjects(false);
       return;
     }
@@ -3234,7 +3532,7 @@ const ClientDashboardPage: React.FC = () => {
         setHasWebDesignProjects(rows.some((p: any) => String(p?.clientId) === String(clientId)));
       })
       .catch(() => setHasWebDesignProjects(false));
-  }, [clientId]);
+  }, [clientId, user?.role]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -4304,6 +4602,16 @@ const ClientDashboardPage: React.FC = () => {
   // Load single report from server (enforced one report per client)
   const loadReport = useCallback(async (ensureFresh: boolean = true) => {
     if (!clientId) return;
+    if (user?.role === "SPECIALIST") {
+      setServerReport(null);
+      setReportError(null);
+      setCampaignWinsMeta({
+        enabled: false,
+        recipients: [],
+        lastSent: null,
+      });
+      return;
+    }
     try {
       setReportLoading(true);
       setReportError(null);
@@ -4341,7 +4649,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setReportLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, user?.role]);
 
   useEffect(() => {
     loadReport();
@@ -4717,20 +5025,31 @@ const ClientDashboardPage: React.FC = () => {
           const endDate = new Date();
           const startDate = new Date();
           startDate.setDate(startDate.getDate() - 30);
-          const res = await api.get(`/clients/${clientId}/google-ads/campaigns`, {
-            params: {
-              start: startDate.toISOString().split("T")[0],
-              end: endDate.toISOString().split("T")[0],
-              activeOnly: "true",
-            },
-            _silent: true,
-          } as any);
+          const params = {
+            start: startDate.toISOString().split("T")[0],
+            end: endDate.toISOString().split("T")[0],
+            activeOnly: "true",
+          };
+          const [campaignsRes, adGroupsRes, keywordsRes, conversionsRes] = await Promise.all([
+            api.get(`/clients/${clientId}/google-ads/campaigns`, { params, _silent: true } as any),
+            api.get(`/clients/${clientId}/google-ads/ad-groups`, { params, _silent: true } as any),
+            api.get(`/clients/${clientId}/google-ads/keywords`, { params, _silent: true } as any),
+            api.get(`/clients/${clientId}/google-ads/conversions`, { params, _silent: true } as any),
+          ]);
 
           if (cancelled) return;
-          setReportPreviewPpcData(res.data ?? null);
-          if (res.data?.success === false && typeof res.data?.message === "string") {
-            setReportPreviewPpcError(res.data.message);
-          }
+          const merged = {
+            success: true,
+            data: {
+              summary: campaignsRes?.data?.data?.summary ?? null,
+              campaigns: campaignsRes?.data?.data?.campaigns ?? [],
+              adGroups: adGroupsRes?.data?.data?.adGroups ?? [],
+              keywords: keywordsRes?.data?.data?.keywords ?? [],
+              conversions: conversionsRes?.data?.data?.conversions ?? [],
+              conversionsSummary: conversionsRes?.data?.data?.summary ?? null,
+            },
+          };
+          setReportPreviewPpcData(merged);
         } catch (e: any) {
           if (cancelled) return;
           setReportPreviewPpcData(null);
@@ -4738,7 +5057,7 @@ const ClientDashboardPage: React.FC = () => {
             e?.response?.data?.message ||
               e?.response?.data?.error ||
               e?.message ||
-              "Failed to load PPC campaign data."
+              "Failed to load PPC report data."
           );
         } finally {
           if (cancelled) return;
@@ -4838,7 +5157,44 @@ const ClientDashboardPage: React.FC = () => {
     }
     try {
       setSendingPpcReport(true);
-      await api.post(`/seo/reports/${clientId}/ppc/send`, {});
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 30);
+      const params = {
+        start: startDate.toISOString().split("T")[0],
+        end: endDate.toISOString().split("T")[0],
+        activeOnly: "true",
+      };
+      const [campaignsRes, adGroupsRes, keywordsRes, conversionsRes, pdfRes] = await Promise.all([
+        api.get(`/clients/${clientId}/google-ads/campaigns`, { params, _silent: true } as any),
+        api.get(`/clients/${clientId}/google-ads/ad-groups`, { params, _silent: true } as any),
+        api.get(`/clients/${clientId}/google-ads/keywords`, { params, _silent: true } as any),
+        api.get(`/clients/${clientId}/google-ads/conversions`, { params, _silent: true } as any),
+        api.get(`/seo/reports/${clientId}/ppc/latest-pdf`, { params: { period: "monthly" }, responseType: "blob", _silent: true } as any),
+      ]);
+      const reportPayload = {
+        success: true,
+        data: {
+          summary: campaignsRes?.data?.data?.summary ?? null,
+          campaigns: campaignsRes?.data?.data?.campaigns ?? [],
+          adGroups: adGroupsRes?.data?.data?.adGroups ?? [],
+          keywords: keywordsRes?.data?.data?.keywords ?? [],
+          conversions: conversionsRes?.data?.data?.conversions ?? [],
+          conversionsSummary: conversionsRes?.data?.data?.summary ?? null,
+        },
+      };
+      const emailHtml = buildPpcEmailHtmlFromReport(reportPayload, client?.name || "Client");
+      const pdfBlob = pdfRes?.data instanceof Blob ? pdfRes.data : new Blob([pdfRes?.data], { type: "application/pdf" });
+      const pdfBase64 = await blobToBase64(pdfBlob);
+      await api.post(`/seo/reports/${clientId}/ppc/send`, {
+        recipients: ppcScheduleMeta.recipients,
+        emailHtml,
+        attachment: {
+          filename: `ppc-analytics-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+          contentType: "application/pdf",
+          contentBase64: pdfBase64,
+        },
+      });
       toast.success("PPC report sent successfully");
     } catch (error: any) {
       console.error("Failed to send PPC report", error);
@@ -4849,7 +5205,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setSendingPpcReport(false);
     }
-  }, [clientId, canModifyClientSettings]);
+  }, [client?.name, clientId, canModifyClientSettings, ppcScheduleMeta.recipients]);
 
   const handleSendLocalMapReportNow = useCallback(async () => {
     if (!clientId) {
@@ -5900,8 +6256,12 @@ const ClientDashboardPage: React.FC = () => {
       navigate(-1);
       return;
     }
+    if (user?.role === "SPECIALIST") {
+      navigate("/specialist/clients", { replace: true });
+      return;
+    }
     navigate("/agency/clients", { replace: true });
-  }, [navigate]);
+  }, [navigate, user?.role]);
 
   // NOTE: DashboardLayout wraps pages in an `overflow-auto` container.
   // For the Client Dashboard "Dashboard" tab we want the scroll to live *inside* the tab
@@ -6351,7 +6711,7 @@ const ClientDashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {!reportOnly && (
+      {!reportOnly && !specialistSeoOverviewOnly && (
         <div className="border-b border-gray-200 px-8">
           <div className="flex items-end justify-between gap-6">
             <nav className="-mb-px flex space-x-8">
@@ -6717,41 +7077,43 @@ const ClientDashboardPage: React.FC = () => {
                 ref={dashboardContentRef}
                 className="flex flex-col gap-6 lg:flex-row lg:items-start h-full min-h-0 lg:h-full"
               >
-                <aside className="w-full lg:w-64 shrink-0" data-pdf-hide="true">
-                  <div className="bg-white border border-gray-200 rounded-xl p-2 lg:sticky lg:top-4">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-2">
-                      {(
-                        [
-                          { id: "seo", label: "SEO Overview", icon: Search },
-                          { id: "ai-intelligence", label: "AI Intelligence", icon: Sparkles },
-                          ...(user?.role === "SPECIALIST" ? [] : [{ id: "local-map" as const, label: "Local Map Rankings", icon: MapPin }]),
-                          ...(googleAdsConnected === true ? [{ id: "ppc" as const, label: "PPC", icon: TrendingUp }] : []),
-                          { id: "backlinks", label: "Backlinks", icon: Search },
-                          { id: "worklog", label: "Work Log", icon: Clock },
-                        ] as const
-                      ).map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setDashboardSection(item.id)}
-                          className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center gap-2 border transition-colors ${
-                            dashboardSection === item.id
-                              ? "bg-primary-50 text-primary-700 border-primary-200"
-                              : "bg-white text-gray-700 border-transparent hover:bg-gray-50"
-                          }`}
-                        >
-                          <item.icon className="h-4 w-4" />
-                          <span className="truncate">{item.label}</span>
-                        </button>
-                      ))}
+                {!specialistSeoOverviewOnly && (
+                  <aside className="w-full lg:w-64 shrink-0" data-pdf-hide="true">
+                    <div className="bg-white border border-gray-200 rounded-xl p-2 lg:sticky lg:top-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-2">
+                        {(
+                          [
+                            { id: "seo", label: "SEO Overview", icon: Search },
+                            { id: "ai-intelligence", label: "AI Intelligence", icon: Sparkles },
+                            ...(user?.role === "SPECIALIST" ? [] : [{ id: "local-map" as const, label: "Local Map Rankings", icon: MapPin }]),
+                            ...(googleAdsConnected === true ? [{ id: "ppc" as const, label: "PPC", icon: TrendingUp }] : []),
+                            { id: "backlinks", label: "Backlinks", icon: Search },
+                            { id: "worklog", label: "Work Log", icon: Clock },
+                          ] as const
+                        ).map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setDashboardSection(item.id)}
+                            className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center gap-2 border transition-colors ${
+                              dashboardSection === item.id
+                                ? "bg-primary-50 text-primary-700 border-primary-200"
+                                : "bg-white text-gray-700 border-transparent hover:bg-gray-50"
+                            }`}
+                          >
+                            <item.icon className="h-4 w-4" />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                </aside>
+                  </aside>
+                )}
 
                 {/* Right panel scrolls on desktop; sidebar stays fixed */}
                 <div
                   ref={dashboardRightPanelScrollRef}
-                  className="min-w-0 flex-1 min-h-0 lg:h-full lg:overflow-y-auto lg:pr-2"
+                  className={`min-w-0 flex-1 min-h-0 lg:h-full lg:overflow-y-auto ${specialistSeoOverviewOnly ? "" : "lg:pr-2"}`}
                 >
                 {dashboardSection === "seo" && (
                   <div className="space-y-8">
@@ -8296,37 +8658,19 @@ const ClientDashboardPage: React.FC = () => {
                                         <table className="min-w-full divide-y divide-gray-200">
                                           <thead className="bg-gray-50">
                                             <tr>
-                                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Campaign
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Clicks
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Impressions
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                CTR
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Conversions
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Conv. Rate
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Cost
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Avg CPC
-                                              </th>
-                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Cost/Conv.
-                                              </th>
+                                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("name", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Campaign <span>{sortIndicator(ppcCampaignSort, "name")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("clicks", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Clicks <span>{sortIndicator(ppcCampaignSort, "clicks")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("impressions", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Impressions <span>{sortIndicator(ppcCampaignSort, "impressions")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("ctr", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">CTR <span>{sortIndicator(ppcCampaignSort, "ctr")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("conversions", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Conversions <span>{sortIndicator(ppcCampaignSort, "conversions")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("convRate", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Conv. Rate <span>{sortIndicator(ppcCampaignSort, "convRate")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("cost", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Cost <span>{sortIndicator(ppcCampaignSort, "cost")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("avgCpc", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Avg CPC <span>{sortIndicator(ppcCampaignSort, "avgCpc")}</span></button></th>
+                                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("costPerConversion", ppcCampaignSort, setPpcCampaignSort)} className="inline-flex items-center gap-1">Cost/Conv. <span>{sortIndicator(ppcCampaignSort, "costPerConversion")}</span></button></th>
                                             </tr>
                                           </thead>
                                           <tbody className="bg-white divide-y divide-gray-200">
-                                            {ppcData.data.campaigns.map((campaign: any, idx: number) => {
+                                            {sortedPpcCampaigns.map((campaign: any, idx: number) => {
                                               const ctr = campaign.impressions > 0 
                                                 ? ((campaign.clicks / campaign.impressions) * 100).toFixed(2)
                                                 : "0.00";
@@ -8400,18 +8744,18 @@ const ClientDashboardPage: React.FC = () => {
                                       <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50">
                                           <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Group</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Impressions</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CTR</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg CPC</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("name", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">Ad Group <span>{sortIndicator(ppcAdGroupSort, "name")}</span></button></th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("campaignName", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">Campaign <span>{sortIndicator(ppcAdGroupSort, "campaignName")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("clicks", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">Clicks <span>{sortIndicator(ppcAdGroupSort, "clicks")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("impressions", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">Impressions <span>{sortIndicator(ppcAdGroupSort, "impressions")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("ctr", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">CTR <span>{sortIndicator(ppcAdGroupSort, "ctr")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("conversions", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">Conversions <span>{sortIndicator(ppcAdGroupSort, "conversions")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("cost", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">Cost <span>{sortIndicator(ppcAdGroupSort, "cost")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("avgCpc", ppcAdGroupSort, setPpcAdGroupSort)} className="inline-flex items-center gap-1">Avg CPC <span>{sortIndicator(ppcAdGroupSort, "avgCpc")}</span></button></th>
                                           </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                          {ppcData.data.adGroups.map((adGroup: any, idx: number) => {
+                                          {sortedPpcAdGroups.map((adGroup: any, idx: number) => {
                                             const ctr = adGroup.impressions > 0 
                                               ? ((adGroup.clicks / adGroup.impressions) * 100).toFixed(2)
                                               : "0.00";
@@ -8460,20 +8804,20 @@ const ClientDashboardPage: React.FC = () => {
                                       <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50">
                                           <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Match Type</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Impressions</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CTR</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Imp. Share</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg CPC</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("keyword", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Keyword <span>{sortIndicator(ppcKeywordSort, "keyword")}</span></button></th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("matchType", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Match Type <span>{sortIndicator(ppcKeywordSort, "matchType")}</span></button></th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("campaignName", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Campaign <span>{sortIndicator(ppcKeywordSort, "campaignName")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("clicks", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Clicks <span>{sortIndicator(ppcKeywordSort, "clicks")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("impressions", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Impressions <span>{sortIndicator(ppcKeywordSort, "impressions")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("ctr", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">CTR <span>{sortIndicator(ppcKeywordSort, "ctr")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("impressionShare", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Imp. Share <span>{sortIndicator(ppcKeywordSort, "impressionShare")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("conversions", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Conversions <span>{sortIndicator(ppcKeywordSort, "conversions")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("cost", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Cost <span>{sortIndicator(ppcKeywordSort, "cost")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("avgCpc", ppcKeywordSort, setPpcKeywordSort)} className="inline-flex items-center gap-1">Avg CPC <span>{sortIndicator(ppcKeywordSort, "avgCpc")}</span></button></th>
                                           </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                          {ppcData.data.keywords.map((keyword: any, idx: number) => {
+                                          {sortedPpcKeywords.map((keyword: any, idx: number) => {
                                             const ctr = keyword.impressions > 0 
                                               ? ((keyword.clicks / keyword.impressions) * 100).toFixed(2)
                                               : "0.00";
@@ -8552,18 +8896,18 @@ const ClientDashboardPage: React.FC = () => {
                                       <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50">
                                           <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Conversion Action</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
-                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost/Conv.</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("date", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Date <span>{sortIndicator(ppcConversionSort, "date")}</span></button></th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("conversionAction", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Conversion Action <span>{sortIndicator(ppcConversionSort, "conversionAction")}</span></button></th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("campaignName", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Campaign <span>{sortIndicator(ppcConversionSort, "campaignName")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("conversions", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Conversions <span>{sortIndicator(ppcConversionSort, "conversions")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("conversionValue", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Value <span>{sortIndicator(ppcConversionSort, "conversionValue")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("clicks", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Clicks <span>{sortIndicator(ppcConversionSort, "clicks")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("cost", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Cost <span>{sortIndicator(ppcConversionSort, "cost")}</span></button></th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"><button type="button" onClick={() => togglePpcSort("costPerConversion", ppcConversionSort, setPpcConversionSort)} className="inline-flex items-center gap-1">Cost/Conv. <span>{sortIndicator(ppcConversionSort, "costPerConversion")}</span></button></th>
                                           </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                          {ppcData.data.conversions.map((conversion: any, idx: number) => (
+                                          {sortedPpcConversions.map((conversion: any, idx: number) => (
                                             <tr key={idx} className="hover:bg-gray-50">
                                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                 {conversion.date ? new Date(conversion.date).toLocaleDateString() : "N/A"}
@@ -13346,22 +13690,22 @@ const ClientDashboardPage: React.FC = () => {
 
                 {selectedReport?.scheduleKind === "ppc" ? (
                   <div className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-                    <div className="flex items-center mb-4">
-                      <Activity className="h-5 w-5 text-blue-500 mr-2" />
-                      <h2 className="text-xl font-bold text-gray-900">Campaign Performance Overview</h2>
-                    </div>
-                    <p className="text-sm text-gray-500 mb-4">This report reflects the same PPC campaign data shown in the PPC dashboard.</p>
 
                     {reportPreviewPpcLoading ? (
                       <div className="flex items-center justify-center py-8 text-gray-500">
                         <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                        <span>Loading PPC campaign data...</span>
+                        <span>Loading PPC report data...</span>
                       </div>
                     ) : reportPreviewPpcError ? (
                       <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
                         {reportPreviewPpcError}
                       </div>
-                    ) : reportPreviewPpcData?.data?.campaigns?.length > 0 ? (
+                    ) : (
+                      (reportPreviewPpcData?.data?.campaigns?.length ?? 0) > 0 ||
+                      (reportPreviewPpcData?.data?.adGroups?.length ?? 0) > 0 ||
+                      (reportPreviewPpcData?.data?.keywords?.length ?? 0) > 0 ||
+                      (reportPreviewPpcData?.data?.conversions?.length ?? 0) > 0
+                    ) ? (
                       <div className="space-y-6">
                         {reportPreviewPpcData?.data?.summary && (
                           <>
@@ -13487,11 +13831,155 @@ const ClientDashboardPage: React.FC = () => {
                             </tbody>
                           </table>
                         </div>
+
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-3">Ad Groups</h3>
+                          {reportPreviewPpcData?.data?.adGroups?.length > 0 ? (
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Group</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Impressions</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CTR</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg CPC</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {reportPreviewPpcData.data.adGroups.map((adGroup: any, idx: number) => {
+                                    const ctr = Number(adGroup.impressions ?? 0) > 0
+                                      ? ((Number(adGroup.clicks ?? 0) / Number(adGroup.impressions ?? 0)) * 100).toFixed(2)
+                                      : "0.00";
+                                    return (
+                                      <tr key={idx} className="hover:bg-gray-50">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{adGroup.name || "N/A"}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{adGroup.campaignName || "N/A"}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{Number(adGroup.clicks ?? 0).toLocaleString()}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{Number(adGroup.impressions ?? 0).toLocaleString()}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{ctr}%</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{Number(adGroup.conversions ?? 0).toLocaleString()}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">${Number(adGroup.cost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">${Number(adGroup.avgCpc ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500">No ad group data available.</p>
+                          )}
+                        </div>
+
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-3">Keywords</h3>
+                          {reportPreviewPpcData?.data?.keywords?.length > 0 ? (
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Match Type</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Impressions</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">CTR</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Imp. Share</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Avg CPC</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {reportPreviewPpcData.data.keywords.map((keyword: any, idx: number) => {
+                                    const ctr = Number(keyword.impressions ?? 0) > 0
+                                      ? ((Number(keyword.clicks ?? 0) / Number(keyword.impressions ?? 0)) * 100).toFixed(2)
+                                      : "0.00";
+                                    return (
+                                      <tr key={idx} className="hover:bg-gray-50">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{keyword.keyword || "N/A"}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{keyword.matchType || "UNKNOWN"}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{keyword.campaignName || "N/A"}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{Number(keyword.clicks ?? 0).toLocaleString()}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{Number(keyword.impressions ?? 0).toLocaleString()}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{ctr}%</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{(Number(keyword.impressionShare ?? 0) * 100).toFixed(1)}%</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{Number(keyword.conversions ?? 0).toLocaleString()}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">${Number(keyword.cost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">${Number(keyword.avgCpc ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500">No keyword data available.</p>
+                          )}
+                        </div>
+
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-3">Conversions</h3>
+                          {reportPreviewPpcData?.data?.conversionsSummary && (
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                              <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+                                <p className="text-sm text-green-700 font-medium">Total Conversions</p>
+                                <p className="text-2xl font-bold text-green-900 mt-1">{Number(reportPreviewPpcData.data.conversionsSummary.totalConversions ?? 0).toLocaleString()}</p>
+                              </div>
+                              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+                                <p className="text-sm text-blue-700 font-medium">Conversion Value</p>
+                                <p className="text-2xl font-bold text-blue-900 mt-1">${Number(reportPreviewPpcData.data.conversionsSummary.conversionValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                              </div>
+                              <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4 border border-purple-200">
+                                <p className="text-sm text-purple-700 font-medium">Conversion Rate</p>
+                                <p className="text-2xl font-bold text-purple-900 mt-1">{Number(reportPreviewPpcData.data.conversionsSummary.conversionRate ?? 0).toFixed(2)}%</p>
+                              </div>
+                            </div>
+                          )}
+                          {reportPreviewPpcData?.data?.conversions?.length > 0 ? (
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Conversion Action</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Conversions</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Clicks</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost/Conv.</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {reportPreviewPpcData.data.conversions.map((conversion: any, idx: number) => (
+                                    <tr key={idx} className="hover:bg-gray-50">
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{conversion.date ? new Date(conversion.date).toLocaleDateString() : "N/A"}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{conversion.conversionAction || "N/A"}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{conversion.campaignName || "N/A"}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{Number(conversion.conversions ?? 0).toLocaleString()}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">${Number(conversion.conversionValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{Number(conversion.clicks ?? 0).toLocaleString()}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">${Number(conversion.cost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">${Number(conversion.costPerConversion ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500">No conversion data available.</p>
+                          )}
+                        </div>
                       </div>
                     ) : (
                       <div className="text-center py-6">
-                        <p className="text-sm text-gray-500">No campaign data available.</p>
-                        <p className="text-xs text-gray-400 mt-1">Ensure your Google Ads account has active campaigns with traffic.</p>
+                        <p className="text-sm text-gray-500">No PPC data available.</p>
+                        <p className="text-xs text-gray-400 mt-1">Ensure your Google Ads account has active campaigns, ad groups, keywords, or conversions in this period.</p>
                       </div>
                     )}
                   </div>
