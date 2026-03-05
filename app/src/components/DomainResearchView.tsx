@@ -782,13 +782,9 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   useEffect(() => {
     if (selectedClientId) {
       setAiSearch(null);
-      // Prefer domain-based live endpoint whenever we have a concrete domain.
-      const selectedDomain = selectedClient?.domain?.trim();
-      if (selectedDomain) {
-        fetchOverview(selectedDomain, true, false);
-      } else {
-        fetchOverview(selectedClientId, false);
-      }
+      // Keep tracked-client research on the client endpoint to preserve
+      // client-context semantics and avoid direct-domain credit gating.
+      fetchOverview(selectedClientId, false);
     } else if (directDomain) {
       setAiSearch(null);
       fetchOverview(directDomain, true);
@@ -797,7 +793,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       setAiSearch(null);
       setError(null);
     }
-  }, [selectedClientId, directDomain, fetchOverview, isAdminPanelUser, isAgencyUser, selectedClient?.domain]);
+  }, [selectedClientId, directDomain, fetchOverview, isAdminPanelUser, isAgencyUser]);
 
   useEffect(() => {
     if (selectedClientId) {
