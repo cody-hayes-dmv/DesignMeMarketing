@@ -1282,16 +1282,18 @@ const ClientDashboardPage: React.FC = () => {
   }, [clientId]);
 
   const openLocalMapActivationModal = useCallback(async () => {
+    if (includedClientReadOnly) return;
     // Ensure other overlays never mask this modal.
     setShowClientReportModal(false);
     setImportBacklinksModalOpen(false);
     toast("Opening activation form...", { duration: 1200 });
     setLocalMapActivationOpen(true);
     await loadLocalMapMoneyKeywords();
-  }, [loadLocalMapMoneyKeywords]);
+  }, [includedClientReadOnly, loadLocalMapMoneyKeywords]);
 
   const handleActivateLocalMapKeyword = useCallback(async () => {
     if (!clientId) return;
+    if (includedClientReadOnly) return;
     if (localMapSubmitting) return;
     if (!localMapSelectedKeywordId) {
       toast.error("Select a keyword");
@@ -1337,6 +1339,7 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [
     clientId,
+    includedClientReadOnly,
     localMapBusinessSelection,
     localMapLabel,
     localMapSubmitting,
@@ -9068,7 +9071,9 @@ const ClientDashboardPage: React.FC = () => {
                             onClick={() => {
                               void openLocalMapActivationModal();
                             }}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700"
+                            disabled={includedClientReadOnly}
+                            title={includedClientReadOnly ? "Included clients are view-only" : "Add keyword"}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <Plus className="h-4 w-4" />
                             Add Keyword
@@ -9089,7 +9094,9 @@ const ClientDashboardPage: React.FC = () => {
                               onClick={() => {
                                 void openLocalMapActivationModal();
                               }}
-                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700"
+                              disabled={includedClientReadOnly}
+                              title={includedClientReadOnly ? "Included clients are view-only" : "Activate your first keyword"}
+                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                               <Plus className="h-4 w-4" />
                               Activate Your First Keyword
@@ -13478,7 +13485,8 @@ const ClientDashboardPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => void handleActivateLocalMapKeyword()}
-                disabled={localMapSubmitting}
+                disabled={localMapSubmitting || includedClientReadOnly}
+                title={includedClientReadOnly ? "Included clients are view-only" : "Activate"}
                 className="px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60"
               >
                 {localMapSubmitting ? "Activating..." : "Activate"}

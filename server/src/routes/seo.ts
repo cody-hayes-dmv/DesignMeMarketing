@@ -304,6 +304,75 @@ async function getGoogleAdsLocationsCached(): Promise<DataForSEOGoogleAdsLocatio
   return googleAdsLocationsLoadPromise;
 }
 
+async function resolveSeoClientAccess(params: {
+  user: { userId: string; role: string };
+  clientId: string;
+  allowOwner?: boolean;
+  allowClientUser?: boolean;
+  allowSpecialistTask?: boolean;
+  allowBelongsToAgency?: boolean;
+}): Promise<{
+  client: (Awaited<ReturnType<typeof prisma.client.findUnique>> & { user?: { memberships?: Array<{ agencyId: string }> } }) | null;
+  hasAccess: boolean;
+  userAgencyIds: string[];
+}> {
+  const {
+    user,
+    clientId,
+    allowOwner = true,
+    allowClientUser = true,
+    allowSpecialistTask = true,
+    allowBelongsToAgency = false,
+  } = params;
+
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    include: {
+      user: {
+        include: {
+          memberships: {
+            select: { agencyId: true },
+          },
+        },
+      },
+    },
+  });
+  if (!client) return { client: null, hasAccess: false, userAgencyIds: [] };
+
+  const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
+  const isOwner = allowOwner && client.userId === user.userId;
+  const userMemberships = await prisma.userAgency.findMany({
+    where: { userId: user.userId },
+    select: { agencyId: true },
+  });
+  const userAgencyIds = userMemberships.map((m) => m.agencyId);
+  const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
+
+  let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
+
+  if (!hasAccess && allowBelongsToAgency && client.belongsToAgencyId && userAgencyIds.includes(client.belongsToAgencyId)) {
+    hasAccess = true;
+  }
+
+  if (!hasAccess && allowClientUser) {
+    const cu = await prisma.clientUser.findFirst({
+      where: { clientId, userId: user.userId, status: "ACTIVE" },
+      select: { id: true },
+    });
+    hasAccess = Boolean(cu);
+  }
+
+  if (!hasAccess && allowSpecialistTask && user.role === "SPECIALIST") {
+    const task = await prisma.task.findFirst({
+      where: { clientId, assigneeId: user.userId },
+      select: { id: true },
+    });
+    hasAccess = Boolean(task);
+  }
+
+  return { client, hasAccess, userAgencyIds };
+}
+
 // Super Admin dashboard metrics (SUPER_ADMIN and ADMIN)
 router.get("/super-admin/dashboard", authenticateToken, async (req, res) => {
   try {
@@ -1821,47 +1890,13 @@ router.get("/reports/:clientId", authenticateToken, async (req, res) => {
       return [raw];
     };
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check - Admins, agency members, or linked client portal users
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -1980,44 +2015,13 @@ router.post("/share-link/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      select: {
-        id: true,
-        dashboardShareToken: true,
-        user: {
-          select: {
-            memberships: { select: { agencyId: true } },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -3051,47 +3055,13 @@ router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
     }
     const { search, sortBy = "currentPosition", order = "asc" } = req.query;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -3194,47 +3164,13 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     const resolvedLocationCode =
       keywordData.locationCode ?? (await resolveLocationCodeFromName(resolvedLocationName)) ?? 2840;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -3553,45 +3489,13 @@ router.post("/keywords/:clientId/bulk", authenticateToken, async (req, res) => {
         .json({ message: `Maximum ${BULK_KEYWORDS_LIMIT} keywords per bulk add. You sent ${keywords.length}.` });
     }
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -3896,47 +3800,13 @@ router.delete("/keywords/:clientId/:keywordId", authenticateToken, async (req, r
   try {
     const { clientId, keywordId } = req.params;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -4522,47 +4392,13 @@ router.get("/backlinks/:clientId", authenticateToken, async (req, res) => {
     const limit = Math.min(10000, Math.max(1, Number(limitRaw) || 200));
     const days = Math.min(365, Math.max(1, Number(daysRaw) || 30));
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -4650,48 +4486,14 @@ router.post("/backlinks/:clientId", authenticateToken, async (req, res) => {
       })
       .parse(req.body);
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
+      allowBelongsToAgency: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess && client.belongsToAgencyId && userAgencyIds.includes(client.belongsToAgencyId)) {
-      hasAccess = true;
-    }
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -4773,45 +4575,13 @@ router.post("/backlinks/:clientId/import", authenticateToken, async (req, res) =
       })
       .parse(req.body);
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -4854,45 +4624,13 @@ router.delete("/backlinks/:clientId/:backlinkId", authenticateToken, async (req,
 
     // Client portal users can manage backlinks for their client.
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -4920,45 +4658,13 @@ router.get("/ai-search-visibility/:clientId", authenticateToken, async (req, res
     const { period = "30", start, end } = req.query;
     const force = coerceBoolean(req.query.force);
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess, userAgencyIds } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
@@ -6092,34 +5798,12 @@ router.get("/ai-intelligence/:clientId", authenticateToken, async (req, res) => 
     const { clientId } = req.params;
     const { period = "30", start, end } = req.query;
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: { select: { agencyId: true } },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
     if (!client) return res.status(404).json({ message: "Client not found" });
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
     if (!hasAccess) return res.status(403).json({ message: "Access denied" });
 
     let startDate: Date;
@@ -6864,48 +6548,14 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
     const { clientId } = req.params;
     const { period = "30", start, end } = req.query;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -8450,55 +8100,14 @@ router.get("/events/:clientId/top", authenticateToken, async (req, res) => {
     const { clientId } = req.params;
     const { period = "30", start, end, limit = "10", type = "events" } = req.query;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -8564,55 +8173,14 @@ router.get("/visitor-sources/:clientId", authenticateToken, async (req, res) => 
     const { clientId } = req.params;
     const { period = "30", start, end, limit = "10" } = req.query;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -10526,53 +10094,13 @@ router.get("/ranked-keywords/:clientId", authenticateToken, async (req, res) => 
   try {
     const { clientId } = req.params;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -10641,46 +10169,13 @@ router.get("/ranked-keywords/:clientId/history", authenticateToken, async (req, 
   try {
     const { clientId } = req.params;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -11077,52 +10572,13 @@ router.get("/backlinks/:clientId/timeseries", authenticateToken, async (req, res
     const { clientId } = req.params;
     const { range = "30" } = req.query;
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -11176,46 +10632,13 @@ router.get("/top-pages/:clientId/keywords", authenticateToken, async (req, res) 
       return res.status(400).json({ message: "URL parameter is required" });
     }
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client || !client.domain) {
       return res.status(404).json({ message: "Client not found or has no domain" });
-    }
-
-    // Permission check
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true }
-    });
-    const userAgencyIds = userMemberships.map(m => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some(id => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -11257,45 +10680,13 @@ router.get("/top-pages/:clientId", authenticateToken, async (req, res) => {
     const { clientId } = req.params;
     const { limit = "10" } = req.query;
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || isOwner || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
@@ -11342,19 +10733,11 @@ router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => 
     const { clientId } = req.params;
     const { period = "30", start, end } = req.query;
 
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true },
-            },
-          },
-        },
-      },
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: false,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
@@ -11362,30 +10745,6 @@ router.get("/traffic-sources/:clientId", authenticateToken, async (req, res) => 
     if (!client.domain) {
       return res.status(400).json({ message: "Client has no domain configured" });
     }
-
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const userMemberships = await prisma.userAgency.findMany({
-      where: { userId: req.user.userId },
-      select: { agencyId: true },
-    });
-    const userAgencyIds = userMemberships.map((m) => m.agencyId);
-    const clientAgencyIds = client.user.memberships.map((m) => m.agencyId);
-    let hasAccess = isAdmin || clientAgencyIds.some((id) => userAgencyIds.includes(id));
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
-    }
-
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -12427,53 +11786,13 @@ router.get("/target-keywords/:clientId", authenticateToken, async (req, res) => 
   try {
     const { clientId } = req.params;
 
-    // Check if user has access to this client
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: {
-        user: {
-          include: {
-            memberships: {
-              select: { agencyId: true }
-            }
-          }
-        }
-      }
+    const { client, hasAccess } = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
     });
-
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
-    }
-
-    // Check access: user must own the client or be ADMIN/SUPER_ADMIN
-    const isAdmin = req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN";
-    const isOwner = client.userId === req.user.userId;
-
-    // For non-admin users, check if they're in the same agency
-    let hasAccess = isAdmin || isOwner;
-    if (!hasAccess && req.user.role !== "ADMIN" && req.user.role !== "SUPER_ADMIN") {
-      const userMemberships = await prisma.userAgency.findMany({
-        where: { userId: req.user.userId },
-        select: { agencyId: true },
-      });
-      const userAgencyIds = userMemberships.map(m => m.agencyId);
-      const clientAgencyIds = client.user.memberships.map(m => m.agencyId);
-      hasAccess = clientAgencyIds.some(id => userAgencyIds.includes(id));
-    }
-    // Client portal users: allow access via client_users membership
-    if (!hasAccess) {
-      const cu = await prisma.clientUser.findFirst({
-        where: { clientId, userId: req.user.userId, status: "ACTIVE" },
-        select: { id: true },
-      });
-      hasAccess = Boolean(cu);
-    }
-    if (!hasAccess && req.user.role === "SPECIALIST") {
-      const task = await prisma.task.findFirst({
-        where: { clientId, assigneeId: req.user.userId },
-        select: { id: true },
-      });
-      hasAccess = Boolean(task);
     }
 
     if (!hasAccess) {
