@@ -51,12 +51,14 @@ export interface DomainOverviewData {
   metricsPeriodDays?: number;
   metricsPeriodLabel?: string;
   organicTrafficSourceLabel?: string;
+  backlinksSampled?: boolean;
+  backlinksSampleSize?: number;
   metrics: {
     organicSearch: { keywords: number; traffic: number; trafficCost: number };
     paidSearch: { keywords: number; traffic: number; trafficCost: number };
     backlinks: { referringDomains: number; totalBacklinks: number };
     authorityScore?: number;
-    trafficShare?: number;
+    trafficShare?: number | null;
   };
   marketTrendsChannels?: Array<{ name: string; value: number; pct: number }>;
   backlinksList?: Array<{
@@ -276,8 +278,14 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const aiSearchUnavailableForDomain = !selectedClientId && !isDirectDomainMode;
   const isExternalDomainResearch = !selectedClientId;
   const seoMetricsPeriodLabel = overview?.metricsPeriodLabel || "Last 30 days";
-  const seoMetricsPeriodBadge = `${overview?.metricsPeriodDays ?? 30}d`;
+  const seoMetricsPeriodBadge =
+    seoMetricsPeriodLabel.toLowerCase() === "last month"
+      ? "1M"
+      : `${overview?.metricsPeriodDays ?? 30}d`;
   const organicTrafficSourceLabel = overview?.organicTrafficSourceLabel || "Estimated";
+  const backlinksSourceLabel = overview?.backlinksSampled
+    ? `Sampled from top ${formatCompactNumber(overview.backlinksSampleSize ?? 0)} backlinks`
+    : undefined;
   const noOrganicKeywordsMessage = isExternalDomainResearch
     ? "No organic keywords were returned for this domain yet. Try another domain or run a fresh search."
     : "No organic keywords yet for this client. Refresh rankings from the client dashboard to populate this table.";
@@ -1100,11 +1108,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       ? "AI Visibility is available for tracked client domains with GA4 data."
                       : "AI Visibility and Mentions are based on GA4 AI referrals (ChatGPT + Gemini) for the selected period."}
                 </p>
-                {isDirectDomainMode && (
-                  <p className="mb-3 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
-                    Source confidence: modeled from third-party AI mention samples; directional only.
-                  </p>
-                )}
 
                 {loading ? (
                   <div className="pt-4 border-t border-gray-100 text-sm text-gray-500">Loading AI Search visibility...</div>
@@ -1182,11 +1185,11 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                   { label: "Authority Score", value: overview.metrics.authorityScore ?? "—", format: (v: number | string) => (typeof v === "number" ? String(v) : v), tooltip: "Domain authority based on backlink profile", unavailable: hasUnavailableOverviewMetric("authorityScore") },
                   { label: "Organic Traffic", value: overview.metrics.organicSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: `Organic search traffic (${seoMetricsPeriodLabel})`, periodBadge: seoMetricsPeriodBadge, subLabel: organicTrafficSourceLabel, unavailable: hasUnavailableOverviewMetric("organicSearch.traffic") },
                   { label: "Paid Traffic", value: overview.metrics.paidSearch.traffic, format: (v: number) => formatCompactNumber(v), tooltip: "Paid search traffic", unavailable: false },
-                  { label: "Ref. Domains", value: overview.metrics.backlinks.referringDomains, format: (v: number) => formatCompactNumber(v), tooltip: "Number of referring domains", unavailable: false },
+                  { label: "Ref. Domains", value: overview.metrics.backlinks.referringDomains, format: (v: number) => formatCompactNumber(v), tooltip: overview?.backlinksSampled ? "Unique referring domains in sampled backlinks" : "Number of referring domains", subLabel: backlinksSourceLabel, unavailable: false },
                   { label: "Traffic Share", value: overview.metrics.trafficShare, format: (v: number | null | undefined) => (v != null ? `${v}%` : "—"), tooltip: "Organic traffic as % of total", icon: true, unavailable: false },
                   { label: "Organic Keywords", value: overview.metrics.organicSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: `Organic keywords ranking (${seoMetricsPeriodLabel})`, periodBadge: seoMetricsPeriodBadge, unavailable: hasUnavailableOverviewMetric("organicSearch.keywords") },
                   { label: "Paid Keywords", value: overview.metrics.paidSearch.keywords, format: (v: number) => formatCompactNumber(v), tooltip: "Paid keywords", unavailable: false },
-                  { label: "Backlinks", value: overview.metrics.backlinks.totalBacklinks, format: (v: number) => formatCompactNumber(v), tooltip: "Total backlinks", unavailable: false },
+                  { label: "Backlinks", value: overview.metrics.backlinks.totalBacklinks, format: (v: number) => formatCompactNumber(v), tooltip: overview?.backlinksSampled ? "Estimated total backlinks from DataForSEO snapshot" : "Total backlinks", subLabel: backlinksSourceLabel, unavailable: false },
                 ].map((m, i) => (
                   <div key={m.label} className={`flex flex-col p-3 rounded-lg bg-gray-50/80 ${i % 4 < 3 ? "border-r-0" : ""}`}>
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider inline-flex items-center gap-1">

@@ -1426,6 +1426,16 @@ async function fetchBacklinksListFromDataForSEO(
   limit: number = 200,
   offset: number = 0
 ): Promise<DataForSEOBacklinkListItem[]> {
+  const snapshot = await fetchBacklinksSnapshotFromDataForSEO(target, statusType, limit, offset);
+  return snapshot.items;
+}
+
+async function fetchBacklinksSnapshotFromDataForSEO(
+  target: string,
+  statusType: "live" | "lost",
+  limit: number = 200,
+  offset: number = 0
+): Promise<{ items: DataForSEOBacklinkListItem[]; totalCount: number; itemsCount: number }> {
   const base64Auth = process.env.DATAFORSEO_BASE64;
   if (!base64Auth) {
     throw new Error("DataForSEO credentials not configured. Please set DATAFORSEO_BASE64 environment variable.");
@@ -1446,27 +1456,61 @@ async function fetchBacklinksListFromDataForSEO(
 
   const endpoint = "https://api.dataforseo.com/v3/backlinks/backlinks/live";
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${base64Auth}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(requestBody),
-  });
+  let rawBody = "";
+  let data: any = {};
+  try {
+    const controller = new AbortController();
+    const timeoutMs = 12000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${base64Auth}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`DataForSEO API error: ${response.status} - ${errorText}`);
+    rawBody = await response.text();
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      data = {};
+    }
+
+    if (!response.ok) {
+      const taskStatusCode = Number(data?.tasks?.[0]?.status_code ?? 0);
+      const tasksError = Number(data?.tasks_error ?? 0);
+      // DataForSEO occasionally returns HTTP 500 with task-level "Internal Error"
+      // and an empty result; treat this as a soft-empty response instead of failing.
+      if (tasksError === 1 || taskStatusCode === 50000) {
+        console.warn("[DataForSEO] backlinks/live returned task error; using empty backlink list", {
+          target,
+          status: response.status,
+          taskStatusCode,
+        });
+        return { items: [], totalCount: 0, itemsCount: 0 };
+      }
+      throw new Error(`DataForSEO API error: ${response.status} - ${rawBody}`);
+    }
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      console.warn("[DataForSEO] backlinks/live request timed out; using empty backlink list", { target });
+      return { items: [], totalCount: 0, itemsCount: 0 };
+    }
+    throw error;
   }
 
-  const data = await response.json();
+  const totalCount = Math.max(0, Number(data?.tasks?.[0]?.result?.[0]?.total_count ?? 0));
+  const itemsCount = Math.max(0, Number(data?.tasks?.[0]?.result?.[0]?.items_count ?? 0));
   const items: any[] =
     data?.tasks?.[0]?.result?.[0]?.items && Array.isArray(data.tasks[0].result[0].items)
       ? data.tasks[0].result[0].items
       : [];
 
-  return items
+  const normalizedItems = items
     .map((it) => {
       const sourceUrl = typeof it?.url_from === "string" ? it.url_from : "";
       const targetUrl = typeof it?.url_to === "string" ? it.url_to : "";
@@ -1503,6 +1547,12 @@ async function fetchBacklinksListFromDataForSEO(
       } satisfies DataForSEOBacklinkListItem;
     })
     .filter((v): v is DataForSEOBacklinkListItem => Boolean(v));
+
+  return {
+    items: normalizedItems,
+    totalCount,
+    itemsCount,
+  };
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -5145,10 +5195,23 @@ router.get("/ai-search-visibility-any", authenticateToken, async (req, res) => {
     const locationCode = Number(req.query.locationCode) || 2840;
     const languageCode = typeof req.query.languageCode === "string" ? req.query.languageCode : "en";
 
-    const [aggregated, searchMentions] = await Promise.all([
-      fetchAiAggregatedMetrics(domain, "domain", locationCode, languageCode).catch(() => null),
-      fetchAiSearchMentions(domain, "domain", locationCode, languageCode, 100).catch(() => []),
+    const requestedPlatforms: Array<"google" | "chat_gpt"> = ["google", "chat_gpt"];
+    const [aggregatedByPlatform, mentionsByPlatform] = await Promise.all([
+      Promise.all(
+        requestedPlatforms.map((platform) =>
+          fetchAiAggregatedMetrics(domain, "domain", locationCode, languageCode, undefined, undefined, platform).catch(() => null)
+        )
+      ),
+      Promise.all(
+        requestedPlatforms.map((platform) =>
+          fetchAiSearchMentions(domain, "domain", locationCode, languageCode, 100, platform).catch(() => [])
+        )
+      ),
     ]);
+    const aggregatedPlatformRows = aggregatedByPlatform.flatMap((result: any) =>
+      Array.isArray(result?.total?.platform) ? result.total.platform : []
+    );
+    const searchMentions = mentionsByPlatform.flat();
 
     const platformMap: Record<string, { mentions: number; aiSearchVol: number }> = {};
     const addToPlatform = (key: string, mentions: number, aiSearchVol: number) => {
@@ -5166,8 +5229,7 @@ router.get("/ai-search-visibility-any", authenticateToken, async (req, res) => {
       return "other";
     };
 
-    const platformArr = Array.isArray((aggregated as any)?.total?.platform) ? (aggregated as any).total.platform : [];
-    for (const p of platformArr) {
+    for (const p of aggregatedPlatformRows) {
       const key = normalizePlatformKey(String(p?.key || ""));
       addToPlatform(key, Number(p?.mentions || 0), Number(p?.ai_search_volume || 0));
     }
@@ -5261,7 +5323,8 @@ async function fetchAiAggregatedMetrics(
   locationCode: number,
   languageCode: string,
   _dateFrom?: string,
-  _dateTo?: string
+  _dateTo?: string,
+  platform: "google" | "chat_gpt" = "google"
 ): Promise<any> {
   const base64Auth = process.env.DATAFORSEO_BASE64;
   if (!base64Auth) {
@@ -5274,11 +5337,14 @@ async function fetchAiAggregatedMetrics(
     target: [targetPayload],
     location_code: locationCode,
     language_code: languageCode,
-    platform: "google",
+    platform,
     // date_from/date_to not in API spec; API returns current aggregated data
   }];
 
   try {
+    const controller = new AbortController();
+    const timeoutMs = 12000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch("https://api.dataforseo.com/v3/ai_optimization/llm_mentions/aggregated_metrics/live", {
       method: "POST",
       headers: {
@@ -5286,7 +5352,9 @@ async function fetchAiAggregatedMetrics(
         "Authorization": `Basic ${base64Auth}`,
       },
       body: JSON.stringify(requestBody),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -5303,6 +5371,9 @@ async function fetchAiAggregatedMetrics(
     }
     return result;
   } catch (error: any) {
+    if (error?.name === "AbortError") {
+      console.warn("[AI Intelligence] Aggregated metrics request timed out", { target });
+    }
     console.error("DataForSEO Aggregated Metrics API error:", error);
     throw error;
   }
@@ -5313,7 +5384,8 @@ export async function fetchAiSearchMentions(
   targetType: "domain" | "url",
   locationCode: number,
   languageCode: string,
-  limit: number = 100
+  limit: number = 100,
+  platform: "google" | "chat_gpt" = "google"
 ): Promise<any[]> {
   const base64Auth = process.env.DATAFORSEO_BASE64;
   if (!base64Auth) {
@@ -5333,12 +5405,15 @@ export async function fetchAiSearchMentions(
     target: targetArray,
     location_code: locationCode,
     language_code: languageCode,
-    platform: "google",
+    platform,
     order_by: ["ai_search_volume,desc"],
     limit,
   }];
 
   try {
+    const controller = new AbortController();
+    const timeoutMs = 12000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch("https://api.dataforseo.com/v3/ai_optimization/llm_mentions/search/live", {
       method: "POST",
       headers: {
@@ -5346,7 +5421,9 @@ export async function fetchAiSearchMentions(
         "Authorization": `Basic ${base64Auth}`,
       },
       body: JSON.stringify(requestBody),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const rawBody = await response.text();
     let data: any;
@@ -5406,6 +5483,10 @@ export async function fetchAiSearchMentions(
     }
     return items;
   } catch (error: any) {
+    if (error?.name === "AbortError") {
+      console.warn("[AI Intelligence] Search mentions request timed out", { target });
+      return [];
+    }
     console.error("DataForSEO Search Mentions API error:", error);
     throw error;
   }
@@ -7507,21 +7588,31 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
           }));
         })();
 
-    const latestOrganicTraffic30d =
-      organicTrafficOverTimeSeries.length > 0
-        ? Number(organicTrafficOverTimeSeries[organicTrafficOverTimeSeries.length - 1]?.traffic ?? 0)
-        : Math.round(organicTraffic);
-    const latestOrganicKeywords30d =
-      organicKeywordsOverTime.length > 0
-        ? Number(organicKeywordsOverTime[organicKeywordsOverTime.length - 1]?.keywords ?? organicKeywords)
-        : organicKeywords;
+    const previousMonthDate = new Date(currentYear, currentMonth - 2, 1);
+    const previousMonthYear = previousMonthDate.getFullYear();
+    const previousMonth = previousMonthDate.getMonth() + 1;
+    const previousMonthKey = `${previousMonthYear}-${String(previousMonth).padStart(2, "0")}`;
+    const previousMonthTraffic = organicTrafficOverTimeSeries.find((m) => m.month === previousMonthKey)?.traffic;
+    const previousMonthKeywords = organicKeywordsOverTime.find((m) => m.year === previousMonthYear && m.month === previousMonth)?.keywords;
+    const lastMonthOrganicTraffic =
+      typeof previousMonthTraffic === "number"
+        ? Number(previousMonthTraffic)
+        : organicTrafficOverTimeSeries.length > 0
+          ? Number(organicTrafficOverTimeSeries[organicTrafficOverTimeSeries.length - 1]?.traffic ?? 0)
+          : Math.round(organicTraffic);
+    const lastMonthOrganicKeywords =
+      typeof previousMonthKeywords === "number"
+        ? Number(previousMonthKeywords)
+        : organicKeywordsOverTime.length > 0
+          ? Number(organicKeywordsOverTime[organicKeywordsOverTime.length - 1]?.keywords ?? organicKeywords)
+          : organicKeywords;
 
     const response = {
       client: { id: client.id, name: client.name, domain: client.domain },
       metrics: {
         organicSearch: {
-          keywords: latestOrganicKeywords30d,
-          traffic: latestOrganicTraffic30d,
+          keywords: lastMonthOrganicKeywords,
+          traffic: lastMonthOrganicTraffic,
           trafficCost: trafficCost,
         },
         paidSearch: {
@@ -7537,7 +7628,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
         trafficShare: strictAccuracy ? 0 : (trafficTotal > 0 ? Math.round((organicTraffic / trafficTotal) * 100) : 0),
       },
       metricsPeriodDays: 30,
-      metricsPeriodLabel: "Last 30 days",
+      metricsPeriodLabel: "Last month",
       organicTrafficSourceLabel: monthlyTrafficByKey.size > 0 ? "Measured (DataForSEO ETV)" : "Estimated",
       marketTrendsChannels,
       backlinksList,
@@ -7727,7 +7818,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       return res.status(500).json({ message: "DataForSEO credentials not configured" });
     }
 
-    const [rankedKwData, historyData, backlinkItems] = await Promise.all([
+    const [rankedKwData, historyData, backlinkSnapshot] = await Promise.all([
       (async () => {
         const body = [{ target: domain, location_code: 2840, language_code: "en", limit: 100 }];
         const resp = await fetch("https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live", {
@@ -7756,14 +7847,15 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
         });
         return [];
       }),
-      fetchBacklinksListFromDataForSEO(domain, "live", 200).catch((err: any) => {
+      fetchBacklinksSnapshotFromDataForSEO(domain, "live", 200).catch((err: any) => {
         console.warn("[domain-overview-any] backlinks fetch failed", {
           ...logCtx,
           error: err?.message || String(err),
         });
-        return [];
+        return { items: [] as DataForSEOBacklinkListItem[], totalCount: 0, itemsCount: 0 };
       }),
     ]);
+    const backlinkItems = backlinkSnapshot.items;
 
     const topKeywords = rankedKwData.items.map((item: any) => {
       const kd = item?.keyword_data || {};
@@ -7906,7 +7998,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       .map(([tld, count]) => ({ tld, refDomains: count }))
       .sort((a, b) => b.refDomains - a.refDomains);
 
-    const totalBacklinks = backlinkItems.length;
+    const totalBacklinks = backlinkSnapshot.totalCount > 0 ? backlinkSnapshot.totalCount : backlinkItems.length;
     const referringDomainsCount = referringDomainsMap.size;
     const avgDr = backlinkItems.length > 0
       ? backlinkItems.reduce((s: number, b: any) => s + (b.domainRating ?? 0), 0) / backlinkItems.length
@@ -8011,26 +8103,38 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
           ? (latestMeasuredTraffic ?? 0)
           : scaledTraffic;
 
-    const latestOrganicTraffic30d =
-      organicTrafficOverTime.length > 0
-        ? Number(organicTrafficOverTime[organicTrafficOverTime.length - 1]?.traffic ?? organicTrafficCurrent)
-        : organicTrafficCurrent;
-    const latestOrganicKeywords30d =
-      organicKeywordsOverTime.length > 0
-        ? Number(organicKeywordsOverTime[organicKeywordsOverTime.length - 1]?.keywords ?? rankedKwData.totalCount)
-        : rankedKwData.totalCount;
+    const previousMonthDate = new Date(currentYear, currentMonth - 2, 1);
+    const previousMonthYear = previousMonthDate.getFullYear();
+    const previousMonth = previousMonthDate.getMonth() + 1;
+    const previousMonthKey = `${previousMonthYear}-${String(previousMonth).padStart(2, "0")}`;
+    const previousMonthTraffic = organicTrafficOverTime.find((m) => m.month === previousMonthKey)?.traffic;
+    const previousMonthKeywords = organicKeywordsOverTime.find((m) => m.year === previousMonthYear && m.month === previousMonth)?.keywords;
+    const lastMonthOrganicTraffic =
+      typeof previousMonthTraffic === "number"
+        ? Number(previousMonthTraffic)
+        : organicTrafficOverTime.length > 0
+          ? Number(organicTrafficOverTime[organicTrafficOverTime.length - 1]?.traffic ?? organicTrafficCurrent)
+          : organicTrafficCurrent;
+    const lastMonthOrganicKeywords =
+      typeof previousMonthKeywords === "number"
+        ? Number(previousMonthKeywords)
+        : organicKeywordsOverTime.length > 0
+          ? Number(organicKeywordsOverTime[organicKeywordsOverTime.length - 1]?.keywords ?? rankedKwData.totalCount)
+          : rankedKwData.totalCount;
 
     const result = {
       client: { id: "external", name: domain, domain },
       metrics: {
-        organicSearch: { keywords: latestOrganicKeywords30d, traffic: latestOrganicTraffic30d, trafficCost: 0 },
+        organicSearch: { keywords: lastMonthOrganicKeywords, traffic: lastMonthOrganicTraffic, trafficCost: 0 },
         paidSearch: { keywords: 0, traffic: 0, trafficCost: 0 },
         backlinks: { referringDomains: referringDomainsCount, totalBacklinks },
         authorityScore: Math.round(avgDr),
-        trafficShare: 0,
+        trafficShare: null,
       },
+      backlinksSampled: true,
+      backlinksSampleSize: backlinkItems.length,
       metricsPeriodDays: 30,
-      metricsPeriodLabel: "Last 30 days",
+      metricsPeriodLabel: "Last month",
       organicTrafficSourceLabel: monthlyTrafficByKey.size > 0 ? "Measured (DataForSEO ETV)" : "Estimated",
       marketTrendsChannels: [
         { name: "Direct", value: 0, pct: 0 },
