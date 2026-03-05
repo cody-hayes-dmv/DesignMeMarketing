@@ -11050,17 +11050,9 @@ const ClientDashboardPage: React.FC = () => {
                             includeStatus: user?.role === "SUPER_ADMIN" || user?.role === "ADMIN",
                             includeManagedServiceFields: user?.role === "SUPER_ADMIN",
                           });
-                          await dispatch(updateClient({ id: client.id, data }) as any).unwrap();
-                          setClient((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  name: viewClientForm.name,
-                                  domain: viewClientForm.domain,
-                                  industry: viewClientForm.industry === "Other" ? viewClientForm.industryOther : viewClientForm.industry,
-                                }
-                              : null
-                          );
+                          const updatedClient = await dispatch(updateClient({ id: client.id, data }) as any).unwrap();
+                          setClient(updatedClient);
+                          setViewClientForm(clientToFormState(updatedClient));
                           setShowViewClientModal(false);
                           toast.success("Client updated successfully.");
                         } catch (e: any) {

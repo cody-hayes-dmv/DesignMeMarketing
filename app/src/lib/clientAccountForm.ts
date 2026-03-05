@@ -293,6 +293,15 @@ export function formStateToUpdatePayload(
   return payload;
 }
 
+function getManagedServicePackageLabel(value: string): string {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "foundation") return "SEO Essentials + Automation($750/mo)";
+  if (normalized === "growth") return "Growth & Automation ($1,500/mo)";
+  if (normalized === "domination") return "Authority Builder ($3,000/mo)";
+  if (normalized === "custom") return "Market Domination ($5,000/mo)";
+  return value || "";
+}
+
 /** Build normalized copy text for client info modals. */
 export function buildClientCopyText(
   form: ClientFormState,
@@ -359,7 +368,7 @@ export function buildClientCopyText(
       "",
       "MANAGED SERVICE STATUS",
       `Managed Service Status: ${form.managedServiceStatus || ""}`,
-      `Managed Service Package: ${form.managedServicePackage || ""}`,
+      `Managed Service Package: ${getManagedServicePackageLabel(form.managedServicePackage)}`,
       `Service Start Date: ${form.serviceStartDate || ""}`,
       `Service End Date: ${form.managedServiceEndDate || ""}`
     );

@@ -157,10 +157,10 @@ const MANAGED_SERVICE_STATUS_OPTIONS = [
 ] as const;
 
 const MANAGED_SERVICE_PACKAGE_OPTIONS = [
-  { value: "foundation", label: "Foundation ($750/mo)" },
-  { value: "growth", label: "Growth ($1,500/mo)" },
-  { value: "domination", label: "Domination ($3,000/mo)" },
-  { value: "custom", label: "Custom" },
+  { value: "foundation", label: "SEO Essentials + Automation($750/mo)" },
+  { value: "growth", label: "Growth & Automation ($1,500/mo)" },
+  { value: "domination", label: "Authority Builder ($3,000/mo)" },
+  { value: "custom", label: "Market Domination ($5,000/mo)" },
 ] as const;
 
 const EMPTY_CLIENT_FORM: ClientFormState = {

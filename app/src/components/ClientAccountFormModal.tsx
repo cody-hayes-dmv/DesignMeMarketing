@@ -22,10 +22,10 @@ const MANAGED_SERVICE_STATUS_OPTIONS = [
   { value: "archived", label: "Archived" },
 ] as const;
 const MANAGED_SERVICE_PACKAGE_OPTIONS = [
-  { value: "foundation", label: "Foundation ($750/mo)" },
-  { value: "growth", label: "Growth ($1,500/mo)" },
-  { value: "domination", label: "Domination ($3,000/mo)" },
-  { value: "custom", label: "Custom" },
+  { value: "foundation", label: "SEO Essentials + Automation($750/mo)" },
+  { value: "growth", label: "Growth & Automation ($1,500/mo)" },
+  { value: "domination", label: "Authority Builder ($3,000/mo)" },
+  { value: "custom", label: "Market Domination ($5,000/mo)" },
 ] as const;
 
 interface ClientAccountFormModalProps {
@@ -71,7 +71,7 @@ export default function ClientAccountFormModal({
     );
   };
 
-  const field = (label: string, required?: boolean, children: React.ReactNode) => (
+  const field = (label: string, required?: boolean, children?: React.ReactNode) => (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-2">
         {label} {required ? "*" : ""}
