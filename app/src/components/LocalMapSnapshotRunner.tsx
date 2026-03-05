@@ -51,6 +51,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
   const [business, setBusiness] = useState<GoogleBusinessSelection | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runProgressPct, setRunProgressPct] = useState(0);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
   const [gridData, setGridData] = useState<SnapshotPoint[]>([]);
@@ -60,6 +61,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
   const [runError, setRunError] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
   const snapshotPdfContentRef = useRef<HTMLDivElement | null>(null);
+  const runProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const gridRows = useMemo(() => {
     if (gridData.length === 0) return [];
@@ -114,11 +116,23 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
 
     try {
       setRunning(true);
+      setRunProgressPct(3);
       setRunError(null);
       if (!business) {
         toast.error("Select a business");
         return;
       }
+      if (runProgressIntervalRef.current) {
+        clearInterval(runProgressIntervalRef.current);
+      }
+      runProgressIntervalRef.current = setInterval(() => {
+        setRunProgressPct((prev) => {
+          if (prev >= 92) return prev;
+          if (prev < 35) return Math.min(92, prev + 6);
+          if (prev < 65) return Math.min(92, prev + 4);
+          return Math.min(92, prev + 2);
+        });
+      }, 700);
 
       const res = await api.post("/local-map/snapshot/run", {
         keyword: keyword.trim(),
@@ -164,6 +178,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
         setRunError(message);
         toast.error(message);
       } else {
+        setRunProgressPct(100);
         toast.success("Snapshot complete");
       }
       setFormOpen(false);
@@ -175,7 +190,12 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       setDebugBusinesses([]);
       toast.error(message);
     } finally {
+      if (runProgressIntervalRef.current) {
+        clearInterval(runProgressIntervalRef.current);
+        runProgressIntervalRef.current = null;
+      }
       setRunning(false);
+      setRunProgressPct(0);
     }
   };
 
@@ -483,6 +503,20 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                 {running ? "Running..." : "Run"}
               </button>
             </div>
+            {running ? (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-indigo-700">
+                  <span className="font-medium">Running snapshot...</span>
+                  <span className="font-semibold">{runProgressPct}%</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-indigo-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-primary-600 to-indigo-500 transition-all duration-500"
+                    style={{ width: `${Math.max(0, Math.min(100, runProgressPct))}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
           </>
         ) : (
           <p className="text-sm text-gray-600">
@@ -512,26 +546,6 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
             </p>
           ) : null}
         </div>
-      ) : null}
-
-      {!runError && gridRows.length > 0 ? (
-        <details className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          <summary className="cursor-pointer font-semibold">Debug details (DataForSEO detected businesses)</summary>
-          <p className="mt-2 text-xs text-slate-600">
-            Top place titles detected across sampled grid responses:
-          </p>
-          {debugBusinesses.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {debugBusinesses.map((name) => (
-                <span key={name} className="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700">
-                  {name}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-2 text-xs text-slate-600">No business titles were returned in sampled responses.</p>
-          )}
-        </details>
       ) : null}
 
       {ataScore != null && (

@@ -476,6 +476,118 @@ async function consumeOnDemandCredit(agencyId: string, isSuperAdmin: boolean) {
   return source;
 }
 
+async function notifySnapshotRunCompleted(params: {
+  userId: string;
+  role: string;
+  keyword: string;
+  businessName: string;
+  ataScore: number;
+  agencyId: string | null;
+}): Promise<void> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: params.userId },
+      select: { id: true, email: true, name: true },
+    });
+    if (!user) return;
+
+    const title = "Local Map snapshot completed";
+    const message = `${params.keyword} for ${params.businessName} finished. ATA ${params.ataScore.toFixed(2)}.`;
+    const appPath = params.role === "SUPER_ADMIN" || params.role === "ADMIN"
+      ? "/superadmin/prospect-snapshot"
+      : "/agency/local-map-snapshot";
+
+    await prisma.notification.create({
+      data: {
+        agencyId: params.agencyId,
+        userId: user.id,
+        type: "local_map_snapshot_completed",
+        title,
+        message,
+        link: appPath,
+      },
+    }).catch(() => undefined);
+
+    if (!user.email) return;
+    const frontendBase = String(process.env.FRONTEND_URL || "https://app.yourmarketingdashboard.ai").replace(/\/+$/, "");
+    const appUrl = `${frontendBase}${appPath}`;
+    const safeName = String(user.name || user.email || "there");
+    await sendEmail({
+      to: user.email,
+      subject: `Local Map Snapshot Complete - ${params.keyword}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+          <p style="margin: 0 0 10px;">Hi ${safeName},</p>
+          <p style="margin: 0 0 10px;">Your Local Map snapshot has completed successfully.</p>
+          <ul style="margin: 0 0 12px 18px; padding: 0;">
+            <li>Keyword: ${params.keyword}</li>
+            <li>Business: ${params.businessName}</li>
+            <li>ATA: ${params.ataScore.toFixed(2)}</li>
+          </ul>
+        </div>
+      `,
+    }).catch(() => undefined);
+  } catch (error) {
+    console.warn("[LocalMap] completion notification failed", error);
+  }
+}
+
+async function notifySnapshotRunFailed(params: {
+  userId: string;
+  role: string;
+  keyword: string;
+  businessName: string;
+  agencyId: string | null;
+  errorMessage: string;
+}): Promise<void> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: params.userId },
+      select: { id: true, email: true, name: true },
+    });
+    if (!user) return;
+
+    const title = "Local Map snapshot failed";
+    const message = `${params.keyword} for ${params.businessName} failed: ${params.errorMessage}`;
+    const appPath = params.role === "SUPER_ADMIN" || params.role === "ADMIN"
+      ? "/superadmin/prospect-snapshot"
+      : "/agency/local-map-snapshot";
+
+    await prisma.notification.create({
+      data: {
+        agencyId: params.agencyId,
+        userId: user.id,
+        type: "local_map_snapshot_failed",
+        title,
+        message,
+        link: appPath,
+      },
+    }).catch(() => undefined);
+
+    if (!user.email) return;
+    const frontendBase = String(process.env.FRONTEND_URL || "https://app.yourmarketingdashboard.ai").replace(/\/+$/, "");
+    const appUrl = `${frontendBase}${appPath}`;
+    const safeName = String(user.name || user.email || "there");
+    await sendEmail({
+      to: user.email,
+      subject: `Local Map Snapshot Failed - ${params.keyword}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+          <p style="margin: 0 0 10px;">Hi ${safeName},</p>
+          <p style="margin: 0 0 10px;">Your Local Map snapshot could not be completed.</p>
+          <ul style="margin: 0 0 12px 18px; padding: 0;">
+            <li>Keyword: ${params.keyword}</li>
+            <li>Business: ${params.businessName}</li>
+            <li>Error: ${params.errorMessage}</li>
+          </ul>
+        </div>
+      `,
+    }).catch(() => undefined);
+  } catch (error) {
+    console.warn("[LocalMap] failure notification failed", error);
+  }
+}
+
 async function canReadClient(user: Express.Request["user"], clientId: string): Promise<boolean> {
   if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") return true;
 
@@ -1107,6 +1219,15 @@ router.post("/snapshot/run", authenticateToken, async (req, res) => {
       },
     });
 
+    await notifySnapshotRunCompleted({
+      userId: req.user.userId,
+      role: req.user.role,
+      keyword: String(keyword),
+      businessName: String(businessName),
+      ataScore: result.ataScore,
+      agencyId: isSuperAdminRun ? null : agencyId,
+    });
+
     return res.status(201).json({
       runId: log.id,
       ataScore: result.ataScore,
@@ -1116,6 +1237,23 @@ router.post("/snapshot/run", authenticateToken, async (req, res) => {
       creditSource,
     });
   } catch (error: any) {
+    const body = req.body ?? {};
+    const isSuperAdminRun = Boolean(body?.superAdminMode) && (req.user?.role === "SUPER_ADMIN" || req.user?.role === "ADMIN");
+    let agencyIdForNotification: string | null = null;
+    const userId = req.user?.userId;
+    if (!isSuperAdminRun && userId) {
+      agencyIdForNotification = await getAgencyIdForUser(userId).catch(() => null);
+    }
+    if (userId) {
+      await notifySnapshotRunFailed({
+        userId,
+        role: req.user?.role || "AGENCY",
+        keyword: String(body?.keyword || "Unknown keyword"),
+        businessName: String(body?.businessName || "Unknown business"),
+        agencyId: isSuperAdminRun ? null : agencyIdForNotification,
+        errorMessage: String(error?.message || "Failed to run snapshot"),
+      });
+    }
     console.error("[LocalMap] snapshot run failed", {
       message: error?.message,
       stack: error?.stack,
@@ -1204,6 +1342,24 @@ router.get("/admin/snapshots", authenticateToken, async (req, res) => {
     return res.json(rows);
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to load snapshots" });
+  }
+});
+
+router.delete("/admin/snapshots/:snapshotId", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { snapshotId } = req.params;
+    await prisma.gridSnapshot.delete({
+      where: { id: snapshotId },
+    });
+    return res.json({ ok: true });
+  } catch (error: any) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return res.status(404).json({ message: "Snapshot not found" });
+    }
+    return res.status(500).json({ message: error?.message || "Failed to delete snapshot" });
   }
 });
 

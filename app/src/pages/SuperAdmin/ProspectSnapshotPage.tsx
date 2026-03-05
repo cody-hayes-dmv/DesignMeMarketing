@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import LocalMapSnapshotRunner from "@/components/LocalMapSnapshotRunner";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import api from "@/lib/api";
-import { Download, Eye, Loader2, MapPin, Play, Save, Send, X } from "lucide-react";
+import { Download, Eye, Loader2, MapPin, Play, Save, Send, Trash2, X } from "lucide-react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 
@@ -131,6 +132,8 @@ const ProspectSnapshotPage: React.FC = () => {
   const [keywordSearch, setKeywordSearch] = useState("");
   const [keywordStatusFilter, setKeywordStatusFilter] = useState<"all" | "active" | "paused" | "canceled">("all");
   const [snapshotSearch, setSnapshotSearch] = useState("");
+  const [agencyUsageSearch, setAgencyUsageSearch] = useState("");
+  const [agencyUsageFilterId, setAgencyUsageFilterId] = useState("all");
   const [creditDrafts, setCreditDrafts] = useState<Record<string, string>>({});
   const [costPerRunDraft, setCostPerRunDraft] = useState("");
   const [savingCostPerRun, setSavingCostPerRun] = useState(false);
@@ -141,6 +144,17 @@ const ProspectSnapshotPage: React.FC = () => {
   const [localMapReportLoading, setLocalMapReportLoading] = useState(false);
   const [localMapReport, setLocalMapReport] = useState<LocalMapKeywordReportPayload | null>(null);
   const [localMapExportingPdf, setLocalMapExportingPdf] = useState(false);
+  const [deletingSnapshotId, setDeletingSnapshotId] = useState<string | null>(null);
+  const [agencyUsageSectionOpen, setAgencyUsageSectionOpen] = useState(true);
+  const [snapshotDeleteConfirm, setSnapshotDeleteConfirm] = useState<{
+    isOpen: boolean;
+    snapshotId: string | null;
+    label: string | null;
+  }>({
+    isOpen: false,
+    snapshotId: null,
+    label: null,
+  });
   const localMapReportContentRef = useRef<HTMLDivElement | null>(null);
 
   const loadAdminData = async () => {
@@ -179,7 +193,7 @@ const ProspectSnapshotPage: React.FC = () => {
 
   useEffect(() => {
     void loadAdminData();
-  }, []);
+  }, [loadAdminData]);
 
   const issueCredits = async (agencyId: string) => {
     const amount = Number(creditDrafts[agencyId] || "0");
@@ -457,6 +471,38 @@ const ProspectSnapshotPage: React.FC = () => {
     }
   }, [exportLocalMapReportPdf]);
 
+  const handleDeleteSnapshot = useCallback(async (row: SnapshotAdminRow) => {
+    const snapshotId = String(row.id || "");
+    if (!snapshotId) {
+      toast.error("Snapshot ID is missing.");
+      return;
+    }
+    setSnapshotDeleteConfirm({
+      isOpen: true,
+      snapshotId,
+      label: row.gridKeyword?.keywordText || "this snapshot",
+    });
+  }, []);
+
+  const confirmDeleteSnapshot = useCallback(async () => {
+    const snapshotId = snapshotDeleteConfirm.snapshotId;
+    if (!snapshotId) {
+      setSnapshotDeleteConfirm({ isOpen: false, snapshotId: null, label: null });
+      return;
+    }
+    try {
+      setDeletingSnapshotId(snapshotId);
+      await api.delete(`/local-map/admin/snapshots/${snapshotId}`);
+      toast.success("Snapshot deleted");
+      await loadAdminData();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Failed to delete snapshot");
+    } finally {
+      setDeletingSnapshotId(null);
+      setSnapshotDeleteConfirm({ isOpen: false, snapshotId: null, label: null });
+    }
+  }, [loadAdminData, snapshotDeleteConfirm.snapshotId]);
+
   const saveCostPerRun = async () => {
     const nextCost = Number(costPerRunDraft);
     if (!Number.isFinite(nextCost) || nextCost < 0) {
@@ -503,6 +549,13 @@ const ProspectSnapshotPage: React.FC = () => {
       return haystack.includes(q);
     });
   }, [snapshots, snapshotSearch]);
+
+  const filteredAgencyUsage = useMemo(() => {
+    const q = agencyUsageSearch.trim().toLowerCase();
+    return agencyUsage
+      .filter((agency) => (agencyUsageFilterId === "all" ? true : agency.id === agencyUsageFilterId))
+      .filter((agency) => (q ? agency.name.toLowerCase().includes(q) : true));
+  }, [agencyUsage, agencyUsageFilterId, agencyUsageSearch]);
 
   return (
     <div className="p-6 space-y-8">
@@ -566,40 +619,6 @@ const ProspectSnapshotPage: React.FC = () => {
       </section>
 
       <section className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-        <h3 className="text-lg font-bold text-gray-900 mb-3">Agency Snapshot Credit Balances</h3>
-        <div className="space-y-2">
-          {agencyUsage.map((agency) => (
-            <div key={agency.id} className="rounded-xl border border-gray-200 bg-gradient-to-r from-slate-50 to-white p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="text-sm">
-                <p className="font-semibold text-gray-900">{agency.name}</p>
-                <p className="text-gray-600">
-                  Monthly: {agency.snapshotMonthlyUsed}/{agency.snapshotMonthlyAllowance} used
-                </p>
-                <p className="text-gray-600">Purchased credits: {agency.snapshotPurchasedCredits}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  value={creditDrafts[agency.id] ?? ""}
-                  onChange={(e) => setCreditDrafts((prev) => ({ ...prev, [agency.id]: e.target.value }))}
-                  className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  placeholder="+ credits"
-                />
-                <button
-                  type="button"
-                  onClick={() => void issueCredits(agency.id)}
-                  title="Issue credits"
-                  aria-label="Issue credits"
-                  className="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
         <h3 className="text-lg font-bold text-gray-900 mb-3">Recurring Grid Keywords (All Agencies)</h3>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <input
@@ -620,7 +639,9 @@ const ProspectSnapshotPage: React.FC = () => {
           </select>
           <p className="text-xs text-gray-600">{filteredKeywords.length} rows</p>
         </div>
-        <div className="overflow-x-auto">
+        <div
+          className={`overflow-x-auto ${filteredKeywords.length > 5 ? "max-h-[280px] overflow-y-auto pr-1" : ""}`}
+        >
           <table className="w-full min-w-[1120px]">
             <thead className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50">
               <tr>
@@ -732,7 +753,9 @@ const ProspectSnapshotPage: React.FC = () => {
           />
           <p className="text-xs text-gray-600">{filteredSnapshots.length} rows</p>
         </div>
-        <div className="overflow-x-auto">
+        <div
+          className={`overflow-x-auto ${filteredSnapshots.length > 5 ? "max-h-[280px] overflow-y-auto pr-1" : ""}`}
+        >
           <table className="w-full min-w-[980px]">
             <thead className="bg-gradient-to-r from-slate-50 via-blue-50 to-indigo-50">
               <tr>
@@ -778,6 +801,20 @@ const ProspectSnapshotPage: React.FC = () => {
                       >
                         <Download className="h-3.5 w-3.5" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteSnapshot(row)}
+                        disabled={deletingSnapshotId === row.id}
+                        title={deletingSnapshotId === row.id ? "Deleting snapshot" : "Delete snapshot"}
+                        aria-label={deletingSnapshotId === row.id ? "Deleting snapshot" : "Delete snapshot"}
+                        className="inline-flex items-center justify-center px-2.5 py-1 rounded-md border border-rose-300 text-rose-700 hover:bg-rose-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {deletingSnapshotId === row.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -792,6 +829,90 @@ const ProspectSnapshotPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+      </section>
+      <ConfirmDialog
+        isOpen={snapshotDeleteConfirm.isOpen}
+        onClose={() => setSnapshotDeleteConfirm({ isOpen: false, snapshotId: null, label: null })}
+        onConfirm={() => void confirmDeleteSnapshot()}
+        title="Delete snapshot?"
+        message={`Delete snapshot for "${snapshotDeleteConfirm.label || "this keyword"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+      <section className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setAgencyUsageSectionOpen((prev) => !prev)}
+          className="w-full flex items-center justify-between text-left"
+          title={agencyUsageSectionOpen ? "Hide agencies" : "Show agencies"}
+          aria-label={agencyUsageSectionOpen ? "Hide agencies" : "Show agencies"}
+        >
+          <h3 className="text-lg font-bold text-gray-900">Agency Snapshot Credit Balances</h3>
+          <span className="text-sm font-semibold text-gray-600">
+            {agencyUsageSectionOpen ? "Hide" : "Show"}
+          </span>
+        </button>
+        {agencyUsageSectionOpen ? (
+          <>
+            <div className="mb-3 mt-3 flex flex-wrap items-center gap-2">
+              <input
+                value={agencyUsageSearch}
+                onChange={(e) => setAgencyUsageSearch(e.target.value)}
+                placeholder="Search agency..."
+                className="w-full md:w-72 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <select
+                value={agencyUsageFilterId}
+                onChange={(e) => setAgencyUsageFilterId(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="all">All agencies</option>
+                {agencyUsage.map((agency) => (
+                  <option key={agency.id} value={agency.id}>
+                    {agency.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-600">{filteredAgencyUsage.length} rows</p>
+            </div>
+            <div className={`space-y-2 ${filteredAgencyUsage.length > 5 ? "max-h-[280px] overflow-y-auto pr-1" : ""}`}>
+              {filteredAgencyUsage.map((agency) => (
+                <div key={agency.id} className="rounded-xl border border-gray-200 bg-gradient-to-r from-slate-50 to-white p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="text-sm">
+                    <p className="font-semibold text-gray-900">{agency.name}</p>
+                    <p className="text-gray-600">
+                      Monthly: {agency.snapshotMonthlyUsed}/{agency.snapshotMonthlyAllowance} used
+                    </p>
+                    <p className="text-gray-600">Purchased credits: {agency.snapshotPurchasedCredits}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={creditDrafts[agency.id] ?? ""}
+                      onChange={(e) => setCreditDrafts((prev) => ({ ...prev, [agency.id]: e.target.value }))}
+                      className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      placeholder="+ credits"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void issueCredits(agency.id)}
+                      title="Issue credits"
+                      aria-label="Issue credits"
+                      className="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {filteredAgencyUsage.length === 0 ? (
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                  No agencies match the current filters.
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </section>
       {localMapReportOpen && (
         <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/50 p-4">
