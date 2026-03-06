@@ -240,7 +240,11 @@ export function formStateToUpdatePayload(
   form: ClientFormState,
   options: { includeStatus?: boolean; includeManagedServiceFields?: boolean }
 ): Record<string, unknown> {
-  const selectedBusinessNiche = form.businessNiche === "Other" ? form.businessNicheOther.trim() : (form.businessNiche || "").trim();
+  const selectedBusinessNiche = (() => {
+    const fromIndustry = form.industry === "Other" ? form.industryOther.trim() : (form.industry || "").trim();
+    if (fromIndustry) return fromIndustry;
+    return form.businessNiche === "Other" ? form.businessNicheOther.trim() : (form.businessNiche || "").trim();
+  })();
   const selectedIndustry = form.industry === "Other" ? form.industryOther.trim() : (form.industry || "").trim();
   const accountInfo: Record<string, unknown> = {
     businessNiche: selectedBusinessNiche,
@@ -265,7 +269,6 @@ export function formStateToUpdatePayload(
     pagesPerMonth: form.pagesPerMonth || "",
     technicalHoursPerMonth: form.technicalHoursPerMonth || "",
     campaignDurationMonths: form.campaignDurationMonths || "",
-    totalKeywordsToTarget: form.totalKeywordsToTarget || "",
     seoRoadmapSection: form.seoRoadmapSection || "",
     managedServicePackage: form.managedServicePackage || "",
     serviceStartDate: form.serviceStartDate || "",
@@ -311,15 +314,22 @@ export function buildClientCopyText(
     includeSeoRoadmapSection?: boolean;
   }
 ): string {
-  const businessNiche = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
-  const industry = form.industry === "Other" ? form.industryOther : form.industry;
+  const businessNiche = (() => {
+    const fromIndustry = form.industry === "Other" ? form.industryOther : form.industry;
+    if ((fromIndustry || "").trim()) return fromIndustry;
+    const fromLegacyNiche = form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche;
+    return fromLegacyNiche;
+  })();
+  const targetedKeywords = (form.keywords || "")
+    .split(/\r?\n|,/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
   const lines: string[] = [
     "BUSINESS INFORMATION (Required)",
     `Business Name: ${form.name || ""}`,
     `Business Niche: ${businessNiche || ""}`,
     `Business Description: ${form.businessDescription || ""}`,
     `Primary Domain: ${form.domain || ""}`,
-    `Industry: ${industry || ""}`,
     "",
     "LOCATION INFORMATION (Required)",
     `Business Address: ${form.businessAddress || ""}`,
@@ -343,15 +353,20 @@ export function buildClientCopyText(
     "GOOGLE BUSINESS PROFILE (Optional)",
     `Google Business Profile Category: ${form.gbpPrimaryCategory || ""}`,
     `Secondary GBP Categories: ${form.gbpSecondaryCategories || ""}`,
+    `Google Business Profile Services: ${form.servicesMarkedPrimary || ""}`,
   ];
 
   if (options?.includeExtendedSuperAdminFields) {
     const includeSeoRoadmapSection = options?.includeSeoRoadmapSection !== false;
+    const targetedKeywordLines =
+      targetedKeywords.length > 0
+        ? targetedKeywords.map((kw) => `- ${kw}`).join("\n")
+        : "";
     lines.push(
       "",
       "KEYWORD ALLOCATION",
       `Number of Keywords for Campaign: ${form.targetKeywordCount || ""}`,
-      `Total Keywords to Target: ${form.totalKeywordsToTarget || ""}`,
+      `Targeted Keywords:\n${targetedKeywordLines}`,
       "",
       "GEOLOCATION DATA",
       `Latitude: ${form.latitude || ""}`,

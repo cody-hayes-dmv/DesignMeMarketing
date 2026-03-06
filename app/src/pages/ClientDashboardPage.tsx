@@ -105,6 +105,7 @@ const WORKLOG_PAGE_SIZES = [25, 50, 100, 250] as const;
 
 /** Dashboard API can be slow (DataForSEO + GA4); use 2 min and retry once on timeout to reduce "Request timed out" toasts. */
 const DASHBOARD_REQUEST_TIMEOUT_MS = 120000;
+const WEB_DESIGN_TABS_ENABLED = (import.meta.env.VITE_ENABLE_WEB_DESIGN_TABS ?? "false") === "true";
 
 interface ClientReport {
   id: string;
@@ -789,7 +790,12 @@ const ClientDashboardPage: React.FC = () => {
     if (requested === "users") return { tab: "users" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "keywords") return { tab: "keywords" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "integration") return { tab: "integration" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
-    if (requested === "web-design") return { tab: "web-design" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+    if (requested === "web-design") {
+      return {
+        tab: (WEB_DESIGN_TABS_ENABLED ? "web-design" : "dashboard") as ClientDashboardTopTab,
+        section: "seo" as ClientDashboardSection,
+      };
+    }
     if (requested === "backlinks") return { tab: "dashboard" as ClientDashboardTopTab, section: "backlinks" as ClientDashboardSection };
     if (requested === "worklog") return { tab: "dashboard" as ClientDashboardTopTab, section: "worklog" as ClientDashboardSection };
     return { tab: (reportOnly ? "report" : "dashboard") as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
@@ -3763,7 +3769,7 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
 
-    if (state?.tab === "web-design") {
+    if (state?.tab === "web-design" && WEB_DESIGN_TABS_ENABLED) {
       setActiveTab("web-design");
       return;
     }
@@ -6984,7 +6990,7 @@ const ClientDashboardPage: React.FC = () => {
               {(clientPortalMode
                 ? [
                     { id: "dashboard", label: "Dashboard", icon: Users },
-                    ...(hasWebDesignProjects ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
+                    ...(WEB_DESIGN_TABS_ENABLED && hasWebDesignProjects ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
                   ]
                 : [
                     { id: "dashboard", label: "Dashboard", icon: Users },
@@ -6992,7 +6998,7 @@ const ClientDashboardPage: React.FC = () => {
                     { id: "users", label: "Users", icon: UserPlus },
                     { id: "keywords", label: "Keywords", icon: Target },
                     { id: "integration", label: "Integrations", icon: Plug },
-                    { id: "web-design", label: "Web Design", icon: FileText },
+                    ...(WEB_DESIGN_TABS_ENABLED ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
                   ]
               ).map((tab) => (
                 <button

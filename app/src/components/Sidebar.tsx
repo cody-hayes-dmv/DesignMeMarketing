@@ -36,6 +36,8 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+const WEB_DESIGN_TABS_ENABLED = (import.meta.env.VITE_ENABLE_WEB_DESIGN_TABS ?? "false") === "true";
+
 const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -320,6 +322,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
 
   const filteredMenuItems = menuItems
     .filter((item) => item.roles.includes(user?.role || ""))
+    .filter((item) => WEB_DESIGN_TABS_ENABLED || item.path !== "/designer/web-design")
     .filter((item) => !(item.path === "/agency/users" && agencyMe?.isBusinessTier))
     .filter((item) => item.path !== "/agency/included" || hasIncludedClients)
     .map((item) => {

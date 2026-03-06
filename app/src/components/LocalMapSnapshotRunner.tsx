@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
-import { Download, Loader2, MapPin, Play, Sparkles, Target } from "lucide-react";
+import { Download, Loader2, MapPin, Play, Sparkles, Target, X } from "lucide-react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "@/lib/api";
@@ -66,8 +66,8 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
   const [gridData, setGridData] = useState<SnapshotPoint[]>([]);
   const [ataScore, setAtaScore] = useState<number | null>(null);
   const [topCompetitors, setTopCompetitors] = useState<string[]>([]);
-  const [debugBusinesses, setDebugBusinesses] = useState<string[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
+  const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const snapshotPdfContentRef = useRef<HTMLDivElement | null>(null);
   const runProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -255,11 +255,6 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
           ? res.data.topCompetitorsCurrent.slice(0, 3)
           : []
       );
-      setDebugBusinesses(
-        Array.isArray(res?.data?.topDetectedBusinesses)
-          ? res.data.topDetectedBusinesses.slice(0, 15)
-          : []
-      );
 
       if (!points.length) {
         const message = "Snapshot completed but no grid points were returned.";
@@ -267,6 +262,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
         toast.error(message);
       } else {
         setRunProgressPct(100);
+        setSnapshotModalOpen(true);
         toast.success("Snapshot complete");
       }
       setFormOpen(false);
@@ -275,7 +271,6 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       const message = error?.response?.data?.message || "Failed to run snapshot";
       setRunError(message);
       setTopCompetitors([]);
-      setDebugBusinesses([]);
       toast.error(message);
     } finally {
       if (runProgressIntervalRef.current) {
@@ -455,7 +450,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
   };
 
   return (
-    <div ref={snapshotPdfContentRef} className="p-6 space-y-6">
+    <div className="p-6 space-y-6">
       <div className="local-map-snapshot-pdf-section rounded-2xl border border-primary-200 bg-gradient-to-r from-primary-600 via-indigo-600 to-blue-600 p-6 text-white shadow-lg">
         <div className="flex items-start gap-3">
           <div className="h-11 w-11 shrink-0 rounded-xl bg-white/15 flex items-center justify-center">
@@ -555,12 +550,11 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
           {gridData.length > 0 ? (
             <button
               type="button"
-              onClick={() => void downloadSnapshotPdf()}
-              disabled={exportingPdf}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={() => setSnapshotModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
             >
-              {exportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {exportingPdf ? "Exporting..." : "Download PDF"}
+              <MapPin className="h-3.5 w-3.5" />
+              View Latest Snapshot
             </button>
           ) : null}
         </div>
@@ -622,91 +616,130 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
         </div>
       ) : null}
 
-      {!runError && gridRows.length > 0 && gridData.every((p) => p.rank == null) ? (
-        <div className="local-map-snapshot-pdf-section rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <p className="font-semibold">Target listing is not ranking in the current scan depth for this keyword/grid.</p>
-          <p className="mt-1">
-            This result is valid when the selected business is outside the top map positions in this area.
-          </p>
-          {topCompetitors.length > 0 ? (
-            <p className="mt-1">
-              Top detected competitors: {topCompetitors.join(", ")}.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {ataScore != null && (
-        <div className="local-map-snapshot-pdf-section rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-100 p-5 shadow-sm">
-          <p className="text-sm font-medium text-amber-700">Average True Rank</p>
-          <p className="text-3xl font-bold text-amber-900">{ataScore.toFixed(2)}</p>
-          <p className="text-xs text-amber-700 mt-1">Lower score means better local map visibility.</p>
-        </div>
-      )}
-
-      {gridRows.length > 0 && (
-        <div className="local-map-snapshot-pdf-section bg-white rounded-2xl border border-gray-200 p-5 overflow-x-auto shadow-sm">
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Local Rank Grid</p>
-              <p className="text-xs text-gray-600">Styled 7x7-style heat view for prospect snapshots.</p>
-            </div>
-            <div className="flex items-center gap-3 text-[11px] text-gray-600">
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-lime-600" />4-7</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />8-10</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-600" />11-20</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-700" />20+</span>
-            </div>
-          </div>
+      {snapshotModalOpen && gridRows.length > 0 && (
+        <div
+          className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setSnapshotModalOpen(false)}
+        >
           <div
-            className="relative rounded-2xl border border-gray-200 p-4 overflow-hidden"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle at center, rgba(59,130,246,0.10) 0%, rgba(148,163,184,0.06) 42%, rgba(15,23,42,0.05) 100%)",
-            }}
+            className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
           >
-            <div className="relative z-10 min-w-[560px] w-[560px] h-[560px] mx-auto rounded-xl overflow-hidden border border-gray-300">
-              {embeddedMapUrl ? (
-                <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
-                  <iframe
-                    title="Google map snapshot background"
-                    src={embeddedMapUrl}
-                    className="h-full w-full opacity-90 pointer-events-auto"
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                  />
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Local Map Snapshot Result</h3>
+                <p className="text-xs text-gray-600">
+                  {keyword.trim() || "Keyword"} · {business?.businessName || "Business"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void downloadSnapshotPdf()}
+                  disabled={exportingPdf}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {exportingPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  {exportingPdf ? "Exporting..." : "Download PDF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSnapshotModalOpen(false)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Close
+                </button>
+              </div>
+            </div>
+            <div ref={snapshotPdfContentRef} className="overflow-y-auto p-4 sm:p-6 space-y-6">
+              {!runError && gridData.every((p) => p.rank == null) ? (
+                <div className="local-map-snapshot-pdf-section rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <p className="font-semibold">Target listing is not ranking in the current scan depth for this keyword/grid.</p>
+                  <p className="mt-1">
+                    This result is valid when the selected business is outside the top map positions in this area.
+                  </p>
+                  {topCompetitors.length > 0 ? (
+                    <p className="mt-1">
+                      Top detected competitors: {topCompetitors.join(", ")}.
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
-              <div className="absolute inset-0 bg-white/20 pointer-events-none" />
-              <div
-                className="absolute inset-0 opacity-30 pointer-events-none"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)",
-                  backgroundSize: "14.2857% 14.2857%",
-                }}
-              />
-              {mapProjectedPoints.map((point) => {
-                const isCenter = Math.abs(point.leftPct - 50) < 0.6 && Math.abs(point.topPct - 50) < 0.6;
-                const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
-                if (!inFrame) return null;
-                return (
-                  <div
-                    key={point.id}
-                    className={`absolute h-10 w-10 rounded-full text-[11px] font-semibold flex items-center justify-center shadow pointer-events-none ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""}`}
-                    style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
-                    title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
-                  >
-                    {rankLabel(point.rank)}
+
+              {ataScore != null && (
+                <div className="local-map-snapshot-pdf-section rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-100 p-5 shadow-sm">
+                  <p className="text-sm font-medium text-amber-700">Average True Rank</p>
+                  <p className="text-3xl font-bold text-amber-900">{ataScore.toFixed(2)}</p>
+                  <p className="text-xs text-amber-700 mt-1">Lower score means better local map visibility.</p>
+                </div>
+              )}
+
+              <div className="local-map-snapshot-pdf-section bg-white rounded-2xl border border-gray-200 p-5 overflow-x-auto shadow-sm">
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Local Rank Grid</p>
+                    <p className="text-xs text-gray-600">Styled 7x7-style heat view for prospect snapshots.</p>
                   </div>
-                );
-              })}
-              <div
-                className="absolute h-4 w-4 rounded-full bg-blue-600 border-2 border-white shadow pointer-events-none"
-                style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
-                title="Business center"
-              />
+                  <div className="flex items-center gap-3 text-[11px] text-gray-600">
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-lime-600" />4-7</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />8-10</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-600" />11-20</span>
+                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-700" />20+</span>
+                  </div>
+                </div>
+                <div
+                  className="relative rounded-2xl border border-gray-200 p-4 overflow-hidden"
+                  style={{
+                    backgroundImage:
+                      "radial-gradient(circle at center, rgba(59,130,246,0.10) 0%, rgba(148,163,184,0.06) 42%, rgba(15,23,42,0.05) 100%)",
+                  }}
+                >
+                  <div className="relative z-10 min-w-[560px] w-[560px] h-[560px] mx-auto rounded-xl overflow-hidden border border-gray-300">
+                    {embeddedMapUrl ? (
+                      <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
+                        <iframe
+                          title="Google map snapshot background"
+                          src={embeddedMapUrl}
+                          className="h-full w-full opacity-90 pointer-events-auto"
+                          loading="lazy"
+                          referrerPolicy="no-referrer-when-downgrade"
+                        />
+                      </div>
+                    ) : null}
+                    <div className="absolute inset-0 bg-white/20 pointer-events-none" />
+                    <div
+                      className="absolute inset-0 opacity-30 pointer-events-none"
+                      style={{
+                        backgroundImage:
+                          "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)",
+                        backgroundSize: "14.2857% 14.2857%",
+                      }}
+                    />
+                    {mapProjectedPoints.map((point) => {
+                      const isCenter = Math.abs(point.leftPct - 50) < 0.6 && Math.abs(point.topPct - 50) < 0.6;
+                      const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
+                      if (!inFrame) return null;
+                      return (
+                        <div
+                          key={point.id}
+                          className={`absolute h-10 w-10 rounded-full text-[11px] font-semibold flex items-center justify-center shadow pointer-events-none ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""}`}
+                          style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
+                          title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
+                        >
+                          {rankLabel(point.rank)}
+                        </div>
+                      );
+                    })}
+                    <div
+                      className="absolute h-4 w-4 rounded-full bg-blue-600 border-2 border-white shadow pointer-events-none"
+                      style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+                      title="Business center"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

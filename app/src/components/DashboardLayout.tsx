@@ -44,6 +44,8 @@ interface AgencyMe {
   } | null;
 }
 
+const WEB_DESIGN_TABS_ENABLED = (import.meta.env.VITE_ENABLE_WEB_DESIGN_TABS ?? "false") === "true";
+
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -136,7 +138,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
     const clientNavItems = [
       { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks", label: "Dashboard", icon: LayoutDashboard },
-      { path: firstClientId ? `/client/web-design/${firstClientId}` : "/client/tasks", label: "Web Design", icon: LayoutDashboard },
+      ...(WEB_DESIGN_TABS_ENABLED
+        ? [{ path: firstClientId ? `/client/web-design/${firstClientId}` : "/client/tasks", label: "Web Design", icon: LayoutDashboard }]
+        : []),
       { path: "/client/tasks", label: "Tasks", icon: CheckSquare },
       { path: "/client/settings", label: "Settings", icon: Settings },
     ];

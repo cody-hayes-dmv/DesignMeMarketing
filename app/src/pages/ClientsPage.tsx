@@ -40,6 +40,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import { buildClientCopyText } from "@/lib/clientAccountForm";
+import ClientAccountFormModal from "@/components/ClientAccountFormModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import AssignClientToAgencyModal from "../components/AssignClientToAgencyModal";
 
@@ -115,21 +116,6 @@ type ClientFormState = {
   clientStatus: string;
   canceledEndDate: string;
 };
-
-const BUSINESS_NICHE_OPTIONS = [
-  "Health & Wellness",
-  "Emergency Locksmith",
-  "Legal Services",
-  "Home Services",
-  "Retail",
-  "Restaurants",
-  "Financial Services",
-  "Real Estate",
-  "Professional Services",
-  "Automotive",
-  "Beauty & Personal Care",
-  "Other",
-] as const;
 
 const SERVICE_RADIUS_OPTIONS = [
   "5 miles",
@@ -289,6 +275,7 @@ const ClientsPage = () => {
   const canSeeSeoRoadmapFields = user?.role === "SUPER_ADMIN" || user?.role === "SPECIALIST";
   /** Agency panel: show only Sections A–F (no keywords allocation, lat/long, roadmap, etc.) */
   const isAgencyCreateForm = user?.role === "AGENCY" || user?.role === "ADMIN";
+  const showLegacyCreateForm = false;
 
   const parseKeywordsText = (raw: string): string[] => {
     return String(raw || "")
@@ -707,19 +694,15 @@ const ClientsPage = () => {
     }
   };
 
-  const handleUpdateClient = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateClient = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!editingClient) return;
 
-    const selectedBusinessNicheEdit = clientForm.businessNiche === "Other" ? clientForm.businessNicheOther.trim() : (clientForm.businessNiche || "").trim();
     const selectedIndustryEdit = clientForm.industry === "Other" ? clientForm.industryOther.trim() : (clientForm.industry || "").trim();
+    const selectedBusinessNicheEdit = selectedIndustryEdit;
 
     if (!selectedBusinessNicheEdit) {
       toast.error("Please select a business niche.");
-      return;
-    }
-    if (!selectedIndustryEdit) {
-      toast.error("Please select an industry.");
       return;
     }
     if (!clientForm.businessDescription.trim()) {
@@ -781,7 +764,6 @@ const ClientsPage = () => {
       }
 
       if (user?.role === "SUPER_ADMIN") {
-        accountInfo.totalKeywordsToTarget = clientForm.totalKeywordsToTarget || "";
         accountInfo.seoRoadmapSection = clientForm.seoRoadmapSection || "";
       }
 
@@ -1762,14 +1744,32 @@ const ClientsPage = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche *</label>
-                          <select value={clientForm.businessNiche} onChange={(e) => setClientForm((prev) => ({ ...prev, businessNiche: e.target.value, businessNicheOther: e.target.value === "Other" ? prev.businessNicheOther : "" }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white" required>
+                          <select
+                            value={clientForm.industry}
+                            onChange={(e) =>
+                              setClientForm((prev) => ({
+                                ...prev,
+                                industry: e.target.value,
+                                industryOther: e.target.value === "Other" ? prev.industryOther : "",
+                              }))
+                            }
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                            required
+                          >
                             <option value="">Select business niche</option>
                             {INDUSTRY_OPTIONS.map((opt) => (
                               <option key={opt} value={opt}>{opt}</option>
                             ))}
                           </select>
-                          {clientForm.businessNiche === "Other" && (
-                            <input type="text" value={clientForm.businessNicheOther} onChange={(e) => setClientForm({ ...clientForm, businessNicheOther: e.target.value })} className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter business niche" required />
+                          {clientForm.industry === "Other" && (
+                            <input
+                              type="text"
+                              value={clientForm.industryOther}
+                              onChange={(e) => setClientForm({ ...clientForm, industryOther: e.target.value })}
+                              className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                              placeholder="Enter business niche"
+                              required
+                            />
                           )}
                         </div>
                         <div className="md:col-span-2">
@@ -1940,7 +1940,7 @@ const ClientsPage = () => {
                   </div>
                 </>
 
-              {false && (
+              {showLegacyCreateForm && (
                   <>
                     <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
                     {/* Full form - hidden; Create always uses 6-step flow */}
@@ -2106,8 +2106,31 @@ const ClientsPage = () => {
         </div>
       )}
 
+      {/* Edit Client Modal (Agency/Admin uses shared modal for parity with Client Dashboard) */}
+      {showEditModal && isAgencyCreateForm && (
+        <ClientAccountFormModal
+          open={showEditModal}
+          title="Edit Client"
+          subtitle="Account information"
+          form={clientForm as any}
+          setForm={setClientForm as any}
+          canEdit
+          showStatus={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"}
+          showExtendedSuperAdminFields={user?.role === "SUPER_ADMIN"}
+          showSeoRoadmapSection={false}
+          onClose={() => {
+            setShowEditModal(false);
+            setEditingClient(null);
+            setClientForm(EMPTY_CLIENT_FORM);
+          }}
+          onSave={async () => {
+            await handleUpdateClient();
+          }}
+        />
+      )}
+
       {/* Edit Client Modal */}
-      {showEditModal && (
+      {showEditModal && !isAgencyCreateForm && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm overflow-y-auto z-50">
           <div className="min-h-full px-4 py-8 flex items-start justify-center">
             <div className="bg-white rounded-2xl shadow-2xl ring-2 ring-primary-200/80 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
@@ -2192,12 +2215,12 @@ const ClientsPage = () => {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain *</label>
                           <input
-                            type="url"
+                            type="text"
                             required
                             value={clientForm.domain}
                             onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            placeholder="https://islandsaltandspa.com"
+                            placeholder="islandsaltandspa.com or https://islandsaltandspa.com"
                           />
                         </div>
                       </div>
@@ -2340,41 +2363,6 @@ const ClientsPage = () => {
                             required
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche *</label>
-                          <select
-                            value={clientForm.businessNiche}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setClientForm((prev) => ({
-                                ...prev,
-                                businessNiche: value,
-                                businessNicheOther: value === "Other" ? prev.businessNicheOther : "",
-                              }));
-                            }}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                            required
-                          >
-                            <option value="" disabled>
-                              Select business niche
-                            </option>
-                            {BUSINESS_NICHE_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                          {clientForm.businessNiche === "Other" && (
-                            <input
-                              type="text"
-                              value={clientForm.businessNicheOther}
-                              onChange={(e) => setClientForm((prev) => ({ ...prev, businessNicheOther: e.target.value }))}
-                              className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                              placeholder="Enter business niche"
-                              required
-                            />
-                          )}
-                        </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-2">Business Description *</label>
                           <textarea
@@ -2390,16 +2378,16 @@ const ClientsPage = () => {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Primary Domain *</label>
                           <input
-                            type="url"
+                            type="text"
                             value={clientForm.domain}
                             onChange={(e) => setClientForm({ ...clientForm, domain: e.target.value })}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            placeholder="https://islandsaltandspa.com"
+                            placeholder="islandsaltandspa.com or https://islandsaltandspa.com"
                             required
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Industry *</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Business Niche *</label>
                           <select
                             value={clientForm.industry}
                             onChange={(e) => {
@@ -2413,7 +2401,7 @@ const ClientsPage = () => {
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
                             required
                           >
-                            <option value="">Select industry</option>
+                            <option value="">Select business niche</option>
                             {INDUSTRY_OPTIONS.map((opt) => (
                               <option key={opt} value={opt}>
                                 {opt}
@@ -2426,7 +2414,7 @@ const ClientsPage = () => {
                               value={clientForm.industryOther}
                               onChange={(e) => setClientForm((prev) => ({ ...prev, industryOther: e.target.value }))}
                               className="mt-2 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                              placeholder="Enter industry"
+                              placeholder="Enter business niche"
                               required
                             />
                           )}
@@ -2609,6 +2597,22 @@ const ClientsPage = () => {
                       </div>
                     </section>
 
+                    {user?.role === "SUPER_ADMIN" && (
+                      <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/30 p-4 sm:p-5">
+                        <h3 className="text-sm font-semibold text-teal-900 mb-4">GOOGLE BUSINESS PROFILE SERVICES</h3>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Google Business Profile Services</label>
+                          <textarea
+                            value={clientForm.servicesMarkedPrimary}
+                            onChange={(e) => setClientForm({ ...clientForm, servicesMarkedPrimary: e.target.value })}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            rows={3}
+                            placeholder="e.g. Day Spa, Massage Therapy, Facials"
+                          />
+                        </div>
+                      </section>
+                    )}
+
                     {canSeeSeoRoadmapFields && user?.role !== "SUPER_ADMIN" && (
                       <section className="rounded-xl border-l-4 border-slate-600 bg-slate-50/50 p-4 sm:p-5">
                         <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
@@ -2656,17 +2660,16 @@ const ClientsPage = () => {
                           />
                           <p className="mt-1 text-xs text-gray-500">Sets the keyword limit for this specific client</p>
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Total Keywords to Target</label>
-                          <input
-                            type="number"
-                            min={0}
-                            value={clientForm.totalKeywordsToTarget}
-                            onChange={(e) => setClientForm({ ...clientForm, totalKeywordsToTarget: e.target.value })}
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Targeted Keywords</label>
+                          <textarea
+                            value={clientForm.keywords}
+                            onChange={(e) => setClientForm({ ...clientForm, keywords: e.target.value })}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            placeholder="e.g. 200"
+                            rows={4}
+                            placeholder={"keyword one\nkeyword two\nkeyword three"}
                           />
-                          <p className="mt-1 text-xs text-gray-500">Long-term goal/roadmap keywords</p>
+                          <p className="mt-1 text-xs text-gray-500">Use one keyword per line or comma-separated values.</p>
                         </div>
                       </div>
                     </section>

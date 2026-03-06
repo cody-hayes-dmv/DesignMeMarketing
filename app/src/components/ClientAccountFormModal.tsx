@@ -6,7 +6,6 @@ import {
   type CampaignType,
   EMPTY_CLIENT_FORM,
   INDUSTRY_OPTIONS,
-  BUSINESS_NICHE_OPTIONS,
   US_STATES,
   SERVICE_RADIUS_OPTIONS,
   buildClientCopyText,
@@ -133,43 +132,6 @@ export default function ClientAccountFormModal({
                     ro(form.name)
                   )
                 )}
-                {field(
-                  "Business Niche",
-                  true,
-                  canEdit ? (
-                    <>
-                      <select
-                        value={form.businessNiche}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            businessNiche: e.target.value,
-                            businessNicheOther: e.target.value === "Other" ? prev.businessNicheOther : "",
-                          }))
-                        }
-                        className={`${inputClass} bg-white`}
-                      >
-                        <option value="">Select business niche</option>
-                        {BUSINESS_NICHE_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                      {form.businessNiche === "Other" && (
-                        <input
-                          type="text"
-                          value={form.businessNicheOther}
-                          onChange={(e) => setForm((f) => ({ ...f, businessNicheOther: e.target.value }))}
-                          className={`mt-2 ${inputClass}`}
-                          placeholder="Enter business niche"
-                        />
-                      )}
-                    </>
-                  ) : (
-                    ro(form.businessNiche === "Other" ? form.businessNicheOther : form.businessNiche)
-                  )
-                )}
                 <div className="md:col-span-2">
                 {field(
                   "Business Description",
@@ -192,18 +154,18 @@ export default function ClientAccountFormModal({
                   true,
                   canEdit ? (
                     <input
-                      type="url"
+                      type="text"
                       value={form.domain}
                       onChange={(e) => setForm((f) => ({ ...f, domain: e.target.value }))}
                       className={inputClass}
-                      placeholder="https://example.com"
+                      placeholder="example.com or https://example.com"
                     />
                   ) : (
                     ro(form.domain)
                   )
                 )}
                 {field(
-                  "Industry",
+                  "Business Niche",
                   true,
                   canEdit ? (
                     <>
@@ -218,7 +180,7 @@ export default function ClientAccountFormModal({
                         }
                         className={`${inputClass} bg-white`}
                       >
-                        <option value="">Select industry</option>
+                        <option value="">Select business niche</option>
                         {INDUSTRY_OPTIONS.map((opt) => (
                           <option key={opt} value={opt}>
                             {opt}
@@ -231,7 +193,7 @@ export default function ClientAccountFormModal({
                           value={form.industryOther}
                           onChange={(e) => setForm((f) => ({ ...f, industryOther: e.target.value }))}
                           className={`mt-2 ${inputClass}`}
-                          placeholder="Enter industry"
+                          placeholder="Enter business niche"
                         />
                       )}
                     </>
@@ -537,6 +499,32 @@ export default function ClientAccountFormModal({
             </section>
 
             {showExtendedSuperAdminFields && (
+              <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/30 p-4 sm:p-5">
+                <h3 className="text-sm font-semibold text-teal-900 mb-4 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                  GOOGLE BUSINESS PROFILE SERVICES
+                </h3>
+                <div>
+                  {field(
+                    "Google Business Profile Services",
+                    false,
+                    canEdit ? (
+                      <textarea
+                        value={form.servicesMarkedPrimary}
+                        onChange={(e) => setForm((f) => ({ ...f, servicesMarkedPrimary: e.target.value }))}
+                        className={inputClass}
+                        rows={3}
+                        placeholder="e.g. Day Spa, Massage Therapy, Facials"
+                      />
+                    ) : (
+                      ro(form.servicesMarkedPrimary)
+                    )
+                  )}
+                </div>
+              </section>
+            )}
+
+            {showExtendedSuperAdminFields && (
               <>
                 <section className="rounded-xl border-l-4 border-cyan-500 bg-cyan-50/50 p-4 sm:p-5">
                   <h3 className="text-sm font-semibold text-cyan-900 mb-4 flex items-center gap-2">
@@ -553,15 +541,23 @@ export default function ClientAccountFormModal({
                         ro(form.targetKeywordCount)
                       )
                     )}
-                    {field(
-                      "Total Keywords to Target",
-                      false,
-                      canEdit ? (
-                        <input type="number" min={0} value={form.totalKeywordsToTarget} onChange={(e) => setForm((f) => ({ ...f, totalKeywordsToTarget: e.target.value }))} className={inputClass} placeholder="e.g. 200" />
-                      ) : (
-                        ro(form.totalKeywordsToTarget)
-                      )
-                    )}
+                    <div className="md:col-span-2">
+                      {field(
+                        "Targeted Keywords",
+                        false,
+                        canEdit ? (
+                          <textarea
+                            value={form.keywords}
+                            onChange={(e) => setForm((f) => ({ ...f, keywords: e.target.value }))}
+                            className={inputClass}
+                            rows={4}
+                            placeholder={"keyword one\nkeyword two\nkeyword three"}
+                          />
+                        ) : (
+                          ro(form.keywords)
+                        )
+                      )}
+                    </div>
                   </div>
                 </section>
 
