@@ -41,14 +41,19 @@ import WebDesignPage from "./pages/WebDesignPage";
 function App() {
   const dispatch = useDispatch();
   const { user, loading } = useSelector((state: RootState) => state.auth);
+  const token = localStorage.getItem("token");
+  const [authBootstrapDone, setAuthBootstrapDone] = useState(!Boolean(token));
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
     const isVerifyRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/verify");
     if (token && !isVerifyRoute) {
-      dispatch(checkAuth() as any);
+      Promise.resolve(dispatch(checkAuth() as any)).finally(() => {
+        setAuthBootstrapDone(true);
+      });
+    } else {
+      setAuthBootstrapDone(true);
     }
-  }, [dispatch]);
+  }, [dispatch, token]);
 
   useEffect(() => {
     const closeTabAfterVerifySignal = () => {
@@ -101,8 +106,7 @@ function App() {
   }, []);
 
   // Show loading while checking auth on initial load (must be after all hooks)
-  const token = localStorage.getItem("token");
-  if (token && !user && loading) {
+  if (token && !user && (!authBootstrapDone || loading)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -236,7 +240,16 @@ function App() {
       {/* Public invite accept route - no auth required */}
       <Route path="/invite" element={<InvitePage />} />
       {/* Public auth landing */}
-      <Route path="/auth" element={<AuthLandingPage />} />
+      <Route
+        path="/auth"
+        element={
+          user && user.verified ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : (
+            <AuthLandingPage />
+          )
+        }
+      />
       {/* Backwards-compatible alias: redirect old portal entry to login */}
       <Route path="/portal" element={<Navigate to="/login" replace />} />
       {/* Auth routes - only redirect if user is authenticated and verified */}
@@ -521,7 +534,14 @@ function App() {
       <Route
         path="/"
         element={
-          user && user.verified ? (
+          token && !user && (!authBootstrapDone || loading) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : user && user.verified ? (
             <Navigate to={getRedirectUrl()} replace />
           ) : (
             <Navigate to="/auth" replace />

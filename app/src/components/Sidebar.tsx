@@ -396,7 +396,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
 
       {/* Navigation */}
       <nav
-        className={`flex-1 ${collapsed ? "p-2" : "p-4"
+        className={`flex-1 min-h-0 overflow-y-auto ${collapsed ? "p-2" : "p-4"
           } transition-all duration-300`}
       >
         <ul className="space-y-2">

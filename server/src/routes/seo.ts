@@ -3887,15 +3887,29 @@ router.delete("/keywords/:clientId/:keywordId", authenticateToken, async (req, r
   }
 });
 
-// Refresh dashboard data from DataForSEO (SUPER_ADMIN only)
+// Refresh dashboard data from DataForSEO
 router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN or ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
-      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    const allowedRefreshRoles = new Set(["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"]);
+    if (!allowedRefreshRoles.has(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
     }
 
     const { clientId } = req.params;
+    const access = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
+      allowClientUser: true,
+      allowSpecialistTask: true,
+      allowBelongsToAgency: true,
+    });
+    if (!access.client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+    if (!access.hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
     const force = coerceBoolean(req.query.force);
     const clientForTtl = await prisma.client.findUnique({
       where: { id: clientId },
@@ -4155,15 +4169,29 @@ router.post("/dashboard/:clientId/refresh", authenticateToken, async (req, res) 
   }
 });
 
-// Refresh top pages from DataForSEO (SUPER_ADMIN only)
+// Refresh top pages from DataForSEO
 router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN or ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
-      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    const allowedRefreshRoles = new Set(["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"]);
+    if (!allowedRefreshRoles.has(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
     }
 
     const { clientId } = req.params;
+    const access = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
+      allowClientUser: true,
+      allowSpecialistTask: true,
+      allowBelongsToAgency: true,
+    });
+    if (!access.client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+    if (!access.hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
     const force = coerceBoolean(req.query.force);
     const clientForTtl = await prisma.client.findUnique({
       where: { id: clientId },
@@ -4285,15 +4313,29 @@ router.post("/top-pages/:clientId/refresh", authenticateToken, async (req, res) 
   }
 });
 
-// Refresh backlinks from DataForSEO (SUPER_ADMIN only)
+// Refresh backlinks from DataForSEO
 router.post("/backlinks/:clientId/refresh", authenticateToken, async (req, res) => {
   try {
-    // Only SUPER_ADMIN or ADMIN can refresh data
-    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN") {
-      return res.status(403).json({ message: "Access denied. Only Super Admin can refresh data." });
+    const allowedRefreshRoles = new Set(["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"]);
+    if (!allowedRefreshRoles.has(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
     }
 
     const { clientId } = req.params;
+    const access = await resolveSeoClientAccess({
+      user: req.user,
+      clientId,
+      allowOwner: true,
+      allowClientUser: true,
+      allowSpecialistTask: true,
+      allowBelongsToAgency: true,
+    });
+    if (!access.client) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+    if (!access.hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
     const force = coerceBoolean(req.query.force);
     const out = await refreshBacklinksForClientInternal({ clientId, force });
     if (out.message === "Client not found or has no domain") {

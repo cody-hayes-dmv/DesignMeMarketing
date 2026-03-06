@@ -3199,10 +3199,14 @@ const ClientDashboardPage: React.FC = () => {
     }
   }, [activeTab, client?.name, client?.domain, dateRange, dashboardSection, fetchPpcReportPayload, generateStyledPpcPdfFromHtml]);
 
+  const canTriggerSeoOverviewRefresh = useMemo(() => {
+    return ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"].includes(user?.role || "");
+  }, [user?.role]);
+
   const handleRefreshDashboard = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
     if (!clientId) return;
-    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
+    if (!canTriggerSeoOverviewRefresh) return;
     try {
       setRefreshingDashboard(true);
       setGa4ConnectionError(null); // Clear any previous errors
@@ -3303,12 +3307,12 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingDashboard(false);
     }
-  }, [clientId, buildDashboardUrl, dateRange, customStartDate, customEndDate, user?.role]);
+  }, [canTriggerSeoOverviewRefresh, clientId, buildDashboardUrl, dateRange, customStartDate, customEndDate]);
 
   const handleRefreshTopPages = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
     if (!clientId) return;
-    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
+    if (!canTriggerSeoOverviewRefresh) return;
     try {
       setRefreshingTopPages(true);
       const refreshRes = await api.post(`/seo/top-pages/${clientId}/refresh`);
@@ -3345,7 +3349,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingTopPages(false);
     }
-  }, [clientId, user?.role]);
+  }, [canTriggerSeoOverviewRefresh, clientId]);
 
   const fetchBacklinksForChart = useCallback(async () => {
     if (!clientId) return;
@@ -3407,7 +3411,7 @@ const ClientDashboardPage: React.FC = () => {
   const handleRefreshBacklinks = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
     if (!clientId) return;
-    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
+    if (!canTriggerSeoOverviewRefresh) return;
     try {
       setRefreshingBacklinks(true);
       const refreshRes = await api.post(`/seo/backlinks/${clientId}/refresh`);
@@ -3442,7 +3446,7 @@ const ClientDashboardPage: React.FC = () => {
     } finally {
       setRefreshingBacklinks(false);
     }
-  }, [activeTab, backlinksFilter, backlinksSortBy, backlinksOrder, clientId, dashboardSection, fetchBacklinksForChart, user?.role]);
+  }, [activeTab, backlinksFilter, backlinksSortBy, backlinksOrder, canTriggerSeoOverviewRefresh, clientId, dashboardSection, fetchBacklinksForChart]);
 
   const refreshedOnOpenByClientRef = useRef<Record<string, boolean>>({});
   const getAutoRefreshStorageKey = useCallback(() => {
@@ -3483,7 +3487,7 @@ const ClientDashboardPage: React.FC = () => {
 
   useEffect(() => {
     if (!clientId) return;
-    if (!["SUPER_ADMIN", "ADMIN"].includes(user?.role || "")) return;
+    if (!canTriggerSeoOverviewRefresh) return;
     if (hasClientBeenAutoRefreshed(clientId)) return;
     markClientAutoRefreshed(clientId);
 
@@ -3495,7 +3499,7 @@ const ClientDashboardPage: React.FC = () => {
       ]);
     };
     void run();
-  }, [clientId, user?.role, handleRefreshDashboard, handleRefreshTopPages, handleRefreshBacklinks, hasClientBeenAutoRefreshed, markClientAutoRefreshed]);
+  }, [clientId, canTriggerSeoOverviewRefresh, handleRefreshDashboard, handleRefreshTopPages, handleRefreshBacklinks, hasClientBeenAutoRefreshed, markClientAutoRefreshed]);
 
   const handleShare = useCallback(async () => {
     if (!clientId) return;
@@ -4219,9 +4223,17 @@ const ClientDashboardPage: React.FC = () => {
   }, [activeTab, dashboardSection, fetchBacklinksList]);
 
   const workLogFilteredTasks = useMemo(() => {
-    return workLogListTab === "completed"
-      ? workLogTasks.filter((t) => t.status === "DONE")
-      : workLogTasks.filter((t) => t.status !== "DONE");
+    if (workLogListTab === "completed") {
+      return workLogTasks
+        .filter((t) => t.status === "DONE")
+        .sort((a, b) => {
+          const aTime = new Date((a as any).updatedAt || (a as any).createdAt || 0).getTime();
+          const bTime = new Date((b as any).updatedAt || (b as any).createdAt || 0).getTime();
+          if (aTime !== bTime) return bTime - aTime;
+          return String(b.id).localeCompare(String(a.id));
+        });
+    }
+    return workLogTasks.filter((t) => t.status !== "DONE");
   }, [workLogListTab, workLogTasks]);
 
   const workLogProjectAssignees = useMemo(() => {

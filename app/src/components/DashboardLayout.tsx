@@ -59,6 +59,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const showBrandedHeader = user?.role === "AGENCY" || user?.role === "USER";
   const isClientPortal = location.pathname.startsWith("/client/");
   const isAgencyRoute = location.pathname.startsWith("/agency/");
+  const handleGlobalSignOut = () => {
+    dispatch(logout() as any);
+    navigate("/login", { replace: true });
+  };
 
   const refetchAgencyMe = () => {
     if (isAgencyRoute && user?.role === "AGENCY") {
@@ -194,7 +198,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             )}
           </div>
 
-          <nav className={`flex-1 ${sidebarCollapsed ? "p-2" : "p-4"} transition-all duration-300`}>
+          <nav className={`flex-1 min-h-0 overflow-y-auto ${sidebarCollapsed ? "p-2" : "p-4"} transition-all duration-300`}>
             <ul className="space-y-2">
               {clientNavItems.map((item) => {
                 const Icon = item.icon;
@@ -265,7 +269,18 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
               <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
               <p className="text-xs text-gray-500">{brandName}</p>
             </div>
-            <NotificationBell />
+            <div className="flex items-center gap-2">
+              <NotificationBell />
+              <button
+                type="button"
+                onClick={handleGlobalSignOut}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Sign out</span>
+              </button>
+            </div>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">{children}</div>
         </div>
@@ -307,7 +322,18 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
             {showBrandedHeader && <p className="text-xs text-gray-500">{brandName}</p>}
           </div>
-          {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY" || user?.role === "SPECIALIST") && <NotificationBell />}
+          <div className="flex items-center gap-2">
+            {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY" || user?.role === "SPECIALIST") && <NotificationBell />}
+            <button
+              type="button"
+              onClick={handleGlobalSignOut}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
+          </div>
         </div>
         {trialExpired && (
           <div className="bg-amber-50 border-b border-amber-200 px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
