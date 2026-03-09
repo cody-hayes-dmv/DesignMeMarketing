@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Download, Loader2, MapPin, Play, Sparkles, Target, X } from "lucide-react";
@@ -6,6 +6,7 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "@/lib/api";
 import GoogleBusinessSearch, { type GoogleBusinessSelection } from "@/components/GoogleBusinessSearch";
+import InfoTooltip from "@/components/InfoTooltip";
 
 type SnapshotSummary = {
   monthlyAllowance: number;
@@ -27,6 +28,19 @@ type SnapshotPoint = {
   lng: number;
   rank: number | null;
   competitors: string[];
+  serpBusinesses: SnapshotSerpBusiness[];
+};
+
+type SnapshotSerpBusiness = {
+  rank: number;
+  title: string;
+  placeId: string | null;
+  address: string | null;
+  rating: number | null;
+  reviewsCount: number | null;
+  category: string | null;
+  isTarget: boolean;
+  matchedBy?: "cid" | "place_id" | "name" | null;
 };
 
 type LocalMapSnapshotRunnerProps = {
@@ -47,8 +61,92 @@ function colorForRank(rank: number | null): string {
 }
 
 function rankLabel(rank: number | null): string {
-  if (rank == null || rank > 20) return "20+";
+  if (rank == null) return "NR";
+  if (rank > 20) return "20+";
   return String(rank);
+}
+
+function normalizePlaceId(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeBusinessName(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function toAddressString(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const parts = [
+    row.address,
+    row.street_address,
+    row.line1,
+    row.line2,
+    row.city,
+    row.state,
+    row.zip,
+    row.postal_code,
+    row.country,
+    row.country_code,
+  ]
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+  return parts.length ? parts.join(", ") : null;
+}
+
+function normalizeSerpBusinesses(rawValue: unknown): SnapshotSerpBusiness[] {
+  if (!Array.isArray(rawValue)) return [];
+  return rawValue
+    .map((entry: any, idx: number) => {
+      const parsedSerpRank = Number(entry?.rank);
+      const ratingSource = entry?.rating;
+      const parsedRating = Number(entry?.rating ?? ratingSource?.value ?? entry?.rankings_rating);
+      const parsedReviews = Number(
+        entry?.reviewsCount
+        ?? entry?.reviews_count
+        ?? entry?.reviews
+        ?? ratingSource?.votes_count
+        ?? ratingSource?.votes
+        ?? entry?.rating_votes
+      );
+      return {
+        rank: Number.isFinite(parsedSerpRank) && parsedSerpRank > 0 ? parsedSerpRank : (idx + 1),
+        title: String(entry?.title ?? entry?.name ?? "").trim(),
+        placeId: entry?.placeId != null ? String(entry.placeId) : (entry?.place_id != null ? String(entry.place_id) : null),
+        address: toAddressString(entry?.address)
+          ?? toAddressString(entry?.address_info)
+          ?? toAddressString(entry?.address_data)
+          ?? toAddressString(entry?.formatted_address),
+        rating: Number.isFinite(parsedRating) ? parsedRating : null,
+        reviewsCount: Number.isFinite(parsedReviews)
+          ? parsedReviews
+          : null,
+        category: entry?.category != null ? String(entry.category) : null,
+        isTarget: Boolean(entry?.isTarget),
+        matchedBy: entry?.matchedBy === "cid" || entry?.matchedBy === "place_id" || entry?.matchedBy === "name"
+          ? entry.matchedBy
+          : null,
+      } as SnapshotSerpBusiness;
+    })
+    .filter((entry: SnapshotSerpBusiness) => entry.title.length > 0)
+    .sort((a: SnapshotSerpBusiness, b: SnapshotSerpBusiness) => a.rank - b.rank)
+    .slice(0, 10);
+}
+
+function hasSerpBusinessDetails(rows: SnapshotSerpBusiness[]): boolean {
+  return rows.some((row) =>
+    Boolean(
+      (row.address && row.address.trim().length > 0)
+    )
+  );
 }
 
 const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
@@ -68,9 +166,13 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
   const [topCompetitors, setTopCompetitors] = useState<string[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
+  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+  const [pointSerpLoadingIndex, setPointSerpLoadingIndex] = useState<number | null>(null);
+  const [pointSerpError, setPointSerpError] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
   const snapshotPdfContentRef = useRef<HTMLDivElement | null>(null);
   const runProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pointSerpAttemptedRef = useRef<Set<number>>(new Set());
 
   const gridRows = useMemo(() => {
     if (gridData.length === 0) return [];
@@ -151,15 +253,94 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
         const topPct = 50 + (deltaY / MAP_CANVAS_SIZE_PX) * 100;
         return {
           id: `${idx}-${point.lat}-${point.lng}`,
+          pointIndex: idx,
           rank: point.rank,
           leftPct,
           topPct,
         };
       })
-      .filter((point): point is { id: string; rank: number | null; leftPct: number; topPct: number } =>
+      .filter((point): point is { id: string; pointIndex: number; rank: number | null; leftPct: number; topPct: number } =>
         Boolean(point && Number.isFinite(point.leftPct) && Number.isFinite(point.topPct))
       );
   }, [gridData, mapCenter, mapZoom]);
+
+  const selectedPoint = useMemo(() => {
+    if (selectedPointIndex == null) return null;
+    return gridData[selectedPointIndex] ?? null;
+  }, [gridData, selectedPointIndex]);
+
+  const selectedPointSerpBusinesses = useMemo(() => {
+    if (!selectedPoint) return [];
+    const normalizedTargetName = normalizeBusinessName(business?.businessName ?? "");
+    const normalizedTargetPlaceId = normalizePlaceId(business?.placeId ?? "");
+    return selectedPoint.serpBusinesses.map((entry) => {
+      const normalizedEntryName = normalizeBusinessName(entry.title);
+      const normalizedEntryPlaceId = normalizePlaceId(entry.placeId ?? "");
+      const isTargetByName = Boolean(normalizedTargetName && normalizedEntryName && normalizedEntryName === normalizedTargetName);
+      const isTargetByPlaceId = Boolean(normalizedTargetPlaceId && normalizedEntryPlaceId && normalizedEntryPlaceId === normalizedTargetPlaceId);
+      const matchedBy = entry.matchedBy
+        ?? (isTargetByPlaceId ? "place_id" : (isTargetByName ? "name" : null));
+      return {
+        ...entry,
+        isTarget: entry.isTarget || isTargetByName || isTargetByPlaceId,
+        matchedBy,
+      };
+    });
+  }, [business?.businessName, business?.placeId, selectedPoint]);
+
+  const loadPointSerpForIndex = useCallback(async (pointIndex: number, force: boolean = false) => {
+    if (!business || !keyword.trim()) return;
+    const point = gridData[pointIndex];
+    if (!point) return;
+    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return;
+    if (!force && hasSerpBusinessDetails(point.serpBusinesses)) return;
+    if (!force && pointSerpAttemptedRef.current.has(pointIndex)) return;
+    if (pointSerpLoadingIndex === pointIndex) return;
+
+    pointSerpAttemptedRef.current.add(pointIndex);
+    setPointSerpLoadingIndex(pointIndex);
+    setPointSerpError(null);
+    try {
+      const res = await api.post("/local-map/snapshot/point-serp", {
+      keyword: keyword.trim(),
+      placeId: business.placeId,
+      mapsCid: business.mapsCid ?? undefined,
+      businessName: business.businessName,
+      lat: point.lat,
+      lng: point.lng,
+      }, { timeout: 120000, _silent: true } as any);
+      const serpBusinesses = normalizeSerpBusinesses(
+        Array.isArray(res?.data?.serpBusinesses) ? res.data.serpBusinesses : []
+      );
+      const rankFromResponse = res?.data?.rank == null ? null : Number(res.data.rank);
+      setGridData((prev) => prev.map((entry, idx) => {
+        if (idx !== pointIndex) return entry;
+        return {
+          ...entry,
+          rank: typeof rankFromResponse === "number" && Number.isFinite(rankFromResponse) && rankFromResponse > 0
+            ? rankFromResponse
+            : entry.rank,
+          serpBusinesses,
+        };
+      }));
+    } catch (error: any) {
+      setPointSerpError(error?.response?.data?.message || "Unable to load point businesses.");
+    } finally {
+      setPointSerpLoadingIndex((current) => (current === pointIndex ? null : current));
+    }
+  }, [business, gridData, keyword, pointSerpLoadingIndex]);
+
+  React.useEffect(() => {
+    if (!snapshotModalOpen) return;
+    if (selectedPointIndex == null) return;
+    const point = gridData[selectedPointIndex];
+    if (!point || hasSerpBusinessDetails(point.serpBusinesses)) return;
+    void loadPointSerpForIndex(selectedPointIndex);
+  }, [gridData, loadPointSerpForIndex, selectedPointIndex, snapshotModalOpen]);
+
+  React.useEffect(() => {
+    setPointSerpError(null);
+  }, [selectedPointIndex]);
 
   const snapshotAllowanceBanner = useMemo(() => {
     if (superAdminMode) return null;
@@ -206,6 +387,8 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       setRunning(true);
       setRunProgressPct(3);
       setRunError(null);
+      setPointSerpError(null);
+      pointSerpAttemptedRef.current.clear();
       if (!business) {
         toast.error("Select a business");
         return;
@@ -225,6 +408,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       const res = await api.post("/local-map/snapshot/run", {
         keyword: keyword.trim(),
         placeId: business.placeId,
+        mapsCid: business.mapsCid ?? undefined,
         businessName: business.businessName,
         businessAddress: business.address,
         centerLat: business.lat,
@@ -241,8 +425,38 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
             try { return JSON.parse(rawGrid); } catch { return []; }
           })()
         : rawGrid;
-      const points = Array.isArray(parsedGrid) ? parsedGrid : [];
-      setGridData(points as SnapshotPoint[]);
+      const points = Array.isArray(parsedGrid)
+        ? parsedGrid.map((item: any) => {
+            const lat = Number(item?.lat);
+            const lng = Number(item?.lng);
+            const rawRank = item?.rank;
+            const parsedRank = rawRank == null ? null : Number(rawRank);
+            const rank = typeof parsedRank === "number" && Number.isFinite(parsedRank) && parsedRank > 0
+              ? parsedRank
+              : null;
+            const rawSerp = Array.isArray(item?.serpBusinesses)
+              ? item.serpBusinesses
+              : Array.isArray(item?.serp)
+                ? item.serp
+                : [];
+            const serpBusinesses = normalizeSerpBusinesses(rawSerp);
+            return {
+              lat: Number.isFinite(lat) ? lat : Number.NaN,
+              lng: Number.isFinite(lng) ? lng : Number.NaN,
+              rank,
+              competitors: Array.isArray(item?.competitors)
+                ? item.competitors.filter((entry: unknown): entry is string => typeof entry === "string").slice(0, 3)
+                : [],
+              serpBusinesses,
+            } as SnapshotPoint;
+          })
+        : [];
+      setGridData(points);
+      if (points.length > 0) {
+        setSelectedPointIndex(Math.floor(points.length / 2));
+      } else {
+        setSelectedPointIndex(null);
+      }
 
       const rawAta =
         res?.data?.ataScore
@@ -295,6 +509,8 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
 
     try {
       setExportingPdf(true);
+      const pdfRoot = snapshotPdfContentRef.current;
+      pdfRoot.classList.add("pdf-exporting");
       const sections = Array.from(
         snapshotPdfContentRef.current.querySelectorAll(".local-map-snapshot-pdf-section")
       ) as HTMLElement[];
@@ -306,8 +522,12 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       const sectionCanvases: HTMLCanvasElement[] = [];
       const ignoreFilter = (el: Element) => el.getAttribute?.("data-pdf-hide") === "true";
       for (const sec of sections) {
+        const sectionType = sec.getAttribute("data-pdf-section");
+        const captureScale = sectionType === "rank-grid"
+          ? Math.max(4, Number(window.devicePixelRatio || 1))
+          : Math.max(3, Number(window.devicePixelRatio || 1));
         const cvs = await html2canvas(sec, {
-          scale: 2,
+          scale: captureScale,
           useCORS: true,
           logging: false,
           scrollX: 0,
@@ -366,30 +586,53 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       const assignments: Array<{ canvas: HTMLCanvasElement; page: number; y: number; w: number; h: number }> = [];
 
       for (const canvas of sectionCanvases) {
-        const baseW = usableWidth;
-        const baseH = (canvas.height * baseW) / canvas.width;
-        let drawW = baseW;
-        let drawH = baseH;
+        const drawW = usableWidth;
+        const pxPerMm = canvas.width / drawW;
+        const maxChunkPx = Math.max(1, Math.floor(usableHeight * pxPerMm));
+        const sectionGapMm = 4;
 
-        if (drawH > usableHeight) {
-          const scale = usableHeight / drawH;
-          drawW = drawW * scale;
-          drawH = usableHeight;
+        const chunkCanvases: HTMLCanvasElement[] = [];
+        if (canvas.height <= maxChunkPx) {
+          chunkCanvases.push(canvas);
+        } else {
+          for (let offsetY = 0; offsetY < canvas.height; offsetY += maxChunkPx) {
+            const chunkHeight = Math.min(maxChunkPx, canvas.height - offsetY);
+            const chunk = document.createElement("canvas");
+            chunk.width = canvas.width;
+            chunk.height = chunkHeight;
+            const ctx = chunk.getContext("2d");
+            if (!ctx) continue;
+            ctx.drawImage(
+              canvas,
+              0,
+              offsetY,
+              canvas.width,
+              chunkHeight,
+              0,
+              0,
+              canvas.width,
+              chunkHeight
+            );
+            chunkCanvases.push(chunk);
+          }
         }
 
-        if (cursorY > 0 && cursorY + drawH > usableHeight) {
-          pdf.addPage();
-          cursorY = 0;
-        }
-
-        assignments.push({
-          canvas,
-          page: pdf.getNumberOfPages(),
-          y: contentMarginTop + cursorY,
-          w: drawW,
-          h: drawH,
+        chunkCanvases.forEach((chunkCanvas, chunkIdx) => {
+          const drawH = (chunkCanvas.height * drawW) / chunkCanvas.width;
+          if (cursorY > 0 && cursorY + drawH > usableHeight) {
+            pdf.addPage();
+            cursorY = 0;
+          }
+          assignments.push({
+            canvas: chunkCanvas,
+            page: pdf.getNumberOfPages(),
+            y: contentMarginTop + cursorY,
+            w: drawW,
+            h: drawH,
+          });
+          const shouldAddGap = chunkIdx === chunkCanvases.length - 1;
+          cursorY += drawH + (shouldAddGap ? sectionGapMm : 0);
         });
-        cursorY += drawH + 4;
       }
 
       const headerLeft = keyword || "Local Map Snapshot";
@@ -445,6 +688,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
     } catch (error: any) {
       toast.error(error?.message || "Failed to export snapshot PDF.");
     } finally {
+      snapshotPdfContentRef.current?.classList.remove("pdf-exporting");
       setExportingPdf(false);
     }
   };
@@ -625,10 +869,10 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
             className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-6">
+            <div className="flex items-center justify-between border-b border-indigo-100 bg-gradient-to-r from-indigo-50 via-sky-50 to-cyan-50 px-4 py-4 sm:px-6">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">Local Map Snapshot Result</h3>
-                <p className="text-xs text-gray-600">
+                <h3 className="text-base font-semibold text-indigo-900 sm:text-lg">Local Map Snapshot Result</h3>
+                <p className="text-sm text-indigo-700/80">
                   {keyword.trim() || "Keyword"} · {business?.businessName || "Business"}
                 </p>
               </div>
@@ -637,17 +881,17 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                   type="button"
                   onClick={() => void downloadSnapshotPdf()}
                   disabled={exportingPdf}
-                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white/80 px-3.5 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {exportingPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  {exportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                   {exportingPdf ? "Exporting..." : "Download PDF"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setSnapshotModalOpen(false)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                  className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white/80 px-3.5 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-4 w-4" />
                   Close
                 </button>
               </div>
@@ -669,75 +913,173 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
 
               {ataScore != null && (
                 <div className="local-map-snapshot-pdf-section rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-100 p-5 shadow-sm">
-                  <p className="text-sm font-medium text-amber-700">Average True Rank</p>
+                  <div className="inline-flex items-center gap-1.5">
+                    <p className="text-sm font-medium text-amber-700">Average True Rank</p>
+                    <InfoTooltip
+                      content="Average of your ranking positions across all grid points in this snapshot. Lower values mean stronger local map visibility."
+                      className="inline-flex align-middle"
+                      iconClassName="h-3.5 w-3.5 text-amber-700/80 cursor-help"
+                    />
+                  </div>
                   <p className="text-3xl font-bold text-amber-900">{ataScore.toFixed(2)}</p>
                   <p className="text-xs text-amber-700 mt-1">Lower score means better local map visibility.</p>
                 </div>
               )}
 
-              <div className="local-map-snapshot-pdf-section bg-white rounded-2xl border border-gray-200 p-5 overflow-x-auto shadow-sm">
-                <div className="mb-4 flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">Local Rank Grid</p>
-                    <p className="text-xs text-gray-600">Styled 7x7-style heat view for prospect snapshots.</p>
+              <div className="space-y-4">
+                <div data-pdf-section="rank-grid" className="local-map-snapshot-pdf-section rounded-2xl border border-indigo-100 bg-gradient-to-br from-white via-indigo-50/40 to-cyan-50/40 p-5 overflow-x-auto shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Local Rank Grid</p>
+                      <p className="text-xs text-gray-600">Styled 7x7-style heat view for prospect snapshots.</p>
+                    </div>
+                    <div className={`flex items-center gap-2 ${exportingPdf ? "text-xs" : "text-[11px]"} text-gray-700`}>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-lime-200 bg-lime-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-lime-600" />4-7</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />8-10</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-600" />11-20</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-red-700" />20+</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] text-gray-600">
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-lime-600" />4-7</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />8-10</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-600" />11-20</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-700" />20+</span>
+                  <div
+                    className="relative rounded-2xl border border-indigo-100 p-4 overflow-hidden shadow-inner"
+                    style={{
+                      backgroundImage:
+                        exportingPdf
+                          ? "radial-gradient(circle at center, rgba(59,130,246,0.06) 0%, rgba(148,163,184,0.04) 40%, rgba(15,23,42,0.03) 100%)"
+                          : "radial-gradient(circle at center, rgba(59,130,246,0.10) 0%, rgba(148,163,184,0.06) 42%, rgba(15,23,42,0.05) 100%)",
+                    }}
+                  >
+                    <div className={`relative z-10 ${exportingPdf ? "min-w-[640px] w-[640px] h-[640px]" : "min-w-[560px] w-[560px] h-[560px]"} mx-auto rounded-xl overflow-hidden border border-gray-300`}>
+                      {embeddedMapUrl ? (
+                        <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
+                          <iframe
+                            title="Google map snapshot background"
+                            src={embeddedMapUrl}
+                            className="h-full w-full opacity-90 pointer-events-auto"
+                            loading="lazy"
+                            referrerPolicy="no-referrer-when-downgrade"
+                          />
+                        </div>
+                      ) : null}
+                      <div className={`absolute inset-0 ${exportingPdf ? "bg-white/8" : "bg-white/20"} pointer-events-none`} />
+                      <div
+                        className={`absolute inset-0 ${exportingPdf ? "opacity-20" : "opacity-30"} pointer-events-none`}
+                        style={{
+                          backgroundImage:
+                            "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)",
+                          backgroundSize: "14.2857% 14.2857%",
+                        }}
+                      />
+                      {mapProjectedPoints.map((point) => {
+                        const isCenter = Math.abs(point.leftPct - 50) < 0.6 && Math.abs(point.topPct - 50) < 0.6;
+                        const isSelected = selectedPointIndex === point.pointIndex;
+                        const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
+                        if (!inFrame) return null;
+                        return (
+                          <button
+                            type="button"
+                            key={point.id}
+                            onClick={() => setSelectedPointIndex(point.pointIndex)}
+                            className={`absolute ${exportingPdf ? "h-12 w-12 text-[13px] font-bold shadow-md" : "h-10 w-10 text-[11px] font-semibold"} rounded-full flex items-center justify-center shadow transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-200 ring-offset-2 ring-offset-fuchsia-500" : ""} ${exportingPdf ? "ring-1 ring-white/90" : ""}`}
+                            style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
+                            title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
+                          >
+                            {rankLabel(point.rank)}
+                          </button>
+                        );
+                      })}
+                      <div
+                        className={`absolute ${exportingPdf ? "h-5 w-5" : "h-4 w-4"} rounded-full bg-blue-600 border-2 border-white shadow pointer-events-none`}
+                        style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+                        title="Business center"
+                      />
+                    </div>
                   </div>
                 </div>
-                <div
-                  className="relative rounded-2xl border border-gray-200 p-4 overflow-hidden"
-                  style={{
-                    backgroundImage:
-                      "radial-gradient(circle at center, rgba(59,130,246,0.10) 0%, rgba(148,163,184,0.06) 42%, rgba(15,23,42,0.05) 100%)",
-                  }}
-                >
-                  <div className="relative z-10 min-w-[560px] w-[560px] h-[560px] mx-auto rounded-xl overflow-hidden border border-gray-300">
-                    {embeddedMapUrl ? (
-                      <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
-                        <iframe
-                          title="Google map snapshot background"
-                          src={embeddedMapUrl}
-                          className="h-full w-full opacity-90 pointer-events-auto"
-                          loading="lazy"
-                          referrerPolicy="no-referrer-when-downgrade"
-                        />
+                <div data-pdf-section="keyword-results" className="local-map-snapshot-pdf-section overflow-hidden rounded-2xl border border-violet-100 bg-white shadow-sm">
+                  <div className="border-b border-violet-100 bg-gradient-to-r from-violet-50 via-fuchsia-50 to-pink-50 px-4 py-3">
+                    <p className="text-[13px] font-semibold text-gray-900">
+                      Results for "{keyword.trim() || "selected keyword"}"
+                    </p>
+                    {selectedPoint ? (
+                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[11px] text-gray-700">
+                        <MapPin className="h-3.5 w-3.5 text-rose-500" />
+                        {selectedPoint.lat.toFixed(6)}, {selectedPoint.lng.toFixed(6)}
+                        <span className="mx-1 text-gray-300">|</span>
+                        Rank {rankLabel(selectedPoint.rank)}
                       </div>
-                    ) : null}
-                    <div className="absolute inset-0 bg-white/20 pointer-events-none" />
-                    <div
-                      className="absolute inset-0 opacity-30 pointer-events-none"
-                      style={{
-                        backgroundImage:
-                          "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)",
-                        backgroundSize: "14.2857% 14.2857%",
-                      }}
-                    />
-                    {mapProjectedPoints.map((point) => {
-                      const isCenter = Math.abs(point.leftPct - 50) < 0.6 && Math.abs(point.topPct - 50) < 0.6;
-                      const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
-                      if (!inFrame) return null;
-                      return (
-                        <div
-                          key={point.id}
-                          className={`absolute h-10 w-10 rounded-full text-[11px] font-semibold flex items-center justify-center shadow pointer-events-none ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""}`}
-                          style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
-                          title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
-                        >
-                          {rankLabel(point.rank)}
-                        </div>
-                      );
-                    })}
-                    <div
-                      className="absolute h-4 w-4 rounded-full bg-blue-600 border-2 border-white shadow pointer-events-none"
-                      style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
-                      title="Business center"
-                    />
+                    ) : (
+                      <p className="mt-1 text-xs text-gray-600">Select a grid point to view top businesses.</p>
+                    )}
                   </div>
+
+                  {!selectedPoint ? null : pointSerpLoadingIndex === selectedPointIndex ? (
+                    <p className="px-4 py-4 text-sm text-gray-600">Loading top businesses for this point...</p>
+                  ) : selectedPointSerpBusinesses.length === 0 ? (
+                    <div className="flex items-center justify-between gap-3 px-4 py-4">
+                      <p className="text-sm text-gray-600">
+                        {pointSerpError || "No top-business details are available for this point in the current response."}
+                      </p>
+                      {pointSerpError && selectedPointIndex != null ? (
+                        <button
+                          type="button"
+                          onClick={() => void loadPointSerpForIndex(selectedPointIndex, true)}
+                          className="inline-flex shrink-0 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                        >
+                          Retry
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {selectedPointSerpBusinesses.map((entry) => {
+                        const roundedRating = entry.rating == null ? 0 : Math.max(0, Math.min(5, Math.round(entry.rating)));
+                        return (
+                          <div
+                            key={`${entry.rank}-${entry.title}`}
+                            className={`flex items-start gap-3 px-4 ${exportingPdf ? "py-4" : "py-2.5"} ${entry.isTarget ? "bg-blue-50/70" : "bg-white"}`}
+                          >
+                            <div
+                              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${
+                                entry.rank <= 3
+                                  ? "bg-emerald-600"
+                                  : entry.rank <= 7
+                                    ? "bg-lime-600"
+                                    : entry.rank <= 10
+                                      ? "bg-amber-500"
+                                      : entry.rank <= 20
+                                        ? "bg-orange-600"
+                                        : "bg-rose-600"
+                              }`}
+                            >
+                              {entry.rank}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start gap-3">
+                                <p className={`${exportingPdf ? "whitespace-normal break-words text-[14px]" : "truncate text-[13px]"} font-semibold text-gray-900`}>{entry.title}</p>
+                              </div>
+                              <p className={`mt-0.5 ${exportingPdf ? "whitespace-normal break-words text-[13px]" : "truncate text-[12px]"} text-gray-500`}>
+                                {entry.address || "Address unavailable"}
+                              </p>
+                              <div className={`mt-1 flex items-center gap-2 ${exportingPdf ? "text-[12px]" : "text-[11px]"} text-gray-500`}>
+                                <span className="inline-flex items-center gap-0.5 text-amber-500">
+                                  {Array.from({ length: 5 }).map((_, idx) => (
+                                    <span key={`${entry.rank}-star-${idx}`} className={idx < roundedRating ? "text-amber-500" : "text-gray-300"}>
+                                      ★
+                                    </span>
+                                  ))}
+                                </span>
+                                {entry.rating != null ? <span>{entry.rating.toFixed(1)}</span> : null}
+                                {entry.reviewsCount != null ? <span>({entry.reviewsCount})</span> : null}
+                                {entry.category ? <span className="truncate italic uppercase tracking-wide text-[10px]">{entry.category}</span> : null}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

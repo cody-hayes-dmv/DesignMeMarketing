@@ -3,7 +3,7 @@ import { Prisma, type GridKeyword, type GridSnapshot } from "@prisma/client";
 import { authenticateToken } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { getTierConfig, normalizeTierId } from "../lib/tiers.js";
-import { calculateAtaScore, runDataForSeoLocalGrid, searchGoogleBusinessProfiles, type LocalMapGridPoint } from "../lib/localMap.js";
+import { calculateAtaScore, fetchDataForSeoPointSerp, runDataForSeoLocalGrid, searchGoogleBusinessProfiles, type LocalMapGridPoint } from "../lib/localMap.js";
 import { generateLocalMapBundlePdfBuffer, generateLocalMapKeywordPdfBuffer } from "../lib/localMapPdf.js";
 import { sendEmail } from "../lib/email.js";
 import { buildReportEmailSubject, normalizeEmailRecipients } from "../lib/qualityContracts.js";
@@ -1169,7 +1169,7 @@ router.post("/snapshot/run", authenticateToken, async (req, res) => {
     if (!isManagerRole(req.user.role)) {
       return res.status(403).json({ message: "Access denied" });
     }
-    const { keyword, placeId, businessName, businessAddress, centerLat, centerLng, clientId, superAdminMode } = req.body ?? {};
+    const { keyword, placeId, mapsCid, businessName, businessAddress, centerLat, centerLng, clientId, superAdminMode } = req.body ?? {};
     if (!keyword || !placeId || !businessName || centerLat == null || centerLng == null) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -1191,6 +1191,7 @@ router.post("/snapshot/run", authenticateToken, async (req, res) => {
     const result = await runDataForSeoLocalGrid({
       keyword: String(keyword),
       placeId: String(placeId),
+      mapsCid: mapsCid ? String(mapsCid) : undefined,
       businessName: String(businessName),
       centerLat: Number(centerLat),
       centerLng: Number(centerLng),
@@ -1262,6 +1263,42 @@ router.post("/snapshot/run", authenticateToken, async (req, res) => {
       body: req.body,
     });
     return res.status(500).json({ message: error?.message || "Failed to run snapshot" });
+  }
+});
+
+router.post("/snapshot/point-serp", authenticateToken, async (req, res) => {
+  try {
+    if (!isManagerRole(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { keyword, placeId, mapsCid, businessName, lat, lng } = req.body ?? {};
+    if (!keyword || !placeId || !businessName || lat == null || lng == null) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const result = await fetchDataForSeoPointSerp({
+      keyword: String(keyword),
+      placeId: String(placeId),
+      mapsCid: mapsCid ? String(mapsCid) : undefined,
+      businessName: String(businessName),
+      lat: Number(lat),
+      lng: Number(lng),
+      includePlaceDetails: true,
+    });
+    return res.status(200).json({
+      rank: result.rank,
+      competitors: result.competitors,
+      serpBusinesses: result.serpBusinesses,
+      debug: result.debug,
+    });
+  } catch (error: any) {
+    console.error("[LocalMap] snapshot point-serp failed", {
+      message: error?.message,
+      stack: error?.stack,
+      body: req.body,
+      userId: req.user?.userId,
+      role: req.user?.role,
+    });
+    return res.status(500).json({ message: error?.message || "Failed to load point SERP" });
   }
 });
 

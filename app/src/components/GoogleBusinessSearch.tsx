@@ -4,6 +4,7 @@ import api from "@/lib/api";
 
 export type GoogleBusinessSelection = {
   placeId: string;
+  mapsCid?: string | null;
   businessName: string;
   address: string;
   lat: number;
@@ -58,6 +59,7 @@ const GoogleBusinessSearch: React.FC<GoogleBusinessSearchProps> = ({
           rows
             .map((row: any) => ({
               placeId: String(row.placeId || ""),
+              mapsCid: row.mapsCid ? String(row.mapsCid) : null,
               businessName: String(row.businessName || ""),
               address: String(row.address || ""),
               lat: Number(row.lat),

@@ -5,10 +5,24 @@ export type LocalMapGridPoint = {
   lng: number;
   rank: number | null;
   competitors: string[];
+  serpBusinesses?: LocalMapSerpBusiness[];
+};
+
+export type LocalMapSerpBusiness = {
+  rank: number;
+  title: string;
+  placeId: string | null;
+  address: string | null;
+  rating: number | null;
+  reviewsCount: number | null;
+  category: string | null;
+  isTarget: boolean;
+  matchedBy?: "cid" | "place_id" | "name" | null;
 };
 
 export type GoogleBusinessSearchResult = {
   placeId: string;
+  mapsCid: string | null;
   businessName: string;
   address: string;
   lat: number;
@@ -23,14 +37,53 @@ export type DataForSeoLocalGridResult = {
   rawResult: unknown;
 };
 
+export type LocalMapPointSerpResult = {
+  rank: number | null;
+  competitors: string[];
+  serpBusinesses: LocalMapSerpBusiness[];
+  rawResult: unknown;
+  debug: LocalMapPointSerpDebug;
+};
+
+export type LocalMapPointSerpDebug = {
+  endpointUsed?: string;
+  requestDepth?: number;
+  taskStatusCode: number | null;
+  taskStatusMessage: string | null;
+  target: {
+    businessName: string;
+    placeId: string;
+    mapsCid: string;
+  };
+  candidateCount: number;
+  candidates: Array<{
+    title: string;
+    placeId: string | null;
+    cidCandidates: string[];
+    matchedBy: "cid" | "place_id" | "name" | null;
+    rank: number;
+  }>;
+};
+
 type DataForSeoLocalGridRequest = {
   keyword: string;
   placeId: string;
+  mapsCid?: string;
   businessName?: string;
   centerLat: number;
   centerLng: number;
   gridSize?: number;
   gridSpacingMiles?: number;
+};
+
+type DataForSeoPointSerpRequest = {
+  keyword: string;
+  placeId: string;
+  mapsCid?: string;
+  businessName?: string;
+  lat: number;
+  lng: number;
+  includePlaceDetails?: boolean;
 };
 
 const EARTH_RADIUS_METERS = 6371000;
@@ -42,6 +95,12 @@ const DEFAULT_DATAFORSEO_DEVICE = "desktop";
 const DEFAULT_LOCAL_GRID_CONCURRENCY = 20;
 const DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS = 8000;
 const DEFAULT_LOCAL_GRID_SINGLE_RUN_TIMEOUT_MS = 12000;
+const DEFAULT_LOCAL_POINT_SERP_TIMEOUT_MS = 20000;
+const DEFAULT_DATAFORSEO_MAPS_DEPTH = 50;
+const DEFAULT_DATAFORSEO_POINT_DEPTH = 100;
+const MAX_DATAFORSEO_DEPTH = 100;
+const DEFAULT_DATAFORSEO_MAPS_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/maps/live/advanced";
+const DEFAULT_DATAFORSEO_LOCAL_FINDER_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/local_finder/live/advanced";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -62,6 +121,83 @@ function toNumber(value: unknown): number | null {
 
 function toStringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function toAddressString(value: unknown): string | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length ? normalized : null;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item) => item.length > 0);
+    return parts.length ? parts.join(", ") : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as UnknownRecord;
+  const orderedParts = [
+    toStringOrNull(record.address),
+    toStringOrNull(record.full_address),
+    toStringOrNull(record.displayed_address),
+    toStringOrNull(record.formatted),
+    toStringOrNull(record.formatted_address),
+    toStringOrNull(record.street),
+    toStringOrNull(record.street_address),
+    toStringOrNull(record.house),
+    toStringOrNull(record.house_number),
+    toStringOrNull(record.line1),
+    toStringOrNull(record.line2),
+    toStringOrNull(record.neighborhood),
+    toStringOrNull(record.district),
+    toStringOrNull(record.borough),
+    toStringOrNull(record.city),
+    toStringOrNull(record.province),
+    toStringOrNull(record.region),
+    toStringOrNull(record.state),
+    toStringOrNull(record.zip_code),
+    toStringOrNull(record.zip),
+    toStringOrNull(record.postal_code),
+    toStringOrNull(record.country_code),
+    toStringOrNull(record.country),
+  ].filter((part): part is string => Boolean(part));
+  if (!orderedParts.length) return null;
+  return orderedParts.join(", ");
+}
+
+function extractPlaceIdFromText(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const fromParam = /(?:\?|&|#)place_id=([^&#]+)/i.exec(text)?.[1];
+  if (!fromParam) return null;
+  const decoded = decodeURIComponent(fromParam);
+  return decoded.startsWith("ChI") ? decoded : null;
+}
+
+function extractPlaceId(row: UnknownRecord): string | null {
+  const candidates = [
+    row.place_id,
+    row.placeId,
+    row.google_place_id,
+    row.placeid,
+    row.check_url,
+    row.url,
+    row.maps_url,
+  ];
+  for (const candidate of candidates) {
+    const asString = toStringOrNull(candidate);
+    if (asString && asString.startsWith("ChI")) return asString;
+    const parsed = extractPlaceIdFromText(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function resolveDepth(rawValue: unknown, fallback: number, minimum: number): number {
+  const parsed = toNumber(rawValue);
+  if (parsed == null) return fallback;
+  const rounded = Math.round(parsed);
+  return Math.max(minimum, Math.min(MAX_DATAFORSEO_DEPTH, rounded));
 }
 
 function milesToMeters(miles: number): number {
@@ -105,6 +241,7 @@ function buildFallbackGrid(centerLat: number, centerLng: number, gridSize: numbe
         lng: Number(coords.lng.toFixed(7)),
         rank: null,
         competitors: [],
+        serpBusinesses: [],
       });
     }
   }
@@ -126,10 +263,14 @@ function parseCompetitorNames(value: unknown): string[] {
     .slice(0, 3);
 }
 
-function parseGridPointsFromResult(result: UnknownRecord): LocalMapGridPoint[] {
+function parseGridPointsFromResult(
+  result: UnknownRecord,
+  targetPlaceId: string,
+  targetBusinessName: string,
+  targetMapsCid: string
+): LocalMapGridPoint[] {
   const direct = Array.isArray(result.grid_data) ? result.grid_data : null;
-  const items = Array.isArray(result.items) ? result.items : null;
-  const source = direct ?? items ?? [];
+  const source = direct ?? [];
   const parsed: LocalMapGridPoint[] = [];
 
   for (const row of source) {
@@ -139,7 +280,7 @@ function parseGridPointsFromResult(result: UnknownRecord): LocalMapGridPoint[] {
     const lng = toNumber(record.lng ?? record.longitude ?? record.x);
     if (lat == null || lng == null) continue;
 
-    const rank = normalizeMapRank(
+    const baseRank = normalizeMapRank(
       record.rank
       ?? record.rank_absolute
       ?? record.rank_group
@@ -154,12 +295,29 @@ function parseGridPointsFromResult(result: UnknownRecord): LocalMapGridPoint[] {
       record.top_3_competitors ??
       record.top_competitor_business_names
     );
+    const serpBusinesses = parseSerpBusinesses(
+      record.items
+      ?? record.competitors
+      ?? record.top_competitors
+      ?? record.top_3_competitors
+      ?? record.top_competitor_business_names,
+      targetPlaceId,
+      targetBusinessName,
+      targetMapsCid
+    );
+    const derivedRankFromSerp = serpBusinesses.find((entry) => entry.isTarget)?.rank ?? null;
+    const rank = baseRank ?? derivedRankFromSerp;
+    const competitorsFromSerp = serpBusinesses
+      .filter((entry) => !entry.isTarget)
+      .slice(0, 3)
+      .map((entry) => entry.title);
 
     parsed.push({
       lat: Number(lat.toFixed(7)),
       lng: Number(lng.toFixed(7)),
       rank,
-      competitors,
+      competitors: competitorsFromSerp.length ? competitorsFromSerp : competitors,
+      serpBusinesses,
     });
   }
 
@@ -224,7 +382,7 @@ async function tryRunLocalRankTrackerGrid(
   const firstTask = (tasks[0] as UnknownRecord | undefined) ?? {};
   const taskResults = Array.isArray(firstTask.result) ? (firstTask.result as unknown[]) : [];
   const firstResult = (taskResults[0] as UnknownRecord | undefined) ?? {};
-  const parsed = parseGridPointsFromResult(firstResult);
+  const parsed = parseGridPointsFromResult(firstResult, input.placeId, input.businessName ?? "", input.mapsCid ?? "");
   if (!parsed.length) return null;
   return { gridData: parsed, rawResult: json };
 }
@@ -281,6 +439,7 @@ function gridCoordinates(centerLat: number, centerLng: number, gridSize: number,
         lng: Number(coords.lng.toFixed(7)),
         rank: null,
         competitors: [],
+        serpBusinesses: [],
       });
     }
   }
@@ -291,6 +450,35 @@ function normalizePlaceId(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function normalizeCid(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const cidFromParam = /(?:\?|&|#)cid=(\d{5,})/i.exec(text)?.[1];
+  if (cidFromParam) return cidFromParam;
+  const digitsOnly = text.replace(/\D/g, "");
+  return digitsOnly.length >= 5 ? digitsOnly : "";
+}
+
+function extractCidCandidates(row: UnknownRecord): string[] {
+  const candidates = [
+    row.cid,
+    row.data_cid,
+    row.place_cid,
+    row.google_cid,
+    row.data_id,
+    row.feature_id,
+    row.google_id,
+    row.url,
+    row.maps_url,
+  ];
+  const out = new Set<string>();
+  for (const value of candidates) {
+    const normalized = normalizeCid(value);
+    if (normalized) out.add(normalized);
+  }
+  return [...out];
+}
+
 function normalizeBusinessName(value: unknown): string {
   return String(value ?? "")
     .toLowerCase()
@@ -299,18 +487,175 @@ function normalizeBusinessName(value: unknown): string {
     .trim();
 }
 
+function getTargetMatchReason(
+  candidateTitle: string,
+  candidatePlaceId: string | null,
+  candidateCidCandidates: string[],
+  targetPlaceId: string,
+  targetBusinessName: string,
+  targetMapsCid: string
+): "cid" | "place_id" | "name" | null {
+  const normalizedTargetCid = normalizeCid(targetMapsCid);
+  if (normalizedTargetCid && candidateCidCandidates.some((cid) => cid === normalizedTargetCid)) {
+    return "cid";
+  }
+
+  const normalizedTargetPlaceId = normalizePlaceId(targetPlaceId);
+  const normalizedCandidatePlaceId = normalizePlaceId(candidatePlaceId ?? "");
+  if (normalizedTargetPlaceId && normalizedCandidatePlaceId && normalizedCandidatePlaceId === normalizedTargetPlaceId) {
+    return "place_id";
+  }
+
+  const normalizedTargetName = normalizeBusinessName(targetBusinessName);
+  const normalizedCandidateName = normalizeBusinessName(candidateTitle);
+  if (!normalizedTargetName || !normalizedCandidateName) return null;
+  if (normalizedCandidateName === normalizedTargetName) return "name";
+
+  const targetTokens = normalizedTargetName.split(" ").filter(Boolean);
+  const candidateTokens = normalizedCandidateName.split(" ").filter(Boolean);
+  if (targetTokens.length < 2 || candidateTokens.length < 2) return null;
+  const targetSet = new Set(targetTokens);
+  const candidateSet = new Set(candidateTokens);
+  let intersection = 0;
+  for (const token of candidateSet) {
+    if (targetSet.has(token)) intersection += 1;
+  }
+  const union = new Set([...targetSet, ...candidateSet]).size;
+  const jaccard = union > 0 ? intersection / union : 0;
+  return jaccard >= 0.6 ? "name" : null;
+}
+
+function isTargetBusinessMatch(
+  candidateTitle: string,
+  candidatePlaceId: string | null,
+  candidateCidCandidates: string[],
+  targetPlaceId: string,
+  targetBusinessName: string,
+  targetMapsCid: string
+): boolean {
+  return getTargetMatchReason(
+    candidateTitle,
+    candidatePlaceId,
+    candidateCidCandidates,
+    targetPlaceId,
+    targetBusinessName,
+    targetMapsCid
+  ) !== null;
+}
+
+function parseSerpBusinesses(
+  value: unknown,
+  targetPlaceId: string,
+  targetBusinessName: string,
+  targetMapsCid: string
+): LocalMapSerpBusiness[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry, index) => {
+      if (entry == null) return null;
+      if (typeof entry === "string") {
+        const title = entry.trim();
+        if (!title) return null;
+        const matchedBy = getTargetMatchReason(title, null, [], targetPlaceId, targetBusinessName, targetMapsCid);
+        const isTarget = matchedBy !== null;
+        return {
+          rank: index + 1,
+          title,
+          placeId: null,
+          address: null,
+          rating: null,
+          reviewsCount: null,
+          category: null,
+          isTarget,
+          matchedBy,
+        } as LocalMapSerpBusiness;
+      }
+      if (typeof entry !== "object") return null;
+      const row = entry as UnknownRecord;
+      const title = toStringOrNull(row.title ?? row.name);
+      if (!title) return null;
+      const placeId = extractPlaceId(row);
+      const cidCandidates = extractCidCandidates(row);
+      const rank = normalizeMapRank(
+        row.rank
+        ?? row.rank_absolute
+        ?? row.rank_group
+        ?? row.rank_position
+        ?? row.position
+        ?? row.absolute_rank
+        ?? row.local_pack_position
+      ) ?? (index + 1);
+      const matchedBy = getTargetMatchReason(
+        title,
+        placeId,
+        cidCandidates,
+        targetPlaceId,
+        targetBusinessName,
+        targetMapsCid
+      );
+      const isTarget = matchedBy !== null;
+
+      return {
+        rank,
+        title,
+        placeId: placeId ?? null,
+        address: toAddressString(row.address)
+          ?? toAddressString(row.address_info)
+          ?? toAddressString(row.address_data)
+          ?? toAddressString(row.formatted_address)
+          ?? toAddressString(row),
+        rating: toNumber(row.rating)
+          ?? toNumber((row.rating as UnknownRecord | undefined)?.value)
+          ?? toNumber(row.rankings_rating),
+        reviewsCount: toNumber(row.reviews_count)
+          ?? toNumber(row.rating_votes)
+          ?? toNumber(row.reviews)
+          ?? toNumber((row.rating as UnknownRecord | undefined)?.votes_count)
+          ?? toNumber((row.rating as UnknownRecord | undefined)?.votes),
+        category: toStringOrNull(row.category_name ?? row.category ?? row.main_category),
+        isTarget,
+        matchedBy,
+      } as LocalMapSerpBusiness;
+    })
+    .filter((item): item is LocalMapSerpBusiness => item !== null)
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, 10);
+}
+
 function parseItemsForCoordinate(
   responseJson: unknown,
   targetPlaceId: string,
-  targetBusinessName: string
-): { rank: number | null; competitors: string[] } {
+  targetBusinessName: string,
+  targetMapsCid: string
+): { rank: number | null; competitors: string[]; serpBusinesses: LocalMapSerpBusiness[]; debug: LocalMapPointSerpDebug } {
   const tasks = Array.isArray((responseJson as UnknownRecord)?.tasks)
     ? ((responseJson as UnknownRecord).tasks as unknown[])
     : [];
   const firstTask = (tasks[0] as UnknownRecord | undefined) ?? {};
   const taskStatusCode = toNumber(firstTask.status_code);
+  const taskStatusMessage = toStringOrNull(firstTask.status_message);
+  const baseDebug: LocalMapPointSerpDebug = {
+    taskStatusCode,
+    taskStatusMessage,
+    target: {
+      businessName: String(targetBusinessName ?? ""),
+      placeId: String(targetPlaceId ?? ""),
+      mapsCid: String(targetMapsCid ?? ""),
+    },
+    candidateCount: 0,
+    candidates: [],
+  };
+  if (taskStatusCode === 40102) {
+    // DataForSEO: "No Search Results" (valid no-data state, not a transport/system failure).
+    return { rank: null, competitors: [], serpBusinesses: [], debug: baseDebug };
+  }
   if (taskStatusCode != null && taskStatusCode >= 40000) {
-    throw new Error(`DataForSEO task failed with status_code ${taskStatusCode}`);
+    throw new Error(
+      taskStatusMessage
+        ? `DataForSEO task failed with status_code ${taskStatusCode}: ${taskStatusMessage}`
+        : `DataForSEO task failed with status_code ${taskStatusCode}`
+    );
   }
 
   const taskResults = Array.isArray(firstTask.result) ? (firstTask.result as unknown[]) : [];
@@ -323,6 +668,7 @@ function parseItemsForCoordinate(
       const row = entry as UnknownRecord;
       const title = toStringOrNull(row.title) ?? "";
       const placeId = normalizePlaceId(row.place_id);
+      const cidCandidates = extractCidCandidates(row);
       const rank =
         normalizeMapRank(
           row.rank
@@ -335,29 +681,41 @@ function parseItemsForCoordinate(
         )
         // If endpoint omits explicit rank fields but returns ordered items, use item order.
         ?? (index + 1);
-      return { title, placeId, rank, index };
+      const matchedBy = getTargetMatchReason(
+        title,
+        placeId || null,
+        cidCandidates,
+        targetPlaceId,
+        targetBusinessName,
+        targetMapsCid
+      );
+      return { title, placeId, rank, index, cidCandidates, matchedBy };
     })
-    .filter((entry): entry is { title: string; placeId: string; rank: number; index: number } => entry !== null);
+    .filter((entry): entry is { title: string; placeId: string; rank: number; index: number; cidCandidates: string[]; matchedBy: "cid" | "place_id" | "name" | null } => entry !== null);
 
   const competitors = ranked
     .slice(0, 3)
     .map((entry) => entry.title)
     .filter((name) => name.length > 0);
-  const normalizedTargetBusinessName = normalizeBusinessName(targetBusinessName);
-  const match = ranked.find((entry) => {
-    if (entry.placeId && entry.placeId === targetPlaceId) return true;
-    if (!normalizedTargetBusinessName) return false;
-    const normalizedTitle = normalizeBusinessName(entry.title);
-    if (!normalizedTitle) return false;
-    if (normalizedTitle === normalizedTargetBusinessName) return true;
-    if (normalizedTitle.length >= 5 && normalizedTargetBusinessName.includes(normalizedTitle)) return true;
-    if (normalizedTargetBusinessName.length >= 5 && normalizedTitle.includes(normalizedTargetBusinessName)) return true;
-    return false;
-  });
+  const serpBusinesses = parseSerpBusinesses(items, targetPlaceId, targetBusinessName, targetMapsCid);
+  const match = ranked.find((entry) => entry.matchedBy !== null);
+  const debug: LocalMapPointSerpDebug = {
+    ...baseDebug,
+    candidateCount: ranked.length,
+    candidates: ranked.slice(0, 10).map((entry) => ({
+      title: entry.title,
+      placeId: entry.placeId || null,
+      cidCandidates: entry.cidCandidates,
+      matchedBy: entry.matchedBy,
+      rank: entry.rank,
+    })),
+  };
 
   return {
     rank: match?.rank ?? null,
     competitors,
+    serpBusinesses,
+    debug,
   };
 }
 
@@ -394,6 +752,166 @@ async function getJsonResponse(response: Response): Promise<unknown> {
   }
 }
 
+type GooglePlaceDetail = {
+  placeId: string;
+  name: string | null;
+  address: string | null;
+  rating: number | null;
+  reviewsCount: number | null;
+  category: string | null;
+};
+
+function normalizeCategoryFromTypes(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const first = value.find((item) => typeof item === "string" && item.trim().length > 0) as string | undefined;
+  if (!first) return null;
+  return first.replace(/_/g, " ").trim();
+}
+
+function nameSimilarityScore(leftValue: unknown, rightValue: unknown): number {
+  const left = normalizeBusinessName(leftValue);
+  const right = normalizeBusinessName(rightValue);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  const leftTokens = left.split(" ").filter(Boolean);
+  const rightTokens = right.split(" ").filter(Boolean);
+  if (!leftTokens.length || !rightTokens.length) return 0;
+  const leftSet = new Set(leftTokens);
+  const rightSet = new Set(rightTokens);
+  let intersection = 0;
+  for (const token of leftSet) {
+    if (rightSet.has(token)) intersection += 1;
+  }
+  const union = new Set([...leftSet, ...rightSet]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+async function fetchGooglePlaceDetail(placeId: string): Promise<GooglePlaceDetail | null> {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) return null;
+  const normalizedPlaceId = String(placeId || "").trim();
+  if (!normalizedPlaceId) return null;
+
+  const detailsUrl = new URL("https://maps.googleapis.com/maps/api/place/details/json");
+  detailsUrl.searchParams.set("place_id", normalizedPlaceId);
+  detailsUrl.searchParams.set("fields", "place_id,name,formatted_address,rating,user_ratings_total,types");
+  detailsUrl.searchParams.set("key", apiKey);
+
+  const res = await fetch(detailsUrl, { method: "GET" });
+  if (!res.ok) return null;
+  const json = await getJsonResponse(res);
+  const result = (json as UnknownRecord)?.result as UnknownRecord | undefined;
+  if (!result) return null;
+
+  return {
+    placeId: normalizedPlaceId,
+    name: toStringOrNull(result.name),
+    address: toAddressString(result.formatted_address),
+    rating: toNumber(result.rating),
+    reviewsCount: toNumber(result.user_ratings_total),
+    category: normalizeCategoryFromTypes(result.types),
+  };
+}
+
+async function searchGooglePlaceDetailByText(query: string, lat: number, lng: number): Promise<GooglePlaceDetail | null> {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) return null;
+  const normalizedQuery = String(query || "").trim();
+  if (!normalizedQuery) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const url = new URL("https://maps.googleapis.com/maps/api/place/textsearch/json");
+  url.searchParams.set("query", normalizedQuery);
+  url.searchParams.set("location", `${Number(lat)},${Number(lng)}`);
+  url.searchParams.set("radius", "8000");
+  url.searchParams.set("key", apiKey);
+
+  const res = await fetch(url, { method: "GET" });
+  if (!res.ok) return null;
+  const json = await getJsonResponse(res);
+  const rows = Array.isArray((json as UnknownRecord)?.results)
+    ? ((json as UnknownRecord).results as unknown[])
+    : [];
+
+  let best: UnknownRecord | null = null;
+  let bestScore = 0;
+  for (const entry of rows) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as UnknownRecord;
+    const score = nameSimilarityScore(normalizedQuery, toStringOrNull(row.name) ?? "");
+    if (score > bestScore) {
+      best = row;
+      bestScore = score;
+    }
+  }
+
+  if (!best || bestScore < 0.6) return null;
+  const placeId = toStringOrNull(best.place_id);
+  if (!placeId) return null;
+  return {
+    placeId,
+    name: toStringOrNull(best.name),
+    address: toAddressString(best.formatted_address),
+    rating: toNumber(best.rating),
+    reviewsCount: toNumber(best.user_ratings_total),
+    category: normalizeCategoryFromTypes(best.types),
+  };
+}
+
+async function enrichSerpBusinessesWithGooglePlaceDetails(
+  businesses: LocalMapSerpBusiness[],
+  lat: number,
+  lng: number
+): Promise<LocalMapSerpBusiness[]> {
+  const placeIds = Array.from(
+    new Set(
+      businesses
+        .map((entry) => toStringOrNull(entry.placeId))
+        .filter((entry): entry is string => Boolean(entry))
+    )
+  );
+  const details = await mapWithConcurrency(placeIds, 5, async (pid) => {
+    try {
+      return await fetchGooglePlaceDetail(pid);
+    } catch {
+      return null;
+    }
+  });
+  const detailMap = new Map<string, GooglePlaceDetail>();
+  for (const detail of details) {
+    if (detail?.placeId) detailMap.set(detail.placeId, detail);
+  }
+
+  const queryCache = new Map<string, GooglePlaceDetail | null>();
+  return mapWithConcurrency(businesses, 4, async (entry) => {
+    const placeId = toStringOrNull(entry.placeId);
+    let detail = placeId ? detailMap.get(placeId) ?? null : null;
+    if (!detail && !toStringOrNull(entry.address)) {
+      const key = normalizeBusinessName(entry.title);
+      if (!queryCache.has(key)) {
+        try {
+          queryCache.set(key, await searchGooglePlaceDetailByText(entry.title, lat, lng));
+        } catch {
+          queryCache.set(key, null);
+        }
+      }
+      detail = queryCache.get(key) ?? null;
+    }
+    if (!detail) return entry;
+    return {
+      ...entry,
+      placeId: entry.placeId || detail.placeId,
+      title: entry.title || detail.name || entry.title,
+      address: entry.address || detail.address || null,
+      rating: entry.rating != null && entry.rating > 0 ? entry.rating : (detail.rating != null && detail.rating > 0 ? detail.rating : null),
+      reviewsCount: entry.reviewsCount != null && entry.reviewsCount > 0
+        ? entry.reviewsCount
+        : (detail.reviewsCount != null && detail.reviewsCount > 0 ? detail.reviewsCount : null),
+      category: entry.category || detail.category || null,
+    };
+  });
+}
+
 export async function searchGoogleBusinessProfiles(query: string): Promise<GoogleBusinessSearchResult[]> {
   const input = query.trim();
   if (input.length < 2) return [];
@@ -422,7 +940,7 @@ export async function searchGoogleBusinessProfiles(query: string): Promise<Googl
     placeIds.map(async (placeId) => {
       const detailsUrl = new URL("https://maps.googleapis.com/maps/api/place/details/json");
       detailsUrl.searchParams.set("place_id", placeId);
-      detailsUrl.searchParams.set("fields", "place_id,name,formatted_address,geometry/location");
+      detailsUrl.searchParams.set("fields", "place_id,name,formatted_address,geometry/location,url");
       detailsUrl.searchParams.set("key", apiKey);
       const res = await fetch(detailsUrl, { method: "GET" });
       if (!res.ok) return null;
@@ -436,10 +954,12 @@ export async function searchGoogleBusinessProfiles(query: string): Promise<Googl
       const location = geometry?.location as UnknownRecord | undefined;
       const lat = toNumber(location?.lat);
       const lng = toNumber(location?.lng);
+      const mapsCid = normalizeCid(result.url);
 
       if (!name || lat == null || lng == null) return null;
       return {
         placeId,
+        mapsCid: mapsCid || null,
         businessName: name,
         address,
         lat: Number(lat.toFixed(7)),
@@ -454,93 +974,36 @@ export async function searchGoogleBusinessProfiles(query: string): Promise<Googl
 export async function runDataForSeoLocalGrid(
   input: DataForSeoLocalGridRequest
 ): Promise<DataForSeoLocalGridResult> {
-  const base64Auth = requireEnv("DATAFORSEO_BASE64");
-  const endpoint = process.env.DATAFORSEO_LOCAL_RANK_ENDPOINT
-    ?? "https://api.dataforseo.com/v3/serp/google/maps/live/advanced";
-
   const gridSize = input.gridSize ?? DEFAULT_GRID_SIZE;
   const gridSpacingMiles = input.gridSpacingMiles ?? DEFAULT_GRID_SPACING_MILES;
   const spacingMeters = milesToMeters(gridSpacingMiles);
 
-  const languageCode = process.env.DATAFORSEO_LANGUAGE_CODE || DEFAULT_DATAFORSEO_LANGUAGE_CODE;
-  const device = process.env.DATAFORSEO_DEVICE || DEFAULT_DATAFORSEO_DEVICE;
-  const depth = Math.max(20, Number(process.env.DATAFORSEO_MAPS_DEPTH ?? 20));
-  const targetPlaceId = normalizePlaceId(input.placeId);
-  const targetBusinessName = String(input.businessName ?? "");
   const points = gridCoordinates(input.centerLat, input.centerLng, gridSize, spacingMeters);
-  const pointTimeoutMs = Math.max(
-    3000,
-    Number(process.env.DATAFORSEO_LOCAL_GRID_POINT_TIMEOUT_MS ?? DEFAULT_LOCAL_GRID_POINT_TIMEOUT_MS)
-  );
   const concurrency = Math.max(
     1,
     Number(process.env.DATAFORSEO_LOCAL_GRID_CONCURRENCY ?? DEFAULT_LOCAL_GRID_CONCURRENCY)
   );
 
-  // Preferred mode: single Local Rank Tracker-style request with place_id + grid params.
-  // Falls back to per-point requests if endpoint/account does not support this payload.
-  const singleRun = await tryRunLocalRankTrackerGrid(
-    endpoint,
-    base64Auth,
-    input,
-    languageCode,
-    device,
-    depth,
-    gridSize,
-    spacingMeters
-  );
-
   let rawResult: unknown[] = [];
   let gridData: LocalMapGridPoint[] = [];
-
-  const expectedGridPoints = gridSize * gridSize;
-  if (singleRun?.gridData?.length && singleRun.gridData.length >= expectedGridPoints) {
-    rawResult = [singleRun.rawResult];
-    gridData = singleRun.gridData.slice(0, expectedGridPoints).map((p) => ({
-      lat: Number(p.lat.toFixed(7)),
-      lng: Number(p.lng.toFixed(7)),
-      rank: p.rank,
-      competitors: Array.isArray(p.competitors) ? p.competitors.slice(0, 3) : [],
-    }));
-  } else {
-    rawResult = [];
-    gridData = await mapWithConcurrency(points, concurrency, async (point) => {
-    const payload = [
-      {
-        keyword: input.keyword,
-        location_coordinate: `${point.lat},${point.lng},20z`,
-        language_code: languageCode,
-        device,
-        depth,
-      },
-    ];
-
-    let timeout: ReturnType<typeof setTimeout> | null = null;
+  rawResult = [];
+  gridData = await mapWithConcurrency(points, concurrency, async (point) => {
     try {
-      const controller = new AbortController();
-      timeout = setTimeout(() => controller.abort(), pointTimeoutMs);
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${base64Auth}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
+      const parsed = await fetchDataForSeoPointSerp({
+        keyword: input.keyword,
+        placeId: input.placeId,
+        mapsCid: input.mapsCid,
+        businessName: input.businessName,
+        lat: point.lat,
+        lng: point.lng,
       });
-
-      const json = await getJsonResponse(response);
-      rawResult.push(json);
-      if (!response.ok) {
-        throw new Error(`DataForSEO local grid request failed with status ${response.status}`);
-      }
-
-      const parsed = parseItemsForCoordinate(json, targetPlaceId, targetBusinessName);
+      rawResult.push(parsed.rawResult);
       return {
         lat: point.lat,
         lng: point.lng,
         rank: parsed.rank,
         competitors: parsed.competitors,
+        serpBusinesses: parsed.serpBusinesses,
       };
     } catch {
       return {
@@ -548,12 +1011,10 @@ export async function runDataForSeoLocalGrid(
         lng: point.lng,
         rank: null,
         competitors: [],
+        serpBusinesses: [],
       };
-    } finally {
-      if (timeout) clearTimeout(timeout);
     }
-    });
-  }
+  });
 
   const hasAnyRank = gridData.some((p) => p.rank != null);
   const normalizedGridData = hasAnyRank ? gridData : buildFallbackGrid(input.centerLat, input.centerLng, gridSize, spacingMeters);
@@ -569,4 +1030,101 @@ export async function runDataForSeoLocalGrid(
     topDetectedBusinesses,
     rawResult,
   };
+}
+
+export async function fetchDataForSeoPointSerp(input: DataForSeoPointSerpRequest): Promise<LocalMapPointSerpResult> {
+  const base64Auth = requireEnv("DATAFORSEO_BASE64");
+  const endpoint = process.env.DATAFORSEO_LOCAL_FINDER_ENDPOINT
+    ?? DEFAULT_DATAFORSEO_LOCAL_FINDER_ENDPOINT;
+  const languageCode = process.env.DATAFORSEO_LANGUAGE_CODE || DEFAULT_DATAFORSEO_LANGUAGE_CODE;
+  const device = process.env.DATAFORSEO_DEVICE || DEFAULT_DATAFORSEO_DEVICE;
+  const depth = resolveDepth(
+    process.env.DATAFORSEO_LOCAL_FINDER_POINT_DEPTH
+      ?? process.env.DATAFORSEO_MAPS_POINT_DEPTH
+      ?? process.env.DATAFORSEO_MAPS_DEPTH,
+    DEFAULT_DATAFORSEO_POINT_DEPTH,
+    10
+  );
+  const pointTimeoutMs = Math.max(
+    3000,
+    Number(
+      process.env.DATAFORSEO_LOCAL_POINT_SERP_TIMEOUT_MS
+      ?? process.env.DATAFORSEO_LOCAL_GRID_POINT_TIMEOUT_MS
+      ?? DEFAULT_LOCAL_POINT_SERP_TIMEOUT_MS
+    )
+  );
+
+  const runPointRequest = async (requestEndpoint: string): Promise<LocalMapPointSerpResult> => {
+    const isLocalFinderEndpoint = /\/local_finder\//i.test(requestEndpoint);
+    const coordinateValue = isLocalFinderEndpoint
+      ? `${Number(input.lat)},${Number(input.lng)}`
+      : `${Number(input.lat)},${Number(input.lng)},20z`;
+    const taskPayload: Record<string, unknown> = {
+      keyword: String(input.keyword),
+      location_coordinate: coordinateValue,
+      language_code: languageCode,
+      device,
+      depth,
+    };
+    if (!isLocalFinderEndpoint) {
+      taskPayload.place_id = String(input.placeId);
+    }
+    const payload = [
+      taskPayload,
+    ];
+
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const controller = new AbortController();
+        const timeoutForAttempt = attempt === 0 ? pointTimeoutMs : Math.round(pointTimeoutMs * 1.5);
+        timeout = setTimeout(() => controller.abort(), timeoutForAttempt);
+        const response = await fetch(requestEndpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${base64Auth}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        const json = await getJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(`DataForSEO point request failed with status ${response.status}`);
+        }
+
+        const parsed = parseItemsForCoordinate(
+          json,
+          normalizePlaceId(input.placeId),
+          String(input.businessName ?? ""),
+          normalizeCid(input.mapsCid ?? "")
+        );
+        const serpBusinesses = input.includePlaceDetails
+          ? await enrichSerpBusinessesWithGooglePlaceDetails(parsed.serpBusinesses, Number(input.lat), Number(input.lng))
+          : parsed.serpBusinesses;
+        return {
+          rank: parsed.rank,
+          competitors: parsed.competitors,
+          serpBusinesses,
+          rawResult: json,
+          debug: {
+            ...parsed.debug,
+            endpointUsed: requestEndpoint,
+            requestDepth: depth,
+          },
+        };
+      } catch (error: any) {
+        lastError = error;
+        const aborted = error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("aborted");
+        if (!aborted || attempt === 1) throw error;
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    }
+    throw (lastError instanceof Error ? lastError : new Error("Failed to load point SERP"));
+  };
+
+  return runPointRequest(endpoint);
 }
