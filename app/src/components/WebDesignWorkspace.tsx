@@ -4,7 +4,7 @@ import { useLocation } from "react-router-dom";
 import { RootState } from "@/store";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { CheckCircle2, MessageSquare, Plus, Upload } from "lucide-react";
+import { CheckCircle2, ExternalLink, Lock, MessageSquare, Plus, Upload } from "lucide-react";
 
 type ProjectStatus = "active" | "complete";
 type PageStatus = "pending_upload" | "needs_review" | "revision_requested" | "approved";
@@ -20,6 +20,7 @@ type WebDesignProject = {
   completedAt?: string | null;
   client?: { id: string; name: string };
   designer?: { id: string; name: string | null; email: string };
+  activatedBy?: { id: string; name: string | null; email: string };
   pages?: Array<{ id: string; status: PageStatus }>;
 };
 
@@ -33,8 +34,10 @@ type WebDesignVersion = {
 type WebDesignComment = {
   id: string;
   message: string;
+  parentId?: string | null;
   authorRole: "client" | "designer" | "admin";
   createdAt: string;
+  author?: { id: string; name: string | null; email: string; role: string };
 };
 
 type WebDesignPage = {
@@ -42,6 +45,7 @@ type WebDesignPage = {
   pageName: string;
   status: PageStatus;
   approvedAt?: string | null;
+  figmaLink?: string | null;
   versions: WebDesignVersion[];
   comments: WebDesignComment[];
 };
@@ -88,8 +92,13 @@ export default function WebDesignWorkspace({
   const [activateClientId, setActivateClientId] = useState(clientId || "");
   const [activateDesignerId, setActivateDesignerId] = useState("");
   const [newPageName, setNewPageName] = useState("");
+  const [newPageFigmaLink, setNewPageFigmaLink] = useState("");
   const [newComment, setNewComment] = useState("");
   const [feedbackText, setFeedbackText] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [openReplyForId, setOpenReplyForId] = useState<string | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [projectStatusFilter, setProjectStatusFilter] = useState<ProjectStatus>("active");
   const [uploading, setUploading] = useState(false);
 
   const isAdmin = ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "");
@@ -107,11 +116,33 @@ export default function WebDesignWorkspace({
     () => (projectDetail?.pages || []).filter((p) => p.status === "approved").length,
     [projectDetail?.pages]
   );
+  const versionList = useMemo(
+    () => (selectedPage?.versions ? [...selectedPage.versions].sort((a, b) => b.versionNumber - a.versionNumber) : []),
+    [selectedPage?.versions]
+  );
+  const selectedVersion = useMemo(() => {
+    if (!versionList.length) return null;
+    if (selectedVersionId) {
+      const match = versionList.find((v) => v.id === selectedVersionId);
+      if (match) return match;
+    }
+    return versionList[0];
+  }, [versionList, selectedVersionId]);
+  const commentsByParent = useMemo(() => {
+    const map: Record<string, WebDesignComment[]> = {};
+    if (!selectedPage) return map;
+    selectedPage.comments.forEach((comment) => {
+      const key = comment.parentId || "root";
+      if (!map[key]) map[key] = [];
+      map[key].push(comment);
+    });
+    return map;
+  }, [selectedPage]);
 
   const loadProjects = async () => {
     setLoading(true);
     try {
-      const res = await api.get("/web-design/projects");
+      const res = await api.get("/web-design/projects", { params: { status: projectStatusFilter } });
       const list = Array.isArray(res.data) ? (res.data as WebDesignProject[]) : [];
       const filtered = clientId ? list.filter((p) => p.clientId === clientId) : list;
       setProjects(filtered);
@@ -145,16 +176,27 @@ export default function WebDesignWorkspace({
 
   useEffect(() => {
     loadProjects();
-  }, [clientId, requestedProjectId]);
+  }, [clientId, requestedProjectId, projectStatusFilter]);
 
   useEffect(() => {
     if (!selectedProjectId) {
       setProjectDetail(null);
       setSelectedPageId(null);
+      setSelectedVersionId(null);
       return;
     }
     loadProjectDetail(selectedProjectId);
   }, [selectedProjectId, requestedPageId]);
+
+  useEffect(() => {
+    if (!versionList.length) {
+      setSelectedVersionId(null);
+      return;
+    }
+    if (!selectedVersionId || !versionList.some((v) => v.id === selectedVersionId)) {
+      setSelectedVersionId(versionList[0].id);
+    }
+  }, [versionList, selectedVersionId]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -193,8 +235,12 @@ export default function WebDesignWorkspace({
   const addPage = async () => {
     if (!selectedProjectId || !newPageName.trim()) return;
     try {
-      await api.post(`/web-design/projects/${selectedProjectId}/pages`, { pageName: newPageName.trim() });
+      await api.post(`/web-design/projects/${selectedProjectId}/pages`, {
+        pageName: newPageName.trim(),
+        figmaLink: newPageFigmaLink.trim() ? newPageFigmaLink.trim() : null,
+      });
       setNewPageName("");
+      setNewPageFigmaLink("");
       await loadProjectDetail(selectedProjectId);
       toast.success("Page added");
     } catch (e: any) {
@@ -225,11 +271,19 @@ export default function WebDesignWorkspace({
     }
   };
 
-  const postComment = async () => {
-    if (!selectedPage || !newComment.trim()) return;
+  const postComment = async (message: string, parentId?: string | null) => {
+    if (!selectedPage || !message.trim()) return;
     try {
-      await api.post(`/web-design/pages/${selectedPage.id}/comments`, { message: newComment.trim() });
-      setNewComment("");
+      await api.post(`/web-design/pages/${selectedPage.id}/comments`, {
+        message: message.trim(),
+        ...(parentId ? { parentId } : {}),
+      });
+      if (parentId) {
+        setReplyDrafts((prev) => ({ ...prev, [parentId]: "" }));
+        setOpenReplyForId(null);
+      } else {
+        setNewComment("");
+      }
       if (selectedProjectId) await loadProjectDetail(selectedProjectId);
     } catch (e: any) {
       toast.error(e?.response?.data?.message || "Failed to post comment");
@@ -265,11 +319,59 @@ export default function WebDesignWorkspace({
     try {
       await api.post(`/web-design/projects/${selectedProjectId}/complete`);
       toast.success("Project marked complete");
+      setProjectStatusFilter("complete");
       await loadProjects();
       await loadProjectDetail(selectedProjectId);
     } catch (e: any) {
       toast.error(e?.response?.data?.message || "Failed to complete project");
     }
+  };
+
+  const renderCommentTree = (parentId: string | null = null, depth = 0): JSX.Element[] => {
+    const key = parentId || "root";
+    const comments = commentsByParent[key] || [];
+    return comments.map((c) => (
+      <div key={c.id} className="space-y-2" style={{ marginLeft: depth > 0 ? `${Math.min(depth, 4) * 16}px` : 0 }}>
+        <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              <span className="font-medium text-gray-600">{c.author?.name || c.author?.email || "Unknown"}</span>
+              {" · "}
+              <span className="capitalize">{c.authorRole}</span>
+            </p>
+            <p className="text-[11px] text-gray-400">{new Date(c.createdAt).toLocaleString()}</p>
+          </div>
+          <p className="text-sm text-gray-800 whitespace-pre-wrap">{c.message}</p>
+          {selectedPage?.status !== "approved" && (
+            <button
+              type="button"
+              onClick={() => setOpenReplyForId((prev) => (prev === c.id ? null : c.id))}
+              className="mt-2 text-xs font-medium text-primary-700 hover:text-primary-800"
+            >
+              Reply
+            </button>
+          )}
+        </div>
+        {openReplyForId === c.id && selectedPage?.status !== "approved" && (
+          <div className="flex gap-2">
+            <input
+              value={replyDrafts[c.id] || ""}
+              onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
+              placeholder="Write a reply"
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => postComment(replyDrafts[c.id] || "", c.id)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              Post Reply
+            </button>
+          </div>
+        )}
+        {renderCommentTree(c.id, depth + 1)}
+      </div>
+    ));
   };
 
   return (
@@ -327,23 +429,70 @@ export default function WebDesignWorkspace({
             <h2 className="font-semibold text-gray-900">Projects</h2>
             {loading && <span className="text-xs text-gray-500">Loading...</span>}
           </div>
-          <div className="space-y-2">
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedProjectId(p.id)}
-                className={`w-full rounded-lg border px-3 py-2 text-left ${
-                  selectedProjectId === p.id ? "border-primary-300 bg-primary-50" : "border-gray-200 hover:bg-gray-50"
-                }`}
-              >
-                <p className="font-medium text-sm text-gray-900">{p.projectName}</p>
-                <p className="text-xs text-gray-500">{p.client?.name || "Client"}</p>
-                <p className="mt-1 text-[11px] text-gray-500">
-                  {(p.pages || []).filter((pg) => pg.status === "approved").length}/{(p.pages || []).length} pages approved
-                </p>
-              </button>
-            ))}
-            {projects.length === 0 && <p className="text-sm text-gray-500">No web design projects yet.</p>}
+          <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-1">
+            <button
+              type="button"
+              onClick={() => setProjectStatusFilter("active")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+                projectStatusFilter === "active" ? "bg-primary-600 text-white" : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              Active Projects
+            </button>
+            <button
+              type="button"
+              onClick={() => setProjectStatusFilter("complete")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+                projectStatusFilter === "complete" ? "bg-primary-600 text-white" : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              Past Projects
+            </button>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Client</th>
+                  <th className="px-3 py-2 font-medium">Project</th>
+                  <th className="px-3 py-2 font-medium">Designer</th>
+                  <th className="px-3 py-2 font-medium">Activated By</th>
+                  <th className="px-3 py-2 font-medium">Total Pages</th>
+                  <th className="px-3 py-2 font-medium">Pages Approved</th>
+                  <th className="px-3 py-2 font-medium">{projectStatusFilter === "active" ? "Started" : "Completed"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projects.map((p) => {
+                  const approved = (p.pages || []).filter((pg) => pg.status === "approved").length;
+                  const total = (p.pages || []).length;
+                  const isSelected = selectedProjectId === p.id;
+                  const dateValue = projectStatusFilter === "active" ? p.createdAt : p.completedAt || p.createdAt;
+                  return (
+                    <tr
+                      key={p.id}
+                      onClick={() => setSelectedProjectId(p.id)}
+                      className={`cursor-pointer border-t border-gray-100 ${
+                        isSelected ? "bg-primary-50" : "hover:bg-gray-50"
+                      }`}
+                    >
+                      <td className="px-3 py-2 text-gray-700">{p.client?.name || "Client"}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900">{p.projectName}</td>
+                      <td className="px-3 py-2 text-gray-700">{p.designer?.name || p.designer?.email || "-"}</td>
+                      <td className="px-3 py-2 text-gray-700">{p.activatedBy?.name || p.activatedBy?.email || "-"}</td>
+                      <td className="px-3 py-2 text-gray-700">{total}</td>
+                      <td className="px-3 py-2 text-gray-700">{approved}</td>
+                      <td className="px-3 py-2 text-gray-600">{new Date(dateValue || Date.now()).toLocaleDateString()}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {projects.length === 0 && (
+              <p className="p-3 text-sm text-gray-500">
+                {projectStatusFilter === "active" ? "No active web design projects." : "No completed web design projects."}
+              </p>
+            )}
           </div>
         </div>
 
@@ -352,6 +501,12 @@ export default function WebDesignWorkspace({
             <p className="text-sm text-gray-500">Select a project to view details.</p>
           ) : (
             <div className="space-y-4">
+              {projectDetail.status === "complete" && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 inline-flex items-center gap-2">
+                  <Lock className="h-4 w-4" />
+                  Project is complete. This view is read-only.
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">{projectDetail.projectName}</h2>
@@ -362,7 +517,10 @@ export default function WebDesignWorkspace({
                     {approvedPagesCount}/{projectDetail.pages.length} pages approved
                   </p>
                 </div>
-                {isAdmin && projectDetail.status === "active" && (
+                {isAdmin &&
+                  projectDetail.status === "active" &&
+                  projectDetail.pages.length > 0 &&
+                  approvedPagesCount === projectDetail.pages.length && (
                   <button
                     type="button"
                     onClick={completeProject}
@@ -370,18 +528,24 @@ export default function WebDesignWorkspace({
                   >
                     Mark Project Complete
                   </button>
-                )}
+                  )}
               </div>
 
               {isAdmin && projectDetail.status === "active" && (
-                <div className="flex gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
                   <input
                     value={newPageName}
                     onChange={(e) => setNewPageName(e.target.value)}
                     placeholder="New page name (e.g. Homepage)"
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2"
+                    className="md:col-span-5 border border-gray-300 rounded-lg px-3 py-2"
                   />
-                  <button onClick={addPage} className="rounded-lg bg-primary-600 text-white px-3 py-2 hover:bg-primary-700">
+                  <input
+                    value={newPageFigmaLink}
+                    onChange={(e) => setNewPageFigmaLink(e.target.value)}
+                    placeholder="Optional Figma share link"
+                    className="md:col-span-6 border border-gray-300 rounded-lg px-3 py-2"
+                  />
+                  <button onClick={addPage} className="md:col-span-1 rounded-lg bg-primary-600 text-white px-3 py-2 hover:bg-primary-700">
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
@@ -423,6 +587,22 @@ export default function WebDesignWorkspace({
                           >
                             {statusLabel[selectedPage.status]}
                           </span>
+                          {selectedPage.status === "approved" && selectedPage.approvedAt && (
+                            <p className="mt-1 text-xs text-emerald-700">
+                              Approved on {new Date(selectedPage.approvedAt).toLocaleString()}
+                            </p>
+                          )}
+                          {selectedPage.figmaLink && (
+                            <a
+                              href={selectedPage.figmaLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary-700 hover:text-primary-800"
+                            >
+                              Open Figma Link
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
                         </div>
                         {isDesignerOrAdmin && selectedPage.status !== "approved" && projectDetail.status === "active" && (
                           <label className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50">
@@ -444,26 +624,46 @@ export default function WebDesignWorkspace({
                       </div>
 
                       <div className="space-y-2">
+                        <p className="text-sm font-medium">Current Design</p>
+                        {!selectedVersion ? (
+                          <p className="text-sm text-gray-500">No file uploaded yet.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                              Viewing v{selectedVersion.versionNumber} uploaded{" "}
+                              {new Date(selectedVersion.uploadedAt).toLocaleString()}
+                            </div>
+                            <iframe
+                              title={`${selectedPage.pageName}-design-preview`}
+                              src={selectedVersion.fileUrl}
+                              className="w-full h-[480px] rounded-lg border border-gray-200 bg-white"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
                         <p className="text-sm font-medium">Version History</p>
                         {selectedPage.versions.length === 0 ? (
                           <p className="text-sm text-gray-500">No file uploaded yet.</p>
                         ) : (
                           <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                            {[...selectedPage.versions].reverse().map((v, idx) => (
-                              <a
+                            {versionList.map((v, idx) => (
+                              <div
                                 key={v.id}
-                                href={v.fileUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="block rounded-lg border border-gray-200 px-3 py-2 hover:bg-gray-50"
+                                className={`rounded-lg border px-3 py-2 ${
+                                  selectedVersion?.id === v.id
+                                    ? "border-primary-300 bg-primary-50"
+                                    : "border-gray-200 hover:bg-gray-50"
+                                }`}
                               >
-                                <p className="text-sm font-medium text-primary-700">
-                                  v{v.versionNumber} {idx === 0 ? "(Current)" : ""}
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  Uploaded {new Date(v.uploadedAt).toLocaleString()}
-                                </p>
-                              </a>
+                                <button type="button" onClick={() => setSelectedVersionId(v.id)} className="w-full text-left">
+                                  <p className="text-sm font-medium text-primary-700">
+                                    v{v.versionNumber} {idx === 0 ? "(Latest)" : ""}
+                                  </p>
+                                  <p className="text-xs text-gray-500">Uploaded {new Date(v.uploadedAt).toLocaleString()}</p>
+                                </button>
+                              </div>
                             ))}
                           </div>
                         )}
@@ -472,15 +672,7 @@ export default function WebDesignWorkspace({
                       <div className="space-y-2">
                         <p className="text-sm font-medium">Comments</p>
                         <div className="max-h-44 overflow-y-auto space-y-2 pr-1">
-                          {selectedPage.comments.map((c) => (
-                            <div key={c.id} className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
-                              <div className="flex items-center justify-between">
-                                <p className="text-xs text-gray-500 capitalize">{c.authorRole}</p>
-                                <p className="text-[11px] text-gray-400">{new Date(c.createdAt).toLocaleString()}</p>
-                              </div>
-                              <p className="text-sm text-gray-800">{c.message}</p>
-                            </div>
-                          ))}
+                          {renderCommentTree()}
                           {selectedPage.comments.length === 0 && <p className="text-sm text-gray-500">No comments yet.</p>}
                         </div>
                       </div>
@@ -521,7 +713,7 @@ export default function WebDesignWorkspace({
                                 className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
                               />
                               <button
-                                onClick={postComment}
+                                onClick={() => postComment(newComment)}
                                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
                               >
                                 Post

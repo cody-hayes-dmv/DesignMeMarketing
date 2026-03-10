@@ -49,12 +49,60 @@ function getDeepLink(projectId: string, pageId: string): string {
   return `/web-design/projects/${projectId}/pages/${pageId}`;
 }
 
+function toFrontendUrl(path: string): string {
+  const base = String(process.env.FRONTEND_URL || "").trim().replace(/\/+$/, "");
+  if (!base) return path;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function buildWebDesignEmailHtml(input: {
+  projectName: string;
+  clientName: string;
+  pageName?: string;
+  summary: string;
+  linkPath: string;
+}): string {
+  const { projectName, clientName, pageName, summary, linkPath } = input;
+  const link = toFrontendUrl(linkPath);
+  return `
+    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+      <h3 style="margin: 0 0 10px;">Web Design Update</h3>
+      <p style="margin: 0 0 10px;">${summary}</p>
+      <p style="margin: 0 0 6px;"><strong>Project:</strong> ${projectName}</p>
+      <p style="margin: 0 0 6px;"><strong>Client:</strong> ${clientName}</p>
+      ${pageName ? `<p style="margin: 0 0 12px;"><strong>Page:</strong> ${pageName}</p>` : ""}
+      <p style="margin: 12px 0 0;">
+        <a href="${link}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 8px 12px; border-radius: 6px;">
+          Open in Dashboard
+        </a>
+      </p>
+    </div>
+  `;
+}
+
 async function getUserAgencyIds(userId: string): Promise<string[]> {
   const memberships = await prisma.userAgency.findMany({
     where: { userId },
     select: { agencyId: true },
   });
   return memberships.map((m) => m.agencyId);
+}
+
+async function getAgencyAdminUserIds(agencyId: string | null | undefined): Promise<string[]> {
+  if (!agencyId) return [];
+  const agencyAdminMemberships = await prisma.userAgency.findMany({
+    where: { agencyId },
+    select: { userId: true },
+  });
+  if (agencyAdminMemberships.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: {
+      id: { in: agencyAdminMemberships.map((m) => m.userId) },
+      role: "AGENCY",
+    },
+    select: { id: true },
+  });
+  return users.map((u) => u.id);
 }
 
 async function canAccessProject(user: { userId: string; role: string }, projectId: string) {
@@ -240,6 +288,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
         include: {
           client: { select: { id: true, name: true } },
           designer: { select: { id: true, name: true, email: true } },
+          activatedBy: { select: { id: true, name: true, email: true } },
           pages: { select: { id: true, status: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -257,6 +306,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
         include: {
           client: { select: { id: true, name: true } },
           designer: { select: { id: true, name: true, email: true } },
+          activatedBy: { select: { id: true, name: true, email: true } },
           pages: { select: { id: true, status: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -273,6 +323,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
         include: {
           client: { select: { id: true, name: true } },
           designer: { select: { id: true, name: true, email: true } },
+          activatedBy: { select: { id: true, name: true, email: true } },
           pages: { select: { id: true, status: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -295,6 +346,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
         include: {
           client: { select: { id: true, name: true } },
           designer: { select: { id: true, name: true, email: true } },
+          activatedBy: { select: { id: true, name: true, email: true } },
           pages: { select: { id: true, status: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -321,6 +373,7 @@ router.get("/projects/:projectId", authenticateToken, async (req, res) => {
       include: {
         client: { select: { id: true, name: true } },
         designer: { select: { id: true, name: true, email: true } },
+        activatedBy: { select: { id: true, name: true, email: true } },
         pages: {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           include: {
@@ -437,7 +490,13 @@ router.post("/pages/:pageId/versions", authenticateToken, async (req, res) => {
       await notifyUsersById(
         clientRecipientIds,
         `Design ready for review: ${page.pageName}`,
-        `<p>A new design revision is ready for review.</p><p><strong>${page.project.client.name}</strong> - ${page.pageName}</p>`,
+        buildWebDesignEmailHtml({
+          projectName: page.project.projectName,
+          clientName: page.project.client.name,
+          pageName: page.pageName,
+          summary: "A new design revision is ready for your review.",
+          linkPath: link,
+        }),
         {
           title: "New web design revision ready",
           message: `${page.pageName} is ready for your review.`,
@@ -522,6 +581,60 @@ router.post("/pages/:pageId/comments", authenticateToken, async (req, res) => {
         author: { select: { id: true, name: true, email: true, role: true } },
       },
     });
+
+    const link = getDeepLink(page.projectId, page.id);
+    if (authorRole === "client") {
+      const adminRecipientIds = new Set<string>([page.project.designerId, page.project.activatedById]);
+      const agencyAdminIds = await getAgencyAdminUserIds(page.project.agencyId);
+      agencyAdminIds.forEach((id) => adminRecipientIds.add(id));
+      adminRecipientIds.delete(req.user.userId);
+      const recipients = [...adminRecipientIds];
+      if (recipients.length > 0) {
+        await notifyUsersById(
+          recipients,
+          `Client comment on ${page.pageName}`,
+          buildWebDesignEmailHtml({
+            projectName: page.project.projectName,
+            clientName: page.project.client.name,
+            pageName: page.pageName,
+            summary: `${page.project.client.name} left a new comment: "${parsed.message}".`,
+            linkPath: link,
+          }),
+          {
+            title: "New client web design comment",
+            message: `${page.project.client.name} commented on ${page.pageName}.`,
+            link,
+            agencyId: page.project.agencyId,
+          }
+        );
+      }
+    } else {
+      const clientUsers = await prisma.clientUser.findMany({
+        where: { clientId: page.project.clientId, status: "ACTIVE" },
+        select: { userId: true },
+      });
+      const recipients = [...new Set(clientUsers.map((u) => u.userId))].filter((id) => id !== req.user.userId);
+      if (recipients.length > 0) {
+        await notifyUsersById(
+          recipients,
+          `Update on ${page.pageName}`,
+          buildWebDesignEmailHtml({
+            projectName: page.project.projectName,
+            clientName: page.project.client.name,
+            pageName: page.pageName,
+            summary: `A new update was posted: "${parsed.message}".`,
+            linkPath: link,
+          }),
+          {
+            title: "Web design page updated",
+            message: `${page.pageName} has a new update for you.`,
+            link,
+            agencyId: page.project.agencyId,
+          }
+        );
+      }
+    }
+
     return res.status(201).json(created);
   } catch (error: any) {
     console.error("Create web design comment error:", error);
@@ -570,22 +683,8 @@ router.post("/pages/:pageId/submit-feedback", authenticateToken, async (req, res
     });
 
     const adminRecipientIds = new Set<string>([page.project.designerId, page.project.activatedById]);
-    if (page.project.agencyId) {
-      const agencyAdminMemberships = await prisma.userAgency.findMany({
-        where: { agencyId: page.project.agencyId },
-        select: { userId: true },
-      });
-      if (agencyAdminMemberships.length > 0) {
-        const users = await prisma.user.findMany({
-          where: {
-            id: { in: agencyAdminMemberships.map((m) => m.userId) },
-            role: "AGENCY",
-          },
-          select: { id: true },
-        });
-        users.forEach((u) => adminRecipientIds.add(u.id));
-      }
-    }
+    const agencyAdminIds = await getAgencyAdminUserIds(page.project.agencyId);
+    agencyAdminIds.forEach((id) => adminRecipientIds.add(id));
     adminRecipientIds.delete(req.user.userId);
     const recipientIds = [...adminRecipientIds];
     if (recipientIds.length > 0) {
@@ -593,7 +692,13 @@ router.post("/pages/:pageId/submit-feedback", authenticateToken, async (req, res
       await notifyUsersById(
         recipientIds,
         `Revision requested: ${page.pageName}`,
-        `<p>${page.project.client.name} requested revisions for <strong>${page.pageName}</strong>.</p><p>${parsed.message}</p>`,
+        buildWebDesignEmailHtml({
+          projectName: page.project.projectName,
+          clientName: page.project.client.name,
+          pageName: page.pageName,
+          summary: `${page.project.client.name} requested revisions: "${parsed.message}".`,
+          linkPath: link,
+        }),
         {
           title: "Client requested revisions",
           message: `${page.project.client.name} requested revisions on ${page.pageName}.`,
@@ -657,7 +762,13 @@ router.post("/pages/:pageId/approve", authenticateToken, async (req, res) => {
       await notifyUsersById(
         recipientIds,
         `Page approved: ${page.pageName}`,
-        `<p>${page.project.client.name} approved <strong>${page.pageName}</strong>.</p>`,
+        buildWebDesignEmailHtml({
+          projectName: page.project.projectName,
+          clientName: page.project.client.name,
+          pageName: page.pageName,
+          summary: `${page.project.client.name} approved this page.`,
+          linkPath: link,
+        }),
         {
           title: "Client approved page",
           message: `${page.project.client.name} approved ${page.pageName}.`,
@@ -665,6 +776,42 @@ router.post("/pages/:pageId/approve", authenticateToken, async (req, res) => {
           agencyId: page.project.agencyId,
         }
       );
+    }
+
+    const counts = await prisma.webDesignPage.groupBy({
+      by: ["status"],
+      where: { projectId: page.projectId },
+      _count: { _all: true },
+    });
+    const totalPages = counts.reduce((acc, row) => acc + row._count._all, 0);
+    const approvedCount = counts
+      .filter((row) => row.status === "approved")
+      .reduce((acc, row) => acc + row._count._all, 0);
+    if (totalPages > 0 && approvedCount === totalPages) {
+      const readyRecipientIds = new Set<string>([page.project.designerId, page.project.activatedById]);
+      const agencyAdminIds = await getAgencyAdminUserIds(page.project.agencyId);
+      agencyAdminIds.forEach((id) => readyRecipientIds.add(id));
+      readyRecipientIds.delete(req.user.userId);
+      const readyRecipients = [...readyRecipientIds];
+      if (readyRecipients.length > 0) {
+        const link = `/agency/web-design?projectId=${encodeURIComponent(page.projectId)}`;
+        await notifyUsersById(
+          readyRecipients,
+          `Project ready to complete: ${page.project.projectName}`,
+          buildWebDesignEmailHtml({
+            projectName: page.project.projectName,
+            clientName: page.project.client.name,
+            summary: "All pages are approved and the project is ready to be marked complete.",
+            linkPath: link,
+          }),
+          {
+            title: "Web design project ready to complete",
+            message: `${page.project.projectName} has all pages approved.`,
+            link,
+            agencyId: page.project.agencyId,
+          }
+        );
+      }
     }
 
     return res.json({ message: "Page approved." });

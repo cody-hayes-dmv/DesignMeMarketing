@@ -326,9 +326,15 @@ const ClientsPage = () => {
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const selectedBusinessNiche = clientForm.businessNiche === "Other"
-      ? clientForm.businessNicheOther.trim()
-      : (clientForm.businessNiche || "").trim();
+    const selectedBusinessNiche = (() => {
+      const fromIndustry = clientForm.industry === "Other"
+        ? clientForm.industryOther.trim()
+        : (clientForm.industry || "").trim();
+      if (fromIndustry) return fromIndustry;
+      return clientForm.businessNiche === "Other"
+        ? clientForm.businessNicheOther.trim()
+        : (clientForm.businessNiche || "").trim();
+    })();
 
     if (!selectedBusinessNiche) {
       toast.error("Please select a business niche.");
@@ -1705,12 +1711,12 @@ const ClientsPage = () => {
 
             <form onSubmit={(e) => e.preventDefault()} className="flex flex-col flex-1 min-h-0 bg-gray-50/50 overflow-hidden">
               <>
-                {/* Step indicator - 6-part flow for all roles */}
+                {/* Step indicator - 5-part flow for all roles */}
                   <div className="px-6 pt-4 pb-2 shrink-0 border-b border-gray-200 bg-white">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-600">Step {createClientModalStep} of 6</span>
+                      <span className="text-sm font-medium text-gray-600">Step {createClientModalStep} of 5</span>
                       <div className="flex gap-1.5">
-                        {[1, 2, 3, 4, 5, 6].map((s) => (
+                        {[1, 2, 3, 4, 5].map((s) => (
                           <button
                             key={s}
                             type="button"
@@ -1727,7 +1733,6 @@ const ClientsPage = () => {
                       {createClientModalStep === 3 && "Contact Information"}
                       {createClientModalStep === 4 && "Website Login Info (Optional)"}
                       {createClientModalStep === 5 && "Campaign Type"}
-                      {createClientModalStep === 6 && "Google Business Profile (Optional)"}
                     </p>
                   </div>
                   <div className="p-6 overflow-y-auto flex-1 min-h-0">
@@ -1888,26 +1893,6 @@ const ClientsPage = () => {
                       </div>
                     </section>
                     )}
-                    {createClientModalStep === 6 && (
-                    <section className="rounded-xl border-l-4 border-teal-500 bg-teal-50/50 p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-teal-900 mb-4 flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-                        GOOGLE BUSINESS PROFILE (Optional)
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Google Business Profile Category</label>
-                          <input type="text" value={clientForm.gbpPrimaryCategory} onChange={(e) => setClientForm({ ...clientForm, gbpPrimaryCategory: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Day Spa" />
-                          <p className="mt-1 text-xs text-gray-500">Your primary GBP category (exact match)</p>
-                        </div>
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Secondary GBP Categories</label>
-                          <input type="text" value={clientForm.gbpSecondaryCategories} onChange={(e) => setClientForm({ ...clientForm, gbpSecondaryCategories: e.target.value })} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" placeholder="e.g. Massage Therapist, Wellness Center" />
-                          <p className="mt-1 text-xs text-gray-500">Additional GBP categories (comma-separated)</p>
-                        </div>
-                      </div>
-                    </section>
-                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3 px-6 py-4 h-[72px] shrink-0 border-t border-gray-200 bg-gray-100/80 rounded-b-2xl items-center">
                     <button
@@ -1919,7 +1904,7 @@ const ClientsPage = () => {
                       <ChevronLeft className="h-4 w-4 shrink-0" /> Previous
                     </button>
                     <div className="flex justify-end">
-                      {createClientModalStep < 6 ? (
+                      {createClientModalStep < 5 ? (
                         <button
                           type="button"
                           onClick={() => setCreateClientModalStep((s) => s + 1)}
@@ -1943,7 +1928,7 @@ const ClientsPage = () => {
               {showLegacyCreateForm && (
                   <>
                     <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
-                    {/* Full form - hidden; Create always uses 6-step flow */}
+                    {/* Full form - hidden; Create always uses 5-step flow */}
                     <section className="rounded-xl border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5">
                       <h3 className="text-sm font-semibold text-blue-900 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />

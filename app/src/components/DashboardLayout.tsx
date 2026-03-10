@@ -52,6 +52,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agencyMe, setAgencyMe] = useState<AgencyMe | null>(null);
+  const [hasClientWebDesignProjects, setHasClientWebDesignProjects] = useState(false);
   const { user } = useSelector((state: RootState) => state.auth);
   const brandName = user?.agencyBranding?.brandDisplayName || "SEO Dashboard";
   const brandColor = user?.agencyBranding?.primaryColor || "#4f46e5";
@@ -59,6 +60,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const showBrandedHeader = user?.role === "AGENCY" || user?.role === "USER";
   const isClientPortal = location.pathname.startsWith("/client/");
   const isAgencyRoute = location.pathname.startsWith("/agency/");
+  const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
   const handleGlobalSignOut = () => {
     dispatch(logout() as any);
     navigate("/login", { replace: true });
@@ -81,6 +83,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     window.addEventListener("subscription-changed", handler);
     return () => window.removeEventListener("subscription-changed", handler);
   }, [isAgencyRoute, user?.role]);
+
+  useEffect(() => {
+    if (!WEB_DESIGN_TABS_ENABLED || user?.role !== "USER" || !firstClientId) {
+      setHasClientWebDesignProjects(false);
+      return;
+    }
+    api
+      .get("/web-design/projects", { _silent: true } as any)
+      .then((res) => {
+        const rows = Array.isArray(res.data) ? res.data : [];
+        setHasClientWebDesignProjects(rows.some((p: any) => String(p?.clientId) === String(firstClientId)));
+      })
+      .catch(() => setHasClientWebDesignProjects(false));
+  }, [firstClientId, user?.role]);
 
   // Get page title based on current route
   const getPageTitle = () => {
@@ -139,10 +155,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       dispatch(logout() as any);
       navigate("/login", { replace: true });
     };
-    const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
     const clientNavItems = [
       { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks", label: "Dashboard", icon: LayoutDashboard },
-      ...(WEB_DESIGN_TABS_ENABLED
+      ...(WEB_DESIGN_TABS_ENABLED && hasClientWebDesignProjects
         ? [{ path: firstClientId ? `/client/web-design/${firstClientId}` : "/client/tasks", label: "Web Design", icon: LayoutDashboard }]
         : []),
       { path: "/client/tasks", label: "Tasks", icon: CheckSquare },
