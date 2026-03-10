@@ -81,7 +81,7 @@ const NETWORK_TOAST_DELAY_MS = 4000;
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL,
-  timeout: 90000, // 90s for heavy SEO/GA4/dashboard requests
+  timeout: 180000, // 180s to reduce false timeouts on heavy report/snapshot requests
   headers: {
     "Content-Type": "application/json",
   },

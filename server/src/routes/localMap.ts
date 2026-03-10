@@ -1016,7 +1016,12 @@ router.patch("/keywords/:gridKeywordId", authenticateToken, async (req, res) => 
 router.get("/report/:gridKeywordId", authenticateToken, async (req, res) => {
   try {
     const { gridKeywordId } = req.params;
-    const keyword = await prisma.gridKeyword.findUnique({
+    const useLiveSource = String(req.query?.live ?? "").toLowerCase() === "1"
+      || String(req.query?.live ?? "").toLowerCase() === "true";
+    const useLiveOnlySource = String(req.query?.liveOnly ?? "").toLowerCase() === "1"
+      || String(req.query?.liveOnly ?? "").toLowerCase() === "true"
+      || String(req.query?.source ?? "").toLowerCase() === "live";
+    let keyword = await prisma.gridKeyword.findUnique({
       where: { id: gridKeywordId },
       include: {
         snapshots: {
@@ -1028,13 +1033,151 @@ router.get("/report/:gridKeywordId", authenticateToken, async (req, res) => {
     const canRead = await canReadClient(req.user, keyword.clientId);
     if (!canRead) return res.status(403).json({ message: "Access denied" });
 
-    const current = keyword.snapshots[0] ?? null;
+    // First preview bootstrap:
+    // If no stored snapshot exists yet, compute a live grid once and persist it.
+    // Subsequent modal opens then read from saved data instead of recomputing each time.
+    if (!useLiveOnlySource && keyword.snapshots.length === 0) {
+      try {
+        const firstRun = await runDataForSeoLocalGrid({
+          keyword: keyword.keywordText,
+          placeId: keyword.placeId,
+          businessName: keyword.businessName,
+          centerLat: Number(keyword.centerLat),
+          centerLng: Number(keyword.centerLng),
+          gridSize: Number(keyword.gridSize) || DEFAULT_GRID_SIZE,
+          gridSpacingMiles: Number(keyword.gridSpacingMiles) || DEFAULT_GRID_SPACING_MILES,
+        });
+        await prisma.gridSnapshot.create({
+          data: {
+            gridKeywordId: keyword.id,
+            runDate: new Date(),
+            gridData: JSON.stringify(firstRun.gridData),
+            ataScore: firstRun.ataScore,
+            isBenchmark: true,
+          },
+        });
+        const refreshed = await prisma.gridKeyword.findUnique({
+          where: { id: gridKeywordId },
+          include: {
+            snapshots: {
+              orderBy: { runDate: "desc" },
+            },
+          },
+        });
+        if (refreshed) keyword = refreshed;
+      } catch (bootstrapError: any) {
+        console.warn("[LocalMap] first preview bootstrap failed", {
+          gridKeywordId,
+          message: bootstrapError?.message,
+        });
+      }
+    }
+
+    if (useLiveOnlySource) {
+      const live = await runDataForSeoLocalGrid({
+        keyword: keyword.keywordText,
+        placeId: keyword.placeId,
+        businessName: keyword.businessName,
+        centerLat: Number(keyword.centerLat),
+        centerLng: Number(keyword.centerLng),
+        gridSize: Number(keyword.gridSize) || DEFAULT_GRID_SIZE,
+        gridSpacingMiles: Number(keyword.gridSpacingMiles) || DEFAULT_GRID_SPACING_MILES,
+      });
+      const currentLiveSnapshot = {
+        id: `live-${keyword.id}-${Date.now()}`,
+        runDate: new Date(),
+        ataScore: live.ataScore,
+        isBenchmark: false,
+        gridData: JSON.stringify(live.gridData),
+      } as GridSnapshot;
+      return res.json({
+        keyword,
+        current: currentLiveSnapshot,
+        previousThree: [],
+        benchmark: null,
+        snapshots: [currentLiveSnapshot],
+        trend: [{ runDate: currentLiveSnapshot.runDate, ataScore: currentLiveSnapshot.ataScore }],
+        liveOnly: true,
+      });
+    }
+
+    // Optional self-heal for stale all-NR snapshots.
+    // Keep default preview reads DB-only unless explicitly requested via ?rehydrate=1.
+    const allowRehydrate = String(req.query?.rehydrate ?? "").toLowerCase() === "1"
+      || String(req.query?.rehydrate ?? "").toLowerCase() === "true";
+    const latestSnapshot = keyword.snapshots[0] ?? null;
+    const latestGrid = latestSnapshot ? parseGridDataOrFallback(latestSnapshot.gridData) : [];
+    const latestHasAnyRank = latestGrid.some((point) => point.rank != null && Number(point.rank) > 0);
+    if (latestSnapshot && !latestHasAnyRank && allowRehydrate) {
+      try {
+        const rerun = await runDataForSeoLocalGrid({
+          keyword: keyword.keywordText,
+          placeId: keyword.placeId,
+          businessName: keyword.businessName,
+          centerLat: Number(keyword.centerLat),
+          centerLng: Number(keyword.centerLng),
+          gridSize: Number(keyword.gridSize) || DEFAULT_GRID_SIZE,
+          gridSpacingMiles: Number(keyword.gridSpacingMiles) || DEFAULT_GRID_SPACING_MILES,
+        });
+        await prisma.gridSnapshot.update({
+          where: { id: latestSnapshot.id },
+          data: {
+            gridData: JSON.stringify(rerun.gridData),
+            ataScore: rerun.ataScore,
+          },
+        });
+        const refreshed = await prisma.gridKeyword.findUnique({
+          where: { id: gridKeywordId },
+          include: {
+            snapshots: {
+              orderBy: { runDate: "desc" },
+            },
+          },
+        });
+        if (refreshed) keyword = refreshed;
+      } catch (rehydrateError) {
+        console.warn("[LocalMap] report rehydrate skipped", {
+          gridKeywordId,
+          message: (rehydrateError as any)?.message,
+        });
+      }
+    }
+
+    let current = keyword.snapshots[0] ?? null;
     const previousThree = keyword.snapshots.slice(1, 4);
     const benchmark = keyword.snapshots.find((x) => x.isBenchmark) ?? null;
     const trend = keyword.snapshots
       .slice()
       .reverse()
       .map((item) => ({ runDate: item.runDate, ataScore: item.ataScore }));
+
+    // Optional live mode: recompute current grid from the same data source path used by
+    // Local Map Snapshot Result modal for most accurate point-level preview.
+    if (useLiveSource) {
+      try {
+        const live = await runDataForSeoLocalGrid({
+          keyword: keyword.keywordText,
+          placeId: keyword.placeId,
+          businessName: keyword.businessName,
+          centerLat: Number(keyword.centerLat),
+          centerLng: Number(keyword.centerLng),
+          gridSize: Number(keyword.gridSize) || DEFAULT_GRID_SIZE,
+          gridSpacingMiles: Number(keyword.gridSpacingMiles) || DEFAULT_GRID_SPACING_MILES,
+        });
+        current = {
+          id: `live-${keyword.id}-${Date.now()}`,
+          runDate: new Date(),
+          ataScore: live.ataScore,
+          isBenchmark: false,
+          gridData: JSON.stringify(live.gridData),
+        } as GridSnapshot;
+      } catch (liveError: any) {
+        console.warn("[LocalMap] live report source failed; falling back to stored snapshot", {
+          gridKeywordId,
+          message: liveError?.message,
+        });
+      }
+    }
 
     return res.json({
       keyword,
@@ -1043,6 +1186,7 @@ router.get("/report/:gridKeywordId", authenticateToken, async (req, res) => {
       benchmark,
       snapshots: keyword.snapshots,
       trend,
+      liveOnly: false,
     });
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to load report" });
@@ -1125,6 +1269,8 @@ router.post("/reports/:clientId/send", authenticateToken, async (req, res) => {
       clientName: client?.name || "Client",
       frequency: (scheduleCandidate?.frequency as "biweekly" | "monthly" | undefined) || "monthly",
     });
+    // Always prefer caller-provided HTML when available.
+    // This keeps "Send now" content aligned with the exact preview payload.
     const html = bodyEmailHtml || buildLocalMapReportEmailHtml(client?.name || "Client", rows);
 
     console.log("[LocalMap] Sending on-demand Local Map report email", {

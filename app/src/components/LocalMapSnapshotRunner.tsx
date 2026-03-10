@@ -308,7 +308,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       businessName: business.businessName,
       lat: point.lat,
       lng: point.lng,
-      }, { timeout: 120000, _silent: true } as any);
+      }, { timeout: 240000, _silent: true } as any);
       const serpBusinesses = normalizeSerpBusinesses(
         Array.isArray(res?.data?.serpBusinesses) ? res.data.serpBusinesses : []
       );

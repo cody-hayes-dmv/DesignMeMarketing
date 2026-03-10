@@ -1016,8 +1016,12 @@ export async function runDataForSeoLocalGrid(
     }
   });
 
-  const hasAnyRank = gridData.some((p) => p.rank != null);
-  const normalizedGridData = hasAnyRank ? gridData : buildFallbackGrid(input.centerLat, input.centerLng, gridSize, spacingMeters);
+  const expectedPoints = gridSize * gridSize;
+  // Keep fetched grid data even when all ranks are NR, so UI still gets real point-level payloads
+  // (competitors/coordinates) instead of a synthetic empty fallback.
+  const normalizedGridData = gridData.length === expectedPoints
+    ? gridData
+    : buildFallbackGrid(input.centerLat, input.centerLng, gridSize, spacingMeters);
 
   const ataScore = calculateAtaScore(normalizedGridData);
   const topCompetitorsCurrent = extractTopCompetitorsCurrent(normalizedGridData);

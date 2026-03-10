@@ -220,6 +220,7 @@ type LocalMapKeywordReportPayload = {
   benchmark: LocalMapSnapshotReportRow | null;
   snapshots: LocalMapSnapshotReportRow[];
   trend: Array<{ runDate: string; ataScore: number }>;
+  liveOnly?: boolean;
 };
 
 interface TrendPoint {
@@ -283,7 +284,12 @@ const TRAFFIC_SOURCE_COLORS: Record<string, string> = {
 const LOCAL_MAP_SCHEDULE_PREFIX = "[LOCAL_MAP] ";
 const PPC_SCHEDULE_PREFIX = "[PPC] ";
 
-type LocalMapGridCell = { rank: number | null; competitors: string[] };
+type LocalMapGridCell = {
+  rank: number | null;
+  competitors: string[];
+  lat: number | null;
+  lng: number | null;
+};
 
 const parseLocalMapGridData = (raw: string): LocalMapGridCell[] => {
   try {
@@ -294,6 +300,8 @@ const parseLocalMapGridData = (raw: string): LocalMapGridCell[] => {
       competitors: Array.isArray(item?.competitors)
         ? item.competitors.filter((entry: unknown): entry is string => typeof entry === "string").slice(0, 3)
         : [],
+      lat: Number.isFinite(Number(item?.lat)) ? Number(item.lat) : null,
+      lng: Number.isFinite(Number(item?.lng)) ? Number(item.lng) : null,
     }));
   } catch {
     return [];
@@ -305,6 +313,12 @@ const localMapCellClass = (rank: number | null): string => {
   if (rank != null && rank >= 4 && rank <= 10) return "bg-yellow-300 text-yellow-900";
   if (rank != null && rank >= 11 && rank <= 20) return "bg-orange-300 text-orange-900";
   return "bg-rose-300 text-rose-900";
+};
+
+const localMapRankLabel = (rank: number | null): string => {
+  if (rank == null) return "NR";
+  if (rank > 20) return "20+";
+  return String(rank);
 };
 
 const getTopCompetitorsFromCells = (cells: LocalMapGridCell[]): string[] => {
@@ -364,8 +378,8 @@ const buildLocalMapEmailHtmlFromReport = (
     const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
     const centerIdx = Math.floor(size / 2) * size + Math.floor(size / 2);
     const competitors = getTopCompetitorsFromCells(cells);
-    const cellPadding = options?.compact ? "5px 0" : "7px 0";
-    const cellFontSize = options?.compact ? "10px" : "11px";
+    const cellSize = options?.compact ? 24 : 30;
+    const cellFontSize = options?.compact ? 10 : 11;
     const rows = Array.from({ length: size }).map((_, rowIdx) => {
       const cols = Array.from({ length: size }).map((__, colIdx) => {
         const pointIdx = rowIdx * size + colIdx;
@@ -373,14 +387,30 @@ const buildLocalMapEmailHtmlFromReport = (
         const rank = point?.rank ?? null;
         const isCenter = pointIdx === centerIdx;
         const style = heatCellStyle(rank);
-        return `<td style="border:1px solid #ffffff; background:${style.bg}; color:${style.color}; text-align:center; font-weight:700; font-size:${cellFontSize}; padding:${cellPadding}; width:${Math.round(100 / size)}%;">${isCenter ? "&#128205; " : ""}${rank == null ? "NR" : rank}</td>`;
+        const ring = isCenter ? "0 0 0 2px #93c5fd inset" : "none";
+        return `<td style="padding:2px; text-align:center; width:${Math.round(100 / size)}%;">
+          <div style="display:inline-flex;align-items:center;justify-content:center;width:${cellSize}px;height:${cellSize}px;border-radius:9999px;background:${style.bg};color:${style.color};font-weight:700;font-size:${cellFontSize}px;box-shadow:${ring};">
+            ${localMapRankLabel(rank)}
+          </div>
+        </td>`;
       });
       return `<tr>${cols.join("")}</tr>`;
     });
+    const legend = `
+      <div style="margin:0 0 8px; display:flex; gap:6px; flex-wrap:wrap; font-size:10px; color:#374151;">
+        <span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #bbf7d0;background:#ecfdf5;padding:3px 7px;border-radius:9999px;"><span style="width:8px;height:8px;border-radius:9999px;background:#047857;display:inline-block;"></span>1-3</span>
+        <span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #fde68a;background:#fffbeb;padding:3px 7px;border-radius:9999px;"><span style="width:8px;height:8px;border-radius:9999px;background:#fde047;display:inline-block;"></span>4-10</span>
+        <span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #fed7aa;background:#fff7ed;padding:3px 7px;border-radius:9999px;"><span style="width:8px;height:8px;border-radius:9999px;background:#fdba74;display:inline-block;"></span>11-20</span>
+        <span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #fecdd3;background:#fff1f2;padding:3px 7px;border-radius:9999px;"><span style="width:8px;height:8px;border-radius:9999px;background:#fda4af;display:inline-block;"></span>20+/NR</span>
+      </div>
+    `;
     return `
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; table-layout: fixed;">
-        ${rows.join("")}
-      </table>
+      ${legend}
+      <div style="border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:8px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; table-layout: fixed;">
+          ${rows.join("")}
+        </table>
+      </div>
       ${
         options?.compact
           ? ""
@@ -444,7 +474,7 @@ const buildLocalMapEmailHtmlFromReport = (
             </table>
             ${
               current
-                ? `<h3 style="margin: 0 0 8px; font-size: 14px; color: #111827;">Current</h3>
+                ? `<h3 style="margin: 0 0 8px; font-size: 14px; color: #111827;">CURRENT</h3>
                    <div style="border: 2px solid #c7d2fe; border-radius: 10px; background: #eef2ff; padding: 10px; margin-bottom: 14px;">
                      <p style="margin: 0 0 8px; font-size: 12px; color: #4338ca; font-weight: 700;">
                        ${escapeLocalMapEmailHtml(safeFormatLocalMapDate(current.runDate, "MMM d, yyyy", "-"))} • ATA ${Number(current.ataScore).toFixed(2)}
@@ -453,7 +483,7 @@ const buildLocalMapEmailHtmlFromReport = (
                    </div>`
                 : `<p style="margin: 0 0 14px; font-size: 12px; color: #6b7280;">No current grid snapshot available.</p>`
             }
-            <h3 style="margin: 0 0 8px; font-size: 14px; color: #111827;">Previous 3 Runs</h3>
+            <h3 style="margin: 0 0 8px; font-size: 14px; color: #111827;">PREVIOUS 3 RUNS</h3>
             ${
               previousThree.length
                 ? previousThree
@@ -470,16 +500,16 @@ const buildLocalMapEmailHtmlFromReport = (
                     .join("")
                 : `<p style="margin: 0 0 14px; font-size: 12px; color: #6b7280;">No previous runs yet.</p>`
             }
+            <h3 style="margin: 0 0 8px; font-size: 14px; color: #111827;">YOUR BENCHMARK</h3>
             ${
               benchmark
                 ? `<div style="border: 1px solid #fcd34d; border-radius: 10px; background: #fffbeb; padding: 12px; margin-bottom: 10px;">
-                    <p style="margin: 0 0 8px; font-size: 12px; font-weight: 700; color: #92400e;">Your Benchmark</p>
                     <p style="margin: 0 0 8px; font-size: 12px; color: #b45309;">
                       ${escapeLocalMapEmailHtml(safeFormatLocalMapDate(benchmark.runDate, "MMM d, yyyy", "-"))} • ATA ${Number(benchmark.ataScore).toFixed(2)}
                     </p>
                     ${renderGrid(benchmark, { compact: true })}
                   </div>`
-                : ""
+                : `<p style="margin: 0 0 14px; font-size: 12px; color: #6b7280;">No benchmark data available.</p>`
             }
             <p style="margin: 0 0 8px; font-size: 12px; color: #6b7280;">Heat map colors: 1-3 (Green), 4-10 (Yellow), 11-20 (Orange), Not ranked / 20+ (Red).</p>
             <p style="margin: 0; font-size: 12px; color: #6b7280;">The attached PDF is exported from the Local Map report view.</p>
@@ -1265,7 +1295,11 @@ const ClientDashboardPage: React.FC = () => {
   const [localMapReportOpen, setLocalMapReportOpen] = useState(false);
   const [localMapReportLoading, setLocalMapReportLoading] = useState(false);
   const [localMapReport, setLocalMapReport] = useState<LocalMapKeywordReportPayload | null>(null);
+  const [localMapReportKeywordId, setLocalMapReportKeywordId] = useState<string | null>(null);
   const [localMapExportingPdf, setLocalMapExportingPdf] = useState(false);
+  const [localMapSelectedCurrentPointIdx, setLocalMapSelectedCurrentPointIdx] = useState<number | null>(null);
+  const [localMapSelectedPreviousPointIdxByRun, setLocalMapSelectedPreviousPointIdxByRun] = useState<Record<string, number>>({});
+  const [localMapSelectedBenchmarkPointIdx, setLocalMapSelectedBenchmarkPointIdx] = useState<number | null>(null);
   const localMapReportContentRef = useRef<HTMLDivElement | null>(null);
   const localMapReportTrendPoints = useMemo(() => {
     if (!localMapReport) return [] as Array<{ runDate: string; ataScore: number }>;
@@ -1283,6 +1317,35 @@ const ClientDashboardPage: React.FC = () => {
     if (!localMapReport) return null;
     return (localMapReport.snapshots || []).find((snap) => snap.isBenchmark) ?? null;
   }, [localMapReport]);
+  const localMapCurrentCells = useMemo(() => {
+    if (!localMapReport?.current?.gridData) return [] as LocalMapGridCell[];
+    return parseLocalMapGridData(localMapReport.current.gridData);
+  }, [localMapReport?.current?.gridData]);
+  const localMapCurrentGridSize = useMemo(
+    () => Math.max(1, Math.round(Math.sqrt(localMapCurrentCells.length || 1))),
+    [localMapCurrentCells.length]
+  );
+  const localMapCurrentCenterIdx = useMemo(
+    () => Math.floor(localMapCurrentGridSize / 2) * localMapCurrentGridSize + Math.floor(localMapCurrentGridSize / 2),
+    [localMapCurrentGridSize]
+  );
+  const localMapSelectedCurrentPoint = useMemo(() => {
+    if (localMapSelectedCurrentPointIdx == null) return null;
+    return localMapCurrentCells[localMapSelectedCurrentPointIdx] ?? null;
+  }, [localMapCurrentCells, localMapSelectedCurrentPointIdx]);
+  const localMapCurrentTopCompetitors = useMemo(
+    () => getTopCompetitorsFromCells(localMapCurrentCells),
+    [localMapCurrentCells]
+  );
+  useEffect(() => {
+    if (!localMapCurrentCells.length) {
+      setLocalMapSelectedCurrentPointIdx(null);
+      return;
+    }
+    if (localMapSelectedCurrentPointIdx == null || !localMapCurrentCells[localMapSelectedCurrentPointIdx]) {
+      setLocalMapSelectedCurrentPointIdx(localMapCurrentCenterIdx);
+    }
+  }, [localMapCurrentCells, localMapCurrentCenterIdx, localMapSelectedCurrentPointIdx]);
 
   const loadLocalMapData = useCallback(async () => {
     if (!clientId) return;
@@ -1414,9 +1477,15 @@ const ClientDashboardPage: React.FC = () => {
       setShowClientReportModal(false);
       setImportBacklinksModalOpen(false);
       setLocalMapReportOpen(true);
+      setLocalMapReportKeywordId(gridKeywordId);
       setLocalMapReportLoading(true);
       setLocalMapReport(null);
-      const res = await api.get(`/local-map/report/${gridKeywordId}`, { _silent: true } as any);
+      setLocalMapSelectedCurrentPointIdx(null);
+      setLocalMapSelectedPreviousPointIdxByRun({});
+      setLocalMapSelectedBenchmarkPointIdx(null);
+      const res = await api.get(`/local-map/report/${gridKeywordId}`, {
+        _silent: true,
+      } as any);
       setLocalMapReport(res.data as LocalMapKeywordReportPayload);
     } catch (error: any) {
       toast.error(error?.response?.data?.message || "Unable to load report.");
@@ -1453,8 +1522,12 @@ const ClientDashboardPage: React.FC = () => {
       const ignoreFilter = (el: Element) => el.getAttribute?.("data-pdf-hide") === "true";
       const sectionCanvases: HTMLCanvasElement[] = [];
       for (const sec of sections) {
+        const sectionType = sec.getAttribute("data-pdf-section");
+        const captureScale = sectionType === "rank-grid"
+          ? Math.max(4, Number(window.devicePixelRatio || 1))
+          : Math.max(3, Number(window.devicePixelRatio || 1));
         const cvs = await html2canvas(sec, {
-          scale: 2,
+          scale: captureScale,
           useCORS: true,
           logging: false,
           scrollX: 0,
@@ -1511,31 +1584,54 @@ const ClientDashboardPage: React.FC = () => {
       const pageAssignments: Array<{ canvas: HTMLCanvasElement; page: number; y: number; w: number; h: number }> = [];
 
       for (const cvs of sectionCanvases) {
-        const baseW = usableWidth;
-        const baseH = (cvs.height * baseW) / cvs.width;
-        let drawW = baseW;
-        let drawH = baseH;
+        const drawW = usableWidth;
+        const pxPerMm = cvs.width / drawW;
+        const maxChunkPx = Math.max(1, Math.floor(usableHeight * pxPerMm));
+        const sectionGapMm = 4;
 
-        if (drawH > usableHeight) {
-          const scale = usableHeight / drawH;
-          drawW = drawW * scale;
-          drawH = usableHeight;
+        const chunkCanvases: HTMLCanvasElement[] = [];
+        if (cvs.height <= maxChunkPx) {
+          chunkCanvases.push(cvs);
+        } else {
+          for (let offsetY = 0; offsetY < cvs.height; offsetY += maxChunkPx) {
+            const chunkHeight = Math.min(maxChunkPx, cvs.height - offsetY);
+            const chunk = document.createElement("canvas");
+            chunk.width = cvs.width;
+            chunk.height = chunkHeight;
+            const ctx = chunk.getContext("2d");
+            if (!ctx) continue;
+            ctx.drawImage(
+              cvs,
+              0,
+              offsetY,
+              cvs.width,
+              chunkHeight,
+              0,
+              0,
+              cvs.width,
+              chunkHeight
+            );
+            chunkCanvases.push(chunk);
+          }
         }
 
-        if (cursorY > 0 && cursorY + drawH > usableHeight) {
-          pdf.addPage();
-          cursorY = 0;
-        }
-
-        const page = pdf.getNumberOfPages();
-        pageAssignments.push({
-          canvas: cvs,
-          page,
-          y: contentMarginTop + cursorY,
-          w: drawW,
-          h: drawH,
+        chunkCanvases.forEach((chunkCanvas, chunkIdx) => {
+          const drawH = (chunkCanvas.height * drawW) / chunkCanvas.width;
+          if (cursorY > 0 && cursorY + drawH > usableHeight) {
+            pdf.addPage();
+            cursorY = 0;
+          }
+          const page = pdf.getNumberOfPages();
+          pageAssignments.push({
+            canvas: chunkCanvas,
+            page,
+            y: contentMarginTop + cursorY,
+            w: drawW,
+            h: drawH,
+          });
+          const shouldAddGap = chunkIdx === chunkCanvases.length - 1;
+          cursorY += drawH + (shouldAddGap ? sectionGapMm : 0);
         });
-        cursorY += drawH + 4;
       }
 
       const drawHeader = () => {
@@ -1618,7 +1714,9 @@ const ClientDashboardPage: React.FC = () => {
       setLocalMapReportOpen(true);
       setLocalMapReportLoading(true);
       setLocalMapReport(null);
-      const res = await api.get(`/local-map/report/${gridKeywordId}`, { _silent: true } as any);
+      const res = await api.get(`/local-map/report/${gridKeywordId}`, {
+        _silent: true,
+      } as any);
       const payload = res.data as LocalMapKeywordReportPayload;
       setLocalMapReport(payload);
       await new Promise((resolve) => setTimeout(resolve, 400));
@@ -2695,7 +2793,15 @@ const ClientDashboardPage: React.FC = () => {
   }, [clientId]);
 
   const generateStyledPpcPdfFromHtml = useCallback(
-    async (html: string, reportType?: string): Promise<{ blob: Blob; fileName: string }> => {
+    async (
+      html: string,
+      reportType?: string,
+      options?: {
+        captureScale?: number;
+        imageFormat?: "PNG" | "JPEG";
+        imageQuality?: number;
+      }
+    ): Promise<{ blob: Blob; fileName: string }> => {
       const iframe = document.createElement("iframe");
       iframe.setAttribute("aria-hidden", "true");
       iframe.style.position = "fixed";
@@ -2728,7 +2834,7 @@ const ClientDashboardPage: React.FC = () => {
         const contentWidth = Math.max(bodyEl.scrollWidth, 980);
         const contentHeight = Math.max(bodyEl.scrollHeight, bodyEl.offsetHeight, 1200);
         const fullCanvas = await html2canvas(bodyEl, {
-          scale: 2,
+          scale: options?.captureScale ?? 2,
           useCORS: true,
           logging: false,
           backgroundColor: "#FFFFFF",
@@ -2752,8 +2858,14 @@ const ClientDashboardPage: React.FC = () => {
         const domain = client?.domain || "";
         const generatedDate = format(new Date(), "MMMM d, yyyy");
         const type = String(reportType || "").toLowerCase();
-        const ppcFrequencyLabel = type.includes("biweekly") ? "Biweekly" : type.includes("weekly") ? "Weekly" : "Monthly";
-        const periodLabel = `${ppcFrequencyLabel} PPC Report`;
+        const isLocalMapReport = type.includes("local_map");
+        const frequencyLabel = type.includes("biweekly") ? "Biweekly" : type.includes("weekly") ? "Weekly" : "Monthly";
+        const periodLabel = isLocalMapReport
+          ? `${frequencyLabel} Local Map Rankings Report`
+          : `${frequencyLabel} PPC Report`;
+
+        const imageFormat = options?.imageFormat ?? "PNG";
+        const imageQuality = typeof options?.imageQuality === "number" ? options.imageQuality : 0.92;
 
         const drawHeader = () => {
           pdf.setFillColor(15, 23, 42);
@@ -2800,7 +2912,7 @@ const ClientDashboardPage: React.FC = () => {
         pdf.setFontSize(11);
         pdf.setTextColor(148, 163, 184);
         const labelY = pageHeight * 0.32;
-        pdf.text("PPC ANALYTICS REPORT", pageWidth / 2, labelY, { align: "center" });
+        pdf.text(isLocalMapReport ? "LOCAL MAP RANKINGS REPORT" : "PPC ANALYTICS REPORT", pageWidth / 2, labelY, { align: "center" });
         const lineW = 50;
         pdf.setDrawColor(59, 130, 246);
         pdf.setLineWidth(0.6);
@@ -2842,7 +2954,10 @@ const ClientDashboardPage: React.FC = () => {
           pdf.addPage();
           drawHeader();
           const imgH = srcH / pxPerMm;
-          pdf.addImage(sliceCanvas.toDataURL("image/png"), "PNG", marginX, contentMarginTop, usableWidth, imgH);
+          const imageData = imageFormat === "JPEG"
+            ? sliceCanvas.toDataURL("image/jpeg", imageQuality)
+            : sliceCanvas.toDataURL("image/png");
+          pdf.addImage(imageData, imageFormat, marginX, contentMarginTop, usableWidth, imgH);
           drawFooter(i + 2, totalPages);
         }
 
@@ -2853,7 +2968,8 @@ const ClientDashboardPage: React.FC = () => {
         pdf.text(`Page 1 of ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
 
         const sanitizedName = (client?.name || "client").replace(/[^a-z0-9]/gi, "-").toLowerCase();
-        const fileName = `${sanitizedName}-ppc-report-${format(new Date(), "yyyyMMdd")}.pdf`;
+        const reportStem = isLocalMapReport ? "local-map-rankings-report" : "ppc-report";
+        const fileName = `${sanitizedName}-${reportStem}-${format(new Date(), "yyyyMMdd")}.pdf`;
         return { blob: pdf.output("blob"), fileName };
       } finally {
         iframe.remove();
@@ -5483,61 +5599,140 @@ const ClientDashboardPage: React.FC = () => {
       toast.error("No recipients configured for Local Map report.");
       return;
     }
+    let fallbackEmailHtml = "";
     try {
       setSendingLocalMapReport(true);
       let reportPayload = localMapReport;
-      if (!reportPayload) {
+      let preferredKeywordId =
+        localMapReportKeywordId
+        || (typeof (localMapReport as any)?.keyword?.id === "string" ? String((localMapReport as any).keyword.id) : "")
+        || (localMapKeywords.find((row) => row?.status === "active" && typeof row?.id === "string")?.id ?? "")
+        || (localMapKeywords.find((row) => typeof row?.id === "string")?.id ?? "");
+
+      if (!preferredKeywordId && !reportPayload) {
         const keywordsRes = await api.get(`/local-map/keywords/${clientId}`, { _silent: true } as any);
         const keywordRows = Array.isArray(keywordsRes?.data) ? keywordsRes.data : [];
-        const activeRows = keywordRows.filter((row: any) => row?.status === "active" && typeof row?.id === "string");
-        const firstKeyword = activeRows[0];
-        if (!firstKeyword?.id) {
-          toast.error("No active Local Map keywords found for this dashboard.");
-          return;
-        }
-        const reportRes = await api.get(`/local-map/report/${firstKeyword.id}`, { _silent: true } as any);
+        preferredKeywordId =
+          (keywordRows.find((row: any) => row?.status === "active" && typeof row?.id === "string")?.id ?? "")
+          || (keywordRows.find((row: any) => typeof row?.id === "string")?.id ?? "");
+      }
+
+      if (preferredKeywordId) {
+        const reportRes = await api.get(`/local-map/report/${preferredKeywordId}`, {
+          _silent: true,
+        } as any);
         reportPayload = reportRes.data as LocalMapKeywordReportPayload;
         setLocalMapReport(reportPayload);
+      } else if (!reportPayload) {
+        toast.error("No Local Map keywords found for this dashboard.");
+        return;
       }
       if (!reportPayload) {
         toast.error("Unable to load Local Map report content.");
         return;
       }
-      const modalWasOpen = localMapReportOpen;
-      if (!modalWasOpen) {
-        setLocalMapReportOpen(true);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      const pdfResult = await exportLocalMapReportPdfBlob(reportPayload, { silent: true });
-      if (!pdfResult) {
-        toast.error("Unable to generate Local Map PDF for email.");
-        if (!modalWasOpen) setLocalMapReportOpen(false);
-        return;
-      }
-      const pdfBase64 = await blobToBase64(pdfResult.blob);
       const emailHtml = buildLocalMapEmailHtmlFromReport(reportPayload, client?.name || "Client");
-      await api.post(`/local-map/reports/${clientId}/send`, {
-        recipients: localMapScheduleMeta.recipients,
-        emailHtml,
-        attachment: {
-          filename: pdfResult.filename,
-          contentType: "application/pdf",
-          contentBase64: pdfBase64,
-        },
-      });
-      if (!modalWasOpen) setLocalMapReportOpen(false);
+      fallbackEmailHtml = emailHtml;
+      const MAX_SAFE_REQUEST_BYTES = 13.5 * 1024 * 1024;
+      const isLikelyPayloadLimitError = (raw: any): boolean => {
+        const statusCode = Number(raw?.response?.status ?? 0);
+        const errorMessage = String(raw?.response?.data?.message || raw?.message || "").toLowerCase();
+        const isPreflightTooLarge = String(raw?.code || "").toLowerCase() === "attachment_payload_too_large_preflight";
+        return statusCode === 413
+          || statusCode >= 500
+          || isPreflightTooLarge
+          || errorMessage.includes("payloadtoolarge")
+          || errorMessage.includes("request entity too large")
+          || errorMessage.includes("payload too large");
+      };
+      const sendWithAttachment = async (pdfBlob: Blob, fileName: string) => {
+        const pdfBase64 = await blobToBase64(pdfBlob);
+        const payload = {
+          recipients: localMapScheduleMeta.recipients,
+          emailHtml,
+          attachment: {
+            filename: fileName,
+            contentType: "application/pdf",
+            contentBase64: pdfBase64,
+          },
+        };
+        const estimatedBytes = new Blob([JSON.stringify(payload)]).size;
+        if (estimatedBytes > MAX_SAFE_REQUEST_BYTES) {
+          const tooLargeError: any = new Error("Local Map attachment payload is too large before upload.");
+          tooLargeError.code = "attachment_payload_too_large_preflight";
+          tooLargeError.payloadBytes = estimatedBytes;
+          throw tooLargeError;
+        }
+        await api.post(`/local-map/reports/${clientId}/send`, payload);
+      };
+
+      const createPreviewMatchedPdf = async () => {
+        const previewPdf = await exportLocalMapReportPdfBlob(reportPayload, { silent: true });
+        if (previewPdf?.blob && previewPdf?.filename) {
+          return { blob: previewPdf.blob, fileName: previewPdf.filename };
+        }
+        return generateStyledPpcPdfFromHtml(emailHtml, "local_map_monthly");
+      };
+
+      try {
+        const { blob: pdfBlob, fileName } = await createPreviewMatchedPdf();
+        await sendWithAttachment(pdfBlob, fileName);
+      } catch (primarySendError: any) {
+        const isPayloadTooLarge = isLikelyPayloadLimitError(primarySendError);
+        if (!isPayloadTooLarge) {
+          throw primarySendError;
+        }
+        toast("Local Map PDF is large. Retrying with compressed attachment...");
+        try {
+          const { blob: compactBlob, fileName: compactName } = await generateStyledPpcPdfFromHtml(
+            emailHtml,
+            "local_map_monthly",
+            { captureScale: 1.35, imageFormat: "JPEG", imageQuality: 0.72 }
+          );
+          await sendWithAttachment(compactBlob, compactName);
+        } catch (compactSendError: any) {
+          const compactStillTooLarge = isLikelyPayloadLimitError(compactSendError);
+          if (!compactStillTooLarge) {
+            throw compactSendError;
+          }
+          toast("Applying stronger PDF compression and retrying...");
+          try {
+            const { blob: ultraBlob, fileName: ultraName } = await generateStyledPpcPdfFromHtml(
+              emailHtml,
+              "local_map_monthly",
+              { captureScale: 1, imageFormat: "JPEG", imageQuality: 0.55 }
+            );
+            await sendWithAttachment(ultraBlob, ultraName);
+          } catch (ultraSendError: any) {
+            const ultraStillTooLarge = isLikelyPayloadLimitError(ultraSendError);
+            if (!ultraStillTooLarge) {
+              throw ultraSendError;
+            }
+            toast("Applying maximum PDF compression and retrying...");
+            const { blob: tinyBlob, fileName: tinyName } = await generateStyledPpcPdfFromHtml(
+              emailHtml,
+              "local_map_monthly",
+              { captureScale: 0.85, imageFormat: "JPEG", imageQuality: 0.38 }
+            );
+            await sendWithAttachment(tinyBlob, tinyName);
+          }
+        }
+      }
       setLocalMapScheduleMeta((prev) => ({
         ...prev,
         lastRunAt: new Date().toISOString(),
       }));
       toast.success("Local Map report sent successfully");
     } catch (error: any) {
-      if (!localMapReportOpen) {
-        setLocalMapReportOpen(false);
-      }
-      const msg =
-        error?.response?.data?.message ||
-        "Failed to send Local Map report. Create a Local Map schedule with recipients first.";
+      const messageText = String(error?.response?.data?.message || error?.message || "");
+      const payloadLimitIssue = messageText.toLowerCase().includes("payload")
+        || messageText.toLowerCase().includes("entity too large")
+        || Number(error?.response?.status ?? 0) === 413
+        || String(error?.code || "").toLowerCase() === "attachment_payload_too_large_preflight";
+      const msg = payloadLimitIssue
+        ? "Local Map report attachment is too large to upload even after maximum compression. Please reduce report size and try again."
+        : (error?.response?.data?.message || error?.message || "Failed to send Local Map report.");
+      console.error("Failed to send Local Map report", error);
       toast.error(msg);
     } finally {
       setSendingLocalMapReport(false);
@@ -5547,9 +5742,11 @@ const ClientDashboardPage: React.FC = () => {
     clientId,
     canModifyClientSettings,
     exportLocalMapReportPdfBlob,
+    localMapKeywords,
     localMapReport,
-    localMapReportOpen,
+    localMapReportKeywordId,
     localMapScheduleMeta.recipients,
+    generateStyledPpcPdfFromHtml,
   ]);
 
   const handleViewCampaignWinsHtml = useCallback(async () => {
@@ -13514,7 +13711,7 @@ const ClientDashboardPage: React.FC = () => {
               </div>
 
               {localMapReport.current && (
-                <div className="local-map-pdf-section rounded-xl border-2 border-indigo-200 bg-gradient-to-br from-white via-indigo-50/30 to-violet-50/40 p-4">
+                <div data-pdf-section="rank-grid" className="local-map-pdf-section rounded-xl border-2 border-indigo-200 bg-gradient-to-br from-white via-indigo-50/30 to-violet-50/40 p-4">
                   <div className="mb-3">
                     <div>
                       <h4 className="text-sm font-bold text-gray-900">CURRENT</h4>
@@ -13523,52 +13720,81 @@ const ClientDashboardPage: React.FC = () => {
                       </p>
                     </div>
                   </div>
-                  {(() => {
-                    const cells = parseLocalMapGridData(localMapReport.current!.gridData);
-                    const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
-                    const centerIdx = Math.floor(size / 2) * size + Math.floor(size / 2);
-                    const topCompetitors = getTopCompetitorsFromCells(cells);
-                    return (
-                      <>
-                        <div className="space-y-1 min-w-[520px] overflow-x-auto">
-                          {Array.from({ length: size }).map((_, rowIdx) => (
-                            <div key={`current-${rowIdx}`} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
-                              {Array.from({ length: size }).map((__, colIdx) => {
-                                const pointIdx = rowIdx * size + colIdx;
-                                const point = cells[pointIdx];
-                                const rank = point?.rank ?? null;
-                                const isCenter = pointIdx === centerIdx;
-                                return (
-                                  <div
-                                    key={`current-${rowIdx}-${colIdx}`}
-                                    className={`h-11 rounded text-[11px] font-semibold flex items-center justify-center gap-1 ${localMapCellClass(rank)}`}
-                                  >
-                                    {isCenter && <MapPin className="h-3.5 w-3.5" />}
-                                    <span>{rank == null ? "NR" : rank}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ))}
+                  <div className="mb-3 flex items-center gap-2 text-[11px] text-gray-700">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-yellow-200 bg-yellow-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />4-10</span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-300" />11-20</span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-rose-300" />20+</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <div className="mx-auto grid w-fit gap-2 rounded-xl border border-indigo-100 bg-white/75 p-3">
+                      {Array.from({ length: localMapCurrentGridSize }).map((_, rowIdx) => (
+                        <div key={`current-${rowIdx}`} className="grid gap-2" style={{ gridTemplateColumns: `repeat(${localMapCurrentGridSize}, minmax(0, 1fr))` }}>
+                          {Array.from({ length: localMapCurrentGridSize }).map((__, colIdx) => {
+                            const pointIdx = rowIdx * localMapCurrentGridSize + colIdx;
+                            const point = localMapCurrentCells[pointIdx];
+                            const rank = point?.rank ?? null;
+                            const isCenter = pointIdx === localMapCurrentCenterIdx;
+                            const isSelected = pointIdx === localMapSelectedCurrentPointIdx;
+                            return (
+                              <button
+                                key={`current-${rowIdx}-${colIdx}`}
+                                type="button"
+                                onClick={() => setLocalMapSelectedCurrentPointIdx(pointIdx)}
+                                className={`${localMapExportingPdf ? "h-12 w-12 text-[13px]" : "h-10 w-10 text-[11px]"} rounded-full font-semibold flex items-center justify-center ${localMapCellClass(rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
+                                title={`Rank: ${localMapRankLabel(rank)}`}
+                              >
+                                {localMapRankLabel(rank)}
+                              </button>
+                            );
+                          })}
                         </div>
-                        <div className="mt-3">
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Top 3 Competitors (Current Grid)</p>
-                          <div className="flex flex-wrap gap-2">
-                            {topCompetitors.length ? topCompetitors.map((name) => (
-                              <span key={name} className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-800">
-                                {name}
-                              </span>
-                            )) : <span className="text-xs text-gray-500">No competitor names captured for this run.</span>}
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })()}
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-violet-100 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Selected grid point details</p>
+                    <p className="mt-1 text-xs text-gray-700">
+                      {localMapSelectedCurrentPoint ? `Rank ${localMapRankLabel(localMapSelectedCurrentPoint.rank)}` : "Select a point to view details."}
+                    </p>
+                    {localMapSelectedCurrentPoint?.lat != null && localMapSelectedCurrentPoint?.lng != null ? (
+                      <p className="mt-0.5 text-[11px] text-gray-500">
+                        {localMapSelectedCurrentPoint.lat.toFixed(6)}, {localMapSelectedCurrentPoint.lng.toFixed(6)}
+                      </p>
+                    ) : null}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(localMapSelectedCurrentPoint?.competitors || []).length > 0 ? (
+                        (localMapSelectedCurrentPoint?.competitors || []).map((name) => (
+                          <span key={name} className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-800">
+                            {name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-500">No point-level competitor names available.</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Top 3 Competitors (Current Grid)</p>
+                    <div className="flex flex-wrap gap-2">
+                      {localMapCurrentTopCompetitors.length ? localMapCurrentTopCompetitors.map((name) => (
+                        <span key={name} className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-800">
+                          {name}
+                        </span>
+                      )) : <span className="text-xs text-gray-500">No competitor names captured for this run.</span>}
+                    </div>
+                  </div>
                 </div>
               )}
 
               <div className="local-map-pdf-section bg-white border border-gray-200 rounded-xl p-4">
                 <h4 className="text-sm font-bold text-gray-900 mb-3">PREVIOUS 3 RUNS</h4>
+                <div className="mb-3 flex items-center gap-2 text-[10px] text-gray-700">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-yellow-200 bg-yellow-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />4-10</span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-300" />11-20</span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-rose-300" />20+</span>
+                </div>
                 {localMapReport.previousThree.length === 0 ? (
                   <p className="text-sm text-gray-500">No previous runs yet.</p>
                 ) : (
@@ -13577,6 +13803,8 @@ const ClientDashboardPage: React.FC = () => {
                       const cells = parseLocalMapGridData(snap.gridData);
                       const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
                       const centerIdx = Math.floor(size / 2) * size + Math.floor(size / 2);
+                      const selectedIdx = localMapSelectedPreviousPointIdxByRun[snap.id] ?? centerIdx;
+                      const selectedPoint = cells[selectedIdx] ?? null;
                       return (
                         <div key={snap.id} className="rounded-lg border border-violet-200 bg-gradient-to-br from-white to-violet-50/40 p-3">
                           <div className="mb-2">
@@ -13585,26 +13813,46 @@ const ClientDashboardPage: React.FC = () => {
                               <p className="text-[11px] text-gray-600">ATA {Number(snap.ataScore).toFixed(2)}</p>
                             </div>
                           </div>
-                          <div className="space-y-1">
-                            {Array.from({ length: size }).map((_, rowIdx) => (
-                              <div key={`${snap.id}-row-${rowIdx}`} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
-                                {Array.from({ length: size }).map((__, colIdx) => {
-                                  const pointIdx = rowIdx * size + colIdx;
-                                  const point = cells[pointIdx];
-                                  const rank = point?.rank ?? null;
-                                  const isCenter = pointIdx === centerIdx;
-                                  return (
-                                    <div
-                                      key={`${snap.id}-${rowIdx}-${colIdx}`}
-                                      className={`h-8 rounded text-[10px] font-semibold flex items-center justify-center gap-0.5 ${localMapCellClass(rank)}`}
-                                    >
-                                      {isCenter && <MapPin className="h-3 w-3" />}
-                                      <span>{rank == null ? "NR" : rank}</span>
-                                    </div>
-                                  );
-                                })}
+                          <div className="overflow-x-auto">
+                            <div className="mx-auto grid w-fit gap-1.5 rounded-lg border border-violet-100 bg-white/80 p-2">
+                              {Array.from({ length: size }).map((_, rowIdx) => (
+                                <div key={`${snap.id}-row-${rowIdx}`} className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+                                  {Array.from({ length: size }).map((__, colIdx) => {
+                                    const pointIdx = rowIdx * size + colIdx;
+                                    const point = cells[pointIdx];
+                                    const rank = point?.rank ?? null;
+                                    const isCenter = pointIdx === centerIdx;
+                                    return (
+                                      <button
+                                        key={`${snap.id}-${rowIdx}-${colIdx}`}
+                                        type="button"
+                                        onClick={() => setLocalMapSelectedPreviousPointIdxByRun((prev) => ({ ...prev, [snap.id]: pointIdx }))}
+                                        className={`${localMapExportingPdf ? "h-9 w-9 text-[11px] font-bold" : "h-7 w-7 text-[10px] font-semibold"} rounded-full flex items-center justify-center ${localMapCellClass(rank)} ${isCenter ? "ring-2 ring-blue-300 ring-offset-1" : ""} ${selectedIdx === pointIdx ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
+                                        title={`Rank: ${localMapRankLabel(rank)}`}
+                                      >
+                                        {localMapRankLabel(rank)}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="mt-2 rounded-md border border-violet-100 bg-white/80 px-2.5 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                              Selected point: {selectedPoint ? `Rank ${localMapRankLabel(selectedPoint.rank)}` : "N/A"}
+                            </p>
+                            {(selectedPoint?.competitors || []).length > 0 ? (
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {(selectedPoint?.competitors || []).map((name) => (
+                                  <span key={`${snap.id}-${name}`} className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800">
+                                    {name}
+                                  </span>
+                                ))}
                               </div>
-                            ))}
+                            ) : (
+                              <p className="mt-1 text-[10px] text-gray-500">No point-level competitors saved.</p>
+                            )}
                           </div>
                         </div>
                       );
@@ -13613,47 +13861,85 @@ const ClientDashboardPage: React.FC = () => {
                 )}
               </div>
 
-              {localMapReportBenchmark && (
-                <div className="local-map-pdf-section bg-white border border-amber-300 rounded-xl p-4">
-                  <div className="mb-3">
-                    <div>
-                      <h4 className="text-sm font-bold text-amber-900">YOUR BENCHMARK</h4>
-                      <p className="text-xs font-semibold text-amber-800">
-                        Benchmark — {safeFormatLocalMapDate(localMapReportBenchmark.runDate, "MMM d, yyyy", "-")}
-                      </p>
-                      <p className="text-xs text-amber-700">ATA {Number(localMapReportBenchmark.ataScore).toFixed(2)}</p>
-                    </div>
+              <div data-pdf-section="rank-grid" className="local-map-pdf-section bg-white border border-amber-300 rounded-xl p-4">
+                <div className="mb-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-900">YOUR BENCHMARK</h4>
+                    {localMapReportBenchmark ? (
+                      <>
+                        <p className="text-xs font-semibold text-amber-800">
+                          Benchmark — {safeFormatLocalMapDate(localMapReportBenchmark.runDate, "MMM d, yyyy", "-")}
+                        </p>
+                        <p className="text-xs text-amber-700">ATA {Number(localMapReportBenchmark.ataScore).toFixed(2)}</p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-amber-700">No benchmark data available.</p>
+                    )}
                   </div>
-                  {(() => {
-                    const cells = parseLocalMapGridData(localMapReportBenchmark.gridData);
-                    const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
-                    const centerIdx = Math.floor(size / 2) * size + Math.floor(size / 2);
-                    return (
-                      <div className="space-y-1 min-w-[360px] overflow-x-auto">
-                        {Array.from({ length: size }).map((_, rowIdx) => (
-                          <div key={`benchmark-row-${rowIdx}`} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
-                            {Array.from({ length: size }).map((__, colIdx) => {
-                              const pointIdx = rowIdx * size + colIdx;
-                              const point = cells[pointIdx];
-                              const rank = point?.rank ?? null;
-                              const isCenter = pointIdx === centerIdx;
-                              return (
-                                <div
-                                  key={`benchmark-${rowIdx}-${colIdx}`}
-                                  className={`h-9 rounded text-[10px] font-semibold flex items-center justify-center gap-0.5 ${localMapCellClass(rank)}`}
-                                >
-                                  {isCenter && <MapPin className="h-3 w-3" />}
-                                  <span>{rank == null ? "NR" : rank}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
                 </div>
-              )}
+                {localMapReportBenchmark ? (
+                  <>
+                    <div className="mb-3 flex items-center gap-2 text-[10px] text-gray-700">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-yellow-200 bg-yellow-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />4-10</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-300" />11-20</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-rose-300" />20+</span>
+                    </div>
+                    {(() => {
+                      const cells = parseLocalMapGridData(localMapReportBenchmark.gridData);
+                      const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
+                      const centerIdx = Math.floor(size / 2) * size + Math.floor(size / 2);
+                      const selectedIdx = localMapSelectedBenchmarkPointIdx ?? centerIdx;
+                      const selectedPoint = cells[selectedIdx] ?? null;
+                      return (
+                        <div>
+                          <div className="overflow-x-auto">
+                            <div className="mx-auto grid w-fit gap-1.5 rounded-lg border border-amber-100 bg-amber-50/40 p-2">
+                              {Array.from({ length: size }).map((_, rowIdx) => (
+                                <div key={`benchmark-row-${rowIdx}`} className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+                                  {Array.from({ length: size }).map((__, colIdx) => {
+                                    const pointIdx = rowIdx * size + colIdx;
+                                    const point = cells[pointIdx];
+                                    const rank = point?.rank ?? null;
+                                    const isCenter = pointIdx === centerIdx;
+                                    return (
+                                      <button
+                                        key={`benchmark-${rowIdx}-${colIdx}`}
+                                        type="button"
+                                        onClick={() => setLocalMapSelectedBenchmarkPointIdx(pointIdx)}
+                                        className={`${localMapExportingPdf ? "h-9 w-9 text-[11px] font-bold" : "h-8 w-8 text-[10px] font-semibold"} rounded-full flex items-center justify-center ${localMapCellClass(rank)} ${isCenter ? "ring-2 ring-blue-300 ring-offset-1" : ""} ${selectedIdx === pointIdx ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
+                                        title={`Rank: ${localMapRankLabel(rank)}`}
+                                      >
+                                        {localMapRankLabel(rank)}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="mt-2 rounded-md border border-amber-200 bg-white/80 px-2.5 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                              Selected point: {selectedPoint ? `Rank ${localMapRankLabel(selectedPoint.rank)}` : "N/A"}
+                            </p>
+                            {(selectedPoint?.competitors || []).length > 0 ? (
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {(selectedPoint?.competitors || []).map((name) => (
+                                  <span key={`benchmark-${name}`} className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-1 text-[10px] text-gray-500">No point-level competitors saved.</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : null}
+              </div>
             </div>
             )}
           </div>
