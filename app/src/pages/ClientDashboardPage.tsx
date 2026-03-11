@@ -2465,18 +2465,35 @@ const ClientDashboardPage: React.FC = () => {
       payload.approvalNotifyUserIds = workLogForm.approvalNotifyUserIds;
     }
 
-    if (!titleValue) {
-      toast.error("Title is required.");
-      return;
-    }
-
     try {
       if (workLogModalMode === "create") {
+        if (!titleValue) {
+          toast.error("Title is required.");
+          return;
+        }
         await api.post("/tasks", payload);
         toast.success("Work log entry created.");
       } else if (workLogModalMode === "edit" && selectedWorkLogTaskId) {
-        await api.put(`/tasks/${selectedWorkLogTaskId}`, payload);
-        toast.success("Work log entry updated.");
+        if (canEditSelectedWorkLog) {
+          if (!titleValue) {
+            toast.error("Title is required.");
+            return;
+          }
+          await api.put(`/tasks/${selectedWorkLogTaskId}`, payload);
+          toast.success("Work log entry updated.");
+        } else if (canEditSelectedWorkLogStatus) {
+          const statusPayload: Record<string, unknown> = {
+            status: workLogForm.status,
+          };
+          if (workLogForm.status === "NEEDS_APPROVAL" && workLogForm.approvalNotifyUserIds?.length) {
+            statusPayload.approvalNotifyUserIds = workLogForm.approvalNotifyUserIds;
+          }
+          await api.patch(`/tasks/${selectedWorkLogTaskId}/status`, statusPayload);
+          toast.success("Work log status updated.");
+        } else {
+          toast.error("You do not have permission to update this work log entry.");
+          return;
+        }
       }
       setWorkLogModalOpen(false);
       await fetchWorkLog();
@@ -2535,6 +2552,10 @@ const ClientDashboardPage: React.FC = () => {
     isAgencyViewingAdminOrSuperAdminWorkLog;
   const canEditSelectedWorkLog =
     !isClientWorkLogUser && (user?.role === "SUPER_ADMIN" || selectedWorkLogTask?.createdBy?.id === user?.id);
+  const isAdminAssigneeForSelectedWorkLog =
+    user?.role === "ADMIN" && selectedWorkLogTask?.assignee?.id === user?.id;
+  const canEditSelectedWorkLogStatus =
+    workLogModalMode !== "view" && (canEditSelectedWorkLog || isAdminAssigneeForSelectedWorkLog);
   const canCommentOnWorkLog =
     Boolean(user) && workLogModalMode !== "view";
 
@@ -10615,7 +10636,7 @@ const ClientDashboardPage: React.FC = () => {
                         <select
                           value={workLogForm.status}
                           onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
-                          disabled={isWorkLogFieldsReadOnly}
+                          disabled={!canEditSelectedWorkLogStatus}
                           className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-400 disabled:bg-gray-50 transition-shadow"
                         >
                           <option value="TODO">Pending</option>
@@ -10625,7 +10646,7 @@ const ClientDashboardPage: React.FC = () => {
                           <option value="CANCELLED">Cancelled</option>
                           <option value="DONE">Completed</option>
                         </select>
-                        {workLogForm.status === "NEEDS_APPROVAL" && !isWorkLogFieldsReadOnly && (
+                        {workLogForm.status === "NEEDS_APPROVAL" && canEditSelectedWorkLogStatus && (
                           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
                             <p className="text-xs font-medium text-amber-800 mb-2">Send approval request to (select who should be notified):</p>
                             {clientUsersLoading ? (
@@ -10930,7 +10951,7 @@ const ClientDashboardPage: React.FC = () => {
                   >
                     Close
                   </button>
-                  {!isWorkLogFieldsReadOnly && canEditSelectedWorkLog && (
+                  {canEditSelectedWorkLogStatus && (
                     <button
                       type="button"
                       onClick={handleSaveWorkLog}
@@ -13026,7 +13047,7 @@ const ClientDashboardPage: React.FC = () => {
                     <select
                       value={workLogForm.status}
                       onChange={(e) => setWorkLogForm({ ...workLogForm, status: e.target.value as TaskStatus })}
-                      disabled={isWorkLogFieldsReadOnly}
+                      disabled={!canEditSelectedWorkLogStatus}
                       className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-400 focus:border-slate-400 disabled:bg-gray-50 transition-shadow"
                     >
                       <option value="TODO">Pending</option>
@@ -13036,7 +13057,7 @@ const ClientDashboardPage: React.FC = () => {
                       <option value="CANCELLED">Cancelled</option>
                       <option value="DONE">Completed</option>
                     </select>
-                    {workLogForm.status === "NEEDS_APPROVAL" && !isWorkLogFieldsReadOnly && (
+                    {workLogForm.status === "NEEDS_APPROVAL" && canEditSelectedWorkLogStatus && (
                       <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
                         <p className="text-xs font-medium text-amber-800 mb-2">Send approval request to (select who should be notified):</p>
                         {clientUsersLoading ? (
@@ -13341,7 +13362,7 @@ const ClientDashboardPage: React.FC = () => {
                   >
                     Close
                   </button>
-                  {!isWorkLogFieldsReadOnly && canEditSelectedWorkLog && (
+                  {canEditSelectedWorkLogStatus && (
                     <button
                       type="button"
                       onClick={handleSaveWorkLog}
