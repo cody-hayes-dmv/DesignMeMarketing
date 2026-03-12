@@ -124,11 +124,15 @@ export default function WebDesignWorkspace({
   const [projectSort, setProjectSort] = useState<"newest" | "oldest" | "client_az" | "project_az">("newest");
   const [uploading, setUploading] = useState(false);
   const [markingReady, setMarkingReady] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [approveModalOpen, setApproveModalOpen] = useState(false);
+  const [deleteProjectModalOpen, setDeleteProjectModalOpen] = useState(false);
   const appliedRequestedPageRef = useRef<string | null>(null);
   const selectedPageIdRef = useRef<string | null>(null);
 
   const isAdmin = ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "");
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
+  const canManagePageStatus = ["SUPER_ADMIN", "DESIGNER", "USER"].includes(user?.role || "");
   const isClient = user?.role === "USER";
   const isDesignerOrAdmin = isAdmin || user?.role === "DESIGNER";
   const brandColor = user?.agencyBranding?.primaryColor || "#4f46e5";
@@ -312,7 +316,11 @@ export default function WebDesignWorkspace({
     api.get("/clients")
       .then((res) => {
         const rows = Array.isArray(res.data) ? res.data : [];
-        setClients(rows.map((c: any) => ({ id: c.id, name: c.name })));
+        setClients(
+          rows
+            .filter((c: any) => String(c?.status || "").toUpperCase() === "ACTIVE")
+            .map((c: any) => ({ id: c.id, name: c.name }))
+        );
       })
       .catch(() => setClients([]));
     api.get("/web-design/designers")
@@ -435,6 +443,20 @@ export default function WebDesignWorkspace({
     }
   };
 
+  const deleteProject = async () => {
+    if (!selectedProjectId) return;
+    try {
+      await api.delete(`/web-design/projects/${selectedProjectId}`);
+      toast.success("Project deleted");
+      setProjectDetail(null);
+      setSelectedPageId(null);
+      setSelectedVersionId(null);
+      await loadProjects();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Failed to delete project");
+    }
+  };
+
   const savePageMeta = async () => {
     if (!selectedPage) return;
     try {
@@ -459,6 +481,20 @@ export default function WebDesignWorkspace({
       toast.error(e?.response?.data?.message || "Failed to mark page ready for review");
     } finally {
       setMarkingReady(false);
+    }
+  };
+
+  const updatePageStatus = async (status: PageStatus) => {
+    if (!selectedPage) return;
+    setUpdatingStatus(true);
+    try {
+      await api.patch(`/web-design/pages/${selectedPage.id}/status`, { status });
+      if (selectedProjectId) await loadProjectDetail(selectedProjectId);
+      toast.success("Page status updated");
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Failed to update page status");
+    } finally {
+      setUpdatingStatus(false);
     }
   };
 
@@ -725,18 +761,29 @@ export default function WebDesignWorkspace({
                           {projectDetail.status === "active" ? "Active" : "Complete"}
                         </span>
                       </div>
-                      {isAdmin &&
-                        projectDetail.status === "active" &&
-                        projectDetail.pages.length > 0 &&
-                        approvedPagesCount === projectDetail.pages.length && (
-                        <button
-                          type="button"
-                          onClick={completeProject}
-                          className="rounded-md border border-gray-300 bg-white/90 px-3 py-1.5 text-xs font-medium whitespace-nowrap shadow-sm hover:bg-white"
-                        >
-                          Mark Project Complete
-                        </button>
+                      <div className="flex items-center gap-2">
+                        {isAdmin &&
+                          projectDetail.status === "active" &&
+                          projectDetail.pages.length > 0 &&
+                          approvedPagesCount === projectDetail.pages.length && (
+                          <button
+                            type="button"
+                            onClick={completeProject}
+                            className="rounded-md border border-gray-300 bg-white/90 px-3 py-1.5 text-xs font-medium whitespace-nowrap shadow-sm hover:bg-white"
+                          >
+                            Mark Project Complete
+                          </button>
+                          )}
+                        {isSuperAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteProjectModalOpen(true)}
+                            className="rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 whitespace-nowrap shadow-sm hover:bg-rose-100"
+                          >
+                            Delete Project
+                          </button>
                         )}
+                      </div>
                     </div>
                     <p className="mt-1 text-xs uppercase tracking-wide text-slate-600">
                       {projectDetail.client?.name || "No client"} - Web Design Project
@@ -874,11 +921,25 @@ export default function WebDesignWorkspace({
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-semibold text-gray-900">{selectedPage.pageName}</p>
-                          <span
-                            className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${pageStatusBadgeClass[selectedPage.status]}`}
-                          >
-                            {statusLabel[selectedPage.status]}
-                          </span>
+                          {canManagePageStatus && projectDetail.status === "active" ? (
+                            <select
+                              value={selectedPage.status}
+                              onChange={(e) => updatePageStatus(e.target.value as PageStatus)}
+                              disabled={updatingStatus}
+                              className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium bg-white ${pageStatusBadgeClass[selectedPage.status]} disabled:opacity-60`}
+                            >
+                              <option value="pending_upload">Pending Upload</option>
+                              <option value="needs_review">Needs Review</option>
+                              <option value="revision_requested">Revision Requested</option>
+                              <option value="approved">Approved</option>
+                            </select>
+                          ) : (
+                            <span
+                              className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${pageStatusBadgeClass[selectedPage.status]}`}
+                            >
+                              {statusLabel[selectedPage.status]}
+                            </span>
+                          )}
                           {selectedPage.status === "approved" && selectedPage.approvedAt && (
                             <p className="mt-1 text-xs text-emerald-700">
                               Approved on {new Date(selectedPage.approvedAt).toLocaleString()}
@@ -1113,6 +1174,17 @@ export default function WebDesignWorkspace({
         confirmText="Approve Page"
         cancelText="Cancel"
         variant="warning"
+      />
+      <ConfirmDialog
+        isOpen={deleteProjectModalOpen}
+        onClose={() => setDeleteProjectModalOpen(false)}
+        onConfirm={deleteProject}
+        title="Delete this project?"
+        message={`Delete "${projectDetail?.projectName || "this project"}"? This will permanently remove all pages, versions, and comments.`}
+        confirmText="Delete Project"
+        cancelText="Cancel"
+        variant="danger"
+        requireConfirmText="DELETE"
       />
     </div>
   );

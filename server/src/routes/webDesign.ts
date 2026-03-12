@@ -26,6 +26,10 @@ const updatePageSchema = z.object({
   figmaLink: z.string().url().optional().nullable(),
 });
 
+const updatePageStatusSchema = z.object({
+  status: z.enum(["pending_upload", "needs_review", "revision_requested", "approved"]),
+});
+
 const uploadVersionSchema = z.object({
   fileUrl: z.string().url(),
 });
@@ -480,6 +484,44 @@ router.patch("/pages/:pageId", authenticateToken, async (req, res) => {
   }
 });
 
+router.patch("/pages/:pageId/status", authenticateToken, async (req, res) => {
+  try {
+    if (!["SUPER_ADMIN", "DESIGNER", "USER"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { pageId } = req.params;
+    const parsed = updatePageStatusSchema.parse(req.body);
+
+    const page = await prisma.webDesignPage.findUnique({
+      where: { id: pageId },
+      include: { project: true },
+    });
+    if (!page) return res.status(404).json({ message: "Page not found" });
+
+    const access = await canAccessProject(req.user, page.projectId);
+    if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+    if (page.project.status === "complete") {
+      return res.status(400).json({ message: "Cannot update status on a completed project." });
+    }
+
+    const updated = await prisma.webDesignPage.update({
+      where: { id: pageId },
+      data: {
+        status: parsed.status,
+        approvedAt: parsed.status === "approved" ? new Date() : null,
+      },
+    });
+
+    return res.json(updated);
+  } catch (error: any) {
+    console.error("Update web design page status error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid data", errors: error.errors });
+    }
+    return res.status(500).json({ message: "Failed to update page status" });
+  }
+});
+
 router.post("/pages/:pageId/versions", authenticateToken, async (req, res) => {
   try {
     if (!["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER"].includes(req.user.role)) {
@@ -521,35 +563,37 @@ router.post("/pages/:pageId/versions", authenticateToken, async (req, res) => {
         uploadedById: req.user.userId,
       },
     });
-    await prisma.webDesignPage.update({
-      where: { id: pageId },
-      data: { status: "needs_review" },
-    });
 
-    const clientUsers = await prisma.clientUser.findMany({
-      where: { clientId: page.project.clientId, status: "ACTIVE" },
-      select: { userId: true },
-    });
-    const clientRecipientIds = [...new Set(clientUsers.map((u) => u.userId))];
-    if (clientRecipientIds.length > 0) {
-      const link = getDeepLink(page.projectId, page.id);
-      await notifyUsersById(
-        clientRecipientIds,
-        `Design ready for review: ${page.pageName}`,
-        buildWebDesignEmailHtml({
-          projectName: page.project.projectName,
-          clientName: page.project.client.name,
-          pageName: page.pageName,
-          summary: "A new design revision is ready for your review.",
-          linkPath: link,
-        }),
-        {
-          title: "New web design revision ready",
-          message: `${page.pageName} is ready for your review.`,
-          link,
-          agencyId: page.project.agencyId,
-        }
-      );
+    const shouldNotifyClientsOnUpload =
+      req.user.role !== "DESIGNER" &&
+      req.user.role !== "ADMIN" &&
+      req.user.role !== "SUPER_ADMIN";
+    if (shouldNotifyClientsOnUpload) {
+      const clientUsers = await prisma.clientUser.findMany({
+        where: { clientId: page.project.clientId, status: "ACTIVE" },
+        select: { userId: true },
+      });
+      const clientRecipientIds = [...new Set(clientUsers.map((u) => u.userId))];
+      if (clientRecipientIds.length > 0) {
+        const link = getDeepLink(page.projectId, page.id);
+        await notifyUsersById(
+          clientRecipientIds,
+          `Design ready for review: ${page.pageName}`,
+          buildWebDesignEmailHtml({
+            projectName: page.project.projectName,
+            clientName: page.project.client.name,
+            pageName: page.pageName,
+            summary: "A new design revision is ready for your review.",
+            linkPath: link,
+          }),
+          {
+            title: "New web design revision ready",
+            message: `${page.pageName} is ready for your review.`,
+            link,
+            agencyId: page.project.agencyId,
+          }
+        );
+      }
     }
 
     return res.status(201).json(version);
@@ -980,6 +1024,30 @@ router.post("/projects/:projectId/complete", authenticateToken, async (req, res)
   } catch (error) {
     console.error("Complete web design project error:", error);
     return res.status(500).json({ message: "Failed to complete project" });
+  }
+});
+
+router.delete("/projects/:projectId", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Only Super Admin can delete web design projects." });
+    }
+
+    const { projectId } = req.params;
+    const project = await prisma.webDesignProject.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!project) return res.status(404).json({ message: "Project not found" });
+
+    await prisma.webDesignProject.delete({
+      where: { id: projectId },
+    });
+
+    return res.json({ message: "Project deleted." });
+  } catch (error) {
+    console.error("Delete web design project error:", error);
+    return res.status(500).json({ message: "Failed to delete project" });
   }
 });
 

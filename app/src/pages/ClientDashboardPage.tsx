@@ -858,6 +858,7 @@ const ClientDashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ClientDashboardTopTab>(initialNav.tab);
   const [dashboardSection, setDashboardSection] = useState<ClientDashboardSection>(initialNav.section);
   const [hasWebDesignProjects, setHasWebDesignProjects] = useState(false);
+  const canShowWebDesignTab = WEB_DESIGN_TABS_ENABLED && hasWebDesignProjects;
   const includedClientReadOnly =
     specialistReadOnlyFromState ||
     (user?.role === "SPECIALIST" && location.pathname.startsWith("/specialist/")) ||
@@ -4033,13 +4034,20 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
     api
-      .get("/web-design/projects", { _silent: true } as any)
+      .get("/clients", { _silent: true } as any)
       .then((res) => {
         const rows = Array.isArray(res.data) ? res.data : [];
-        setHasWebDesignProjects(rows.some((p: any) => String(p?.clientId) === String(clientId)));
+        const currentClient = rows.find((c: any) => String(c?.id) === String(clientId));
+        setHasWebDesignProjects(String(currentClient?.status || "").toUpperCase() === "ACTIVE");
       })
       .catch(() => setHasWebDesignProjects(false));
   }, [clientId, user?.role]);
+
+  useEffect(() => {
+    if (activeTab === "web-design" && !canShowWebDesignTab) {
+      setActiveTab("dashboard");
+    }
+  }, [activeTab, canShowWebDesignTab]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -7383,7 +7391,7 @@ const ClientDashboardPage: React.FC = () => {
               {(clientPortalMode
                 ? [
                     { id: "dashboard", label: "Dashboard", icon: Users },
-                    ...(WEB_DESIGN_TABS_ENABLED && hasWebDesignProjects ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
+                    ...(canShowWebDesignTab ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
                   ]
                 : [
                     { id: "dashboard", label: "Dashboard", icon: Users },
@@ -7391,7 +7399,7 @@ const ClientDashboardPage: React.FC = () => {
                     { id: "users", label: "Users", icon: UserPlus },
                     { id: "keywords", label: "Keywords", icon: Target },
                     { id: "integration", label: "Integrations", icon: Plug },
-                    ...(WEB_DESIGN_TABS_ENABLED ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
+                    ...(canShowWebDesignTab ? [{ id: "web-design", label: "Web Design", icon: FileText }] : []),
                   ]
               ).map((tab) => (
                 <button

@@ -90,10 +90,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       return;
     }
     api
-      .get("/web-design/projects", { _silent: true } as any)
+      .get("/clients", { _silent: true } as any)
       .then((res) => {
         const rows = Array.isArray(res.data) ? res.data : [];
-        setHasClientWebDesignProjects(rows.some((p: any) => String(p?.clientId) === String(firstClientId)));
+        const currentClient = rows.find((c: any) => String(c?.id) === String(firstClientId));
+        setHasClientWebDesignProjects(String(currentClient?.status || "").toUpperCase() === "ACTIVE");
       })
       .catch(() => setHasClientWebDesignProjects(false));
   }, [firstClientId, user?.role]);
