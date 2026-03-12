@@ -37,6 +37,7 @@ import ClientUsersPage from "./pages/ClientUsersPage";
 import FinancialOverviewPage from "./pages/FinancialOverviewPage";
 import AuthLandingPage from "./pages/AuthLandingPage";
 import WebDesignPage from "./pages/WebDesignPage";
+import WebDesignDeepLinkPage from "./pages/WebDesignDeepLinkPage";
 
 function App() {
   const dispatch = useDispatch();
@@ -206,6 +207,20 @@ function App() {
     return getRedirectUrl();
   };
 
+  const getSafeRedirectFromQuery = () => {
+    if (typeof window === "undefined") return null;
+    const redirect = new URLSearchParams(window.location.search).get("redirect");
+    if (!redirect) return null;
+    if (!redirect.startsWith("/") || redirect.startsWith("//")) return null;
+    return redirect;
+  };
+
+  const getLoginUrlWithCurrentLocation = () => {
+    if (typeof window === "undefined") return "/login";
+    const current = `${window.location.pathname}${window.location.search}`;
+    return `/login?redirect=${encodeURIComponent(current)}`;
+  };
+
   return (
     <div id="app-root" style={{ minHeight: "100vh" }}>
       {toasterReady && (
@@ -257,7 +272,7 @@ function App() {
         path="/login"
         element={
           user && user.verified ? (
-            <Navigate to={getRedirectUrl()} replace />
+            <Navigate to={getSafeRedirectFromQuery() || getRedirectUrl()} replace />
           ) : (
             <LoginPage />
           )
@@ -276,6 +291,25 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/verify" element={<VerifyPage />} />
+      <Route
+        path="/web-design/projects/:projectId/pages/:pageId"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to={getLoginUrlWithCurrentLocation()} replace />
+          ) : (
+            <DashboardLayout>
+              <WebDesignDeepLinkPage />
+            </DashboardLayout>
+          )
+        }
+      />
 
 
       {/* Specialist routes */}
@@ -525,6 +559,29 @@ function App() {
           ) : (
             <DashboardLayout>
               <SuperAdminDashboard />
+            </DashboardLayout>
+          )
+        }
+      />
+
+      {/* Super Admin Web Design route */}
+      <Route
+        path="/superadmin/web-design"
+        element={
+          (token && !user) ? (
+            <div className="min-h-screen flex items-center justify-center">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            </div>
+          ) : !user || !user.verified ? (
+            <Navigate to="/login" replace />
+          ) : !["SUPER_ADMIN", "ADMIN"].includes(user.role) ? (
+            <Navigate to={getRedirectUrl()} replace />
+          ) : (
+            <DashboardLayout>
+              <WebDesignPage />
             </DashboardLayout>
           )
         }

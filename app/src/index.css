@@ -60,3 +60,13 @@
   line-height: 1.5;
 }
 /* Section spacing in PDF so page 1 / page 2 content isn’t cramped */
+
+/* Hide scrollbar while keeping horizontal scroll behavior */
+.scrollbar-none {
+  -ms-overflow-style: none; /* IE and legacy Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}

@@ -126,6 +126,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/superadmin/dashboard") return "Dashboard";
     if (path === "/superadmin/financial-overview") return "Financial Overview";
     if (path === "/superadmin/settings") return "Settings";
+    if (path === "/superadmin/web-design") return "Web Design";
     if (path === "/superadmin/clients") return "Clients";
     if (path === "/superadmin/agencies/myagency") return "My Agency";
     if (path === "/superadmin/agencies/allagencies") return "All Agencies";
@@ -277,19 +278,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
         <div className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}>
           <div
-            className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4"
-            style={showBrandedHeader ? { borderTop: `3px solid ${brandColor}` } : undefined}
+            className="relative overflow-visible border-b border-indigo-200/60 px-8 py-4 flex items-center justify-between gap-4 bg-gradient-to-r from-indigo-50 via-sky-50 to-violet-50"
+            style={showBrandedHeader ? { borderTop: `3px solid ${brandColor}` } : { borderTop: "3px solid #4f46e5" }}
           >
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(99,102,241,0.22),_transparent_55%),radial-gradient(circle_at_bottom_left,_rgba(14,165,233,0.18),_transparent_45%)]" />
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
-              <p className="text-xs text-gray-500">{brandName}</p>
+              <h1 className="text-2xl font-extrabold text-indigo-900 tracking-tight">{getPageTitle()}</h1>
+              <p className="text-xs font-medium text-indigo-700/80">{brandName}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="relative z-10 flex items-center gap-2">
               <NotificationBell />
               <button
                 type="button"
                 onClick={handleGlobalSignOut}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white/90 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 transition-colors shadow-sm"
                 title="Sign out"
               >
                 <LogOut className="h-4 w-4" />
@@ -330,19 +332,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         className={`w-full transition-all duration-300 flex flex-col ${sidebarCollapsed ? "pl-16" : "pl-64"}`}
       >
         <div
-          className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between gap-4"
-          style={showBrandedHeader ? { borderTop: `3px solid ${brandColor}` } : undefined}
+          className="relative overflow-visible border-b border-indigo-200/60 px-8 py-4 flex items-center justify-between gap-4 bg-gradient-to-r from-indigo-50 via-sky-50 to-violet-50"
+          style={showBrandedHeader ? { borderTop: `3px solid ${brandColor}` } : { borderTop: "3px solid #4f46e5" }}
         >
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(99,102,241,0.22),_transparent_55%),radial-gradient(circle_at_bottom_left,_rgba(14,165,233,0.18),_transparent_45%)]" />
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
-            {showBrandedHeader && <p className="text-xs text-gray-500">{brandName}</p>}
+            <h1 className="text-2xl font-extrabold text-indigo-900 tracking-tight">{getPageTitle()}</h1>
+            {showBrandedHeader && <p className="text-xs font-medium text-indigo-700/80">{brandName}</p>}
           </div>
-          <div className="flex items-center gap-2">
-            {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY" || user?.role === "SPECIALIST") && <NotificationBell />}
+          <div className="relative z-10 flex items-center gap-2">
+            {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN" || user?.role === "AGENCY" || user?.role === "SPECIALIST" || user?.role === "DESIGNER") && <NotificationBell />}
             <button
               type="button"
               onClick={handleGlobalSignOut}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white/90 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 transition-colors shadow-sm"
               title="Sign out"
             >
               <LogOut className="h-4 w-4" />

@@ -21,6 +21,11 @@ const createPageSchema = z.object({
   sortOrder: z.number().int().min(0).optional(),
 });
 
+const updatePageSchema = z.object({
+  pageName: z.string().min(1).max(255).optional(),
+  figmaLink: z.string().url().optional().nullable(),
+});
+
 const uploadVersionSchema = z.object({
   fileUrl: z.string().url(),
 });
@@ -434,6 +439,47 @@ router.post("/projects/:projectId/pages", authenticateToken, async (req, res) =>
   }
 });
 
+router.patch("/pages/:pageId", authenticateToken, async (req, res) => {
+  try {
+    if (!["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { pageId } = req.params;
+    const parsed = updatePageSchema.parse(req.body);
+    if (typeof parsed.pageName === "undefined" && typeof parsed.figmaLink === "undefined") {
+      return res.status(400).json({ message: "No updates provided." });
+    }
+
+    const page = await prisma.webDesignPage.findUnique({
+      where: { id: pageId },
+      include: { project: true },
+    });
+    if (!page) return res.status(404).json({ message: "Page not found" });
+
+    const access = await canAccessProject(req.user, page.projectId);
+    if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+    if (page.project.status === "complete") {
+      return res.status(400).json({ message: "Cannot edit pages on a completed project." });
+    }
+
+    const updated = await prisma.webDesignPage.update({
+      where: { id: pageId },
+      data: {
+        ...(typeof parsed.pageName === "string" ? { pageName: parsed.pageName.trim() } : {}),
+        ...(typeof parsed.figmaLink !== "undefined" ? { figmaLink: parsed.figmaLink ?? null } : {}),
+      },
+    });
+
+    return res.json(updated);
+  } catch (error: any) {
+    console.error("Update web design page error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Invalid data", errors: error.errors });
+    }
+    return res.status(500).json({ message: "Failed to update page" });
+  }
+});
+
 router.post("/pages/:pageId/versions", authenticateToken, async (req, res) => {
   try {
     if (!["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER"].includes(req.user.role)) {
@@ -513,6 +559,85 @@ router.post("/pages/:pageId/versions", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Invalid data", errors: error.errors });
     }
     return res.status(500).json({ message: "Failed to upload version" });
+  }
+});
+
+router.post("/pages/:pageId/mark-ready", authenticateToken, async (req, res) => {
+  try {
+    if (!["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { pageId } = req.params;
+    const page = await prisma.webDesignPage.findUnique({
+      where: { id: pageId },
+      include: {
+        project: {
+          include: {
+            client: { select: { id: true, name: true } },
+          },
+        },
+        versions: {
+          orderBy: { versionNumber: "desc" },
+          take: 1,
+          select: { id: true },
+        },
+      },
+    });
+    if (!page) return res.status(404).json({ message: "Page not found" });
+    const access = await canAccessProject(req.user, page.projectId);
+    if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+    if (page.project.status === "complete") {
+      return res.status(400).json({ message: "Cannot update a page on a completed project." });
+    }
+    if (page.status === "approved") {
+      return res.status(400).json({ message: "Page is approved and locked." });
+    }
+    if (page.versions.length === 0) {
+      return res.status(400).json({ message: "Please upload at least one revision before marking ready." });
+    }
+
+    const wasAlreadyReady = page.status === "needs_review";
+    if (!wasAlreadyReady) {
+      await prisma.webDesignPage.update({
+        where: { id: pageId },
+        data: { status: "needs_review" },
+      });
+    }
+
+    if (!wasAlreadyReady) {
+      const clientUsers = await prisma.clientUser.findMany({
+        where: { clientId: page.project.clientId, status: "ACTIVE" },
+        select: { userId: true },
+      });
+      const clientRecipientIds = [...new Set(clientUsers.map((u) => u.userId))];
+      if (clientRecipientIds.length > 0) {
+        const link = getDeepLink(page.projectId, page.id);
+        await notifyUsersById(
+          clientRecipientIds,
+          `Design ready for review: ${page.pageName}`,
+          buildWebDesignEmailHtml({
+            projectName: page.project.projectName,
+            clientName: page.project.client.name,
+            pageName: page.pageName,
+            summary: "A new design revision is ready for your review.",
+            linkPath: link,
+          }),
+          {
+            title: "New web design revision ready",
+            message: `${page.pageName} is ready for your review.`,
+            link,
+            agencyId: page.project.agencyId,
+          }
+        );
+      }
+    }
+
+    return res.json({
+      message: wasAlreadyReady ? "Page is already marked ready for review." : "Page marked ready for client review.",
+    });
+  } catch (error) {
+    console.error("Mark web design page ready error:", error);
+    return res.status(500).json({ message: "Failed to mark page ready for review" });
   }
 });
 

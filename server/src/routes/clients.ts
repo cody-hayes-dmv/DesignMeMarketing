@@ -513,8 +513,8 @@ router.put('/users/:userId/access', authenticateToken, async (req, res) => {
             await prisma.clientUser.upsert({
                 where: { clientId_userId: { clientId, userId } },
                 update: {
-                    status: 'PENDING',
-                    acceptedAt: null,
+                    status: 'ACTIVE',
+                    acceptedAt: new Date(),
                     invitedById: req.user.userId,
                     invitedAt: new Date(),
                 },
@@ -522,7 +522,8 @@ router.put('/users/:userId/access', authenticateToken, async (req, res) => {
                     clientId,
                     userId,
                     clientRole: 'CLIENT',
-                    status: 'PENDING',
+                    status: 'ACTIVE',
+                    acceptedAt: new Date(),
                     invitedById: req.user.userId,
                     invitedAt: new Date(),
                 },

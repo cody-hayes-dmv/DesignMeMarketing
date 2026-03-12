@@ -71,24 +71,51 @@ const ClientUsersPage: React.FC = () => {
   const [editClientAccessLoading, setEditClientAccessLoading] = useState(false);
   const [editClientAccessSaving, setEditClientAccessSaving] = useState(false);
 
-  const fetchAllUsers = useCallback(async () => {
+  const fetchAllUsers = useCallback(async (options?: { background?: boolean }) => {
+    const background = options?.background === true;
     try {
-      setLoading(true);
-      setError(null);
-      const res = await api.get("/clients/users");
+      if (!background) {
+        setLoading(true);
+        setError(null);
+      }
+      const res = await api.get("/clients/users", background ? { _silent: true } : undefined);
       setRows(Array.isArray(res.data) ? (res.data as ClientUserRow[]) : []);
     } catch (e: any) {
       console.error("Failed to load client users", e);
-      setRows([]);
-      setError(e?.response?.data?.message || "Failed to load users.");
-      toast.error(e?.response?.data?.message || "Failed to load users.");
+      if (!background) {
+        setRows([]);
+        setError(e?.response?.data?.message || "Failed to load users.");
+        toast.error(e?.response?.data?.message || "Failed to load users.");
+      }
     } finally {
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void fetchAllUsers();
+  }, [fetchAllUsers]);
+
+  useEffect(() => {
+    const pollInterval = window.setInterval(() => {
+      void fetchAllUsers({ background: true });
+    }, 3000);
+
+    const refreshNow = () => {
+      if (document.visibilityState !== "visible") return;
+      void fetchAllUsers({ background: true });
+    };
+
+    window.addEventListener("focus", refreshNow);
+    document.addEventListener("visibilitychange", refreshNow);
+
+    return () => {
+      window.clearInterval(pollInterval);
+      window.removeEventListener("focus", refreshNow);
+      document.removeEventListener("visibilitychange", refreshNow);
+    };
   }, [fetchAllUsers]);
 
   // Invite modal state (multi-client invites)

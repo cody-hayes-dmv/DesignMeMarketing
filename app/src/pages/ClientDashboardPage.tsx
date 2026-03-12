@@ -107,6 +107,24 @@ const WORKLOG_PAGE_SIZES = [25, 50, 100, 250] as const;
 const DASHBOARD_REQUEST_TIMEOUT_MS = 120000;
 const WEB_DESIGN_TABS_ENABLED = (import.meta.env.VITE_ENABLE_WEB_DESIGN_TABS ?? "false") === "true";
 
+function hexToRgba(hex: string, alpha: number): string {
+  const cleaned = hex.replace("#", "").trim();
+  const expanded =
+    cleaned.length === 3
+      ? cleaned
+          .split("")
+          .map((c) => `${c}${c}`)
+          .join("")
+      : cleaned;
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
+    return `rgba(79,70,229,${alpha})`;
+  }
+  const r = parseInt(expanded.slice(0, 2), 16);
+  const g = parseInt(expanded.slice(2, 4), 16);
+  const b = parseInt(expanded.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 interface ClientReport {
   id: string;
   name: string;
@@ -790,6 +808,9 @@ const ClientDashboardPage: React.FC = () => {
   const location = useLocation();
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
+  const brandColor = user?.agencyBranding?.primaryColor || "#4f46e5";
+  const brandSoftBg = hexToRgba(brandColor, 0.1);
+  const brandSoftBorder = hexToRgba(brandColor, 0.24);
   const isClientPortal = location.pathname.startsWith("/client/");
   const clientPortalMode = isClientPortal && user?.role === "USER";
   const navState = location.state as {
@@ -812,10 +833,13 @@ const ClientDashboardPage: React.FC = () => {
   type ClientDashboardSection = "seo" | "ai-intelligence" | "local-map" | "ppc" | "backlinks" | "worklog";
 
   const initialNav = (() => {
+    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration" | "web-design" } | null)?.tab;
     if (clientPortalMode) {
+      if (requested === "web-design" && WEB_DESIGN_TABS_ENABLED) {
+        return { tab: "web-design" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
+      }
       return { tab: "dashboard" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     }
-    const requested = (location.state as { tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration" | "web-design" } | null)?.tab;
     if (requested === "report") return { tab: "report" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "users") return { tab: "users" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
     if (requested === "keywords") return { tab: "keywords" as ClientDashboardTopTab, section: "seo" as ClientDashboardSection };
@@ -1900,7 +1924,8 @@ const ClientDashboardPage: React.FC = () => {
     isOpen: boolean;
     taskId: string | null;
     taskTitle: string | null;
-  }>({ isOpen: false, taskId: null, taskTitle: null });
+    taskIds: string[];
+  }>({ isOpen: false, taskId: null, taskTitle: null, taskIds: [] });
   const [workLogUploading, setWorkLogUploading] = useState(false);
   const [workLogUrlInput, setWorkLogUrlInput] = useState("");
   const [workLogUrlType, setWorkLogUrlType] = useState<"image" | "video" | "url">("url");
@@ -1908,6 +1933,12 @@ const ClientDashboardPage: React.FC = () => {
   const [workLogListTab, setWorkLogListTab] = useState<"upcoming" | "completed">("upcoming");
   const [workLogPageSize, setWorkLogPageSize] = useState<(typeof WORKLOG_PAGE_SIZES)[number]>(25);
   const [workLogPage, setWorkLogPage] = useState(1);
+  const [selectedWorkLogTaskIds, setSelectedWorkLogTaskIds] = useState<string[]>([]);
+  const [workLogBulkEditOpen, setWorkLogBulkEditOpen] = useState(false);
+  const [workLogAssignSelectedOpen, setWorkLogAssignSelectedOpen] = useState(false);
+  const [workLogAssignSelectedUserId, setWorkLogAssignSelectedUserId] = useState("");
+  const [workLogBulkAssigning, setWorkLogBulkAssigning] = useState(false);
+  const [workLogBulkDeleting, setWorkLogBulkDeleting] = useState(false);
   const [workLogComments, setWorkLogComments] = useState<WorkLogComment[]>([]);
   const [workLogCommentsLoading, setWorkLogCommentsLoading] = useState(false);
   const [workLogCommentsError, setWorkLogCommentsError] = useState<string | null>(null);
@@ -2273,6 +2304,22 @@ const ClientDashboardPage: React.FC = () => {
     }
   };
 
+  const assigneeRoleLabel = (role?: string) => {
+    if (role === "SUPER_ADMIN") return "Super Admin";
+    if (role === "ADMIN") return "Admin";
+    if (role === "AGENCY") return "Agency";
+    return "Specialist";
+  };
+
+  const canBulkManageWorkLogTask = (task: WorkLogTask) => {
+    const actorRole = String(user?.role || "").toUpperCase();
+    const creatorRole = String(task.createdBy?.role || "").toUpperCase();
+    if (actorRole === "SUPER_ADMIN") return true;
+    if (actorRole === "ADMIN") return creatorRole === "ADMIN";
+    if (actorRole === "AGENCY") return creatorRole === "AGENCY";
+    return false;
+  };
+
   const openWorkLogCreate = () => {
     setWorkLogAddMenuOpen(false);
     setWorkLogModalMode("create");
@@ -2508,23 +2555,62 @@ const ClientDashboardPage: React.FC = () => {
       isOpen: true,
       taskId,
       taskTitle: taskTitle ?? null,
+      taskIds: [],
+    });
+  };
+
+  const handleBulkDeleteWorkLogSelected = () => {
+    if (selectedWorkLogTaskIds.length === 0) return;
+    setWorkLogDeleteConfirm({
+      isOpen: true,
+      taskId: null,
+      taskTitle: null,
+      taskIds: [...selectedWorkLogTaskIds],
     });
   };
 
   const confirmDeleteWorkLog = async () => {
-    const taskId = workLogDeleteConfirm.taskId;
-    if (!taskId) return;
+    const requestedTaskIds = workLogDeleteConfirm.taskIds.length > 0
+      ? workLogDeleteConfirm.taskIds
+      : workLogDeleteConfirm.taskId
+        ? [workLogDeleteConfirm.taskId]
+        : [];
+    if (requestedTaskIds.length === 0) return;
+    const taskIdsToDelete = requestedTaskIds.filter((id) => {
+      const t = workLogTasks.find((task) => task.id === id);
+      return Boolean(t && canBulkManageWorkLogTask(t));
+    });
+    if (taskIdsToDelete.length === 0) {
+      toast.error("No eligible work log entries selected for delete.");
+      setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null, taskIds: [] });
+      return;
+    }
     try {
-      await api.delete(`/tasks/${taskId}`);
-      toast.success("Work log entry deleted.");
+      if (taskIdsToDelete.length > 1) setWorkLogBulkDeleting(true);
+      const results = await Promise.allSettled(
+        taskIdsToDelete.map((taskId) => api.delete(`/tasks/${taskId}`))
+      );
+      const successCount = results.filter((r) => r.status === "fulfilled").length;
+      const failedCount = results.length - successCount;
+      if (successCount > 0) {
+        toast.success(successCount === 1 ? "Work log entry deleted." : `${successCount} work log entries deleted.`);
+      }
+      if (failedCount > 0) {
+        toast.error(failedCount === 1 ? "1 work log entry failed to delete." : `${failedCount} work log entries failed to delete.`);
+      }
       await fetchWorkLog();
     } catch (e: any) {
       console.error("Work log delete failed", e);
       toast.error(e?.response?.data?.message || "Failed to delete work log entry.");
     } finally {
-      setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null });
+      const deletedIds = new Set(taskIdsToDelete);
+      setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null, taskIds: [] });
+      if (workLogDeleteConfirm.taskIds.length > 0) {
+        clearWorkLogSelection();
+      }
+      setWorkLogBulkDeleting(false);
       // If the user deleted the entry they were editing/viewing, close the modal.
-      if (selectedWorkLogTaskId === taskId) {
+      if (selectedWorkLogTaskId && deletedIds.has(selectedWorkLogTaskId)) {
         setWorkLogModalOpen(false);
         setSelectedWorkLogTaskId(null);
       }
@@ -3879,15 +3965,19 @@ const ClientDashboardPage: React.FC = () => {
       setDashboardSection("seo");
       return;
     }
-    if (clientPortalMode) {
-      setActiveTab("dashboard");
-      setDashboardSection("seo");
-      return;
-    }
     const state = location.state as {
       tab?: "dashboard" | "report" | "backlinks" | "worklog" | "users" | "keywords" | "integration" | "web-design";
       section?: ClientDashboardSection;
     };
+    if (clientPortalMode) {
+      if (state?.tab === "web-design" && WEB_DESIGN_TABS_ENABLED) {
+        setActiveTab("web-design");
+        return;
+      }
+      setActiveTab("dashboard");
+      setDashboardSection("seo");
+      return;
+    }
     if (!state?.tab && !state?.section) return;
 
     if (state?.tab === "report") {
@@ -4649,6 +4739,66 @@ const ClientDashboardPage: React.FC = () => {
     return { totalRows, totalPages, page, from, to, rows };
   }, [workLogFilteredTasks, workLogPage, workLogPageSize]);
 
+  const canBulkAssignWorkLog =
+    canModifyClientSettings &&
+    !reportOnly &&
+    !clientPortalMode &&
+    user?.role !== "USER";
+
+  const toggleWorkLogTaskSelection = (taskId: string) => {
+    const task = workLogTasks.find((t) => t.id === taskId);
+    if (!task || !canBulkManageWorkLogTask(task)) return;
+    setSelectedWorkLogTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+  };
+
+  const toggleSelectAllWorkLogPageRows = () => {
+    const ids = workLogPagination.rows.filter(canBulkManageWorkLogTask).map((t) => t.id);
+    if (ids.length === 0) return;
+    setSelectedWorkLogTaskIds((prev) => {
+      const visibleSet = new Set(ids);
+      const selectedVisibleCount = prev.filter((id) => visibleSet.has(id)).length;
+      if (selectedVisibleCount === ids.length) {
+        return prev.filter((id) => !visibleSet.has(id));
+      }
+      const merged = new Set([...prev, ...ids]);
+      return Array.from(merged);
+    });
+  };
+
+  const clearWorkLogSelection = () => {
+    setSelectedWorkLogTaskIds([]);
+    setWorkLogBulkEditOpen(false);
+    setWorkLogAssignSelectedOpen(false);
+    setWorkLogAssignSelectedUserId("");
+  };
+
+  const handleBulkAssignWorkLog = async () => {
+    const selectedEligibleIds = selectedWorkLogTaskIds.filter((id) => {
+      const t = workLogTasks.find((task) => task.id === id);
+      return Boolean(t && canBulkManageWorkLogTask(t));
+    });
+    if (selectedEligibleIds.length === 0) {
+      toast.error("No eligible work log entries selected for bulk assign.");
+      return;
+    }
+    setWorkLogBulkAssigning(true);
+    try {
+      const assigneeId = workLogAssignSelectedUserId || null;
+      await Promise.all(
+        selectedEligibleIds.map((id) => api.put(`/tasks/${id}`, { assigneeId }))
+      );
+      toast.success(`${selectedEligibleIds.length} work log entr${selectedEligibleIds.length === 1 ? "y" : "ies"} assigned.`);
+      clearWorkLogSelection();
+      await fetchWorkLog();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Failed to assign selected work log entries.");
+    } finally {
+      setWorkLogBulkAssigning(false);
+    }
+  };
+
   useEffect(() => {
     setWorkLogPage(1);
   }, [workLogListTab]);
@@ -4660,6 +4810,19 @@ const ClientDashboardPage: React.FC = () => {
   useEffect(() => {
     setWorkLogPage((p) => Math.min(p, workLogPagination.totalPages));
   }, [workLogPagination.totalPages]);
+
+  useEffect(() => {
+    setSelectedWorkLogTaskIds((prev) => prev.filter((id) => workLogFilteredTasks.some((t) => t.id === id)));
+  }, [workLogFilteredTasks]);
+
+  useEffect(() => {
+    setSelectedWorkLogTaskIds((prev) =>
+      prev.filter((id) => {
+        const t = workLogTasks.find((task) => task.id === id);
+        return Boolean(t && canBulkManageWorkLogTask(t));
+      })
+    );
+  }, [workLogTasks, user?.role]);
 
   const openAddBacklink = useCallback(() => {
     if (reportOnly || includedClientReadOnly) return;
@@ -7214,7 +7377,7 @@ const ClientDashboardPage: React.FC = () => {
       </div>
 
       {!reportOnly && !specialistSeoOverviewOnly && (
-        <div className="border-b border-gray-200 px-8">
+        <div className="border-b px-8" style={{ borderColor: brandSoftBorder }}>
           <div className="flex items-end justify-between gap-6">
             <nav className="-mb-px flex space-x-8">
               {(clientPortalMode
@@ -7236,9 +7399,10 @@ const ClientDashboardPage: React.FC = () => {
                   onClick={() => setActiveTab(tab.id as typeof activeTab)}
                   className={`py-2 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 ${
                     activeTab === tab.id
-                      ? "border-primary-500 text-primary-600"
+                      ? ""
                       : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                   }`}
+                  style={activeTab === tab.id ? { borderColor: brandColor, color: brandColor } : undefined}
                 >
                   <tab.icon className="h-4 w-4" />
                   <span>{tab.label}</span>
@@ -10189,10 +10353,96 @@ const ClientDashboardPage: React.FC = () => {
                       </div>
                     )}
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                      {canBulkAssignWorkLog && selectedWorkLogTaskIds.length > 0 && (
+                        <div className="px-6 py-3 bg-primary-50 border-b border-primary-100 flex flex-wrap items-center gap-3">
+                          <span className="text-sm font-medium text-primary-800">
+                            {selectedWorkLogTaskIds.length} entr{selectedWorkLogTaskIds.length === 1 ? "y" : "ies"} selected
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setWorkLogBulkEditOpen((prev) => !prev)}
+                            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
+                          >
+                            <Edit className="h-4 w-4" />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearWorkLogSelection}
+                            className="text-sm text-gray-600 hover:text-gray-900"
+                          >
+                            Clear selection
+                          </button>
+                          {workLogBulkEditOpen && !workLogAssignSelectedOpen && (
+                            <div className="flex items-center gap-2 ml-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => setWorkLogAssignSelectedOpen(true)}
+                                className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700"
+                              >
+                                Assign
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleBulkDeleteWorkLogSelected}
+                                disabled={workLogBulkDeleting}
+                                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                              >
+                                {workLogBulkDeleting ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          )}
+                          {workLogAssignSelectedOpen && (
+                            <div className="flex items-center gap-2 ml-2 flex-wrap">
+                              <select
+                                value={workLogAssignSelectedUserId}
+                                onChange={(e) => setWorkLogAssignSelectedUserId(e.target.value)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              >
+                                <option value="">Unassigned</option>
+                                {assignableUsers.map((u) => (
+                                  <option key={u.id} value={u.id}>
+                                    {u.name || u.email} ({assigneeRoleLabel(u.role)})
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={handleBulkAssignWorkLog}
+                                disabled={workLogBulkAssigning}
+                                className="rounded-lg bg-gray-800 px-3 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-50"
+                              >
+                                {workLogBulkAssigning ? "Assigning..." : "Assign"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setWorkLogAssignSelectedOpen(false)}
+                                className="text-sm text-gray-600 hover:text-gray-900"
+                              >
+                                Back
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="overflow-x-auto">
                         <table className="min-w-full">
                           <thead>
                             <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
+                              {canBulkAssignWorkLog && (
+                                <th className="px-4 py-3.5 text-left border-l-4 border-transparent">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      workLogPagination.rows.filter(canBulkManageWorkLogTask).length > 0 &&
+                                      workLogPagination.rows.filter(canBulkManageWorkLogTask).every((t) => selectedWorkLogTaskIds.includes(t.id))
+                                    }
+                                    onChange={toggleSelectAllWorkLogPageRows}
+                                    disabled={workLogPagination.rows.filter(canBulkManageWorkLogTask).length === 0}
+                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                  />
+                                </th>
+                              )}
                               <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Title</th>
                               <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Work Type</th>
                               <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Due date</th>
@@ -10204,19 +10454,19 @@ const ClientDashboardPage: React.FC = () => {
                           <tbody className="divide-y divide-gray-100">
                             {workLogLoading ? (
                               <tr>
-                                <td className="px-6 py-8 text-sm text-gray-500 bg-gray-50/50" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-gray-500 bg-gray-50/50" colSpan={canBulkAssignWorkLog ? 7 : 6}>
                                   Loading work log...
                                 </td>
                               </tr>
                             ) : workLogError ? (
                               <tr>
-                                <td className="px-6 py-8 text-sm text-rose-600 bg-rose-50/50" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-rose-600 bg-rose-50/50" colSpan={canBulkAssignWorkLog ? 7 : 6}>
                                   {workLogError}
                                 </td>
                               </tr>
                             ) : workLogFilteredTasks.length === 0 ? (
                               <tr>
-                                <td className="px-6 py-8 text-sm text-gray-500 bg-amber-50/50" colSpan={6}>
+                                <td className="px-6 py-8 text-sm text-gray-500 bg-amber-50/50" colSpan={canBulkAssignWorkLog ? 7 : 6}>
                                   {workLogListTab === "completed" ? "No completed entries yet." : "No upcoming entries."}
                                 </td>
                               </tr>
@@ -10231,6 +10481,20 @@ const ClientDashboardPage: React.FC = () => {
                                 const titleDisplay = titleText.length > 90 ? `${titleText.slice(0, 90)}…` : titleText;
                                 return (
                                   <tr key={task.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
+                                    {canBulkAssignWorkLog && (
+                                      <td className="px-4 py-4">
+                                        {canBulkManageWorkLogTask(task) ? (
+                                          <input
+                                            type="checkbox"
+                                            checked={selectedWorkLogTaskIds.includes(task.id)}
+                                            onChange={() => toggleWorkLogTaskSelection(task.id)}
+                                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                          />
+                                        ) : (
+                                          <span className="text-xs text-gray-400">-</span>
+                                        )}
+                                      </td>
+                                    )}
                                     <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs align-top">
                                       <button
                                         type="button"
@@ -11234,10 +11498,14 @@ const ClientDashboardPage: React.FC = () => {
 
               <ConfirmDialog
                 isOpen={workLogDeleteConfirm.isOpen}
-                onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null })}
+                onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null, taskIds: [] })}
                 onConfirm={() => void confirmDeleteWorkLog()}
-                title="Delete work log entry"
-                message={`Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`}
+                title={workLogDeleteConfirm.taskIds.length > 0 ? "Delete work log entries" : "Delete work log entry"}
+                message={
+                  workLogDeleteConfirm.taskIds.length > 0
+                    ? `Are you sure you want to delete ${workLogDeleteConfirm.taskIds.length} selected entries? This action cannot be undone.`
+                    : `Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`
+                }
                 confirmText="Delete"
                 cancelText="Cancel"
                 variant="danger"
@@ -11262,44 +11530,6 @@ const ClientDashboardPage: React.FC = () => {
                 confirmText="Remove"
                 cancelText="Cancel"
                 variant="danger"
-              />
-
-              {/* View / Edit Client Information Modal (same layout as Edit Client in Clients page) */}
-              <ClientAccountFormModal
-                open={showViewClientModal && !!client}
-                title={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "") ? "Edit Client" : "Client Information"}
-                subtitle="Account information"
-                form={viewClientForm}
-                setForm={setViewClientForm}
-                canEdit={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")}
-                showStatus={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"}
-                showExtendedSuperAdminFields={user?.role === "SUPER_ADMIN"}
-                showSeoRoadmapSection={false}
-                onClose={() => setShowViewClientModal(false)}
-                onSave={
-                  ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")
-                    ? async () => {
-                        if (!client) return;
-                        setViewClientSaving(true);
-                        try {
-                          const data = formStateToUpdatePayload(viewClientForm, {
-                            includeStatus: user?.role === "SUPER_ADMIN" || user?.role === "ADMIN",
-                            includeManagedServiceFields: user?.role === "SUPER_ADMIN",
-                          });
-                          const updatedClient = await dispatch(updateClient({ id: client.id, data }) as any).unwrap();
-                          setClient(updatedClient);
-                          setViewClientForm(clientToFormState(updatedClient));
-                          setShowViewClientModal(false);
-                          toast.success("Client updated successfully.");
-                        } catch (e: any) {
-                          toast.error(e?.message || "Failed to update client.");
-                        } finally {
-                          setViewClientSaving(false);
-                        }
-                      }
-                    : undefined
-                }
-                saving={viewClientSaving}
               />
 
               {/* GA4 Property Selection Modal */}
@@ -11505,12 +11735,12 @@ const ClientDashboardPage: React.FC = () => {
                 </div>
               )}
               {!reportOnly && activeTab === "integration" && (
-                <div className="space-y-8 max-w-3xl">
+                <div className="space-y-8 max-w-3xl rounded-2xl border p-5" style={{ borderColor: brandSoftBorder, backgroundColor: brandSoftBg }}>
                   <h2 className="text-xl font-semibold text-gray-900">Integrations</h2>
                   <p className="text-sm text-gray-600">Connect Google Analytics 4 and Google Ads for this client. When Google Ads is connected, the PPC tab appears in the Dashboard.</p>
 
                   {/* GA4 */}
-                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                  <div className="bg-white border rounded-xl p-6" style={{ borderColor: brandSoftBorder }}>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                       <TrendingUp className="h-5 w-5 text-primary-600" />
                       Google Analytics 4 (GA4)
@@ -11537,7 +11767,8 @@ const ClientDashboardPage: React.FC = () => {
                         <button
                           onClick={handleConnectGA4}
                           disabled={ga4Connecting}
-                          className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          style={{ backgroundColor: brandColor }}
                         >
                           {ga4Connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                           {ga4Connecting ? "Connecting..." : "Connect GA4"}
@@ -11547,7 +11778,7 @@ const ClientDashboardPage: React.FC = () => {
                   </div>
 
                   {/* Google Ads (PPC) */}
-                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                  <div className="bg-white border rounded-xl p-6" style={{ borderColor: brandSoftBorder }}>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                       <TrendingUp className="h-5 w-5 text-primary-600" />
                       Google Ads (PPC)
@@ -11560,7 +11791,8 @@ const ClientDashboardPage: React.FC = () => {
                         <button
                           onClick={handleFetchGoogleAdsCustomers}
                           disabled={loadingGoogleAdsCustomers}
-                          className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          style={{ backgroundColor: brandColor }}
                         >
                           {loadingGoogleAdsCustomers ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
                           {loadingGoogleAdsCustomers ? "Loading..." : "Select Google Ads account"}
@@ -11572,7 +11804,8 @@ const ClientDashboardPage: React.FC = () => {
                         <button
                           onClick={handleConnectGoogleAds}
                           disabled={googleAdsConnecting}
-                          className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                          style={{ backgroundColor: brandColor }}
                         >
                           {googleAdsConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
                           {googleAdsConnecting ? "Connecting..." : "Connect Google Ads"}
@@ -11608,8 +11841,8 @@ const ClientDashboardPage: React.FC = () => {
               )}
               {!reportOnly && activeTab === "users" && (
                 <div className="space-y-6">
-                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                  <div className="bg-white border rounded-xl overflow-hidden" style={{ borderColor: brandSoftBorder }}>
+                    <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: brandSoftBorder, backgroundColor: brandSoftBg }}>
                       <div>
                         <p className="text-xs text-amber-800/90 bg-amber-50/80 rounded-lg px-3 py-2 border border-amber-200">
                           Showing {clientUsers.length} of {clientUsers.length} Rows
@@ -11631,8 +11864,8 @@ const ClientDashboardPage: React.FC = () => {
                     <div className="overflow-x-auto">
                       <table className="min-w-full">
                         <thead>
-                          <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
-                            <th className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Name</th>
+                          <tr className="border-b-2" style={{ borderBottomColor: brandSoftBorder, background: `linear-gradient(90deg, ${hexToRgba(brandColor, 0.14)} 0%, #e0f2fe 60%, #eef2ff 100%)` }}>
+                            <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider border-l-4 first:border-l-0" style={{ color: brandColor, borderLeftColor: brandColor }}>Name</th>
                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Email</th>
                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Role</th>
                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Status</th>
@@ -11671,10 +11904,10 @@ const ClientDashboardPage: React.FC = () => {
                                 ? new Date(u.lastLoginAt).toLocaleString()
                                 : "Never";
                               return (
-                                <tr key={u.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50`}>
+                                <tr key={u.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-gray-50`}>
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <div className="flex items-center gap-3">
-                                      <div className="h-9 w-9 rounded-full bg-primary-100 flex items-center justify-center text-xs font-semibold text-primary-800">
+                                      <div className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold" style={{ backgroundColor: hexToRgba(brandColor, 0.16), color: brandColor }}>
                                         {initials}
                                       </div>
                                       <div className="text-sm font-medium text-gray-900">
@@ -12408,12 +12641,12 @@ const ClientDashboardPage: React.FC = () => {
                     <h2 className="text-xl font-semibold text-gray-900">Reports</h2>
                   </div>
 
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="bg-white rounded-xl border shadow-sm overflow-hidden" style={{ borderColor: brandSoftBorder }}>
                     <div className="overflow-x-auto">
                       <table className="min-w-full" aria-label="Client reports table">
                         <thead>
-                          <tr className="bg-gradient-to-r from-primary-50 via-blue-50 to-indigo-50 border-b-2 border-primary-200">
-                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-primary-800 uppercase tracking-wider border-l-4 border-primary-400 first:border-l-0">Name</th>
+                          <tr className="border-b-2" style={{ borderBottomColor: brandSoftBorder, background: `linear-gradient(90deg, ${hexToRgba(brandColor, 0.14)} 0%, #e0f2fe 60%, #eef2ff 100%)` }}>
+                            <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider border-l-4 first:border-l-0" style={{ color: brandColor, borderLeftColor: brandColor }}>Name</th>
                             <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-emerald-800 uppercase tracking-wider border-l-4 border-emerald-300">Type</th>
                             <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider border-l-4 border-amber-300">Last Generated</th>
                             <th scope="col" className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
@@ -12438,7 +12671,7 @@ const ClientDashboardPage: React.FC = () => {
                             </tr>
                           ) : (
                             reportRows.map((reportRow) => (
-                            <tr key={reportRow.id} className="bg-white hover:bg-primary-50/50 transition-colors">
+                            <tr key={reportRow.id} className="bg-white hover:bg-gray-50 transition-colors">
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{reportRow.name}</td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-800/90">
                                 <div className="inline-flex items-center gap-2">
@@ -14079,10 +14312,14 @@ const ClientDashboardPage: React.FC = () => {
 
       <ConfirmDialog
         isOpen={workLogDeleteConfirm.isOpen}
-        onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null })}
+        onClose={() => setWorkLogDeleteConfirm({ isOpen: false, taskId: null, taskTitle: null, taskIds: [] })}
         onConfirm={() => void confirmDeleteWorkLog()}
-        title="Delete work log entry"
-        message={`Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`}
+        title={workLogDeleteConfirm.taskIds.length > 0 ? "Delete work log entries" : "Delete work log entry"}
+        message={
+          workLogDeleteConfirm.taskIds.length > 0
+            ? `Are you sure you want to delete ${workLogDeleteConfirm.taskIds.length} selected entries? This action cannot be undone.`
+            : `Are you sure you want to delete "${workLogDeleteConfirm.taskTitle || "this entry"}"? This action cannot be undone.`
+        }
         confirmText="Delete"
         cancelText="Cancel"
         variant="danger"
@@ -15677,6 +15914,11 @@ const ClientDashboardPage: React.FC = () => {
         </div>
       )}
 
+            </>
+          )}
+        </div>
+      )}
+
       {/* Google Ads Customer Selection Modal */}
       {showGoogleAdsModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -15860,10 +16102,44 @@ const ClientDashboardPage: React.FC = () => {
           </div>
         </div>
       )}
-            </>
-          )}
-        </div>
-      )}
+
+      {/* View / Edit Client Information Modal (same layout as Edit Client in Clients page) */}
+      <ClientAccountFormModal
+        open={showViewClientModal && !!client}
+        title={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "") ? "Edit Client" : "Client Information"}
+        subtitle="Account information"
+        form={viewClientForm}
+        setForm={setViewClientForm}
+        canEdit={["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")}
+        showStatus={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"}
+        showExtendedSuperAdminFields={user?.role === "SUPER_ADMIN"}
+        showSeoRoadmapSection={false}
+        onClose={() => setShowViewClientModal(false)}
+        onSave={
+          ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "")
+            ? async () => {
+                if (!client) return;
+                setViewClientSaving(true);
+                try {
+                  const data = formStateToUpdatePayload(viewClientForm, {
+                    includeStatus: user?.role === "SUPER_ADMIN" || user?.role === "ADMIN",
+                    includeManagedServiceFields: user?.role === "SUPER_ADMIN",
+                  });
+                  const updatedClient = await dispatch(updateClient({ id: client.id, data }) as any).unwrap();
+                  setClient(updatedClient);
+                  setViewClientForm(clientToFormState(updatedClient));
+                  setShowViewClientModal(false);
+                  toast.success("Client updated successfully.");
+                } catch (e: any) {
+                  toast.error(e?.message || "Failed to update client.");
+                } finally {
+                  setViewClientSaving(false);
+                }
+              }
+            : undefined
+        }
+        saving={viewClientSaving}
+      />
 
       {/* View All Queries Modal */}
       {showAllQueriesModal && aiIntelligence && (

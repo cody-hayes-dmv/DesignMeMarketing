@@ -219,6 +219,20 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
     {
+      icon: PenTool,
+      label: "Web Design",
+      path: "/agency/web-design",
+      hasSubMenu: false,
+      roles: ["AGENCY"],
+    },
+    {
+      icon: PenTool,
+      label: "Web Design",
+      path: "/superadmin/web-design",
+      hasSubMenu: false,
+      roles: ["ADMIN", "SUPER_ADMIN"],
+    },
+    {
       icon: MapPin,
       label: "Local Map Snapshot",
       path: "/agency/local-map-snapshot",

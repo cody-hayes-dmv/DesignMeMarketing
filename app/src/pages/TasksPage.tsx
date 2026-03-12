@@ -228,7 +228,17 @@ const TasksPage = () => {
     const assigneeRoleLabel = (role: string | undefined) => {
         if (role === "SUPER_ADMIN") return "Super Admin";
         if (role === "ADMIN") return "Admin";
+        if (role === "AGENCY") return "Agency";
         return "Specialist";
+    };
+
+    const canBulkManageTask = (task: Task) => {
+        const actorRole = String(user?.role || "").toUpperCase();
+        const creatorRole = String(task.createdBy?.role || "").toUpperCase();
+        if (actorRole === "SUPER_ADMIN") return true;
+        if (actorRole === "ADMIN") return creatorRole === "ADMIN";
+        if (actorRole === "AGENCY") return creatorRole === "AGENCY";
+        return false;
     };
 
     useEffect(() => {
@@ -249,12 +259,15 @@ const TasksPage = () => {
     }, [canCreate, user?.role]);
 
     const toggleTaskSelection = (taskId: string) => {
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task || !canBulkManageTask(task)) return;
         setSelectedTaskIds((prev) =>
             prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
         );
     };
     const selectAllFiltered = () => {
-        const ids = paginatedDisplayedTasks.rows.map((t) => t.id);
+        const ids = paginatedDisplayedTasks.rows.filter(canBulkManageTask).map((t) => t.id);
+        if (ids.length === 0) return;
         setSelectedTaskIds((prev) => {
             const visibleSet = new Set(ids);
             const selectedVisibleCount = prev.filter((id) => visibleSet.has(id)).length;
@@ -273,14 +286,21 @@ const TasksPage = () => {
     };
 
     const handleBulkAssign = async () => {
-        if (selectedTaskIds.length === 0) return;
+        const selectedEligibleIds = selectedTaskIds.filter((id) => {
+            const t = tasks.find((task) => task.id === id);
+            return Boolean(t && canBulkManageTask(t));
+        });
+        if (selectedEligibleIds.length === 0) {
+            toast.error("No eligible tasks selected for bulk assign.");
+            return;
+        }
         setBulkAssigning(true);
         try {
             const assigneeId = assignSelectedSpecialistId || null;
-            for (const id of selectedTaskIds) {
+            for (const id of selectedEligibleIds) {
                 await dispatch(updateTask({ id, assigneeId }) as any);
             }
-            toast.success(`${selectedTaskIds.length} task(s) assigned successfully.`);
+            toast.success(`${selectedEligibleIds.length} task(s) assigned successfully.`);
             clearSelection();
             setAssignSelectedOpen(false);
             setAssignSelectedSpecialistId("");
@@ -320,12 +340,21 @@ const TasksPage = () => {
   };
 
   const confirmDeleteTask = async () => {
-    const taskIdsToDelete = deleteConfirm.taskIds.length > 0
+    const requestedTaskIds = deleteConfirm.taskIds.length > 0
       ? deleteConfirm.taskIds
       : deleteConfirm.taskId
         ? [deleteConfirm.taskId]
         : [];
-    if (taskIdsToDelete.length === 0) return;
+    if (requestedTaskIds.length === 0) return;
+    const taskIdsToDelete = requestedTaskIds.filter((id) => {
+      const t = tasks.find((task) => task.id === id);
+      return Boolean(t && canBulkManageTask(t));
+    });
+    if (taskIdsToDelete.length === 0) {
+      toast.error("No eligible tasks selected for bulk delete.");
+      setDeleteConfirm({ isOpen: false, taskId: null, taskIds: [] });
+      return;
+    }
     try {
       if (taskIdsToDelete.length > 1) setBulkDeleting(true);
       const results = await Promise.all(
@@ -493,6 +522,15 @@ const TasksPage = () => {
     useEffect(() => {
         setTasksPage((p) => Math.min(p, paginatedDisplayedTasks.totalPages));
     }, [paginatedDisplayedTasks.totalPages]);
+
+    useEffect(() => {
+        setSelectedTaskIds((prev) =>
+            prev.filter((id) => {
+                const t = tasks.find((task) => task.id === id);
+                return Boolean(t && canBulkManageTask(t));
+            })
+        );
+    }, [tasks, user?.role]);
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
 
@@ -1024,10 +1062,11 @@ const TasksPage = () => {
                                             <input
                                                 type="checkbox"
                                                 checked={
-                                                    paginatedDisplayedTasks.rows.length > 0 &&
-                                                    paginatedDisplayedTasks.rows.every((t) => selectedTaskIds.includes(t.id))
+                                                    paginatedDisplayedTasks.rows.filter(canBulkManageTask).length > 0 &&
+                                                    paginatedDisplayedTasks.rows.filter(canBulkManageTask).every((t) => selectedTaskIds.includes(t.id))
                                                 }
                                                 onChange={selectAllFiltered}
+                                                disabled={paginatedDisplayedTasks.rows.filter(canBulkManageTask).length === 0}
                                                 className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                                             />
                                         </th>
@@ -1045,12 +1084,16 @@ const TasksPage = () => {
                                     <tr key={task.id} className={`transition-colors ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-primary-50/50 ${isOverdue(task.dueDate) ? 'bg-red-50/50' : ''}`}>
                                         {canCreate && (
                                             <td className="px-4 py-4">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedTaskIds.includes(task.id)}
-                                                    onChange={() => toggleTaskSelection(task.id)}
-                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                                />
+                                                {canBulkManageTask(task) ? (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedTaskIds.includes(task.id)}
+                                                        onChange={() => toggleTaskSelection(task.id)}
+                                                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                                    />
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">-</span>
+                                                )}
                                             </td>
                                         )}
                                         <td className="px-6 py-4">
