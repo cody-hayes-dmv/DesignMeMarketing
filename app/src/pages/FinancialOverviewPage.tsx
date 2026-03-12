@@ -415,7 +415,7 @@ const FinancialOverviewPage: React.FC = () => {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(value: number) => formatCurrency(value)}
+                      formatter={(value: number | undefined) => formatCurrency(value ?? 0)}
                       content={({ active, payload }) => {
                         if (!active || !payload?.length) return null;
                         const p = payload[0].payload as MrrSegment & { value: number };
@@ -485,7 +485,7 @@ const FinancialOverviewPage: React.FC = () => {
                         width={50}
                       />
                       <Tooltip
-                        formatter={(value: number) => formatCurrency(value)}
+                        formatter={(value: number | undefined) => formatCurrency(value ?? 0)}
                         labelFormatter={(label, payload) =>
                           payload?.[0]?.payload?.date ? `${payload[0].payload.date}` : label
                         }
@@ -693,7 +693,7 @@ const FinancialOverviewPage: React.FC = () => {
                       <Tooltip
                         contentStyle={{ backgroundColor: "#1e2333", border: "1px solid #374151", borderRadius: "8px", color: "#e2e8f0" }}
                         labelStyle={{ color: "#94a3b8" }}
-                        formatter={(v: number, name: string) => [`$${v.toFixed(4)}`, name]}
+                        formatter={(v: number | undefined, name: string | undefined) => [`$${(v ?? 0).toFixed(4)}`, name ?? ""]}
                         labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
                       />
                       <Legend wrapperStyle={{ color: "#94a3b8", fontSize: "12px", paddingTop: "8px" }} />
