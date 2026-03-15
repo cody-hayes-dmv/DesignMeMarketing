@@ -207,6 +207,27 @@ router.get('/', authenticateToken, async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
+    const cancellationByAgencyId = new Map<string, { cancelAtPeriodEnd: boolean; cancellationEffectiveAt: string | null }>();
+    const stripe = getStripe();
+    if (stripe && isStripeConfigured()) {
+      await Promise.all(
+        agencies.map(async (agency) => {
+          const subscriptionId = String(agency.stripeSubscriptionId || "").trim();
+          if (!subscriptionId) return;
+          try {
+            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            const cancelAtPeriodEnd = subscription.cancel_at_period_end === true;
+            const cancellationEffectiveAt = cancelAtPeriodEnd
+              ? new Date(((subscription.cancel_at ?? subscription.current_period_end ?? Math.floor(Date.now() / 1000)) as number) * 1000).toISOString()
+              : null;
+            cancellationByAgencyId.set(agency.id, { cancelAtPeriodEnd, cancellationEffectiveAt });
+          } catch (err: any) {
+            console.warn(`[agencies] Failed to retrieve Stripe subscription for agency ${agency.id}:`, err?.message);
+          }
+        })
+      );
+    }
+
     // Collect all user IDs from all agencies
     const allUserIds = new Set<string>();
     agencies.forEach(agency => {
@@ -257,7 +278,10 @@ router.get('/', authenticateToken, async (req, res) => {
         name: agency.name,
         subdomain: agency.subdomain,
         subscriptionTier: agency.subscriptionTier ?? null,
+        billingType: agency.billingType ?? null,
         trialEndsAt: agency.trialEndsAt ?? null,
+        cancelAtPeriodEnd: cancellationByAgencyId.get(agency.id)?.cancelAtPeriodEnd ?? false,
+        cancellationEffectiveAt: cancellationByAgencyId.get(agency.id)?.cancellationEffectiveAt ?? null,
         brandDisplayName: agency.brandDisplayName ?? null,
         customDomain: agency.customDomain ?? null,
         domainStatus: toDomainStatus(agency.domainStatus),

@@ -12,6 +12,7 @@ import {
   Check,
   Briefcase,
   Building2,
+  X,
 } from "lucide-react";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import api from "@/lib/api";
@@ -162,6 +163,11 @@ const SubscriptionPage = () => {
   const [paymentMethodSaving, setPaymentMethodSaving] = useState(false);
   const [cancelActionLoading, setCancelActionLoading] = useState(false);
   const paymentRef = useRef<StripePaymentHandle>(null);
+  const canCloseBillingManageModal = !paymentMethodSaving && !cancelActionLoading;
+  const closeBillingManageModal = () => {
+    if (!canCloseBillingManageModal) return;
+    setBillingManageModalOpen(false);
+  };
 
   useEffect(() => {
     if (window.location.hash === "#invoices") {
@@ -368,6 +374,17 @@ const SubscriptionPage = () => {
       cancelled = true;
     };
   }, [billingManageModalOpen]);
+
+  useEffect(() => {
+    if (!billingManageModalOpen) return;
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeBillingManageModal();
+      }
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [billingManageModalOpen, canCloseBillingManageModal]);
 
   const handleSavePaymentMethod = async () => {
     if (!paymentRef.current || !setupSecret || !paymentElementReady) {
@@ -1019,12 +1036,31 @@ const SubscriptionPage = () => {
       )}
 
       {billingManageModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-semibold text-gray-900">Manage Billing</h3>
-            <p className="mt-1 text-sm text-gray-600">
-              Manage payment method and subscription status directly on this page.
-            </p>
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 sm:items-center sm:p-4"
+          onClick={closeBillingManageModal}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl sm:p-6 max-h-[92vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Manage Billing</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  Manage payment method and subscription status directly on this page.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeBillingManageModal}
+                disabled={!canCloseBillingManageModal}
+                aria-label="Close manage billing dialog"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
             <div className="mt-5 grid gap-6 md:grid-cols-2">
               <div>
@@ -1103,7 +1139,7 @@ const SubscriptionPage = () => {
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
-                onClick={() => setBillingManageModalOpen(false)}
+                onClick={closeBillingManageModal}
                 disabled={paymentMethodSaving || cancelActionLoading}
                 className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
               >

@@ -1286,6 +1286,11 @@ const AgenciesPage = () => {
                                                 )}
                                                 <span className="text-gray-900">{agency.name}</span>
                                             </div>
+                                            {agency.cancelAtPeriodEnd && agency.cancellationEffectiveAt && (
+                                                <div className="mt-1 inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+                                                    Cancellation Scheduled - {new Date(agency.cancellationEffectiveAt).toLocaleDateString()}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             {(() => {

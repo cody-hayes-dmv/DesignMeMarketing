@@ -6,7 +6,10 @@ export interface Agency {
   name: string;
   subdomain?: string;
   subscriptionTier?: string | null;
+  billingType?: string | null;
   trialEndsAt?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  cancellationEffectiveAt?: string | null;
   createdAt: string;
   memberCount: number;
   clientCount?: number;

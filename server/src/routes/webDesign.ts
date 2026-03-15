@@ -37,6 +37,7 @@ const uploadVersionSchema = z.object({
 const commentSchema = z.object({
   message: z.string().min(1).max(10000),
   parentId: z.string().optional().nullable(),
+  notifyUserIds: z.array(z.string().min(1)).optional(),
 });
 
 const feedbackSchema = z.object({
@@ -185,6 +186,22 @@ async function notifyUsersById(
       console.warn("[WebDesign] Email send failed", u.email, e?.message)
     );
   }
+}
+
+async function getProjectCollaboratorOptionIds(project: {
+  agencyId?: string | null;
+  designerId: string;
+  activatedById: string;
+}): Promise<string[]> {
+  const ids = new Set<string>([project.designerId, project.activatedById]);
+  if (project.agencyId) {
+    const memberships = await prisma.userAgency.findMany({
+      where: { agencyId: project.agencyId },
+      select: { userId: true },
+    });
+    memberships.forEach((m) => ids.add(m.userId));
+  }
+  return [...ids];
 }
 
 // List assignable designers for activation UI
@@ -401,6 +418,32 @@ router.get("/projects/:projectId", authenticateToken, async (req, res) => {
     return res.json(project);
   } catch (error) {
     console.error("Get web design project error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+router.get("/projects/:projectId/collaborator-options", authenticateToken, async (req, res) => {
+  try {
+    if (!["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const { projectId } = req.params;
+    const access = await canAccessProject(req.user, projectId);
+    if (!access.project) return res.status(404).json({ message: "Project not found" });
+    if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
+    const optionIds = await getProjectCollaboratorOptionIds(access.project);
+    if (optionIds.length === 0) return res.json([]);
+    const users = await prisma.user.findMany({
+      where: {
+        id: { in: optionIds },
+        role: { in: ["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER", "SPECIALIST"] },
+      },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+    return res.json(users);
+  } catch (error) {
+    console.error("List web design collaborator options error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -738,6 +781,9 @@ router.post("/pages/:pageId/comments", authenticateToken, async (req, res) => {
     }
 
     const authorRole = req.user.role === "USER" ? "client" : req.user.role === "DESIGNER" ? "designer" : "admin";
+    const notifyUserIds = [...new Set((parsed.notifyUserIds || []).map((v) => String(v || "").trim()).filter(Boolean))];
+    const allowedNotifyOptionIds = new Set(await getProjectCollaboratorOptionIds(page.project));
+    const safeNotifyUserIds = notifyUserIds.filter((id) => allowedNotifyOptionIds.has(id));
     const created = await prisma.webDesignComment.create({
       data: {
         pageId: page.id,
@@ -756,6 +802,7 @@ router.post("/pages/:pageId/comments", authenticateToken, async (req, res) => {
       const adminRecipientIds = new Set<string>([page.project.designerId, page.project.activatedById]);
       const agencyAdminIds = await getAgencyAdminUserIds(page.project.agencyId);
       agencyAdminIds.forEach((id) => adminRecipientIds.add(id));
+      safeNotifyUserIds.forEach((id) => adminRecipientIds.add(id));
       adminRecipientIds.delete(req.user.userId);
       const recipients = [...adminRecipientIds];
       if (recipients.length > 0) {
@@ -782,7 +829,10 @@ router.post("/pages/:pageId/comments", authenticateToken, async (req, res) => {
         where: { clientId: page.project.clientId, status: "ACTIVE" },
         select: { userId: true },
       });
-      const recipients = [...new Set(clientUsers.map((u) => u.userId))].filter((id) => id !== req.user.userId);
+      const recipients = [...new Set([
+        ...clientUsers.map((u) => u.userId),
+        ...safeNotifyUserIds,
+      ])].filter((id) => id !== req.user.userId);
       if (recipients.length > 0) {
         await notifyUsersById(
           recipients,

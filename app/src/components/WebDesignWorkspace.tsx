@@ -9,6 +9,7 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 
 type ProjectStatus = "active" | "complete";
 type PageStatus = "pending_upload" | "needs_review" | "revision_requested" | "approved";
+type CollaboratorUser = { id: string; name: string | null; email: string; role: string };
 
 type WebDesignProject = {
   id: string;
@@ -22,6 +23,8 @@ type WebDesignProject = {
   client?: { id: string; name: string };
   designer?: { id: string; name: string | null; email: string };
   activatedBy?: { id: string; name: string | null; email: string };
+  collaboratorUserIds?: string[];
+  collaboratorUsers?: CollaboratorUser[];
   pages?: Array<{ id: string; status: PageStatus }>;
 };
 
@@ -51,7 +54,7 @@ type WebDesignPage = {
   comments: WebDesignComment[];
 };
 
-type WebDesignProjectDetail = WebDesignProject & { pages: WebDesignPage[] };
+type WebDesignProjectDetail = Omit<WebDesignProject, "pages"> & { pages: WebDesignPage[] };
 const WEB_DESIGN_LIVE_REFRESH_MS = 3000;
 
 const statusLabel: Record<PageStatus, string> = {
@@ -101,12 +104,17 @@ export default function WebDesignWorkspace({
 }: Props) {
   const location = useLocation();
   const { user } = useSelector((state: RootState) => state.auth);
+  const isClientScopedView = Boolean(clientId);
   const [projects, setProjects] = useState<WebDesignProject[]>([]);
   const [projectDetail, setProjectDetail] = useState<WebDesignProjectDetail | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
   const [designers, setDesigners] = useState<Array<{ id: string; name: string | null; email: string }>>([]);
+  const [collaboratorOptions, setCollaboratorOptions] = useState<CollaboratorUser[]>([]);
+  const [selectedCollaboratorIds, setSelectedCollaboratorIds] = useState<string[]>([]);
+  const [collaboratorCandidateId, setCollaboratorCandidateId] = useState("");
+  const [savingCollaborators, setSavingCollaborators] = useState(false);
   const [loading, setLoading] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [activateClientId, setActivateClientId] = useState(clientId || "");
@@ -144,6 +152,23 @@ export default function WebDesignWorkspace({
     () => projectDetail?.pages.find((p) => p.id === selectedPageId) || null,
     [projectDetail, selectedPageId]
   );
+  const selectedCollaborators = useMemo(
+    () => {
+      const pool = [
+        ...(projectDetail?.collaboratorUsers || []),
+        ...collaboratorOptions,
+      ];
+      const poolById = new Map(pool.map((u) => [u.id, u] as const));
+      return selectedCollaboratorIds
+        .map((id) => poolById.get(id))
+        .filter(Boolean) as CollaboratorUser[];
+    },
+    [selectedCollaboratorIds, collaboratorOptions, projectDetail?.collaboratorUsers]
+  );
+
+  useEffect(() => {
+    setActivateClientId(clientId || "");
+  }, [clientId]);
 
   useEffect(() => {
     selectedPageIdRef.current = selectedPageId;
@@ -195,6 +220,17 @@ export default function WebDesignWorkspace({
 
     return list;
   }, [projects, projectSearch, projectSort, projectStatusFilter]);
+  const sortedClients = useMemo(
+    () => [...clients].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [clients]
+  );
+  const sortedDesigners = useMemo(
+    () =>
+      [...designers].sort((a, b) =>
+        (a.name || a.email || "").localeCompare((b.name || b.email || ""), undefined, { sensitivity: "base" })
+      ),
+    [designers]
+  );
 
   const shellClass = embedded ? "space-y-5 rounded-xl p-4" : "min-h-screen p-8 space-y-5";
   const shellStyle = {
@@ -204,10 +240,6 @@ export default function WebDesignWorkspace({
   const accentButtonStyle = {
     backgroundColor: brandColor,
     borderColor: brandColor,
-  };
-  const accentSoftStyle = {
-    backgroundColor: hexToRgba(brandColor, 0.1),
-    borderColor: hexToRgba(brandColor, 0.22),
   };
 
   const loadProjects = async () => {
@@ -274,6 +306,15 @@ export default function WebDesignWorkspace({
     }
   };
 
+  const loadCollaboratorOptions = async (projectId: string) => {
+    try {
+      const res = await api.get(`/web-design/projects/${projectId}/collaborator-options`, { _silent: true } as any);
+      setCollaboratorOptions(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setCollaboratorOptions([]);
+    }
+  };
+
   useEffect(() => {
     loadProjects();
   }, [clientId, requestedProjectId, projectStatusFilter]);
@@ -283,9 +324,19 @@ export default function WebDesignWorkspace({
       setProjectDetail(null);
       setSelectedPageId(null);
       setSelectedVersionId(null);
+      setCollaboratorOptions([]);
+      setSelectedCollaboratorIds([]);
       return;
     }
+    try {
+      const raw = window.localStorage.getItem(`webDesignCollaborators:${selectedProjectId}`);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setSelectedCollaboratorIds(Array.isArray(parsed) ? parsed.map((v) => String(v || "")).filter(Boolean) : []);
+    } catch {
+      setSelectedCollaboratorIds([]);
+    }
     loadProjectDetail(selectedProjectId);
+    if (isDesignerOrAdmin) loadCollaboratorOptions(selectedProjectId);
   }, [selectedProjectId, requestedPageId]);
 
   useEffect(() => {
@@ -320,6 +371,7 @@ export default function WebDesignWorkspace({
           rows
             .filter((c: any) => String(c?.status || "").toUpperCase() === "ACTIVE")
             .map((c: any) => ({ id: c.id, name: c.name }))
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
         );
       })
       .catch(() => setClients([]));
@@ -331,14 +383,15 @@ export default function WebDesignWorkspace({
   }, [isAdmin]);
 
   const activateProject = async () => {
-    if (!projectName.trim() || !activateClientId || !activateDesignerId) {
+    const effectiveClientId = clientId || activateClientId;
+    if (!projectName.trim() || !effectiveClientId || !activateDesignerId) {
       toast.error("Project name, client, and designer are required");
       return;
     }
     try {
       await api.post("/web-design/projects/activate", {
         projectName: projectName.trim(),
-        clientId: activateClientId,
+        clientId: effectiveClientId,
         designerId: activateDesignerId,
       });
       setProjectName("");
@@ -394,6 +447,7 @@ export default function WebDesignWorkspace({
       await api.post(`/web-design/pages/${selectedPage.id}/comments`, {
         message: message.trim(),
         ...(parentId ? { parentId } : {}),
+        ...(selectedCollaboratorIds.length ? { notifyUserIds: selectedCollaboratorIds } : {}),
       });
       if (parentId) {
         setReplyDrafts((prev) => ({ ...prev, [parentId]: "" }));
@@ -498,6 +552,21 @@ export default function WebDesignWorkspace({
     }
   };
 
+  const persistCollaborators = async (nextIds: string[]) => {
+    if (!selectedProjectId) return;
+    setSavingCollaborators(true);
+    try {
+      const ids = [...new Set(nextIds.map((v) => String(v || "").trim()).filter(Boolean))];
+      setSelectedCollaboratorIds(ids);
+      window.localStorage.setItem(`webDesignCollaborators:${selectedProjectId}`, JSON.stringify(ids));
+      toast.success("Collaborators updated");
+    } catch {
+      toast.error("Failed to update collaborators");
+    } finally {
+      setSavingCollaborators(false);
+    }
+  };
+
   const renderCommentTree = (parentId: string | null = null, depth = 0): JSX.Element[] => {
     const key = parentId || "root";
     const comments = commentsByParent[key] || [];
@@ -570,32 +639,34 @@ export default function WebDesignWorkspace({
           }}
         >
           <h2 className="text-xs font-semibold tracking-[0.08em] text-gray-600 uppercase">Activate Project</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className={`grid grid-cols-1 ${isClientScopedView ? "md:grid-cols-3" : "md:grid-cols-4"} gap-3 overflow-visible`}>
             <input
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               placeholder="Project name"
               className="border border-gray-300 rounded-lg px-3 py-2"
             />
-            <select
-              value={activateClientId}
-              onChange={(e) => setActivateClientId(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2"
-            >
-              <option value="">Select client</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            {!isClientScopedView && (
+              <select
+                value={activateClientId}
+                onChange={(e) => setActivateClientId(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2"
+              >
+                <option value="">Select client</option>
+                {sortedClients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <select
               value={activateDesignerId}
               onChange={(e) => setActivateDesignerId(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-2"
             >
               <option value="">Select designer</option>
-              {designers.map((d) => (
+              {sortedDesigners.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name || d.email}
                 </option>
@@ -662,7 +733,7 @@ export default function WebDesignWorkspace({
             <table className="w-full text-left text-[12px]">
               <thead className="text-gray-700 bg-gray-50 sticky top-0 z-10">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Client</th>
+                  {!isClientScopedView && <th className="px-3 py-2 font-medium">Client</th>}
                   <th className="px-3 py-2 font-medium">Project</th>
                   <th className="px-3 py-2 font-medium">Designer</th>
                   {projectStatusFilter === "active" && (
@@ -692,7 +763,9 @@ export default function WebDesignWorkspace({
                         backgroundColor: isSelected ? hexToRgba(brandColor, 0.12) : undefined,
                       }}
                     >
-                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{p.client?.name || "Client"}</td>
+                      {!isClientScopedView && (
+                        <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{p.client?.name || "Client"}</td>
+                      )}
                       <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{p.projectName}</td>
                       <td className="px-3 py-2 text-gray-700">{p.designer?.name || p.designer?.email || "-"}</td>
                       {projectStatusFilter === "active" && (
@@ -852,6 +925,69 @@ export default function WebDesignWorkspace({
                     <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-white to-transparent" />
                     <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent" />
                   </div>
+                  <div
+                    className="mt-3 rounded-lg border p-3"
+                    style={{
+                      borderColor: hexToRgba(brandColor, 0.22),
+                      background: `linear-gradient(120deg, ${hexToRgba(brandColor, 0.08)} 0%, #ffffff 60%)`,
+                    }}
+                  >
+                    <p className="text-xs font-semibold tracking-[0.08em] uppercase mb-2" style={{ color: brandColor }}>
+                      Collaborators (receive comment notifications)
+                    </p>
+                    {isDesignerOrAdmin && projectDetail.status === "active" && (
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <select
+                          value={collaboratorCandidateId}
+                          onChange={(e) => setCollaboratorCandidateId(e.target.value)}
+                          className="min-w-[220px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs"
+                          disabled={savingCollaborators}
+                        >
+                          <option value="">Add collaborator</option>
+                          {collaboratorOptions
+                            .filter((u) => !selectedCollaboratorIds.includes(u.id))
+                            .map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.name || u.email}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!collaboratorCandidateId || savingCollaborators}
+                          onClick={() => {
+                            const nextIds = [...new Set([...selectedCollaboratorIds, collaboratorCandidateId])];
+                            setCollaboratorCandidateId("");
+                            persistCollaborators(nextIds);
+                          }}
+                          className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-60"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {selectedCollaborators.length === 0 ? (
+                        <p className="text-xs text-gray-500">No collaborators selected.</p>
+                      ) : (
+                        selectedCollaborators.map((u) => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            disabled={!isDesignerOrAdmin || savingCollaborators || projectDetail.status !== "active"}
+                            onClick={() =>
+                              persistCollaborators(selectedCollaboratorIds.filter((id) => id !== u.id))
+                            }
+                            className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-80 disabled:hover:bg-white"
+                            title={isDesignerOrAdmin ? "Remove collaborator" : "Collaborator"}
+                          >
+                            <span>{u.name || u.email}</span>
+                            {isDesignerOrAdmin && projectDetail.status === "active" && <span className="text-slate-400">x</span>}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -869,8 +1005,19 @@ export default function WebDesignWorkspace({
                     placeholder="Optional Figma share link"
                     className="md:col-span-6 border border-gray-300 rounded-lg px-3 py-2"
                   />
-                  <button onClick={addPage} className="md:col-span-1 rounded-lg text-white px-3 py-2" style={accentButtonStyle}>
-                    <Plus className="h-4 w-4" />
+                  <button
+                    onClick={addPage}
+                    type="button"
+                    title="+ Add page"
+                    className="md:col-span-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-white text-sm font-medium shadow-sm transition-all hover:scale-[1.02] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-offset-1"
+                    style={{
+                      background: `linear-gradient(90deg, ${brandColor} 0%, #6366f1 65%, #22d3ee 100%)`,
+                      border: `1px solid ${hexToRgba(brandColor, 0.42)}`,
+                      boxShadow: `0 6px 14px ${hexToRgba(brandColor, 0.24)}`,
+                    }}
+                  >
+                    <Plus className="h-4 w-4" strokeWidth={2.4} />
+                    <span>Add page</span>
                   </button>
                 </div>
               )}
@@ -1092,8 +1239,12 @@ export default function WebDesignWorkspace({
                       <div className="space-y-2">
                         <p className="text-xs font-semibold tracking-[0.08em] uppercase" style={{ color: brandColor }}>Comments</p>
                         <div
-                          className="max-h-52 overflow-y-auto space-y-1.5 rounded-lg border bg-white/80 p-2 pr-1"
-                          style={{ borderColor: hexToRgba(brandColor, 0.16) }}
+                          className="max-h-52 overflow-y-auto space-y-1.5 rounded-lg border-l-4 p-2.5 pr-1.5 shadow-sm"
+                          style={{
+                            borderColor: hexToRgba(brandColor, 0.2),
+                            borderLeftColor: brandColor,
+                            background: `linear-gradient(145deg, ${hexToRgba(brandColor, 0.08)} 0%, #ffffff 45%)`,
+                          }}
                         >
                           {renderCommentTree()}
                           {selectedPage.comments.length === 0 && <p className="text-sm text-gray-500">No comments yet.</p>}

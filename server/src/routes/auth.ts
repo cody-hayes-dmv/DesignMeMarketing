@@ -57,6 +57,9 @@ const mapAgencyBranding = (agency: any) =>
     }
     : null;
 
+const getActiveAgencyMemberships = (memberships: Array<{ agency?: unknown | null }> | undefined | null) =>
+  (memberships ?? []).filter((membership) => Boolean(membership?.agency));
+
 const defaultBranding = {
   brandDisplayName: "Your Marketing Dashboard",
   logoUrl: null as string | null,
@@ -235,6 +238,13 @@ router.post("/login", async (req, res) => {
         .json({ message: "Please verify your email before logging in" });
     }
 
+    const activeAgencyMemberships = getActiveAgencyMemberships(user.memberships);
+    if (user.role === "AGENCY" && activeAgencyMemberships.length === 0) {
+      return res.status(403).json({
+        message: "Your agency account is no longer active. Please contact support.",
+      });
+    }
+
     // Track last login time (useful for client user lists)
     await prisma.user.update({
       where: { id: user.id },
@@ -265,7 +275,7 @@ router.post("/login", async (req, res) => {
       getJwtSecret(),
       { expiresIn: "7d" }
     );
-    const primaryAgency = user.memberships?.[0]?.agency ?? null;
+    const primaryAgency = activeAgencyMemberships[0]?.agency ?? null;
     res.json({
       token,
       user: {
@@ -317,6 +327,13 @@ router.get("/me", authenticateToken, async (req, res) => {
       return res.status(401).json({ message: "User not found" });
     }
 
+    const activeAgencyMemberships = getActiveAgencyMemberships(user.memberships);
+    if (user.role === "AGENCY" && activeAgencyMemberships.length === 0) {
+      return res.status(403).json({
+        message: "Your agency account is no longer active. Please contact support.",
+      });
+    }
+
     const prefs = user.notificationPreferences as Record<string, boolean> | null;
     const notificationPreferences = prefs && typeof prefs === "object"
       ? {
@@ -356,7 +373,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       }
     }
 
-    const primaryAgency = user.memberships?.[0]?.agency ?? null;
+    const primaryAgency = activeAgencyMemberships[0]?.agency ?? null;
     res.json({
       id: user.id,
       email: user.email,

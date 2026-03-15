@@ -478,8 +478,14 @@ router.get("/super-admin/notifications", authenticateToken, async (req, res) => 
     }
 
     for (const n of persistedNotifications) {
-      let link = n.link ?? "/agency/agencies";
+      const type = String(n.type || "");
+      const defaultLinkByType =
+        ["new_signup", "new_agency_signup", "agency_signup", "plan_upgrade", "plan_downgrade", "subscription_canceled", "subscription_activated", "free_trial_started"].includes(type)
+          ? "/agency/agencies"
+          : "/superadmin/dashboard";
+      let link = String(n.link || "").trim() || defaultLinkByType;
       if (link === "/superadmin/agencies") link = "/agency/agencies";
+      if (!link.startsWith("/")) link = defaultLinkByType;
       items.push({
         id: n.id,
         type: n.type,

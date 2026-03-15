@@ -207,11 +207,23 @@ const NotificationBell: React.FC = () => {
       navigate(item.link || defaultDashboardPath);
       return;
     }
-    if (["free_trial_started", "new_signup", "new_agency_signup", "agency_signup"].includes(item.type)) {
+    if (
+      [
+        "free_trial_started",
+        "new_signup",
+        "new_agency_signup",
+        "agency_signup",
+        "plan_upgrade",
+        "plan_downgrade",
+        "subscription_canceled",
+        "subscription_activated",
+      ].includes(item.type)
+    ) {
       navigate("/agency/agencies");
       return;
     }
-    navigate(item.link);
+    const safeLink = String(item.link || "").trim();
+    navigate(safeLink.startsWith("/") ? safeLink : defaultDashboardPath);
   };
 
   const unreadCount = data?.unreadCount ?? 0;

@@ -51,6 +51,7 @@ type LocalMapSnapshotRunnerProps = {
 
 const DEFAULT_MAP_ZOOM = 11;
 const MAP_CANVAS_SIZE_PX = 560;
+const EXPORT_MAP_SIZE_PX = 640;
 
 function colorForRank(rank: number | null): string {
   if (rank != null && rank >= 1 && rank <= 3) return "bg-emerald-700 text-white shadow-emerald-800/45";
@@ -156,7 +157,6 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
 }) => {
   const [keyword, setKeyword] = useState("");
   const [business, setBusiness] = useState<GoogleBusinessSelection | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [runProgressPct, setRunProgressPct] = useState(0);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -230,6 +230,13 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
   const embeddedMapUrl = useMemo(() => {
     if (!mapCenter) return null;
     return `https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&z=${mapZoom}&output=embed`;
+  }, [mapCenter, mapZoom]);
+
+  const exportStaticMapUrl = useMemo(() => {
+    if (!mapCenter) return null;
+    const center = `${mapCenter.lat.toFixed(6)},${mapCenter.lng.toFixed(6)}`;
+    const marker = `${mapCenter.lat.toFixed(6)},${mapCenter.lng.toFixed(6)},red-pushpin`;
+    return `https://staticmap.openstreetmap.de/staticmap.php?center=${encodeURIComponent(center)}&zoom=${encodeURIComponent(String(mapZoom))}&size=${EXPORT_MAP_SIZE_PX}x${EXPORT_MAP_SIZE_PX}&markers=${encodeURIComponent(marker)}`;
   }, [mapCenter, mapZoom]);
 
   const mapProjectedPoints = useMemo(() => {
@@ -479,7 +486,6 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
         setSnapshotModalOpen(true);
         toast.success("Snapshot complete");
       }
-      setFormOpen(false);
       await loadSummary();
     } catch (error: any) {
       const message = error?.response?.data?.message || "Failed to run snapshot";
@@ -511,6 +517,26 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       setExportingPdf(true);
       const pdfRoot = snapshotPdfContentRef.current;
       pdfRoot.classList.add("pdf-exporting");
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+      const imageNodes = Array.from(
+        snapshotPdfContentRef.current.querySelectorAll("img[data-pdf-map='true']")
+      ) as HTMLImageElement[];
+      if (imageNodes.length > 0) {
+        await Promise.all(
+          imageNodes.map(
+            (img) =>
+              new Promise<void>((resolve) => {
+                if (img.complete && img.naturalWidth > 0) return resolve();
+                const done = () => resolve();
+                img.addEventListener("load", done, { once: true });
+                img.addEventListener("error", done, { once: true });
+                window.setTimeout(done, 2500);
+              })
+          )
+        );
+      }
       const sections = Array.from(
         snapshotPdfContentRef.current.querySelectorAll(".local-map-snapshot-pdf-section")
       ) as HTMLElement[];
@@ -783,14 +809,6 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
 
       <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setFormOpen((v) => !v)}
-            className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700 hover:bg-primary-100"
-          >
-            <Play className="h-3.5 w-3.5" />
-            {formOpen ? "Hide Snapshot Form" : "Run New Snapshot"}
-          </button>
           {gridData.length > 0 ? (
             <button
               type="button"
@@ -803,52 +821,46 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
           ) : null}
         </div>
 
-        {formOpen ? (
-          <>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Keyword</label>
-              <input
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                placeholder="e.g. emergency plumber"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <GoogleBusinessSearch
-              value={business}
-              onSelect={setBusiness}
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Keyword</label>
+            <input
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="e.g. emergency plumber"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={running}
-                onClick={() => void runSnapshot()}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60"
-              >
-                {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {running ? "Running..." : "Run"}
-              </button>
-            </div>
-            {running ? (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs text-indigo-700">
-                  <span className="font-medium">Running snapshot...</span>
-                  <span className="font-semibold">{runProgressPct}%</span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-indigo-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-primary-600 to-indigo-500 transition-all duration-500"
-                    style={{ width: `${Math.max(0, Math.min(100, runProgressPct))}%` }}
-                  />
-                </div>
+          </div>
+          <GoogleBusinessSearch
+            value={business}
+            onSelect={setBusiness}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={running}
+              onClick={() => void runSnapshot()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-primary-600 to-indigo-600 text-white text-sm font-semibold hover:from-primary-700 hover:to-indigo-700 disabled:opacity-60"
+            >
+              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {running ? "Running..." : "Run"}
+            </button>
+          </div>
+          {running ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-indigo-700">
+                <span className="font-medium">Running snapshot...</span>
+                <span className="font-semibold">{runProgressPct}%</span>
               </div>
-            ) : null}
-          </>
-        ) : (
-          <p className="text-sm text-gray-600">
-            Click <span className="font-semibold">Run New Snapshot</span> to open the keyword + business form.
-          </p>
-        )}
+              <div className="h-2 w-full rounded-full bg-indigo-100 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-primary-600 to-indigo-500 transition-all duration-500"
+                  style={{ width: `${Math.max(0, Math.min(100, runProgressPct))}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
+        </>
         <p className="text-xs text-gray-500">
           One-time prospecting tool: runs are not saved as snapshot history. Download the PDF if you want to keep the report.
         </p>
@@ -951,7 +963,16 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                     }}
                   >
                     <div className={`relative z-10 ${exportingPdf ? "min-w-[640px] w-[640px] h-[640px]" : "min-w-[560px] w-[560px] h-[560px]"} mx-auto rounded-xl overflow-hidden border border-gray-300`}>
-                      {embeddedMapUrl ? (
+                      {exportingPdf && exportStaticMapUrl ? (
+                        <img
+                          src={exportStaticMapUrl}
+                          alt="Map background for snapshot export"
+                          data-pdf-map="true"
+                          className="absolute inset-0 h-full w-full object-cover"
+                          loading="eager"
+                          crossOrigin="anonymous"
+                        />
+                      ) : embeddedMapUrl ? (
                         <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
                           <iframe
                             title="Google map snapshot background"
@@ -981,11 +1002,11 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                             type="button"
                             key={point.id}
                             onClick={() => setSelectedPointIndex(point.pointIndex)}
-                            className={`absolute ${exportingPdf ? "h-12 w-12 text-[13px] font-bold shadow-md" : "h-10 w-10 text-[11px] font-semibold"} rounded-full flex items-center justify-center shadow transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-200 ring-offset-2 ring-offset-fuchsia-500" : ""} ${exportingPdf ? "ring-1 ring-white/90" : ""}`}
+                            className={`absolute ${exportingPdf ? "h-12 w-12 text-[13px] font-bold shadow-md" : "h-10 w-10 text-[11px] font-semibold"} rounded-full flex items-center justify-center p-0 leading-none tabular-nums appearance-none shadow transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-200 ring-offset-2 ring-offset-fuchsia-500" : ""} ${exportingPdf ? "ring-1 ring-white/90" : ""}`}
                             style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
                             title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
                           >
-                            {rankLabel(point.rank)}
+                            <span className="relative top-[0.5px]">{rankLabel(point.rank)}</span>
                           </button>
                         );
                       })}
@@ -1041,7 +1062,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                             className={`flex items-start gap-3 px-4 ${exportingPdf ? "py-4" : "py-2.5"} ${entry.isTarget ? "bg-blue-50/70" : "bg-white"}`}
                           >
                             <div
-                              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${
+                              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 text-[11px] font-bold leading-none tabular-nums text-white ${
                                 entry.rank <= 3
                                   ? "bg-emerald-600"
                                   : entry.rank <= 7
@@ -1053,7 +1074,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                                         : "bg-rose-600"
                               }`}
                             >
-                              {entry.rank}
+                              <span className="relative top-[0.5px]">{entry.rank}</span>
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-start gap-3">
