@@ -106,6 +106,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     const canEditStatus =
         !isClientUser && (!formReadOnly || isSpecialistView || isAdminAssigneeStatusEditor);
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
+    const [activityCollaboratorUsers, setActivityCollaboratorUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
     const [assignableLoading, setAssignableLoading] = useState(false);
     const [assignableSearch, setAssignableSearch] = useState("");
     const [assignToOpen, setAssignToOpen] = useState(false);
@@ -205,6 +206,25 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             });
         return () => { cancelled = true; };
     }, [open, assignableSearch]);
+
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        const scopedClientId = String(form.clientId || task?.client?.id || "").trim();
+        api
+            .get("/tasks/activity-collaborators", {
+                params: scopedClientId ? { clientId: scopedClientId } : {},
+            })
+            .then((res) => {
+                if (!cancelled) setActivityCollaboratorUsers(Array.isArray(res.data) ? res.data : []);
+            })
+            .catch(() => {
+                if (!cancelled) setActivityCollaboratorUsers([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, form.clientId, task?.client?.id]);
 
     // Close Assign to dropdown on outside click
     useEffect(() => {
@@ -386,7 +406,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             if (!byId.has(member.id)) byId.set(member.id, member);
         };
 
-        assignableUsers.forEach((u) => add({ id: u.id, name: u.name ?? null, email: u.email, role: u.role ?? null }));
+        activityCollaboratorUsers.forEach((u) => add({ id: u.id, name: u.name ?? null, email: u.email, role: u.role ?? null }));
         if (task?.createdBy?.id && task.createdBy.email) {
             add({
                 id: task.createdBy.id,
@@ -396,7 +416,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             });
         }
         if (task?.assignee?.id && task.assignee.email) {
-            const fallbackRole = assignableUsers.find((u) => u.id === task.assignee?.id)?.role ?? null;
+            const fallbackRole = activityCollaboratorUsers.find((u) => u.id === task.assignee?.id)?.role ?? null;
             add({ id: task.assignee.id, name: task.assignee.name ?? null, email: task.assignee.email, role: fallbackRole });
         }
         if (user?.id && user?.email) {
@@ -412,7 +432,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
             const bLabel = (b.name || b.email).toLowerCase();
             return aLabel.localeCompare(bLabel);
         });
-    }, [assignableUsers, comments, task?.assignee, task?.createdBy, user]);
+    }, [activityCollaboratorUsers, comments, task?.assignee, task?.createdBy, user]);
 
     const entryCollaborators = useMemo(() => {
         const byId = new Map<string, CollaboratorMember>();

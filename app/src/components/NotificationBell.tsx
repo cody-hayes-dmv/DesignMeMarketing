@@ -22,6 +22,8 @@ interface NotificationsResponse {
   items: NotificationItem[];
 }
 
+const COMMUNICATION_NOTIFICATION_TYPES = new Set(["task_activity", "task_completed", "web_design_activity"]);
+
 const NotificationBell: React.FC = () => {
   const DEFAULT_DROPDOWN_WIDTH = 384;
   const VIEWPORT_GUTTER = 8;
@@ -40,6 +42,11 @@ const NotificationBell: React.FC = () => {
   const isSpecialistUser = user?.role === "SPECIALIST";
   const firstClientId = (user as any)?.clientAccess?.clients?.[0]?.clientId;
   const clientDashboardPath = firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks";
+  const inboxPath = isClientUser
+    ? "/client/inbox"
+    : isSpecialistUser
+    ? "/specialist/inbox"
+    : "/agency/inbox";
   const defaultDashboardPath = isSuperOrAdmin
     ? "/superadmin/dashboard"
     : isClientUser
@@ -160,6 +167,12 @@ const NotificationBell: React.FC = () => {
       }
     }
     setOpen(false);
+
+    if (COMMUNICATION_NOTIFICATION_TYPES.has(String(item.type || ""))) {
+      navigate(inboxPath);
+      return;
+    }
+
     const webDesignTarget = parseWebDesignLink(item.link || "");
     if (webDesignTarget) {
       if (isClientUser) {

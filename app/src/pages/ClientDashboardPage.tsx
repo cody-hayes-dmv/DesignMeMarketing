@@ -2198,6 +2198,7 @@ const ClientDashboardPage: React.FC = () => {
     approvalNotifyUserIds: [],
   });
   const [assignableUsers, setAssignableUsers] = useState<{ id: string; name: string | null; email: string; role: string }[]>([]);
+  const [activityCollaboratorUsers, setActivityCollaboratorUsers] = useState<{ id: string; name: string | null; email: string; role: string }[]>([]);
   const [assignableLoading, setAssignableLoading] = useState(false);
   const [assignableSearch, setAssignableSearch] = useState("");
   const [assignToOpen, setAssignToOpen] = useState(false);
@@ -2232,6 +2233,24 @@ const ClientDashboardPage: React.FC = () => {
       });
     return () => { cancelled = true; };
   }, [workLogModalOpen, workLogRecurringRulesOpen, workLogAssigneesModalOpen, assignableSearch, user?.role]);
+
+  useEffect(() => {
+    if (!workLogModalOpen && !workLogRecurringRulesOpen && !workLogAssigneesModalOpen) return;
+    let cancelled = false;
+    api
+      .get("/tasks/activity-collaborators", {
+        params: clientId ? { clientId } : {},
+      })
+      .then((res) => {
+        if (!cancelled) setActivityCollaboratorUsers(Array.isArray(res.data) ? res.data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setActivityCollaboratorUsers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workLogModalOpen, workLogRecurringRulesOpen, workLogAssigneesModalOpen, clientId]);
 
   useEffect(() => {
     if (!assignToOpen) return;
@@ -4354,14 +4373,29 @@ const ClientDashboardPage: React.FC = () => {
       setHasWebDesignProjects(false);
       return;
     }
-    api
-      .get("/clients", { _silent: true } as any)
-      .then((res) => {
-        const rows = Array.isArray(res.data) ? res.data : [];
-        const currentClient = rows.find((c: any) => String(c?.id) === String(clientId));
-        setHasWebDesignProjects(String(currentClient?.status || "").toUpperCase() === "ACTIVE");
+    let isMounted = true;
+    Promise.all([
+      api.get("/clients", { _silent: true } as any),
+      api.get("/web-design/projects", { _silent: true } as any),
+    ])
+      .then(([clientsRes, projectsRes]) => {
+        if (!isMounted) return;
+        const clients = Array.isArray(clientsRes?.data) ? clientsRes.data : [];
+        const projects = Array.isArray(projectsRes?.data) ? projectsRes.data : [];
+        const currentClient = clients.find((c: any) => String(c?.id) === String(clientId));
+        const isClientActive = String(currentClient?.status || "").toUpperCase() === "ACTIVE";
+        const hasProjectForClient = projects.some((p: any) => String(p?.clientId || p?.client?.id || "") === String(clientId));
+        // Client portal should only show Web Design when there is an activated project.
+        // Admin-facing panels keep the ACTIVE-status fallback.
+        setHasWebDesignProjects(clientPortalMode ? hasProjectForClient : (isClientActive || hasProjectForClient));
       })
-      .catch(() => setHasWebDesignProjects(false));
+      .catch(() => {
+        if (!isMounted) return;
+        setHasWebDesignProjects(false);
+      });
+    return () => {
+      isMounted = false;
+    };
   }, [clientId, user?.role]);
 
   useEffect(() => {
@@ -4794,8 +4828,24 @@ const ClientDashboardPage: React.FC = () => {
 
   const workLogProjectAssignees = useMemo(() => {
     const byId = new Map<string, { id: string; name: string | null; email: string; role: string | null }>();
-    const roleByUserId = new Map(assignableUsers.map((u) => [u.id, u.role] as const));
+    const roleByUserId = new Map(
+      [...assignableUsers, ...activityCollaboratorUsers].map((u) => [u.id, u.role] as const)
+    );
     const isAgencyRole = (role: string | null | undefined) => String(role || "").toUpperCase().includes("AGENCY");
+
+    for (const u of activityCollaboratorUsers) {
+      const userId = String(u.id || "").trim();
+      const email = String(u.email || "").trim();
+      if (!userId || !email) continue;
+      if (!byId.has(userId)) {
+        byId.set(userId, {
+          id: userId,
+          name: u.name ?? null,
+          email,
+          role: u.role ?? null,
+        });
+      }
+    }
 
     for (const cu of clientUsers) {
       const userId = String(cu.userId || "").trim();
@@ -4830,8 +4880,8 @@ const ClientDashboardPage: React.FC = () => {
       const aLabel = (a.name || a.email).toLowerCase();
       const bLabel = (b.name || b.email).toLowerCase();
       return aLabel.localeCompare(bLabel);
-    }).filter((member) => !isAgencyRole(member.role));
-  }, [assignableUsers, clientUsers, workLogTasks]);
+    });
+  }, [activityCollaboratorUsers, assignableUsers, clientUsers, workLogTasks]);
 
   const workLogApprovalClientUsers = useMemo(() => {
     return clientUsers

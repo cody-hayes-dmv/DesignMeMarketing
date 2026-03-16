@@ -38,6 +38,7 @@ import FinancialOverviewPage from "./pages/FinancialOverviewPage";
 import AuthLandingPage from "./pages/AuthLandingPage";
 import WebDesignPage from "./pages/WebDesignPage";
 import WebDesignDeepLinkPage from "./pages/WebDesignDeepLinkPage";
+import InboxPage from "./pages/InboxPage";
 
 function App() {
   const dispatch = useDispatch();
@@ -164,6 +165,7 @@ function App() {
     { path: "/agency/clients/:clientId", component: ClientDashboardPage },
     { path: "/agency/settings", component: SettingsPage },
     { path: "/agency/tasks", component: TasksPage },
+    { path: "/agency/inbox", component: InboxPage },
     { path: "/agency/web-design", component: WebDesignPage },
   ];
 
@@ -173,6 +175,7 @@ function App() {
     { path: "/specialist/clients", component: SpecialistClientsPage },
     { path: "/specialist/clients/:clientId", component: ClientDashboardPage },
     { path: "/specialist/tasks", component: TasksPage },
+    { path: "/specialist/inbox", component: InboxPage },
     { path: "/specialist/settings", component: SettingsPage },
   ];
 
@@ -186,6 +189,7 @@ function App() {
     { path: "/client/dashboard/:clientId", component: ClientDashboardPage },
     { path: "/client/web-design/:clientId", component: WebDesignPage },
     { path: "/client/tasks", component: TasksPage },
+    { path: "/client/inbox", component: InboxPage },
     { path: "/client/settings", component: SettingsPage },
     // Back-compat: keep report portal paths if still used
     { path: "/client/report", component: ClientReportIndexPage },

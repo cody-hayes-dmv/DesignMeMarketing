@@ -7,7 +7,7 @@ import NotificationBell from "./NotificationBell";
 import AgencyOnboardingModal from "./AgencyOnboardingModal";
 import api from "@/lib/api";
 import { logout } from "@/store/slices/authSlice";
-import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare, Menu, ChevronLeft, LogOut, Settings } from "lucide-react";
+import { CreditCard, AlertTriangle, LayoutDashboard, CheckSquare, Menu, ChevronLeft, LogOut, Settings, MessageSquare } from "lucide-react";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -45,6 +45,7 @@ interface AgencyMe {
 }
 
 const WEB_DESIGN_TABS_ENABLED = (import.meta.env.VITE_ENABLE_WEB_DESIGN_TABS ?? "false") === "true";
+const COMMUNICATION_NOTIFICATION_TYPES = new Set(["task_activity", "task_completed", "web_design_activity"]);
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const dispatch = useDispatch();
@@ -53,6 +54,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agencyMe, setAgencyMe] = useState<AgencyMe | null>(null);
   const [hasClientWebDesignProjects, setHasClientWebDesignProjects] = useState(false);
+  const [clientInboxUnreadCount, setClientInboxUnreadCount] = useState(0);
   const { user } = useSelector((state: RootState) => state.auth);
   const brandName = user?.agencyBranding?.brandDisplayName || "SEO Dashboard";
   const brandColor = user?.agencyBranding?.primaryColor || "#4f46e5";
@@ -99,6 +101,35 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       .catch(() => setHasClientWebDesignProjects(false));
   }, [firstClientId, user?.role]);
 
+  useEffect(() => {
+    if (user?.role !== "USER") {
+      setClientInboxUnreadCount(0);
+      return;
+    }
+    let cancelled = false;
+    const loadClientInboxUnread = async () => {
+      try {
+        const res = await api.get<{ unreadCount: number; items: Array<{ type: string; read: boolean }> }>(
+          "/agencies/me/notifications",
+          { _silent: true } as any
+        );
+        const rows = Array.isArray(res.data?.items) ? res.data.items : [];
+        const unread = rows.filter(
+          (item) => !item.read && COMMUNICATION_NOTIFICATION_TYPES.has(String(item.type || ""))
+        ).length;
+        if (!cancelled) setClientInboxUnreadCount(unread);
+      } catch {
+        if (!cancelled) setClientInboxUnreadCount(0);
+      }
+    };
+    loadClientInboxUnread();
+    const intervalId = window.setInterval(loadClientInboxUnread, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [user?.role]);
+
   // Get page title based on current route
   const getPageTitle = () => {
     const path = location.pathname;
@@ -110,6 +141,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/agency/clients") return "Clients";
     if (path === "/agency/vendasta") return "Vendasta";
     if (path === "/agency/tasks") return "Tasks";
+    if (path === "/agency/inbox") return "Inbox";
     if (path === "/agency/web-design") return "Web Design";
     if (path === "/agency/research" || path === "/admin/research" || path === "/superadmin/research") return "Research";
     if (path === "/agency/rankings") return "Rankings";
@@ -137,6 +169,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path === "/specialist/dashboard") return "Dashboard";
     if (path === "/specialist/clients") return "My Clients";
     if (path === "/specialist/tasks") return "Tasks";
+    if (path === "/specialist/inbox") return "Inbox";
     if (path === "/specialist/settings") return "Settings";
 
     if (path === "/designer/web-design") return "Web Design";
@@ -145,6 +178,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (path.startsWith("/client/dashboard")) return "Dashboard";
     if (path.startsWith("/client/web-design")) return "Web Design";
     if (path === "/client/tasks") return "Tasks";
+    if (path === "/client/inbox") return "Inbox";
     if (path === "/client/settings") return "Settings";
     if (path === "/client/report" || path.startsWith("/client/report/")) return "Report";
 
@@ -158,12 +192,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       navigate("/login", { replace: true });
     };
     const clientNavItems = [
-      { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks", label: "Dashboard", icon: LayoutDashboard },
+      { path: firstClientId ? `/client/dashboard/${firstClientId}` : "/client/tasks", label: "Dashboard", icon: LayoutDashboard, badge: 0 },
       ...(WEB_DESIGN_TABS_ENABLED && hasClientWebDesignProjects
-        ? [{ path: firstClientId ? `/client/web-design/${firstClientId}` : "/client/tasks", label: "Web Design", icon: LayoutDashboard }]
+        ? [{ path: firstClientId ? `/client/web-design/${firstClientId}` : "/client/tasks", label: "Web Design", icon: LayoutDashboard, badge: 0 }]
         : []),
-      { path: "/client/tasks", label: "Tasks", icon: CheckSquare },
-      { path: "/client/settings", label: "Settings", icon: Settings },
+      { path: "/client/tasks", label: "Tasks", icon: CheckSquare, badge: 0 },
+      { path: "/client/inbox", label: "Inbox", icon: MessageSquare, badge: clientInboxUnreadCount },
+      { path: "/client/settings", label: "Settings", icon: Settings, badge: 0 },
     ];
 
     return (
@@ -231,7 +266,19 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                       title={sidebarCollapsed ? item.label : undefined}
                     >
                       <Icon className="h-5 w-5 transition-all duration-300" />
-                      {!sidebarCollapsed && <span className="font-medium transition-opacity duration-300">{item.label}</span>}
+                      {!sidebarCollapsed && (
+                        <span className="font-medium transition-opacity duration-300 flex items-center gap-2">
+                          {item.label}
+                          {item.badge > 0 && (
+                            <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                              {item.badge > 99 ? "99+" : item.badge}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      {sidebarCollapsed && item.badge > 0 && (
+                        <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500" />
+                      )}
                     </Link>
                   </li>
                 );

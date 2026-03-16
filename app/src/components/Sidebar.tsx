@@ -28,6 +28,7 @@ import {
   FolderPlus,
   MapPin,
   PenTool,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -37,6 +38,7 @@ interface SidebarProps {
 }
 
 const WEB_DESIGN_TABS_ENABLED = (import.meta.env.VITE_ENABLE_WEB_DESIGN_TABS ?? "false") === "true";
+const COMMUNICATION_NOTIFICATION_TYPES = new Set(["task_activity", "task_completed", "web_design_activity"]);
 
 const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const location = useLocation();
@@ -46,6 +48,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [agencyMe, setAgencyMe] = useState<{ isBusinessTier?: boolean; trialExpired?: boolean } | null>(null);
   const [hasIncludedClients, setHasIncludedClients] = useState(false);
+  const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
   const showPlatformLogo = user?.role === "SUPER_ADMIN" || user?.role === "ADMIN";
   const isAgencyUser = user?.role === "AGENCY";
   const agencyBranding = user?.agencyBranding;
@@ -89,6 +92,35 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     const handler = () => refetchHasIncluded();
     window.addEventListener("included-clients-changed", handler);
     return () => window.removeEventListener("included-clients-changed", handler);
+  }, [user?.role]);
+
+  useEffect(() => {
+    if (!user?.role || user.role === "USER") {
+      setInboxUnreadCount(0);
+      return;
+    }
+    let cancelled = false;
+    const notificationsUrl = user.role === "SUPER_ADMIN" || user.role === "ADMIN"
+      ? "/seo/super-admin/notifications"
+      : "/agencies/me/notifications";
+    const loadUnread = async () => {
+      try {
+        const res = await api.get<{ items: Array<{ type: string; read: boolean }> }>(notificationsUrl, { _silent: true } as any);
+        const rows = Array.isArray(res.data?.items) ? res.data.items : [];
+        const unread = rows.filter(
+          (item) => !item.read && COMMUNICATION_NOTIFICATION_TYPES.has(String(item.type || ""))
+        ).length;
+        if (!cancelled) setInboxUnreadCount(unread);
+      } catch {
+        if (!cancelled) setInboxUnreadCount(0);
+      }
+    };
+    loadUnread();
+    const intervalId = window.setInterval(loadUnread, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [user?.role]);
 
   const panelLabel =
@@ -180,6 +212,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       icon: FolderOpen,
       label: "Tasks",
       path: "/agency/tasks",
+      hasSubMenu: false,
+      roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
+    },
+    {
+      icon: MessageSquare,
+      label: "Inbox",
+      path: "/agency/inbox",
       hasSubMenu: false,
       roles: ["AGENCY", "ADMIN", "SUPER_ADMIN"],
     },
@@ -308,6 +347,13 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
       icon: FolderOpen,
       label: "Tasks",
       path: "/specialist/tasks",
+      hasSubMenu: false,
+      roles: ["SPECIALIST"],
+    },
+    {
+      icon: MessageSquare,
+      label: "Inbox",
+      path: "/specialist/inbox",
       hasSubMenu: false,
       roles: ["SPECIALIST"],
     },
@@ -447,9 +493,17 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
                       } transition-all duration-300`}
                   />
                   {!collapsed && (
-                    <span className="font-medium transition-opacity duration-300">
+                    <span className="font-medium transition-opacity duration-300 flex items-center gap-2">
                       {item.label}
+                      {item.label === "Inbox" && inboxUnreadCount > 0 && (
+                        <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                          {inboxUnreadCount > 99 ? "99+" : inboxUnreadCount}
+                        </span>
+                      )}
                     </span>
+                  )}
+                  {collapsed && item.label === "Inbox" && inboxUnreadCount > 0 && (
+                    <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500" />
                   )}
                   {collapsed && (
                     <div className="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">

@@ -122,9 +122,15 @@ export default function WebDesignWorkspace({
   const [newPageName, setNewPageName] = useState("");
   const [newPageFigmaLink, setNewPageFigmaLink] = useState("");
   const [newComment, setNewComment] = useState("");
+  const [commentMentionRange, setCommentMentionRange] = useState<{ start: number; end: number } | null>(null);
+  const [commentMentionQuery, setCommentMentionQuery] = useState("");
+  const [commentMentionActiveIndex, setCommentMentionActiveIndex] = useState(0);
+  const [commentMentionedUserIds, setCommentMentionedUserIds] = useState<string[]>([]);
   const [feedbackText, setFeedbackText] = useState("");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [openReplyForId, setOpenReplyForId] = useState<string | null>(null);
+  const [commentCollaboratorEditorOpen, setCommentCollaboratorEditorOpen] = useState(false);
+  const [commentCollaboratorSearch, setCommentCollaboratorSearch] = useState("");
   const [figmaDraft, setFigmaDraft] = useState("");
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [projectStatusFilter, setProjectStatusFilter] = useState<ProjectStatus>("active");
@@ -137,6 +143,7 @@ export default function WebDesignWorkspace({
   const [deleteProjectModalOpen, setDeleteProjectModalOpen] = useState(false);
   const appliedRequestedPageRef = useRef<string | null>(null);
   const selectedPageIdRef = useRef<string | null>(null);
+  const commentInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const isAdmin = ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(user?.role || "");
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
@@ -165,6 +172,66 @@ export default function WebDesignWorkspace({
     },
     [selectedCollaboratorIds, collaboratorOptions, projectDetail?.collaboratorUsers]
   );
+  const commentCollaboratorPool = useMemo(() => {
+    const byId = new Map<string, CollaboratorUser>();
+    const add = (member: CollaboratorUser | null | undefined) => {
+      if (!member?.id || !member.email) return;
+      if (!byId.has(member.id)) byId.set(member.id, member);
+    };
+
+    collaboratorOptions.forEach(add);
+    (projectDetail?.collaboratorUsers || []).forEach(add);
+
+    if (projectDetail?.designer?.id && projectDetail?.designer?.email) {
+      add({
+        id: projectDetail.designer.id,
+        name: projectDetail.designer.name ?? null,
+        email: projectDetail.designer.email,
+        role: "DESIGNER",
+      });
+    }
+    if (projectDetail?.activatedBy?.id && projectDetail?.activatedBy?.email) {
+      add({
+        id: projectDetail.activatedBy.id,
+        name: projectDetail.activatedBy.name ?? null,
+        email: projectDetail.activatedBy.email,
+        role: "ADMIN",
+      });
+    }
+
+    (selectedPage?.comments || []).forEach((c) => {
+      if (!c.author?.id || !c.author?.email) return;
+      add({
+        id: c.author.id,
+        name: c.author.name ?? null,
+        email: c.author.email,
+        role: c.author.role ?? "USER",
+      });
+    });
+
+    return Array.from(byId.values()).sort((a, b) =>
+      (a.name || a.email).localeCompare((b.name || b.email), undefined, { sensitivity: "base" })
+    );
+  }, [collaboratorOptions, projectDetail?.activatedBy, projectDetail?.collaboratorUsers, projectDetail?.designer, selectedPage?.comments]);
+  const commentCollaboratorSearchResults = useMemo(() => {
+    const q = commentCollaboratorSearch.trim().toLowerCase();
+    return commentCollaboratorPool.filter((m) => {
+      if (m.id === user?.id) return false;
+      if (!q) return true;
+      return (m.name || "").toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
+    });
+  }, [commentCollaboratorPool, commentCollaboratorSearch, user?.id]);
+  const commentMentionSuggestions = useMemo(() => {
+    if (!commentMentionRange) return [];
+    const q = commentMentionQuery.trim().toLowerCase();
+    return commentCollaboratorPool
+      .filter((member) => {
+        if (member.id === user?.id) return false;
+        if (!q) return true;
+        return (member.name || "").toLowerCase().includes(q) || member.email.toLowerCase().includes(q);
+      })
+      .slice(0, 8);
+  }, [commentCollaboratorPool, commentMentionQuery, commentMentionRange, user?.id]);
 
   useEffect(() => {
     setActivateClientId(clientId || "");
@@ -441,25 +508,147 @@ export default function WebDesignWorkspace({
     }
   };
 
+  const buildCommentMentionToken = (member: { name: string | null; email: string }) => {
+    const rawHandle = (member.name || member.email || "").trim();
+    return (rawHandle
+      .replace(/\s+/g, "_")
+      .replace(/[^A-Za-z0-9._-]/g, "") || "user").toLowerCase();
+  };
+  const updateCommentMentionState = (value: string, caretPosition: number) => {
+    const safeCaret = Math.max(0, Math.min(caretPosition, value.length));
+    const beforeCaret = value.slice(0, safeCaret);
+    const atIndex = beforeCaret.lastIndexOf("@");
+    if (atIndex < 0) {
+      setCommentMentionRange(null);
+      setCommentMentionQuery("");
+      return;
+    }
+    const prevChar = atIndex > 0 ? beforeCaret.charAt(atIndex - 1) : " ";
+    if (!/\s|[\(\[\{,]/.test(prevChar)) {
+      setCommentMentionRange(null);
+      setCommentMentionQuery("");
+      return;
+    }
+    const query = beforeCaret.slice(atIndex + 1);
+    if (!/^[A-Za-z0-9._-]*$/.test(query)) {
+      setCommentMentionRange(null);
+      setCommentMentionQuery("");
+      return;
+    }
+    setCommentMentionRange({ start: atIndex, end: safeCaret });
+    setCommentMentionQuery(query.toLowerCase());
+  };
+
+  const handleCommentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const next = e.target.value;
+    setNewComment(next);
+    updateCommentMentionState(next, e.target.selectionStart ?? next.length);
+  };
+
+  const handleSelectCommentMention = (member: CollaboratorUser) => {
+    if (!commentMentionRange) return;
+    const token = `@${buildCommentMentionToken(member)} `;
+    const before = newComment.slice(0, commentMentionRange.start);
+    const after = newComment.slice(commentMentionRange.end);
+    const nextValue = `${before}${token}${after}`;
+    const nextCaret = (before + token).length;
+    setNewComment(nextValue);
+    setCommentMentionRange(null);
+    setCommentMentionQuery("");
+    setCommentMentionActiveIndex(0);
+    setCommentMentionedUserIds((prev) => (prev.includes(member.id) ? prev : [...prev, member.id]));
+    requestAnimationFrame(() => {
+      if (!commentInputRef.current) return;
+      commentInputRef.current.focus();
+      commentInputRef.current.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
+  const handleCommentMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!commentMentionRange || commentMentionSuggestions.length === 0) {
+      if (e.key === "Escape") {
+        setCommentMentionRange(null);
+        setCommentMentionQuery("");
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCommentMentionActiveIndex((prev) => (prev + 1) % commentMentionSuggestions.length);
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCommentMentionActiveIndex((prev) => (prev - 1 + commentMentionSuggestions.length) % commentMentionSuggestions.length);
+      return;
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      const candidate = commentMentionSuggestions[commentMentionActiveIndex];
+      if (candidate) handleSelectCommentMention(candidate);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setCommentMentionRange(null);
+      setCommentMentionQuery("");
+    }
+  };
+
+  const extractMentionUserIdsFromMessage = (message: string): string[] => {
+    const mentionMatches = message.match(/@([A-Za-z0-9._-]+)/g) || [];
+    if (mentionMatches.length === 0) return [];
+    const tokenToUserId = new Map(
+      commentCollaboratorPool.map((member) => [buildCommentMentionToken(member), member.id] as const)
+    );
+    return Array.from(
+      new Set(
+        mentionMatches
+          .map((raw) => raw.slice(1).toLowerCase())
+          .map((token) => tokenToUserId.get(token))
+          .filter(Boolean) as string[]
+      )
+    ).filter((uid) => uid !== user?.id);
+  };
+
   const postComment = async (message: string, parentId?: string | null) => {
     if (!selectedPage || !message.trim()) return;
+    const trimmedMessage = message.trim();
+    const bodyMentionIds = extractMentionUserIdsFromMessage(trimmedMessage);
+    const mentionUserIds = Array.from(new Set([...(commentMentionedUserIds || []), ...bodyMentionIds]));
+    const notifyUserIds = Array.from(new Set([...selectedCollaboratorIds, ...mentionUserIds]));
     try {
       await api.post(`/web-design/pages/${selectedPage.id}/comments`, {
-        message: message.trim(),
+        message: trimmedMessage,
         ...(parentId ? { parentId } : {}),
-        ...(selectedCollaboratorIds.length ? { notifyUserIds: selectedCollaboratorIds } : {}),
+        ...(notifyUserIds.length ? { notifyUserIds } : {}),
       });
       if (parentId) {
         setReplyDrafts((prev) => ({ ...prev, [parentId]: "" }));
         setOpenReplyForId(null);
       } else {
         setNewComment("");
+        setCommentMentionQuery("");
+        setCommentMentionRange(null);
+        setCommentMentionedUserIds([]);
+        setCommentMentionActiveIndex(0);
+      }
+      if (notifyUserIds.length > selectedCollaboratorIds.length) {
+        await persistCollaborators(notifyUserIds, { silent: true });
       }
       if (selectedProjectId) await loadProjectDetail(selectedProjectId);
     } catch (e: any) {
       toast.error(e?.response?.data?.message || "Failed to post comment");
     }
   };
+
+  useEffect(() => {
+    if (!commentMentionRange || commentMentionSuggestions.length === 0) {
+      setCommentMentionActiveIndex(0);
+      return;
+    }
+    setCommentMentionActiveIndex((prev) => Math.min(prev, commentMentionSuggestions.length - 1));
+  }, [commentMentionRange, commentMentionSuggestions.length]);
 
   const submitFeedback = async () => {
     if (!selectedPage || !feedbackText.trim()) return;
@@ -552,14 +741,14 @@ export default function WebDesignWorkspace({
     }
   };
 
-  const persistCollaborators = async (nextIds: string[]) => {
+  const persistCollaborators = async (nextIds: string[], options?: { silent?: boolean }) => {
     if (!selectedProjectId) return;
     setSavingCollaborators(true);
     try {
       const ids = [...new Set(nextIds.map((v) => String(v || "").trim()).filter(Boolean))];
       setSelectedCollaboratorIds(ids);
       window.localStorage.setItem(`webDesignCollaborators:${selectedProjectId}`, JSON.stringify(ids));
-      toast.success("Collaborators updated");
+      if (!options?.silent) toast.success("Collaborators updated");
     } catch {
       toast.error("Failed to update collaborators");
     } finally {
@@ -925,69 +1114,6 @@ export default function WebDesignWorkspace({
                     <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-white to-transparent" />
                     <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent" />
                   </div>
-                  <div
-                    className="mt-3 rounded-lg border p-3"
-                    style={{
-                      borderColor: hexToRgba(brandColor, 0.22),
-                      background: `linear-gradient(120deg, ${hexToRgba(brandColor, 0.08)} 0%, #ffffff 60%)`,
-                    }}
-                  >
-                    <p className="text-xs font-semibold tracking-[0.08em] uppercase mb-2" style={{ color: brandColor }}>
-                      Collaborators (receive comment notifications)
-                    </p>
-                    {isDesignerOrAdmin && projectDetail.status === "active" && (
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <select
-                          value={collaboratorCandidateId}
-                          onChange={(e) => setCollaboratorCandidateId(e.target.value)}
-                          className="min-w-[220px] border border-gray-300 rounded-md px-2.5 py-1.5 text-xs"
-                          disabled={savingCollaborators}
-                        >
-                          <option value="">Add collaborator</option>
-                          {collaboratorOptions
-                            .filter((u) => !selectedCollaboratorIds.includes(u.id))
-                            .map((u) => (
-                              <option key={u.id} value={u.id}>
-                                {u.name || u.email}
-                              </option>
-                            ))}
-                        </select>
-                        <button
-                          type="button"
-                          disabled={!collaboratorCandidateId || savingCollaborators}
-                          onClick={() => {
-                            const nextIds = [...new Set([...selectedCollaboratorIds, collaboratorCandidateId])];
-                            setCollaboratorCandidateId("");
-                            persistCollaborators(nextIds);
-                          }}
-                          className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-60"
-                        >
-                          Add
-                        </button>
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      {selectedCollaborators.length === 0 ? (
-                        <p className="text-xs text-gray-500">No collaborators selected.</p>
-                      ) : (
-                        selectedCollaborators.map((u) => (
-                          <button
-                            key={u.id}
-                            type="button"
-                            disabled={!isDesignerOrAdmin || savingCollaborators || projectDetail.status !== "active"}
-                            onClick={() =>
-                              persistCollaborators(selectedCollaboratorIds.filter((id) => id !== u.id))
-                            }
-                            className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-80 disabled:hover:bg-white"
-                            title={isDesignerOrAdmin ? "Remove collaborator" : "Collaborator"}
-                          >
-                            <span>{u.name || u.email}</span>
-                            {isDesignerOrAdmin && projectDetail.status === "active" && <span className="text-slate-400">x</span>}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -1287,13 +1413,98 @@ export default function WebDesignWorkspace({
                               </div>
                             </>
                           ) : (
-                            <div className="flex gap-2">
-                              <input
-                                value={newComment}
-                                onChange={(e) => setNewComment(e.target.value)}
-                                placeholder="Leave a comment"
-                                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                              />
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-[11px] text-gray-500">
+                                  Collaborators notified on every message: <span className="font-semibold text-gray-700">{selectedCollaborators.length}</span>
+                                  {" "}• @mention adds collaborator
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => setCommentCollaboratorEditorOpen((prev) => !prev)}
+                                  className="rounded-md border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50"
+                                >
+                                  {commentCollaboratorEditorOpen ? "Close collaborators" : "Edit collaborators"}
+                                </button>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {selectedCollaborators.slice(0, 8).map((u) => (
+                                  <span
+                                    key={u.id}
+                                    className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700"
+                                  >
+                                    {u.name || u.email}
+                                  </span>
+                                ))}
+                                {selectedCollaborators.length > 8 && (
+                                  <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-600">
+                                    +{selectedCollaborators.length - 8}
+                                  </span>
+                                )}
+                              </div>
+                              {commentCollaboratorEditorOpen && (
+                                <div className="space-y-2 rounded-md border border-slate-200 bg-white p-2">
+                                  <input
+                                    value={commentCollaboratorSearch}
+                                    onChange={(e) => setCommentCollaboratorSearch(e.target.value)}
+                                    placeholder="Add collaborators by name or email..."
+                                    className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-xs"
+                                  />
+                                  <div className="max-h-40 overflow-y-auto space-y-1">
+                                    {commentCollaboratorSearchResults.map((member) => {
+                                      const selected = selectedCollaboratorIds.includes(member.id);
+                                      return (
+                                        <button
+                                          key={member.id}
+                                          type="button"
+                                          onClick={() => {
+                                            const nextIds = selected
+                                              ? selectedCollaboratorIds.filter((id) => id !== member.id)
+                                              : [...new Set([...selectedCollaboratorIds, member.id])];
+                                            persistCollaborators(nextIds);
+                                          }}
+                                          className={`w-full rounded-md px-2 py-1.5 text-left text-xs ${
+                                            selected ? "bg-primary-50 text-primary-700" : "hover:bg-gray-50 text-gray-700"
+                                          }`}
+                                        >
+                                          <span className="font-medium">{member.name || member.email}</span>
+                                          <span className="ml-1 text-gray-500">({member.email})</span>
+                                        </button>
+                                      );
+                                    })}
+                                    {commentCollaboratorSearchResults.length === 0 && (
+                                      <p className="px-1 py-2 text-xs text-gray-500">No collaborators found.</p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="relative flex gap-2">
+                                <textarea
+                                  ref={commentInputRef}
+                                  value={newComment}
+                                  onChange={handleCommentChange}
+                                  onKeyDown={handleCommentMentionKeyDown}
+                                  placeholder="Write a comment... Use @ to mention a user."
+                                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[42px]"
+                                />
+                                {commentMentionRange && commentMentionSuggestions.length > 0 && (
+                                  <div className="absolute left-0 right-24 top-full z-20 mt-1 max-h-44 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                                    {commentMentionSuggestions.map((member, idx) => (
+                                      <button
+                                        key={member.id}
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => handleSelectCommentMention(member)}
+                                        className={`w-full px-3 py-2 text-left text-xs ${
+                                          idx === commentMentionActiveIndex ? "bg-primary-50" : "hover:bg-gray-50"
+                                        }`}
+                                      >
+                                        <p className="font-medium text-gray-800">{member.name || member.email}</p>
+                                        <p className="text-[11px] text-gray-500">{member.email}</p>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
                               <button
                                 onClick={() => postComment(newComment)}
                                 className="rounded-lg border px-3 py-2 text-sm text-white shadow-sm hover:opacity-95"
@@ -1304,6 +1515,7 @@ export default function WebDesignWorkspace({
                               >
                                 Post
                               </button>
+                              </div>
                             </div>
                           )}
                         </div>

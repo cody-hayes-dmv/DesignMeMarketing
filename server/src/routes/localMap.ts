@@ -23,6 +23,44 @@ const GRID_RUN_DAYS = new Set([1, 15]);
 const DEFAULT_GRID_SIZE = 7;
 const DEFAULT_GRID_SPACING_MILES = 0.5;
 const DEFAULT_MAP_ZOOM = 11;
+const SUPER_ADMIN_EXCLUDED_LABEL_PREFIX = "__SA_EXCLUDED__:";
+
+function normalizeLocationLabelForActivation(
+  rawLocationLabel: string | null | undefined,
+  isSuperAdminActivation: boolean
+): string | null {
+  const base = String(rawLocationLabel ?? "").trim();
+  const unmarked = base.startsWith(SUPER_ADMIN_EXCLUDED_LABEL_PREFIX)
+    ? base.slice(SUPER_ADMIN_EXCLUDED_LABEL_PREFIX.length).trim()
+    : base;
+  if (!unmarked && !isSuperAdminActivation) return null;
+  if (isSuperAdminActivation) return `${SUPER_ADMIN_EXCLUDED_LABEL_PREFIX}${unmarked}`;
+  return unmarked || null;
+}
+
+function excludeSuperAdminActivatedKeywordsWhere() {
+  return {
+    NOT: {
+      locationLabel: { startsWith: SUPER_ADMIN_EXCLUDED_LABEL_PREFIX },
+    },
+  } as const;
+}
+
+function stripSuperAdminExcludedPrefix(value: string | null | undefined): string | null {
+  const raw = String(value ?? "");
+  if (!raw.startsWith(SUPER_ADMIN_EXCLUDED_LABEL_PREFIX)) {
+    return value == null ? null : raw;
+  }
+  const stripped = raw.slice(SUPER_ADMIN_EXCLUDED_LABEL_PREFIX.length).trim();
+  return stripped || null;
+}
+
+function sanitizeGridKeywordForResponse<T extends { locationLabel: string | null }>(row: T): T {
+  return {
+    ...row,
+    locationLabel: stripSuperAdminExcludedPrefix(row.locationLabel),
+  };
+}
 
 async function ensurePlatformConfigTable(): Promise<void> {
   if (platformConfigTableEnsured) return;
@@ -264,7 +302,11 @@ async function getMapKeywordCapacity(agencyId: string): Promise<{ total: number;
   }
 
   const active = await prisma.gridKeyword.count({
-    where: { agencyId, status: "active" },
+    where: {
+      agencyId,
+      status: "active",
+      ...excludeSuperAdminActivatedKeywordsWhere(),
+    },
   });
   return {
     total,
@@ -891,7 +933,11 @@ router.get("/summary/:clientId", authenticateToken, async (req, res) => {
     if (!canRead) return res.status(403).json({ message: "Access denied" });
 
     const activeForDashboard = await prisma.gridKeyword.count({
-      where: { clientId, status: "active" },
+      where: {
+        clientId,
+        status: "active",
+        ...excludeSuperAdminActivatedKeywordsWhere(),
+      },
     });
     const agencyId = await resolveAgencyIdForClient(clientId, req.user.userId);
     if (!agencyId) {
@@ -936,7 +982,7 @@ router.get("/keywords/:clientId", authenticateToken, async (req, res) => {
         const latest = row.snapshots[0] ?? null;
         const previous = row.snapshots[1] ?? null;
         return {
-          ...row,
+          ...sanitizeGridKeywordForResponse(row),
           latestAta: latest?.ataScore ?? null,
           previousAta: previous?.ataScore ?? null,
           trend:
@@ -963,6 +1009,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     if (!canRead) return res.status(403).json({ message: "Access denied" });
 
     const { keywordId, placeId, businessName, businessAddress, centerLat, centerLng, locationLabel } = req.body ?? {};
+    const isSuperAdminActivation = req.user.role === "SUPER_ADMIN";
     if (!keywordId || !placeId || !businessName || centerLat == null || centerLng == null) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -992,14 +1039,14 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     if (existing) {
       if (existing.status === "active") {
         return res.json({
-          ...existing,
+          ...sanitizeGridKeywordForResponse(existing),
           alreadyActive: true,
           message: "This keyword and business listing is already active.",
         });
       }
 
       const capacity = await getMapKeywordCapacity(agencyId);
-      if (capacity.remaining <= 0) {
+      if (!isSuperAdminActivation && capacity.remaining <= 0) {
         return res.status(402).json({
           code: "LOCAL_MAP_KEYWORD_CAP_REACHED",
           message: "No grid keyword slots remaining. Upgrade or add Local Map Rankings keyword pack.",
@@ -1015,7 +1062,10 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
           businessAddress: businessAddress ? String(businessAddress) : null,
           centerLat: new Prisma.Decimal(Number(centerLat)),
           centerLng: new Prisma.Decimal(Number(centerLng)),
-          locationLabel: locationLabel ? String(locationLabel) : null,
+          locationLabel: normalizeLocationLabelForActivation(
+            locationLabel ? String(locationLabel) : null,
+            isSuperAdminActivation
+          ),
           gridSize: DEFAULT_GRID_SIZE,
           gridSpacingMiles: new Prisma.Decimal(DEFAULT_GRID_SPACING_MILES),
           status: "active",
@@ -1024,13 +1074,13 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       });
 
       return res.json({
-        ...reactivated,
+        ...sanitizeGridKeywordForResponse(reactivated),
         reactivated: true,
       });
     }
 
     const capacity = await getMapKeywordCapacity(agencyId);
-    if (capacity.remaining <= 0) {
+    if (!isSuperAdminActivation && capacity.remaining <= 0) {
       return res.status(402).json({
         code: "LOCAL_MAP_KEYWORD_CAP_REACHED",
         message: "No grid keyword slots remaining. Upgrade or add Local Map Rankings keyword pack.",
@@ -1049,7 +1099,10 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
           businessAddress: businessAddress ? String(businessAddress) : null,
           centerLat: new Prisma.Decimal(Number(centerLat)),
           centerLng: new Prisma.Decimal(Number(centerLng)),
-          locationLabel: locationLabel ? String(locationLabel) : null,
+          locationLabel: normalizeLocationLabelForActivation(
+            locationLabel ? String(locationLabel) : null,
+            isSuperAdminActivation
+          ),
           gridSize: DEFAULT_GRID_SIZE,
           gridSpacingMiles: new Prisma.Decimal(DEFAULT_GRID_SPACING_MILES),
           status: "active",
@@ -1057,7 +1110,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
         },
       });
 
-      return res.status(201).json(created);
+      return res.status(201).json(sanitizeGridKeywordForResponse(created));
     } catch (error: any) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const duplicate = await prisma.gridKeyword.findFirst({
@@ -1069,7 +1122,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
         });
         if (duplicate) {
           return res.json({
-            ...duplicate,
+            ...sanitizeGridKeywordForResponse(duplicate),
             alreadyActive: duplicate.status === "active",
             message:
               duplicate.status === "active"
@@ -1100,7 +1153,7 @@ router.patch("/keywords/:gridKeywordId", authenticateToken, async (req, res) => 
       where: { id: gridKeywordId },
       data: { status: status as "active" | "paused" | "canceled" },
     });
-    return res.json(updated);
+    return res.json(sanitizeGridKeywordForResponse(updated));
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to update grid keyword" });
   }
@@ -1184,7 +1237,7 @@ router.get("/report/:gridKeywordId", authenticateToken, async (req, res) => {
         gridData: JSON.stringify(live.gridData),
       } as GridSnapshot;
       return res.json({
-        keyword,
+        keyword: sanitizeGridKeywordForResponse(keyword),
         current: currentLiveSnapshot,
         previousThree: [],
         benchmark: null,
@@ -1273,7 +1326,7 @@ router.get("/report/:gridKeywordId", authenticateToken, async (req, res) => {
     }
 
     return res.json({
-      keyword,
+      keyword: sanitizeGridKeywordForResponse(keyword),
       current,
       previousThree,
       benchmark,
@@ -1602,7 +1655,7 @@ router.get("/admin/keywords", authenticateToken, async (req, res) => {
       orderBy: { createdAt: "desc" },
       take: 500,
     });
-    return res.json(rows);
+    return res.json(rows.map((row) => sanitizeGridKeywordForResponse(row)));
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || "Failed to load grid keywords" });
   }

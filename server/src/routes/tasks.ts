@@ -178,19 +178,26 @@ async function sendTaskCompletedEmails(
   completedByUserId?: string
 ): Promise<void> {
   const toEmails: string[] = [];
+  const recipientUserIds = new Set<string>();
 
   // 1. Notify client users (the actual client contacts who need to know)
   if (task.clientId) {
     const clientUsers = await prisma.clientUser.findMany({
       where: { clientId: task.clientId, status: "ACTIVE" as const },
-      select: { user: { select: { email: true } } },
+      select: { userId: true, user: { select: { email: true } } },
     });
-    clientUsers.forEach((cu: { user: { email: string | null } }) => cu.user.email && toEmails.push(cu.user.email));
+    clientUsers.forEach((cu: { userId: string; user: { email: string | null } }) => {
+      recipientUserIds.add(cu.userId);
+      if (cu.user.email) toEmails.push(cu.user.email);
+    });
   }
 
   // 2. Notify the task creator if they didn't complete it themselves
   if (task.createdBy?.email && task.createdBy.id !== completedByUserId) {
     toEmails.push(task.createdBy.email);
+  }
+  if (task.createdBy?.id && task.createdBy.id !== completedByUserId) {
+    recipientUserIds.add(task.createdBy.id);
   }
 
   // 3. Notify approval-notify users
@@ -199,13 +206,26 @@ async function sendTaskCompletedEmails(
       const ids = JSON.parse(approvalNotifyUserIds) as string[];
       const users = await prisma.user.findMany({
         where: { id: { in: ids } },
-        select: { email: true },
+        select: { id: true, email: true },
       });
-      users.forEach((u) => u.email && toEmails.push(u.email));
+      users.forEach((u) => {
+        recipientUserIds.add(u.id);
+        if (u.email) toEmails.push(u.email);
+      });
     } catch {
       // ignore invalid JSON
     }
   }
+
+  // 4. Notify higher-up users (super admins/admins), excluding the completer.
+  const higherUpUsers = await prisma.user.findMany({
+    where: { role: { in: ["SUPER_ADMIN", "ADMIN"] } },
+    select: { id: true, email: true },
+  });
+  higherUpUsers.forEach((u) => {
+    if (u.id !== completedByUserId) recipientUserIds.add(u.id);
+    if (u.email) toEmails.push(u.email);
+  });
 
   // Never email the person who completed the task
   const excludeEmail = completedByUserId
@@ -225,17 +245,27 @@ async function sendTaskCompletedEmails(
     );
   }
 
-  // 4. Create in-app notification for the agency
-  if (task.agencyId) {
-    prisma.notification.create({
-      data: {
-        agencyId: task.agencyId,
-        type: "task_completed",
-        title: "Task completed",
-        message: `"${task.title}" for ${clientName} has been completed.`,
-        link: `/agency/tasks`,
-      },
-    }).catch((e) => console.warn("[Task] In-app notification failed", e?.message));
+  // 5. Create in-app notifications only for targeted recipients
+  const inAppRecipientIds = Array.from(recipientUserIds).filter((uid) => uid !== completedByUserId);
+  if (inAppRecipientIds.length > 0) {
+    const inAppUsers = await prisma.user.findMany({
+      where: { id: { in: inAppRecipientIds } },
+      select: { id: true, role: true },
+    });
+    if (inAppUsers.length > 0) {
+      await prisma.notification
+        .createMany({
+          data: inAppUsers.map((u) => ({
+            userId: u.id,
+            agencyId: task.agencyId ?? null,
+            type: "task_completed",
+            title: "Task completed",
+            message: `"${task.title}" for ${clientName} has been completed.`,
+            link: u.role === "USER" ? `/client/tasks?taskId=${task.id}` : `/agency/tasks?taskId=${task.id}`,
+          })),
+        })
+        .catch((e) => console.warn("[Task] Completion in-app notification failed", e?.message));
+    }
   }
 }
 
@@ -778,13 +808,19 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
-// List users who can be assigned to work log tasks.
+// List users who can be assigned or mentioned in task/work-log activity.
 // SUPER_ADMIN: can assign to Super Admins, Admins, Specialists (system-wide).
 // ADMIN: can assign ONLY to Admins and Specialists (system-wide).
 // AGENCY: can assign ONLY to users in their own agency (same team).
+// SPECIALIST: mention-only list (admins/super admins + own agency members).
 router.get("/assignable-users", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== "SUPER_ADMIN" && req.user.role !== "ADMIN" && req.user.role !== "AGENCY") {
+    if (
+      req.user.role !== "SUPER_ADMIN" &&
+      req.user.role !== "ADMIN" &&
+      req.user.role !== "AGENCY" &&
+      req.user.role !== "SPECIALIST"
+    ) {
       return res.status(403).json({ message: "Access denied" });
     }
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
@@ -825,6 +861,35 @@ router.get("/assignable-users", authenticateToken, async (req, res) => {
       return res.json(users);
     }
 
+    if (req.user.role === "SPECIALIST") {
+      const myMemberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const myAgencyIds = myMemberships.map((m) => m.agencyId);
+      const teamUserIds = myAgencyIds.length
+        ? await prisma.userAgency.findMany({
+            where: { agencyId: { in: myAgencyIds } },
+            select: { userId: true },
+          })
+        : [];
+      const scopedIds = [...new Set(teamUserIds.map((m) => m.userId))];
+      const users = await prisma.user.findMany({
+        where: {
+          verified: true,
+          ...searchFilter,
+          OR: [
+            { role: { in: ["SUPER_ADMIN", "ADMIN"] } },
+            ...(scopedIds.length ? [{ id: { in: scopedIds } }] : []),
+          ],
+        },
+        select: { id: true, name: true, email: true, role: true },
+        orderBy: [{ role: "asc" }, { name: "asc" }],
+        take: 150,
+      });
+      return res.json(users);
+    }
+
     // SUPER_ADMIN and ADMIN: system-wide assignable users.
     // Admins are intentionally blocked from assigning tasks to Super Admins.
     const rolesForRequester: Role[] =
@@ -843,6 +908,115 @@ router.get("/assignable-users", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Assignable users error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// List users who can be selected as Activity collaborators (@mentions + collaborator picker).
+// Includes higher-ups, specialists, project client users, and agency user(s) for scoped client.
+router.get("/activity-collaborators", authenticateToken, async (req, res) => {
+  try {
+    const allowedRequesterRoles = ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"];
+    if (!allowedRequesterRoles.includes(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const clientId = typeof req.query.clientId === "string" ? req.query.clientId.trim() : "";
+    const searchFilter = search
+      ? {
+          OR: [
+            { name: { contains: search } },
+            { email: { contains: search } },
+          ],
+        }
+      : {};
+
+    const allowedIds = new Set<string>();
+    const addIds = (ids: Array<string | null | undefined>) => {
+      ids.forEach((id) => {
+        const normalized = String(id || "").trim();
+        if (normalized) allowedIds.add(normalized);
+      });
+    };
+
+    // Always allow global higher-up and specialist collaborators.
+    const coreUsers = await prisma.user.findMany({
+      where: { role: { in: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] }, verified: true },
+      select: { id: true },
+    });
+    addIds(coreUsers.map((u) => u.id));
+
+    // Include agency account(s) + same-agency internal users for scoped collaboration.
+    let scopedAgencyId: string | null = null;
+    if (clientId) {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId },
+        select: { id: true, belongsToAgencyId: true, userId: true, user: { select: { memberships: { select: { agencyId: true } } } } },
+      });
+      if (!client) return res.status(404).json({ message: "Client not found" });
+
+      const isRequesterAdmin = req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN";
+      let hasClientAccess = isRequesterAdmin;
+      if (!hasClientAccess) {
+        const membership = await prisma.clientUser.findFirst({
+          where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+          select: { id: true },
+        });
+        hasClientAccess = Boolean(membership);
+      }
+      if (!hasClientAccess) {
+        const requesterMemberships = await prisma.userAgency.findMany({
+          where: { userId: req.user.userId },
+          select: { agencyId: true },
+        });
+        const requesterAgencyIds = requesterMemberships.map((m) => m.agencyId);
+        const clientAgencyId = client.belongsToAgencyId ?? client.user.memberships[0]?.agencyId ?? null;
+        hasClientAccess = Boolean(clientAgencyId && requesterAgencyIds.includes(clientAgencyId));
+      }
+      if (!hasClientAccess) return res.status(403).json({ message: "Access denied" });
+
+      scopedAgencyId = client.belongsToAgencyId ?? client.user.memberships[0]?.agencyId ?? null;
+
+      const clientUsers = await prisma.clientUser.findMany({
+        where: { clientId, status: "ACTIVE" },
+        select: { userId: true },
+      });
+      addIds(clientUsers.map((cu) => cu.userId));
+    }
+
+    // Fallback agency scope when clientId is not provided.
+    if (!scopedAgencyId && (req.user.role === "AGENCY" || req.user.role === "SPECIALIST")) {
+      const memberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      scopedAgencyId = memberships[0]?.agencyId ?? null;
+    }
+
+    if (scopedAgencyId) {
+      const agencyMembers = await prisma.userAgency.findMany({
+        where: { agencyId: scopedAgencyId },
+        select: { userId: true },
+      });
+      addIds(agencyMembers.map((m) => m.userId));
+    }
+
+    if (allowedIds.size === 0) return res.json([]);
+
+    const users = await prisma.user.findMany({
+      where: {
+        id: { in: Array.from(allowedIds) },
+        verified: true,
+        ...searchFilter,
+      },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: [{ role: "asc" }, { name: "asc" }],
+      take: 300,
+    });
+    return res.json(users);
+  } catch (error) {
+    console.error("Activity collaborators error:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 });
 
@@ -1353,11 +1527,11 @@ router.post("/:id/comments", authenticateToken, async (req, res) => {
     });
     // Restrict collaborator notifications to users that can access this task.
     const allowedIds = new Set<string>();
-    const superAdmins = await prisma.user.findMany({
-      where: { role: "SUPER_ADMIN" },
+    const superAdminsAndAdmins = await prisma.user.findMany({
+      where: { role: { in: ["SUPER_ADMIN", "ADMIN"] } },
       select: { id: true },
     });
-    superAdmins.forEach((u) => allowedIds.add(u.id));
+    superAdminsAndAdmins.forEach((u) => allowedIds.add(u.id));
 
     let agencyScopeId: string | null = task.agencyId ?? null;
     if (task.clientId) {
@@ -1713,7 +1887,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
         actorName
       ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
     }
-    if (didStatusChange && canSelfNotifyStatus) {
+    if (didStatusChange && canSelfNotifyStatus && updatedTask.status !== "DONE") {
       createSelfTaskStatusNotification({
         taskId: updatedTask.id,
         taskTitle: updatedTask.title,
@@ -1795,7 +1969,7 @@ router.patch("/:id/status", authenticateToken, async (req, res) => {
         actorName
       ).catch((e) => console.warn("[Task] Approval emails failed", e?.message));
     }
-    if (didStatusChange && canSelfNotifyStatus) {
+    if (didStatusChange && canSelfNotifyStatus && updated.status !== "DONE") {
       createSelfTaskStatusNotification({
         taskId: updated.id,
         taskTitle: updated.title,
