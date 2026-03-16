@@ -9,6 +9,8 @@ interface EmailAttachment {
   content: Buffer | string;
   encoding?: "base64" | "utf-8" | "utf8" | "binary" | "hex";
   contentType?: string;
+  cid?: string;
+  contentDisposition?: "attachment" | "inline";
 }
 
 interface EmailOptions {
@@ -30,6 +32,11 @@ const EMAIL_DISABLED = process.env.EMAIL_DISABLED === "true";
 
 // Lazy-load transporter to ensure env vars are loaded
 let transporter: nodemailer.Transporter | null = null;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function htmlToPlainText(html: string): string {
   return String(html || "")
@@ -71,10 +78,10 @@ function getTransporter(): nodemailer.Transporter {
       user: smtpUser,
       pass: smtpPass,
     },
-    // Add connection timeout and retry options
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
+    // Defaults are intentionally generous to support larger PDF attachments.
+    connectionTimeout: parsePositiveInt(process.env.SMTP_CONNECTION_TIMEOUT_MS, 30000),
+    greetingTimeout: parsePositiveInt(process.env.SMTP_GREETING_TIMEOUT_MS, 30000),
+    socketTimeout: parsePositiveInt(process.env.SMTP_SOCKET_TIMEOUT_MS, 120000),
   });
 
   return transporter;

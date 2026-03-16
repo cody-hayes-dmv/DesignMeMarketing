@@ -124,6 +124,76 @@ const getTopCompetitorsFromCells = (cells: LocalMapGridCell[]): string[] => {
     .map(([name]) => name);
 };
 
+const LOCAL_MAP_CANVAS_SIZE_PX = 560;
+
+const buildMapViewportFromCells = (cells: LocalMapGridCell[]): { centerLat: number; centerLng: number; zoom: number } | null => {
+  const valid = cells.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) as Array<{ lat: number; lng: number }>;
+  if (!valid.length) return null;
+  const minLat = Math.min(...valid.map((p) => p.lat));
+  const maxLat = Math.max(...valid.map((p) => p.lat));
+  const minLng = Math.min(...valid.map((p) => p.lng));
+  const maxLng = Math.max(...valid.map((p) => p.lng));
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLng = (minLng + maxLng) / 2;
+  if (valid.length < 2) return { centerLat, centerLng, zoom: 11 };
+  const toWorld0 = (lat: number, lng: number) => {
+    const x = ((lng + 180) / 360) * 256;
+    const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+    const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+    const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 256;
+    return { x, y };
+  };
+  const world = valid.map((p) => toWorld0(p.lat, p.lng));
+  const spanX = Math.max(1e-6, Math.max(...world.map((p) => p.x)) - Math.min(...world.map((p) => p.x)));
+  const spanY = Math.max(1e-6, Math.max(...world.map((p) => p.y)) - Math.min(...world.map((p) => p.y)));
+  const targetPx = LOCAL_MAP_CANVAS_SIZE_PX * 0.72;
+  const fitted = Math.floor(Math.min(Math.log2(targetPx / spanX), Math.log2(targetPx / spanY)));
+  const zoom = Math.max(8, Math.min(16, Number.isFinite(fitted) ? fitted : 11));
+  return { centerLat, centerLng, zoom };
+};
+
+const renderLocalMapLegend = (exporting: boolean, compact = false): JSX.Element => {
+  if (exporting) {
+    const h = compact ? 20 : 22;
+    const w = compact ? 54 : 58;
+    const fs = compact ? 8 : 9;
+    const chip = (label: string, dot: string, bg: string, border: string) => (
+      <svg key={label} width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={label}>
+        <rect x="0.5" y="0.5" width={w - 1} height={h - 1} rx={(h - 1) / 2} fill={bg} stroke={border} />
+        <circle cx="10" cy={h / 2} r="4" fill={dot} />
+        <text
+          x="20"
+          y={h / 2}
+          textAnchor="start"
+          dominantBaseline="middle"
+          fontSize={fs}
+          fontWeight="600"
+          fill="#334155"
+          style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
+        >
+          {label}
+        </text>
+      </svg>
+    );
+    return (
+      <div className="mb-3 flex items-center gap-2">
+        {chip("1-3", "#047857", "#ecfdf5", "#a7f3d0")}
+        {chip("4-10", "#f59e0b", "#fffbeb", "#fde68a")}
+        {chip("11-20", "#ea580c", "#fff7ed", "#fdba74")}
+        {chip("20+", "#dc2626", "#fff1f2", "#fecdd3")}
+      </div>
+    );
+  }
+  return (
+    <div className={`mb-3 flex items-center gap-2 ${compact ? "text-[10px]" : "text-[11px]"} text-gray-700`}>
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
+      <span className="inline-flex items-center gap-1 rounded-full border border-yellow-200 bg-yellow-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />4-10</span>
+      <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-300" />11-20</span>
+      <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-rose-300" />20+</span>
+    </div>
+  );
+};
+
 const safeFormatLocalMapDate = (
   value: string | Date | null | undefined,
   fallback: string = "N/A"
@@ -167,6 +237,7 @@ const ProspectSnapshotPage: React.FC = () => {
   const [localMapReportLoading, setLocalMapReportLoading] = useState(false);
   const [localMapReport, setLocalMapReport] = useState<LocalMapKeywordReportPayload | null>(null);
   const [localMapExportingPdf, setLocalMapExportingPdf] = useState(false);
+  const [localMapPdfMapUrls, setLocalMapPdfMapUrls] = useState<Record<string, string>>({});
   const [localMapSelectedCurrentPointIdx, setLocalMapSelectedCurrentPointIdx] = useState<number | null>(null);
   const [localMapSelectedPreviousPointIdxByRun, setLocalMapSelectedPreviousPointIdxByRun] = useState<Record<string, number>>({});
   const [localMapSelectedBenchmarkPointIdx, setLocalMapSelectedBenchmarkPointIdx] = useState<number | null>(null);
@@ -201,6 +272,78 @@ const ProspectSnapshotPage: React.FC = () => {
     if (localMapSelectedCurrentPointIdx == null) return null;
     return localMapCurrentCells[localMapSelectedCurrentPointIdx] ?? null;
   }, [localMapCurrentCells, localMapSelectedCurrentPointIdx]);
+  const localMapCurrentMapCenter = useMemo(() => {
+    const valid = localMapCurrentCells.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) as Array<{
+      lat: number;
+      lng: number;
+    }>;
+    if (!valid.length) return null;
+    const minLat = Math.min(...valid.map((p) => p.lat));
+    const maxLat = Math.max(...valid.map((p) => p.lat));
+    const minLng = Math.min(...valid.map((p) => p.lng));
+    const maxLng = Math.max(...valid.map((p) => p.lng));
+    return { lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 };
+  }, [localMapCurrentCells]);
+  const localMapCurrentMapZoom = useMemo(() => {
+    const valid = localMapCurrentCells.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) as Array<{
+      lat: number;
+      lng: number;
+    }>;
+    if (valid.length < 2) return 11;
+    const toWorld0 = (lat: number, lng: number) => {
+      const x = ((lng + 180) / 360) * 256;
+      const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+      const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+      const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 256;
+      return { x, y };
+    };
+    const world = valid.map((p) => toWorld0(p.lat, p.lng));
+    const minX = Math.min(...world.map((p) => p.x));
+    const maxX = Math.max(...world.map((p) => p.x));
+    const minY = Math.min(...world.map((p) => p.y));
+    const maxY = Math.max(...world.map((p) => p.y));
+    const spanX = Math.max(1e-6, maxX - minX);
+    const spanY = Math.max(1e-6, maxY - minY);
+    const targetPx = LOCAL_MAP_CANVAS_SIZE_PX * 0.72;
+    const zoomX = Math.log2(targetPx / spanX);
+    const zoomY = Math.log2(targetPx / spanY);
+    const fitted = Math.floor(Math.min(zoomX, zoomY));
+    return Math.max(8, Math.min(16, Number.isFinite(fitted) ? fitted : 11));
+  }, [localMapCurrentCells]);
+  const localMapCurrentEmbeddedMapUrl = useMemo(() => {
+    if (!localMapCurrentMapCenter) return null;
+    return `https://www.google.com/maps?q=${localMapCurrentMapCenter.lat},${localMapCurrentMapCenter.lng}&z=${localMapCurrentMapZoom}&output=embed`;
+  }, [localMapCurrentMapCenter, localMapCurrentMapZoom]);
+  const localMapCurrentProjectedPoints = useMemo(() => {
+    if (!localMapCurrentMapCenter || !localMapCurrentCells.length) return [];
+    const toWorld = (lat: number, lng: number, zoom: number) => {
+      const scale = 256 * 2 ** zoom;
+      const x = ((lng + 180) / 360) * scale;
+      const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+      const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+      const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+      return { x, y };
+    };
+    const centerWorld = toWorld(localMapCurrentMapCenter.lat, localMapCurrentMapCenter.lng, localMapCurrentMapZoom);
+    return localMapCurrentCells
+      .map((point, idx) => {
+        if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+        const world = toWorld(point.lat as number, point.lng as number, localMapCurrentMapZoom);
+        const deltaX = world.x - centerWorld.x;
+        const deltaY = world.y - centerWorld.y;
+        return {
+          id: `current-${idx}`,
+          pointIndex: idx,
+          rank: point.rank,
+          leftPct: 50 + (deltaX / LOCAL_MAP_CANVAS_SIZE_PX) * 100,
+          topPct: 50 + (deltaY / LOCAL_MAP_CANVAS_SIZE_PX) * 100,
+        };
+      })
+      .filter(
+        (point): point is { id: string; pointIndex: number; rank: number | null; leftPct: number; topPct: number } =>
+          Boolean(point && Number.isFinite(point.leftPct) && Number.isFinite(point.topPct))
+      );
+  }, [localMapCurrentCells, localMapCurrentMapCenter, localMapCurrentMapZoom]);
 
   useEffect(() => {
     if (!localMapCurrentCells.length) {
@@ -346,8 +489,63 @@ const ProspectSnapshotPage: React.FC = () => {
       return false;
     }
 
+    let mapObjectUrls: Record<string, string> = {};
     try {
       setLocalMapExportingPdf(true);
+      const mapRequests: Array<Promise<void>> = [];
+      const queueStaticMap = (key: string, cells: LocalMapGridCell[], size: number) => {
+        const viewport = buildMapViewportFromCells(cells);
+        if (!viewport) return;
+        mapRequests.push((async () => {
+          try {
+            const res = await api.get("/local-map/snapshot/static-map", {
+              params: {
+                centerLat: Number(viewport.centerLat.toFixed(6)),
+                centerLng: Number(viewport.centerLng.toFixed(6)),
+                zoom: viewport.zoom,
+                size,
+              },
+              responseType: "blob",
+              _silent: true,
+            } as any);
+            const blob = res.data as Blob;
+            if (blob instanceof Blob && blob.size > 0) {
+              mapObjectUrls[key] = URL.createObjectURL(blob);
+            }
+          } catch {
+            // Keep iframe fallback when static map fails.
+          }
+        })());
+      };
+      if (report.current?.gridData) {
+        queueStaticMap("current", parseLocalMapGridData(report.current.gridData), 640);
+      }
+      for (const snap of report.previousThree || []) {
+        queueStaticMap(`prev-${snap.id}`, parseLocalMapGridData(snap.gridData), 360);
+      }
+      if (report.benchmark?.gridData) {
+        queueStaticMap("benchmark", parseLocalMapGridData(report.benchmark.gridData), 360);
+      }
+      await Promise.all(mapRequests);
+      setLocalMapPdfMapUrls(mapObjectUrls);
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      const imageNodes = Array.from(
+        localMapReportContentRef.current.querySelectorAll("img[data-pdf-map='true']")
+      ) as HTMLImageElement[];
+      if (imageNodes.length > 0) {
+        await Promise.all(
+          imageNodes.map(
+            (img) =>
+              new Promise<void>((resolve) => {
+                if (img.complete && img.naturalWidth > 0) return resolve();
+                const done = () => resolve();
+                img.addEventListener("load", done, { once: true });
+                img.addEventListener("error", done, { once: true });
+                window.setTimeout(done, 2000);
+              })
+          )
+        );
+      }
       const sections = Array.from(
         localMapReportContentRef.current.querySelectorAll(".local-map-pdf-section")
       ) as HTMLElement[];
@@ -524,6 +722,8 @@ const ProspectSnapshotPage: React.FC = () => {
       toast.error(error?.message || "Unable to export report.");
       return false;
     } finally {
+      Object.values(mapObjectUrls).forEach((url) => URL.revokeObjectURL(url));
+      setLocalMapPdfMapUrls({});
       setLocalMapExportingPdf(false);
     }
   }, [localMapReport]);
@@ -1070,36 +1270,69 @@ const ProspectSnapshotPage: React.FC = () => {
                     <p className="mb-3 text-xs text-gray-600">
                       {safeFormatLocalMapDate(localMapReport.current.runDate)} · ATA {Number(localMapReport.current.ataScore).toFixed(2)}
                     </p>
-                    <div className="mb-3 flex items-center gap-2 text-[11px] text-gray-700">
-                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-yellow-200 bg-yellow-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />4-10</span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-300" />11-20</span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-rose-300" />20+</span>
-                    </div>
+                    {renderLocalMapLegend(localMapExportingPdf)}
                     <div className="overflow-x-auto">
-                      <div className="mx-auto grid w-fit gap-2 rounded-xl border border-indigo-100 bg-white/75 p-3">
-                        {Array.from({ length: localMapCurrentGridSize }).map((_, rowIdx) => (
-                          <div key={`current-${rowIdx}`} className="grid gap-2" style={{ gridTemplateColumns: `repeat(${localMapCurrentGridSize}, minmax(0, 1fr))` }}>
-                            {Array.from({ length: localMapCurrentGridSize }).map((__, colIdx) => {
-                              const pointIdx = rowIdx * localMapCurrentGridSize + colIdx;
-                              const point = localMapCurrentCells[pointIdx];
-                              const rank = point?.rank ?? null;
-                              const isCenter = pointIdx === localMapCurrentCenterIdx;
-                              const isSelected = pointIdx === localMapSelectedCurrentPointIdx;
-                              return (
-                                <button
-                                  key={`current-${rowIdx}-${colIdx}`}
-                                  type="button"
-                                  onClick={() => setLocalMapSelectedCurrentPointIdx(pointIdx)}
-                                  className={`${localMapExportingPdf ? "h-12 w-12 text-[13px]" : "h-10 w-10 text-[11px]"} rounded-full font-semibold flex items-center justify-center ${localMapCellClass(rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
-                                  title={`Rank: ${localMapRankLabel(rank)}`}
-                                >
-                                  {localMapRankLabel(rank)}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ))}
+                      <div
+                        className="relative mx-auto rounded-xl border border-indigo-100 p-3 overflow-hidden shadow-inner"
+                        style={{
+                          backgroundImage:
+                            "radial-gradient(circle at center, rgba(59,130,246,0.10) 0%, rgba(148,163,184,0.06) 42%, rgba(15,23,42,0.05) 100%)",
+                        }}
+                      >
+                        <div className={`relative z-10 ${localMapExportingPdf ? "min-w-[640px] w-[640px] h-[640px]" : "min-w-[560px] w-[560px] h-[560px]"} mx-auto rounded-xl overflow-hidden border border-gray-300`}>
+                          {localMapExportingPdf && localMapPdfMapUrls.current ? (
+                            <img
+                              src={localMapPdfMapUrls.current}
+                              alt="Static map for current report"
+                              data-pdf-map="true"
+                              className="absolute inset-0 h-full w-full object-cover"
+                              loading="eager"
+                            />
+                          ) : localMapCurrentEmbeddedMapUrl ? (
+                            <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
+                              <iframe
+                                title="Google map report background"
+                                src={localMapCurrentEmbeddedMapUrl}
+                                className="h-full w-full opacity-90 pointer-events-auto"
+                                loading="lazy"
+                                referrerPolicy="no-referrer-when-downgrade"
+                              />
+                            </div>
+                          ) : null}
+                          <div className="absolute inset-0 bg-white/20 pointer-events-none" />
+                          <div
+                            className="absolute inset-0 opacity-30 pointer-events-none"
+                            style={{
+                              backgroundImage:
+                                "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)",
+                              backgroundSize: "14.2857% 14.2857%",
+                            }}
+                          />
+                          {localMapCurrentProjectedPoints.map((point) => {
+                            const isCenter = point.pointIndex === localMapCurrentCenterIdx;
+                            const isSelected = point.pointIndex === localMapSelectedCurrentPointIdx;
+                            const inFrame =
+                              point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
+                            if (!inFrame) return null;
+                            return (
+                              <button
+                                key={point.id}
+                                type="button"
+                                onClick={() => setLocalMapSelectedCurrentPointIdx(point.pointIndex)}
+                                className={`${localMapExportingPdf ? "h-12 w-12 text-[13px]" : "h-10 w-10 text-[11px]"} absolute rounded-full font-semibold flex items-center justify-center ${localMapCellClass(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
+                                style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
+                                title={`Rank: ${localMapRankLabel(point.rank)}`}
+                              >
+                                {localMapRankLabel(point.rank)}
+                              </button>
+                            );
+                          })}
+                          <div
+                            className={`${localMapExportingPdf ? "h-5 w-5" : "h-4 w-4"} absolute rounded-full bg-blue-600 border-2 border-white shadow pointer-events-none`}
+                            style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
+                            title="Business center"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="mt-3 rounded-lg border border-violet-100 bg-white p-3">
@@ -1115,7 +1348,7 @@ const ProspectSnapshotPage: React.FC = () => {
                       <div className="mt-2 flex flex-wrap gap-2">
                         {(localMapSelectedCurrentPoint?.competitors || []).length > 0 ? (
                           (localMapSelectedCurrentPoint?.competitors || []).map((name) => (
-                            <span key={name} className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-800">
+                            <span key={name} className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-800" style={localMapExportingPdf ? { fontFamily: "Arial, Helvetica, sans-serif" } : undefined}>
                               {name}
                             </span>
                           ))
@@ -1128,7 +1361,7 @@ const ProspectSnapshotPage: React.FC = () => {
                       <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Top 3 Competitors (Current Grid)</p>
                       <div className="flex flex-wrap gap-2">
                         {getTopCompetitorsFromCells(localMapCurrentCells).length ? getTopCompetitorsFromCells(localMapCurrentCells).map((name) => (
-                          <span key={name} className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-800">
+                        <span key={name} className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-800" style={localMapExportingPdf ? { fontFamily: "Arial, Helvetica, sans-serif" } : undefined}>
                             {name}
                           </span>
                         )) : <span className="text-xs text-gray-500">No competitor names captured for this run.</span>}
@@ -1139,12 +1372,7 @@ const ProspectSnapshotPage: React.FC = () => {
 
                 <div data-pdf-section="rank-grid" className="local-map-pdf-section bg-white border border-gray-200 rounded-xl p-4">
                   <h4 className="text-sm font-bold text-gray-900 mb-3">PREVIOUS 3 RUNS</h4>
-                  <div className="mb-3 flex items-center gap-2 text-[10px] text-gray-700">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-yellow-200 bg-yellow-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />4-10</span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-300" />11-20</span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-rose-300" />20+</span>
-                  </div>
+                  {renderLocalMapLegend(localMapExportingPdf, true)}
                   {localMapReport.previousThree.length === 0 ? (
                     <p className="text-sm text-gray-500">No previous runs yet.</p>
                   ) : (
@@ -1160,29 +1388,101 @@ const ProspectSnapshotPage: React.FC = () => {
                             <p className="text-xs font-semibold text-gray-900">{safeFormatLocalMapDate(snap.runDate)}</p>
                             <p className="mb-2 text-[11px] text-gray-600">ATA {Number(snap.ataScore).toFixed(2)}</p>
                             <div className="overflow-x-auto">
-                              <div className="mx-auto grid w-fit gap-1.5 rounded-lg border border-violet-100 bg-white/80 p-2">
-                                {Array.from({ length: size }).map((_, rowIdx) => (
-                                  <div key={`${snap.id}-row-${rowIdx}`} className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
-                                    {Array.from({ length: size }).map((__, colIdx) => {
-                                      const pointIdx = rowIdx * size + colIdx;
-                                      const point = cells[pointIdx];
-                                      const rank = point?.rank ?? null;
-                                      const isCenter = pointIdx === centerIdx;
-                                      return (
-                                        <button
-                                          key={`${snap.id}-${rowIdx}-${colIdx}`}
-                                          type="button"
-                                          onClick={() => setLocalMapSelectedPreviousPointIdxByRun((prev) => ({ ...prev, [snap.id]: pointIdx }))}
-                                          className={`${localMapExportingPdf ? "h-9 w-9 text-[11px] font-bold" : "h-7 w-7 text-[10px] font-semibold"} rounded-full flex items-center justify-center ${localMapCellClass(rank)} ${isCenter ? "ring-2 ring-blue-300 ring-offset-1" : ""} ${selectedIdx === pointIdx ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
-                                          title={`Rank: ${localMapRankLabel(rank)}`}
-                                        >
-                                          {localMapRankLabel(rank)}
-                                        </button>
-                                      );
-                                    })}
+                              {(() => {
+                                const valid = cells.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) as Array<{ lat: number; lng: number }>;
+                                const mapCenter = valid.length
+                                  ? {
+                                      lat: (Math.min(...valid.map((p) => p.lat)) + Math.max(...valid.map((p) => p.lat))) / 2,
+                                      lng: (Math.min(...valid.map((p) => p.lng)) + Math.max(...valid.map((p) => p.lng))) / 2,
+                                    }
+                                  : null;
+                                const mapZoom = (() => {
+                                  if (valid.length < 2) return 11;
+                                  const toWorld0 = (lat: number, lng: number) => {
+                                    const x = ((lng + 180) / 360) * 256;
+                                    const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+                                    const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+                                    const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 256;
+                                    return { x, y };
+                                  };
+                                  const world = valid.map((p) => toWorld0(p.lat, p.lng));
+                                  const spanX = Math.max(1e-6, Math.max(...world.map((p) => p.x)) - Math.min(...world.map((p) => p.x)));
+                                  const spanY = Math.max(1e-6, Math.max(...world.map((p) => p.y)) - Math.min(...world.map((p) => p.y)));
+                                  const targetPx = LOCAL_MAP_CANVAS_SIZE_PX * 0.72;
+                                  const fitted = Math.floor(Math.min(Math.log2(targetPx / spanX), Math.log2(targetPx / spanY)));
+                                  return Math.max(8, Math.min(16, Number.isFinite(fitted) ? fitted : 11));
+                                })();
+                                const projectedPoints = (() => {
+                                  if (!mapCenter || !cells.length) return [] as Array<{ idx: number; rank: number | null; leftPct: number; topPct: number }>;
+                                  const toWorld = (lat: number, lng: number, zoom: number) => {
+                                    const scale = 256 * 2 ** zoom;
+                                    const x = ((lng + 180) / 360) * scale;
+                                    const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+                                    const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+                                    const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+                                    return { x, y };
+                                  };
+                                  const centerWorld = toWorld(mapCenter.lat, mapCenter.lng, mapZoom);
+                                  return cells
+                                    .map((point, idx) => {
+                                      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+                                      const world = toWorld(point.lat as number, point.lng as number, mapZoom);
+                                      const deltaX = world.x - centerWorld.x;
+                                      const deltaY = world.y - centerWorld.y;
+                                      return {
+                                        idx,
+                                        rank: point.rank,
+                                        leftPct: 50 + (deltaX / LOCAL_MAP_CANVAS_SIZE_PX) * 100,
+                                        topPct: 50 + (deltaY / LOCAL_MAP_CANVAS_SIZE_PX) * 100,
+                                      };
+                                    })
+                                    .filter((p): p is { idx: number; rank: number | null; leftPct: number; topPct: number } => Boolean(p));
+                                })();
+                                const embeddedUrl = mapCenter
+                                  ? `https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&z=${mapZoom}&output=embed`
+                                  : null;
+                                const mapKey = `prev-${snap.id}`;
+                                return (
+                                  <div
+                                    className="relative mx-auto rounded-lg border border-violet-100 p-2 overflow-hidden shadow-inner"
+                                    style={{ backgroundImage: "radial-gradient(circle at center, rgba(79,70,229,0.10) 0%, rgba(148,163,184,0.06) 42%, rgba(15,23,42,0.05) 100%)" }}
+                                  >
+                                    <div className={`relative z-10 ${localMapExportingPdf ? "min-w-[360px] w-[360px] h-[360px]" : "min-w-[260px] w-[260px] h-[260px]"} mx-auto rounded-lg overflow-hidden border border-violet-200`}>
+                                      {localMapExportingPdf && localMapPdfMapUrls[mapKey] ? (
+                                        <img
+                                          src={localMapPdfMapUrls[mapKey]}
+                                          alt={`Static map for previous run ${snap.id}`}
+                                          data-pdf-map="true"
+                                          className="absolute inset-0 h-full w-full object-cover"
+                                          loading="eager"
+                                        />
+                                      ) : embeddedUrl ? (
+                                        <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
+                                          <iframe title={`Google map previous run ${snap.id}`} src={embeddedUrl} className="h-full w-full opacity-90 pointer-events-auto" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                                        </div>
+                                      ) : null}
+                                      <div className="absolute inset-0 bg-white/20 pointer-events-none" />
+                                      <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ backgroundImage: "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)", backgroundSize: "14.2857% 14.2857%" }} />
+                                      {projectedPoints.map((point) => {
+                                        const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
+                                        if (!inFrame) return null;
+                                        return (
+                                          <button
+                                            key={`${snap.id}-m-${point.idx}`}
+                                            type="button"
+                                            onClick={() => setLocalMapSelectedPreviousPointIdxByRun((prev) => ({ ...prev, [snap.id]: point.idx }))}
+                                            className={`${localMapExportingPdf ? "h-9 w-9 text-[11px] font-bold" : "h-7 w-7 text-[10px] font-semibold"} absolute rounded-full flex items-center justify-center ${localMapCellClass(point.rank)} ${point.idx === centerIdx ? "ring-2 ring-blue-300 ring-offset-1" : ""} ${selectedIdx === point.idx ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
+                                            style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
+                                            title={`Rank: ${localMapRankLabel(point.rank)}`}
+                                          >
+                                            {localMapRankLabel(point.rank)}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                ))}
-                              </div>
+                                );
+                              })()}
                             </div>
                             <div className="mt-2 rounded-md border border-violet-100 bg-white/80 px-2.5 py-2">
                               <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
@@ -1191,7 +1491,7 @@ const ProspectSnapshotPage: React.FC = () => {
                               {(selectedPoint?.competitors || []).length > 0 ? (
                                 <div className="mt-1 flex flex-wrap gap-1.5">
                                   {(selectedPoint?.competitors || []).map((name) => (
-                                    <span key={`${snap.id}-${name}`} className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800">
+                                    <span key={`${snap.id}-${name}`} className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800" style={localMapExportingPdf ? { fontFamily: "Arial, Helvetica, sans-serif" } : undefined}>
                                       {name}
                                     </span>
                                   ))}
@@ -1215,12 +1515,7 @@ const ProspectSnapshotPage: React.FC = () => {
                           Benchmark — {safeFormatLocalMapDate(localMapReport.benchmark.runDate)}
                         </p>
                         <p className="text-xs text-amber-700 mb-3">ATA {Number(localMapReport.benchmark.ataScore).toFixed(2)}</p>
-                        <div className="mb-3 flex items-center gap-2 text-[10px] text-gray-700">
-                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
-                          <span className="inline-flex items-center gap-1 rounded-full border border-yellow-200 bg-yellow-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />4-10</span>
-                          <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-300" />11-20</span>
-                          <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-rose-300" />20+</span>
-                        </div>
+                        {renderLocalMapLegend(localMapExportingPdf, true)}
                         {(() => {
                       const cells = parseLocalMapGridData(localMapReport.benchmark!.gridData);
                       const size = Math.max(1, Math.round(Math.sqrt(cells.length || 1)));
@@ -1230,29 +1525,101 @@ const ProspectSnapshotPage: React.FC = () => {
                       return (
                         <div>
                           <div className="overflow-x-auto">
-                            <div className="mx-auto grid w-fit gap-1.5 rounded-lg border border-amber-100 bg-amber-50/40 p-2">
-                              {Array.from({ length: size }).map((_, rowIdx) => (
-                                <div key={`benchmark-row-${rowIdx}`} className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
-                                  {Array.from({ length: size }).map((__, colIdx) => {
-                                    const pointIdx = rowIdx * size + colIdx;
-                                    const point = cells[pointIdx];
-                                    const rank = point?.rank ?? null;
-                                    const isCenter = pointIdx === centerIdx;
-                                    return (
-                                      <button
-                                        key={`benchmark-${rowIdx}-${colIdx}`}
-                                        type="button"
-                                        onClick={() => setLocalMapSelectedBenchmarkPointIdx(pointIdx)}
-                                        className={`${localMapExportingPdf ? "h-9 w-9 text-[11px] font-bold" : "h-8 w-8 text-[10px] font-semibold"} rounded-full flex items-center justify-center ${localMapCellClass(rank)} ${isCenter ? "ring-2 ring-blue-300 ring-offset-1" : ""} ${selectedIdx === pointIdx ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
-                                        title={`Rank: ${localMapRankLabel(rank)}`}
-                                      >
-                                        {localMapRankLabel(rank)}
-                                      </button>
-                                    );
-                                  })}
+                            {(() => {
+                              const valid = cells.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) as Array<{ lat: number; lng: number }>;
+                              const mapCenter = valid.length
+                                ? {
+                                    lat: (Math.min(...valid.map((p) => p.lat)) + Math.max(...valid.map((p) => p.lat))) / 2,
+                                    lng: (Math.min(...valid.map((p) => p.lng)) + Math.max(...valid.map((p) => p.lng))) / 2,
+                                  }
+                                : null;
+                              const mapZoom = (() => {
+                                if (valid.length < 2) return 11;
+                                const toWorld0 = (lat: number, lng: number) => {
+                                  const x = ((lng + 180) / 360) * 256;
+                                  const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+                                  const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+                                  const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * 256;
+                                  return { x, y };
+                                };
+                                const world = valid.map((p) => toWorld0(p.lat, p.lng));
+                                const spanX = Math.max(1e-6, Math.max(...world.map((p) => p.x)) - Math.min(...world.map((p) => p.x)));
+                                const spanY = Math.max(1e-6, Math.max(...world.map((p) => p.y)) - Math.min(...world.map((p) => p.y)));
+                                const targetPx = LOCAL_MAP_CANVAS_SIZE_PX * 0.72;
+                                const fitted = Math.floor(Math.min(Math.log2(targetPx / spanX), Math.log2(targetPx / spanY)));
+                                return Math.max(8, Math.min(16, Number.isFinite(fitted) ? fitted : 11));
+                              })();
+                              const projectedPoints = (() => {
+                                if (!mapCenter || !cells.length) return [] as Array<{ idx: number; rank: number | null; leftPct: number; topPct: number }>;
+                                const toWorld = (lat: number, lng: number, zoom: number) => {
+                                  const scale = 256 * 2 ** zoom;
+                                  const x = ((lng + 180) / 360) * scale;
+                                  const clampedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+                                  const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+                                  const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+                                  return { x, y };
+                                };
+                                const centerWorld = toWorld(mapCenter.lat, mapCenter.lng, mapZoom);
+                                return cells
+                                  .map((point, idx) => {
+                                    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+                                    const world = toWorld(point.lat as number, point.lng as number, mapZoom);
+                                    const deltaX = world.x - centerWorld.x;
+                                    const deltaY = world.y - centerWorld.y;
+                                    return {
+                                      idx,
+                                      rank: point.rank,
+                                      leftPct: 50 + (deltaX / LOCAL_MAP_CANVAS_SIZE_PX) * 100,
+                                      topPct: 50 + (deltaY / LOCAL_MAP_CANVAS_SIZE_PX) * 100,
+                                    };
+                                  })
+                                  .filter((p): p is { idx: number; rank: number | null; leftPct: number; topPct: number } => Boolean(p));
+                              })();
+                              const embeddedUrl = mapCenter
+                                ? `https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&z=${mapZoom}&output=embed`
+                                : null;
+                              const mapKey = "benchmark";
+                              return (
+                                <div
+                                  className="relative mx-auto rounded-lg border border-amber-100 p-2 overflow-hidden shadow-inner"
+                                  style={{ backgroundImage: "radial-gradient(circle at center, rgba(245,158,11,0.10) 0%, rgba(251,191,36,0.06) 42%, rgba(120,53,15,0.05) 100%)" }}
+                                >
+                                  <div className={`relative z-10 ${localMapExportingPdf ? "min-w-[360px] w-[360px] h-[360px]" : "min-w-[300px] w-[300px] h-[300px]"} mx-auto rounded-lg overflow-hidden border border-amber-200`}>
+                                    {localMapExportingPdf && localMapPdfMapUrls[mapKey] ? (
+                                      <img
+                                        src={localMapPdfMapUrls[mapKey]}
+                                        alt="Static map for benchmark run"
+                                        data-pdf-map="true"
+                                        className="absolute inset-0 h-full w-full object-cover"
+                                        loading="eager"
+                                      />
+                                    ) : embeddedUrl ? (
+                                      <div className="absolute inset-0" data-pdf-hide="true" aria-hidden>
+                                        <iframe title="Google map benchmark background" src={embeddedUrl} className="h-full w-full opacity-90 pointer-events-auto" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                                      </div>
+                                    ) : null}
+                                    <div className="absolute inset-0 bg-white/20 pointer-events-none" />
+                                    <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ backgroundImage: "linear-gradient(to right, rgba(15,23,42,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.15) 1px, transparent 1px)", backgroundSize: "14.2857% 14.2857%" }} />
+                                    {projectedPoints.map((point) => {
+                                      const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
+                                      if (!inFrame) return null;
+                                      return (
+                                        <button
+                                          key={`benchmark-m-${point.idx}`}
+                                          type="button"
+                                          onClick={() => setLocalMapSelectedBenchmarkPointIdx(point.idx)}
+                                          className={`${localMapExportingPdf ? "h-9 w-9 text-[11px] font-bold" : "h-8 w-8 text-[10px] font-semibold"} absolute rounded-full flex items-center justify-center ${localMapCellClass(point.rank)} ${point.idx === centerIdx ? "ring-2 ring-blue-300 ring-offset-1" : ""} ${selectedIdx === point.idx ? "ring-2 ring-fuchsia-400 ring-offset-1" : ""}`}
+                                          style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
+                                          title={`Rank: ${localMapRankLabel(point.rank)}`}
+                                        >
+                                          {localMapRankLabel(point.rank)}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                              ))}
-                            </div>
+                              );
+                            })()}
                           </div>
                           <div className="mt-2 rounded-md border border-amber-200 bg-white/80 px-2.5 py-2">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">
@@ -1261,7 +1628,7 @@ const ProspectSnapshotPage: React.FC = () => {
                             {(selectedPoint?.competitors || []).length > 0 ? (
                               <div className="mt-1 flex flex-wrap gap-1.5">
                                 {(selectedPoint?.competitors || []).map((name) => (
-                                  <span key={`benchmark-${name}`} className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                  <span key={`benchmark-${name}`} className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800" style={localMapExportingPdf ? { fontFamily: "Arial, Helvetica, sans-serif" } : undefined}>
                                     {name}
                                   </span>
                                 ))}

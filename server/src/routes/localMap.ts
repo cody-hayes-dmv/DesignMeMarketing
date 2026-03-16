@@ -1,5 +1,6 @@
 import express from "express";
 import { Prisma, type GridKeyword, type GridSnapshot } from "@prisma/client";
+import axios from "axios";
 import { authenticateToken } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { getTierConfig, normalizeTierId } from "../lib/tiers.js";
@@ -21,6 +22,7 @@ let platformConfigTableEnsured = false;
 const GRID_RUN_DAYS = new Set([1, 15]);
 const DEFAULT_GRID_SIZE = 7;
 const DEFAULT_GRID_SPACING_MILES = 0.5;
+const DEFAULT_MAP_ZOOM = 11;
 
 async function ensurePlatformConfigTable(): Promise<void> {
   if (platformConfigTableEnsured) return;
@@ -444,6 +446,38 @@ function parseClientProvidedPdfAttachment(rawAttachment: unknown): { filename: s
   return { filename, pdf };
 }
 
+function parseClientProvidedInlineImages(
+  rawInlineImages: unknown
+): Array<{ filename: string; contentType: string; content: Buffer; cid: string }> {
+  if (!Array.isArray(rawInlineImages)) return [];
+  const parsed: Array<{ filename: string; contentType: string; content: Buffer; cid: string }> = [];
+  for (const item of rawInlineImages) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const cidRaw = typeof record.cid === "string" ? record.cid.trim() : "";
+    const contentBase64 = typeof record.contentBase64 === "string" ? record.contentBase64.trim() : "";
+    if (!cidRaw || !contentBase64) continue;
+    const cid = cidRaw.replace(/[^\w.\-@]/g, "");
+    if (!cid) continue;
+    const rawFilename = typeof record.filename === "string" ? record.filename.trim() : "";
+    const filename = (rawFilename || `${cid}.png`).replace(/[^\w.\-]/g, "-");
+    const contentTypeRaw = typeof record.contentType === "string" ? record.contentType.trim().toLowerCase() : "";
+    const contentType = contentTypeRaw === "image/jpeg" || contentTypeRaw === "image/jpg" ? "image/jpeg" : "image/png";
+    const cleanedBase64 = contentBase64
+      .replace(/^data:image\/(?:png|jpe?g);base64,/i, "")
+      .replace(/\s+/g, "");
+    let content: Buffer;
+    try {
+      content = Buffer.from(cleanedBase64, "base64");
+    } catch {
+      continue;
+    }
+    if (!content.length) continue;
+    parsed.push({ filename, contentType, content, cid });
+  }
+  return parsed;
+}
+
 function pickCreditSource(data: { monthlyAllowance: number; monthlyUsed: number; purchasedCredits: number }, isSuperAdmin: boolean) {
   if (isSuperAdmin) return "super_admin" as const;
   if (data.monthlyUsed < data.monthlyAllowance) return "monthly_allowance" as const;
@@ -788,6 +822,65 @@ router.get("/gbp/search", authenticateToken, async (req, res) => {
   } catch (error: any) {
     console.error("[LocalMap] GBP search failed", error);
     return res.status(500).json({ message: error?.message || "Failed to search businesses" });
+  }
+});
+
+router.get("/snapshot/static-map", authenticateToken, async (req, res) => {
+  try {
+    if (!isManagerRole(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    const centerLat = Number(req.query.centerLat);
+    const centerLng = Number(req.query.centerLng);
+    const zoom = Math.max(3, Math.min(18, Number(req.query.zoom ?? DEFAULT_MAP_ZOOM)));
+    const size = Math.max(300, Math.min(1200, Number(req.query.size ?? 640)));
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) {
+      return res.status(400).json({ message: "Invalid center coordinates" });
+    }
+
+    const key = String(
+      process.env.GOOGLE_MAPS_API_KEY
+      || process.env.GOOGLE_PLACES_API_KEY
+      || process.env.GOOGLE_API_KEY
+      || ""
+    ).trim();
+
+    const candidates: string[] = [];
+    if (key) {
+      candidates.push(
+        `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(`${centerLat},${centerLng}`)}&zoom=${encodeURIComponent(String(zoom))}&size=${encodeURIComponent(`${size}x${size}`)}&scale=2&maptype=roadmap&key=${encodeURIComponent(key)}`
+      );
+    }
+    candidates.push(
+      `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(`${centerLat},${centerLng}`)}&zoom=${encodeURIComponent(String(zoom))}&size=${encodeURIComponent(`${size}x${size}`)}&scale=2&maptype=roadmap`,
+      `https://staticmap.openstreetmap.de/staticmap.php?center=${encodeURIComponent(`${centerLat},${centerLng}`)}&zoom=${encodeURIComponent(String(zoom))}&size=${encodeURIComponent(`${size}x${size}`)}`
+    );
+
+    let lastError = "Unknown map fetch error";
+    for (const mapUrl of candidates) {
+      try {
+        const upstream = await axios.get<ArrayBuffer>(mapUrl, {
+          responseType: "arraybuffer",
+          timeout: 20000,
+          validateStatus: () => true,
+        });
+        const contentType = String(upstream.headers["content-type"] || "");
+        if (upstream.status >= 200 && upstream.status < 300 && contentType.includes("image")) {
+          const bytes = Buffer.from(upstream.data);
+          res.setHeader("Content-Type", contentType || "image/png");
+          res.setHeader("Cache-Control", "private, max-age=300");
+          return res.status(200).send(bytes);
+        }
+        lastError = `Upstream ${upstream.status} ${contentType || "unknown-content-type"}`;
+      } catch (e: any) {
+        lastError = e?.message || "Request failed";
+      }
+    }
+
+    return res.status(502).json({ message: `Failed to fetch map image: ${lastError}` });
+  } catch (error: any) {
+    console.error("[LocalMap] static map proxy failed", error);
+    return res.status(500).json({ message: error?.message || "Failed to render static map" });
   }
 });
 
@@ -1233,7 +1326,10 @@ router.post("/reports/:clientId/send", authenticateToken, async (req, res) => {
     const recipients = bodyRecipients.length
       ? bodyRecipients
       : normalizeEmailRecipients(scheduleCandidate?.recipients);
-    if (!recipients.length) {
+    const uniqueRecipients = [...new Set(
+      recipients.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean)
+    )];
+    if (!uniqueRecipients.length) {
       return res.status(400).json({ message: "No recipients configured for this Local Map report." });
     }
 
@@ -1243,6 +1339,7 @@ router.post("/reports/:clientId/send", authenticateToken, async (req, res) => {
     });
     const bodyEmailHtml = typeof req.body?.emailHtml === "string" ? req.body.emailHtml.trim() : "";
     const clientProvidedAttachment = parseClientProvidedPdfAttachment(req.body?.attachment);
+    const inlineImages = parseClientProvidedInlineImages(req.body?.inlineImages);
     let rows: Array<GridKeyword & { snapshots: GridSnapshot[] }> = [];
     if (!bodyEmailHtml || !clientProvidedAttachment) {
       rows = await getLocalMapBundleRows(clientId);
@@ -1275,16 +1372,25 @@ router.post("/reports/:clientId/send", authenticateToken, async (req, res) => {
 
     console.log("[LocalMap] Sending on-demand Local Map report email", {
       clientId,
-      recipients: recipients.length,
+      recipients: uniqueRecipients.length,
       subject: emailSubject,
     });
     await Promise.all(
-      recipients.map((to) =>
+      uniqueRecipients.map((to) =>
         sendEmail({
           to,
           subject: emailSubject,
           html,
-          attachments: [pdfAttachment],
+          attachments: [
+            pdfAttachment,
+            ...inlineImages.map((img) => ({
+              filename: img.filename,
+              content: img.content,
+              contentType: img.contentType,
+              cid: img.cid,
+              contentDisposition: "inline" as const,
+            })),
+          ],
         })
       )
     );
@@ -1303,7 +1409,7 @@ router.post("/reports/:clientId/send", authenticateToken, async (req, res) => {
       });
     }
 
-    return res.json({ message: "Local Map report sent successfully", recipients: recipients.length });
+    return res.json({ message: "Local Map report sent successfully", recipients: uniqueRecipients.length });
   } catch (error: any) {
     console.error("[LocalMap] send now failed", error);
     return res.status(500).json({ message: error?.message || "Failed to send Local Map report" });

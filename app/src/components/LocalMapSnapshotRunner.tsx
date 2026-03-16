@@ -67,6 +67,35 @@ function rankLabel(rank: number | null): string {
   return String(rank);
 }
 
+function fillColorForRank(rank: number): string {
+  if (rank <= 3) return "#059669";
+  if (rank <= 7) return "#65a30d";
+  if (rank <= 10) return "#f59e0b";
+  if (rank <= 20) return "#ea580c";
+  return "#e11d48";
+}
+
+function legendChipSvg(label: string, circleFill: string, bgFill: string, borderStroke: string): JSX.Element {
+  return (
+    <svg width="58" height="22" viewBox="0 0 58 22" role="img" aria-label={label}>
+      <rect x="0.5" y="0.5" width="57" height="21" rx="10.5" fill={bgFill} stroke={borderStroke} />
+      <circle cx="10" cy="11" r="4" fill={circleFill} />
+      <text
+        x="22"
+        y="11"
+        textAnchor="start"
+        dominantBaseline="middle"
+        fontSize="9"
+        fontWeight="600"
+        fill="#334155"
+        style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
+      >
+        {label}
+      </text>
+    </svg>
+  );
+}
+
 function normalizePlaceId(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -170,6 +199,7 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
   const [pointSerpLoadingIndex, setPointSerpLoadingIndex] = useState<number | null>(null);
   const [pointSerpError, setPointSerpError] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [pdfMapDataUrl, setPdfMapDataUrl] = useState<string | null>(null);
   const snapshotPdfContentRef = useRef<HTMLDivElement | null>(null);
   const runProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pointSerpAttemptedRef = useRef<Set<number>>(new Set());
@@ -232,11 +262,26 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
     return `https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&z=${mapZoom}&output=embed`;
   }, [mapCenter, mapZoom]);
 
-  const exportStaticMapUrl = useMemo(() => {
+  const loadPdfMapDataUrl = useCallback(async (): Promise<string | null> => {
     if (!mapCenter) return null;
-    const center = `${mapCenter.lat.toFixed(6)},${mapCenter.lng.toFixed(6)}`;
-    const marker = `${mapCenter.lat.toFixed(6)},${mapCenter.lng.toFixed(6)},red-pushpin`;
-    return `https://staticmap.openstreetmap.de/staticmap.php?center=${encodeURIComponent(center)}&zoom=${encodeURIComponent(String(mapZoom))}&size=${EXPORT_MAP_SIZE_PX}x${EXPORT_MAP_SIZE_PX}&markers=${encodeURIComponent(marker)}`;
+    try {
+      const res = await api.get("/local-map/snapshot/static-map", {
+        params: {
+          centerLat: Number(mapCenter.lat.toFixed(6)),
+          centerLng: Number(mapCenter.lng.toFixed(6)),
+          zoom: mapZoom,
+          size: EXPORT_MAP_SIZE_PX,
+        },
+        responseType: "blob",
+        _silent: true,
+      } as any);
+      const blob = res.data as Blob;
+      if (!(blob instanceof Blob)) return null;
+      if (blob.size <= 0) return null;
+      return URL.createObjectURL(blob);
+    } catch {
+      return null;
+    }
   }, [mapCenter, mapZoom]);
 
   const mapProjectedPoints = useMemo(() => {
@@ -513,16 +558,30 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
       return;
     }
 
+    let mapObjectUrl: string | null = null;
     try {
       setExportingPdf(true);
+      mapObjectUrl = await loadPdfMapDataUrl();
+      setPdfMapDataUrl(mapObjectUrl);
+      for (let i = 0; i < 3; i += 1) {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      }
       const pdfRoot = snapshotPdfContentRef.current;
       pdfRoot.classList.add("pdf-exporting");
       await new Promise<void>((resolve) => {
         window.requestAnimationFrame(() => resolve());
       });
-      const imageNodes = Array.from(
+      let imageNodes = Array.from(
         snapshotPdfContentRef.current.querySelectorAll("img[data-pdf-map='true']")
       ) as HTMLImageElement[];
+      if (mapObjectUrl && imageNodes.length === 0) {
+        for (let attempt = 0; attempt < 10 && imageNodes.length === 0; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 80));
+          imageNodes = Array.from(
+            snapshotPdfContentRef.current.querySelectorAll("img[data-pdf-map='true']")
+          ) as HTMLImageElement[];
+        }
+      }
       if (imageNodes.length > 0) {
         await Promise.all(
           imageNodes.map(
@@ -714,6 +773,10 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
     } catch (error: any) {
       toast.error(error?.message || "Failed to export snapshot PDF.");
     } finally {
+      if (mapObjectUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(mapObjectUrl);
+      }
+      setPdfMapDataUrl(null);
       snapshotPdfContentRef.current?.classList.remove("pdf-exporting");
       setExportingPdf(false);
     }
@@ -946,11 +1009,11 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                       <p className="text-xs text-gray-600">Styled 7x7-style heat view for prospect snapshots.</p>
                     </div>
                     <div className={`flex items-center gap-2 ${exportingPdf ? "text-xs" : "text-[11px]"} text-gray-700`}>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-700" />1-3</span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-lime-200 bg-lime-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-lime-600" />4-7</span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />8-10</span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-600" />11-20</span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1"><span className="h-2.5 w-2.5 rounded-full bg-red-700" />20+</span>
+                      {legendChipSvg("1-3", "#047857", "#ecfdf5", "#a7f3d0")}
+                      {legendChipSvg("4-7", "#65a30d", "#f7fee7", "#d9f99d")}
+                      {legendChipSvg("8-10", "#f59e0b", "#fffbeb", "#fde68a")}
+                      {legendChipSvg("11-20", "#ea580c", "#fff7ed", "#fdba74")}
+                      {legendChipSvg("20+", "#dc2626", "#fff1f2", "#fecdd3")}
                     </div>
                   </div>
                   <div
@@ -963,9 +1026,9 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                     }}
                   >
                     <div className={`relative z-10 ${exportingPdf ? "min-w-[640px] w-[640px] h-[640px]" : "min-w-[560px] w-[560px] h-[560px]"} mx-auto rounded-xl overflow-hidden border border-gray-300`}>
-                      {exportingPdf && exportStaticMapUrl ? (
+                      {exportingPdf && pdfMapDataUrl ? (
                         <img
-                          src={exportStaticMapUrl}
+                          src={pdfMapDataUrl}
                           alt="Map background for snapshot export"
                           data-pdf-map="true"
                           className="absolute inset-0 h-full w-full object-cover"
@@ -997,16 +1060,40 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                         const isSelected = selectedPointIndex === point.pointIndex;
                         const inFrame = point.leftPct >= -8 && point.leftPct <= 108 && point.topPct >= -8 && point.topPct <= 108;
                         if (!inFrame) return null;
+                        const markerClass = `absolute ${exportingPdf ? "h-12 w-12 text-[13px] font-bold shadow-md" : "h-10 w-10 text-[11px] font-semibold"} rounded-full flex items-center justify-center p-0 leading-none tabular-nums shadow ${!exportingPdf ? "transition-transform hover:scale-105" : ""} ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-200 ring-offset-2 ring-offset-fuchsia-500" : ""} ${exportingPdf ? "ring-1 ring-white/90" : ""}`;
+                        const markerStyle = { left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" };
+                        if (exportingPdf) {
+                          return (
+                            <div
+                              key={point.id}
+                              className={markerClass}
+                              style={markerStyle}
+                              title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
+                            >
+                              <span
+                                className="absolute inset-0 grid place-items-center"
+                                style={{ fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1 }}
+                              >
+                                {rankLabel(point.rank)}
+                              </span>
+                            </div>
+                          );
+                        }
                         return (
                           <button
                             type="button"
                             key={point.id}
                             onClick={() => setSelectedPointIndex(point.pointIndex)}
-                            className={`absolute ${exportingPdf ? "h-12 w-12 text-[13px] font-bold shadow-md" : "h-10 w-10 text-[11px] font-semibold"} rounded-full flex items-center justify-center p-0 leading-none tabular-nums appearance-none shadow transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${colorForRank(point.rank)} ${isCenter ? "ring-2 ring-blue-400 ring-offset-1" : ""} ${isSelected ? "ring-2 ring-fuchsia-200 ring-offset-2 ring-offset-fuchsia-500" : ""} ${exportingPdf ? "ring-1 ring-white/90" : ""}`}
-                            style={{ left: `${point.leftPct}%`, top: `${point.topPct}%`, transform: "translate(-50%, -50%)" }}
+                            className={`${markerClass} focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+                            style={markerStyle}
                             title={`Rank: ${point.rank == null ? "Not Ranked (20+)" : point.rank}`}
                           >
-                            <span className="relative top-[0.5px]">{rankLabel(point.rank)}</span>
+                            <span
+                              className="absolute inset-0 grid place-items-center"
+                              style={{ fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1 }}
+                            >
+                              {rankLabel(point.rank)}
+                            </span>
                           </button>
                         );
                       })}
@@ -1024,11 +1111,22 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                       Results for "{keyword.trim() || "selected keyword"}"
                     </p>
                     {selectedPoint ? (
-                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[11px] text-gray-700">
-                        <MapPin className="h-3.5 w-3.5 text-rose-500" />
-                        {selectedPoint.lat.toFixed(6)}, {selectedPoint.lng.toFixed(6)}
-                        <span className="mx-1 text-gray-300">|</span>
-                        Rank {rankLabel(selectedPoint.rank)}
+                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] text-slate-700">
+                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-rose-50">
+                          <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden>
+                            <path
+                              d="M8 1.5a4.1 4.1 0 0 0-4.1 4.1c0 2.8 3 6.4 3.7 7.2.2.2.5.2.7 0 .7-.8 3.7-4.4 3.7-7.2A4.1 4.1 0 0 0 8 1.5Zm0 5.6a1.5 1.5 0 1 1 0-3.1 1.5 1.5 0 0 1 0 3.1Z"
+                              fill="#e11d48"
+                            />
+                          </svg>
+                        </span>
+                        <span style={{ fontFamily: "Arial, Helvetica, sans-serif", lineHeight: 1 }}>
+                          {selectedPoint.lat.toFixed(6)}, {selectedPoint.lng.toFixed(6)}
+                        </span>
+                        <span className="mx-0.5 h-3.5 w-px bg-slate-300" aria-hidden />
+                        <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                          Rank {rankLabel(selectedPoint.rank)}
+                        </span>
                       </div>
                     ) : (
                       <p className="mt-1 text-xs text-gray-600">Select a grid point to view top businesses.</p>
@@ -1061,20 +1159,22 @@ const LocalMapSnapshotRunner: React.FC<LocalMapSnapshotRunnerProps> = ({
                             key={`${entry.rank}-${entry.title}`}
                             className={`flex items-start gap-3 px-4 ${exportingPdf ? "py-4" : "py-2.5"} ${entry.isTarget ? "bg-blue-50/70" : "bg-white"}`}
                           >
-                            <div
-                              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 text-[11px] font-bold leading-none tabular-nums text-white ${
-                                entry.rank <= 3
-                                  ? "bg-emerald-600"
-                                  : entry.rank <= 7
-                                    ? "bg-lime-600"
-                                    : entry.rank <= 10
-                                      ? "bg-amber-500"
-                                      : entry.rank <= 20
-                                        ? "bg-orange-600"
-                                        : "bg-rose-600"
-                              }`}
-                            >
-                              <span className="relative top-[0.5px]">{entry.rank}</span>
+                            <div className="mt-0.5 h-6 w-6 shrink-0">
+                              <svg viewBox="0 0 24 24" className="h-6 w-6" role="img" aria-label={`Rank ${entry.rank}`}>
+                                <circle cx="12" cy="12" r="12" fill={fillColorForRank(entry.rank)} />
+                                <text
+                                  x="12"
+                                  y="12"
+                                  textAnchor="middle"
+                                  dominantBaseline="middle"
+                                  fontSize="10"
+                                  fontWeight="700"
+                                  fill="#ffffff"
+                                  style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
+                                >
+                                  {entry.rank}
+                                </text>
+                              </svg>
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-start gap-3">
