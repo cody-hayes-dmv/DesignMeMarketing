@@ -2177,6 +2177,22 @@ router.post('/me/domain/provision-ssl', authenticateToken, async (req, res) => {
       });
     }
 
+    if (!provisioning.issued) {
+      const pending = await prisma.agency.update({
+        where: { id: membership.agency.id },
+        data: {
+          domainStatus: "SSL_PENDING",
+          sslError: null,
+        },
+      });
+      return res.json({
+        message: 'DNS records look good. SSL issuance request accepted and is pending. Please allow up to 24 hours.',
+        customDomain: pending.customDomain,
+        domainStatus: toDomainStatus(pending.domainStatus),
+        sslIssuedAt: pending.sslIssuedAt?.toISOString() ?? null,
+      });
+    }
+
     const now = new Date();
     const updated = await prisma.agency.update({
       where: { id: membership.agency.id },

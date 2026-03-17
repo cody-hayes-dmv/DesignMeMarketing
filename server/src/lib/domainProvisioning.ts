@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { resolveTxt } from "dns/promises";
+import { resolveCname, resolveTxt } from "dns/promises";
 
 const DOMAIN_TXT_PREFIX = "_ymd-verify";
 const DOMAIN_CNAME_PREFIX = "_ymd-ssl";
@@ -80,12 +80,32 @@ export async function verifyCustomDomainViaDns(
 
 export async function requestSslProvisioning(
   customDomain: string
-): Promise<{ accepted: boolean; reason?: string }> {
+): Promise<{ accepted: boolean; issued?: boolean; reason?: string }> {
   const normalized = normalizeDomainHost(customDomain);
   if (!normalized) return { accepted: false, reason: "Invalid custom domain format" };
 
+  const cnameHost = `${DOMAIN_CNAME_PREFIX}.${normalized}`;
+  const expectedTarget = DEFAULT_SSL_CNAME_TARGET.replace(/\.$/, "").toLowerCase();
+  let cnameReady = false;
+
+  try {
+    const records = await resolveCname(cnameHost);
+    cnameReady = records
+      .map((record) => String(record || "").replace(/\.$/, "").toLowerCase())
+      .some((record) => record === expectedTarget);
+  } catch {
+    cnameReady = false;
+  }
+
+  if (!cnameReady) {
+    return {
+      accepted: false,
+      reason: `CNAME record not found or incorrect for ${cnameHost}. It must point to ${expectedTarget}.`,
+    };
+  }
+
   // Adapter boundary for infra-specific provider integration.
-  // Current implementation accepts request and relies on external provisioning.
-  return { accepted: true };
+  // DNS checks passed; provisioning is accepted but certificate issuance is async.
+  return { accepted: true, issued: false };
 }
 

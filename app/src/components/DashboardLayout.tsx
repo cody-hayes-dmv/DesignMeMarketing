@@ -91,14 +91,24 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       setHasClientWebDesignProjects(false);
       return;
     }
+    let isMounted = true;
     api
-      .get("/clients", { _silent: true } as any)
+      .get("/web-design/projects", { _silent: true } as any)
       .then((res) => {
-        const rows = Array.isArray(res.data) ? res.data : [];
-        const currentClient = rows.find((c: any) => String(c?.id) === String(firstClientId));
-        setHasClientWebDesignProjects(String(currentClient?.status || "").toUpperCase() === "ACTIVE");
+        if (!isMounted) return;
+        const projects = Array.isArray(res.data) ? res.data : [];
+        const hasProjectForClient = projects.some(
+          (p: any) => String(p?.clientId || p?.client?.id || "") === String(firstClientId)
+        );
+        setHasClientWebDesignProjects(hasProjectForClient);
       })
-      .catch(() => setHasClientWebDesignProjects(false));
+      .catch(() => {
+        if (!isMounted) return;
+        setHasClientWebDesignProjects(false);
+      });
+    return () => {
+      isMounted = false;
+    };
   }, [firstClientId, user?.role]);
 
   useEffect(() => {

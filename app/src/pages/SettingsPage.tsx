@@ -61,12 +61,49 @@ const SettingsPage = () => {
   const [sslIssuedAt, setSslIssuedAt] = useState<string | null>(null);
   const [domainError, setDomainError] = useState<string | null>(null);
   const [domainActionLoading, setDomainActionLoading] = useState<"verify" | "ssl" | null>(null);
+  const [domainLastCheckedAt, setDomainLastCheckedAt] = useState<string | null>(null);
   const [domainInstructions, setDomainInstructions] = useState<{
     txtHost: string;
     txtValue: string;
     cnameHost: string;
     cnameTarget: string;
   } | null>(null);
+
+  const domainStatusMeta: Record<
+    "NONE" | "PENDING_VERIFICATION" | "VERIFIED" | "SSL_PENDING" | "ACTIVE" | "FAILED",
+    { badgeClass: string; title: string; detail: string }
+  > = {
+    NONE: {
+      badgeClass: "bg-gray-100 border-gray-300 text-gray-700",
+      title: "Not configured",
+      detail: "Add your custom domain and save. Then add TXT/CNAME DNS records below.",
+    },
+    PENDING_VERIFICATION: {
+      badgeClass: "bg-amber-100 border-amber-300 text-amber-800",
+      title: "DNS verification pending",
+      detail: "TXT verification has not passed yet. Double-check DNS values and propagation.",
+    },
+    VERIFIED: {
+      badgeClass: "bg-blue-100 border-blue-300 text-blue-800",
+      title: "Domain verified",
+      detail: "TXT record passed. Next step: request SSL issuance.",
+    },
+    SSL_PENDING: {
+      badgeClass: "bg-violet-100 border-violet-300 text-violet-800",
+      title: "SSL issuance pending",
+      detail: "DNS looks correct. SSL certificate issuance is in progress and may take up to 24 hours.",
+    },
+    ACTIVE: {
+      badgeClass: "bg-emerald-100 border-emerald-300 text-emerald-800",
+      title: "Active",
+      detail: "Custom domain is active with SSL and ready for branded login.",
+    },
+    FAILED: {
+      badgeClass: "bg-rose-100 border-rose-300 text-rose-800",
+      title: "Needs attention",
+      detail: "Domain setup failed. Review DNS records and error details, then retry.",
+    },
+  };
 
   const defaults = {
     emailReports: true,
@@ -225,6 +262,7 @@ const SettingsPage = () => {
       // Handle null response for SUPER_ADMIN (though they shouldn't call this)
       if (response.data) {
         applyAgencyData(response.data);
+        setDomainLastCheckedAt(new Date().toISOString());
       }
     } catch (error: any) {
       if (error.response?.status !== 404) {
@@ -333,6 +371,7 @@ const SettingsPage = () => {
       toast.error(error?.response?.data?.message || "Domain verification failed");
       await fetchAgencyData();
     } finally {
+      setDomainLastCheckedAt(new Date().toISOString());
       setDomainActionLoading(null);
     }
   };
@@ -347,6 +386,7 @@ const SettingsPage = () => {
       toast.error(error?.response?.data?.message || "SSL provisioning failed");
       await fetchAgencyData();
     } finally {
+      setDomainLastCheckedAt(new Date().toISOString());
       setDomainActionLoading(null);
     }
   };
@@ -761,7 +801,7 @@ const SettingsPage = () => {
 
                         <div className="flex flex-wrap items-center gap-2 text-sm">
                           <span className="font-medium text-gray-700">Status:</span>
-                          <span className="inline-flex items-center rounded-full bg-white border border-gray-300 px-2.5 py-1 text-xs font-semibold text-gray-700">
+                          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${domainStatusMeta[domainStatus].badgeClass}`}>
                             {domainStatus}
                           </span>
                           {domainVerifiedAt && (
@@ -770,10 +810,21 @@ const SettingsPage = () => {
                           {sslIssuedAt && (
                             <span className="text-gray-500">SSL issued: {new Date(sslIssuedAt).toLocaleString()}</span>
                           )}
+                          {domainLastCheckedAt && (
+                            <span className="text-gray-500">Last checked: {new Date(domainLastCheckedAt).toLocaleString()}</span>
+                          )}
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+                          <p className="font-semibold text-slate-800">{domainStatusMeta[domainStatus].title}</p>
+                          <p className="mt-1 text-slate-600">{domainStatusMeta[domainStatus].detail}</p>
                         </div>
 
                         {domainError && (
-                          <p className="text-sm text-rose-600">{domainError}</p>
+                          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                            <p className="font-semibold">Setup error</p>
+                            <p className="mt-1">{domainError}</p>
+                          </div>
                         )}
 
                         {domainInstructions && (
@@ -793,7 +844,7 @@ const SettingsPage = () => {
                             onClick={handleVerifyDomain}
                             className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {domainActionLoading === "verify" ? "Verifying..." : "Verify domain"}
+                            {domainActionLoading === "verify" ? "Checking DNS..." : "Check DNS verification"}
                           </button>
                           <button
                             type="button"
@@ -801,7 +852,7 @@ const SettingsPage = () => {
                             onClick={handleProvisionSsl}
                             className="inline-flex items-center rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {domainActionLoading === "ssl" ? "Provisioning..." : "Provision SSL"}
+                            {domainActionLoading === "ssl" ? "Requesting SSL..." : "Request SSL issuance"}
                           </button>
                         </div>
                       </div>
