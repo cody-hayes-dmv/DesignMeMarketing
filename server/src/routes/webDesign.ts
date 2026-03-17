@@ -192,16 +192,75 @@ async function getProjectCollaboratorOptionIds(project: {
   agencyId?: string | null;
   designerId: string;
   activatedById: string;
+  clientId?: string;
+  client?: { id?: string; name?: string; belongsToAgencyId?: string | null; userId?: string | null } | null;
 }): Promise<string[]> {
   const ids = new Set<string>([project.designerId, project.activatedById]);
-  if (project.agencyId) {
+  // Match work-log activity behavior: allow tagging hierarchy/internal peers.
+  const internalUsers = await prisma.user.findMany({
+    where: {
+      role: { in: ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] },
+      verified: true,
+    },
+    select: { id: true },
+  });
+  internalUsers.forEach((u) => ids.add(u.id));
+
+  // Resolve agency scope from project agencyId first, then fallback via client linkage.
+  let agencyScopeId = project.agencyId ?? null;
+  if (!agencyScopeId && project.client?.belongsToAgencyId) {
+    agencyScopeId = project.client.belongsToAgencyId;
+  }
+  if (!agencyScopeId && project.clientId) {
+    const client = await prisma.client.findUnique({
+      where: { id: project.clientId },
+      select: { belongsToAgencyId: true, userId: true },
+    });
+    if (client?.belongsToAgencyId) agencyScopeId = client.belongsToAgencyId;
+    if (client?.userId) ids.add(client.userId);
+  }
+
+  if (agencyScopeId) {
     const memberships = await prisma.userAgency.findMany({
-      where: { agencyId: project.agencyId },
+      where: { agencyId: agencyScopeId },
       select: { userId: true },
     });
     memberships.forEach((m) => ids.add(m.userId));
   }
+
+  // Include active client users for this specific project/client.
+  if (project.clientId) {
+    const clientUsers = await prisma.clientUser.findMany({
+      where: { clientId: project.clientId, status: "ACTIVE" },
+      select: { userId: true },
+    });
+    clientUsers.forEach((cu) => ids.add(cu.userId));
+  }
+
   return [...ids];
+}
+
+async function applyPeerRoleTaggingRules(
+  actorRole: string,
+  candidateUserIds: string[]
+): Promise<string[]> {
+  const actor = String(actorRole || "").toUpperCase();
+  if (candidateUserIds.length === 0) return [];
+  if (actor !== "DESIGNER" && actor !== "SPECIALIST") return candidateUserIds;
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: candidateUserIds } },
+    select: { id: true, role: true },
+  });
+  const byId = new Map(users.map((u) => [u.id, String(u.role || "").toUpperCase()] as const));
+
+  return candidateUserIds.filter((id) => {
+    const targetRole = byId.get(id);
+    if (!targetRole) return false;
+    if (actor === "DESIGNER" && targetRole === "SPECIALIST") return false;
+    if (actor === "SPECIALIST" && targetRole === "DESIGNER") return false;
+    return true;
+  });
 }
 
 // List assignable designers for activation UI
@@ -424,7 +483,7 @@ router.get("/projects/:projectId", authenticateToken, async (req, res) => {
 
 router.get("/projects/:projectId/collaborator-options", authenticateToken, async (req, res) => {
   try {
-    if (!["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER"].includes(req.user.role)) {
+    if (!["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER", "USER"].includes(req.user.role)) {
       return res.status(403).json({ message: "Access denied" });
     }
     const { projectId } = req.params;
@@ -433,10 +492,12 @@ router.get("/projects/:projectId/collaborator-options", authenticateToken, async
     if (!access.hasAccess) return res.status(403).json({ message: "Access denied" });
     const optionIds = await getProjectCollaboratorOptionIds(access.project);
     if (optionIds.length === 0) return res.json([]);
+    const filteredOptionIds = await applyPeerRoleTaggingRules(req.user.role, optionIds);
+    if (filteredOptionIds.length === 0) return res.json([]);
     const users = await prisma.user.findMany({
       where: {
-        id: { in: optionIds },
-        role: { in: ["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER", "SPECIALIST"] },
+        id: { in: filteredOptionIds },
+        role: { in: ["SUPER_ADMIN", "ADMIN", "AGENCY", "DESIGNER", "SPECIALIST", "USER"] },
       },
       select: { id: true, name: true, email: true, role: true },
       orderBy: [{ name: "asc" }, { email: "asc" }],
@@ -783,7 +844,8 @@ router.post("/pages/:pageId/comments", authenticateToken, async (req, res) => {
     const authorRole = req.user.role === "USER" ? "client" : req.user.role === "DESIGNER" ? "designer" : "admin";
     const notifyUserIds = [...new Set((parsed.notifyUserIds || []).map((v) => String(v || "").trim()).filter(Boolean))];
     const allowedNotifyOptionIds = new Set(await getProjectCollaboratorOptionIds(page.project));
-    const safeNotifyUserIds = notifyUserIds.filter((id) => allowedNotifyOptionIds.has(id));
+    const roleFilteredNotifyUserIds = await applyPeerRoleTaggingRules(req.user.role, notifyUserIds);
+    const safeNotifyUserIds = roleFilteredNotifyUserIds.filter((id) => allowedNotifyOptionIds.has(id));
     const created = await prisma.webDesignComment.create({
       data: {
         pageId: page.id,
