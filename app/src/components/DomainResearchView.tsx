@@ -232,7 +232,7 @@ const AI_SEARCH_MONTHS_LIMIT: Record<"1M" | "6M" | "1Y" | "2Y" | "All", number> 
   "6M": 6,
   "1Y": 12,
   "2Y": 24,
-  All: 999,
+  All: 120,
 };
 const AI_SEARCH_PDF_TABLE_ROW_LIMIT = 5;
 
@@ -255,6 +255,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
   const [overview, setOverview] = useState<DomainOverviewData | null>(null);
   const [aiSearch, setAiSearch] = useState<AiSearchVisibilityData | null>(null);
   const [aiSearchError, setAiSearchError] = useState<string | null>(null);
+  const [aiSearchLoading, setAiSearchLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -306,6 +307,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     (metric: string | string[]) => isMetricUnavailable(aiSearch?.accuracy, metric),
     [aiSearch?.accuracy]
   );
+  const overviewHistoryMonths = AI_SEARCH_MONTHS_LIMIT[aiSearchTimeRange];
 
   // Use GA4-comparable rows for top-line KPIs; AI Overview/Mode are keyword-level SERP metrics.
   const aiSearchKpis = React.useMemo(() => {
@@ -319,10 +321,21 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     const ga4Rows = rows.filter((r) => r.name === "ChatGPT" || r.name === "Gemini");
     const baselineRows = ga4Rows.length > 0 ? ga4Rows : rows;
     const totalAiMentions = baselineRows.reduce((s, r) => s + (r.mentions ?? 0), 0);
-    const aiVisibilityScore = Math.min(100, baselineRows.reduce((s, r) => s + (r.visibility ?? 0), 0));
+    const visibilityFromRows = Math.min(100, baselineRows.reduce((s, r) => s + (r.visibility ?? 0), 0));
+    const apiKpiScore = Number(aiSearch?.kpis?.aiVisibilityScore ?? 0);
+    const aiVisibilityScore = (() => {
+      if (Number.isFinite(apiKpiScore) && apiKpiScore > 0) {
+        return Math.min(100, Math.max(0, Math.round(apiKpiScore)));
+      }
+      if (visibilityFromRows > 0) {
+        return visibilityFromRows;
+      }
+      // Fallback for providers that return mentions without visibility percentages.
+      return totalAiMentions > 0 ? 100 : 0;
+    })();
     const worldwideVisibility = totalAiMentions > 0 ? 100 : 0;
     return { aiVisibilityScore, totalAiMentions, worldwideVisibility };
-  }, [aiSearch?.rows, aiSearchUnavailableForDomain, hasUnavailableAiSearchMetric]);
+  }, [aiSearch?.rows, aiSearch?.kpis?.aiVisibilityScore, aiSearchUnavailableForDomain, hasUnavailableAiSearchMetric]);
 
   const aiSearchPlatforms = React.useMemo(() => {
     return (aiSearch?.rows ?? []).map((r) => ({
@@ -467,19 +480,21 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       if (isDirect) {
         // External domains must use direct-domain endpoint.
         overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview-any`, {
-          params: { domain: clientIdOrDomain, live: "true" },
+          params: { domain: clientIdOrDomain, live: "true", historyMonths: String(overviewHistoryMonths) },
         });
       } else {
         // Tracked clients should use the client endpoint to include full agency/client context
         // (paid metrics, traffic-source-derived tiles, and client-specific enrichments).
         try {
-          overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`);
+          overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview/${clientIdOrDomain}`, {
+            params: { historyMonths: String(overviewHistoryMonths) },
+          });
         } catch (clientErr: any) {
           // Fallback to direct-domain endpoint if the client route fails for any reason.
           const selectedClientDomain = clients.find((c) => c.id === clientIdOrDomain)?.domain?.trim();
           if (!selectedClientDomain) throw clientErr;
           overviewRes = await api.get<DomainOverviewData>(`/seo/domain-overview-any`, {
-            params: { domain: selectedClientDomain, live: "true" },
+            params: { domain: selectedClientDomain, live: "true", historyMonths: String(overviewHistoryMonths) },
           });
         }
       }
@@ -494,10 +509,11 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     } finally {
       setLoading(false);
     }
-  }, [clients]);
+  }, [clients, overviewHistoryMonths]);
 
   const fetchAiSearch = useCallback(async (target: string, timeRange: "1M" | "6M" | "1Y" | "2Y" | "All", isDirect: boolean = false) => {
     setAiSearchError(null);
+    setAiSearchLoading(true);
     try {
       const period = AI_SEARCH_PERIOD_DAYS[timeRange];
       const aiRes = await api.get<AiSearchVisibilityData>(
@@ -511,6 +527,8 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     } catch (err: any) {
       setAiSearch(null);
       setAiSearchError(err?.response?.data?.message || "Unable to load AI Search Visibility");
+    } finally {
+      setAiSearchLoading(false);
     }
   }, []);
 
@@ -801,7 +819,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
       setAiSearch(null);
       setError(null);
     }
-  }, [selectedClientId, directDomain, fetchOverview, isAdminPanelUser, isAgencyUser]);
+  }, [selectedClientId, directDomain, aiSearchTimeRange, fetchOverview, isAdminPanelUser, isAgencyUser]);
 
   useEffect(() => {
     if (selectedClientId) {
@@ -845,7 +863,7 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
     return [...competitorPoints, clientPoint];
   })();
 
-  const monthsLimit = AI_SEARCH_MONTHS_LIMIT[aiSearchTimeRange];
+  const monthsLimit = overviewHistoryMonths;
   const trafficChartDataRaw = (overview?.organicTrafficOverTime ?? []).map((m) => {
     const parts = (m.month || "").split("-");
     const year = parseInt(parts[0] || "", 10) || new Date().getFullYear();
@@ -1236,6 +1254,12 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                     </button>
                   ))}
                 </div>
+                {((loading && !!overview) || aiSearchLoading) && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading {aiSearchTimeRange === "All" ? "all-time" : aiSearchTimeRange} data...
+                  </span>
+                )}
                 <div className="flex rounded-lg border border-gray-200 overflow-hidden">
                   <button
                     type="button"
@@ -1407,9 +1431,6 @@ const DomainResearchView: React.FC<DomainResearchViewProps> = ({ clients, client
                       <input type="checkbox" checked={trafficOrganic} onChange={(e) => setTrafficOrganic(e.target.checked)} className="rounded border-gray-300 focus:ring-2 focus:ring-offset-1" style={{ accentColor: "#3B82F6" }} />
                       <span className="text-sm text-blue-600 font-medium">Organic Traffic</span>
                     </label>
-                    <select data-pdf-hide="true" className="ml-auto text-sm border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white">
-                      <option>Notes</option>
-                    </select>
                   </div>
                   <div className="h-52">
                     <ResponsiveContainer width="100%" height="100%">

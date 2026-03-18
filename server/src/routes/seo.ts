@@ -7072,6 +7072,10 @@ router.get("/dashboard/:clientId", authenticateToken, async (req, res) => {
 router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => {
   try {
     const { clientId } = req.params;
+    const requestedHistoryMonths = Number.parseInt(String(req.query.historyMonths ?? ""), 10);
+    const historyMonths = Number.isFinite(requestedHistoryMonths)
+      ? Math.max(12, Math.min(120, requestedHistoryMonths))
+      : 12;
     // Keep metric shaping consistent across roles so the same client/domain
     // returns the same overview in Agency, Admin, and Super Admin panels.
     const strictAccuracy = false;
@@ -7115,7 +7119,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const domainOverviewClientCacheKey = `domain-overview:${req.user.userId}:${clientId}:strict:${strictAccuracy ? 1 : 0}`;
+    const domainOverviewClientCacheKey = `domain-overview:${req.user.userId}:${clientId}:history:${historyMonths}:strict:${strictAccuracy ? 1 : 0}`;
     const cachedClientOverview = getCachedResearchResponse<any>(domainOverviewClientCacheKey);
     if (cachedClientOverview) {
       return res.json(cachedClientOverview);
@@ -7133,7 +7137,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       prisma.rankedKeywordsHistory.findMany({
         where: { clientId },
         orderBy: [{ year: "asc" }, { month: "asc" }],
-        take: 12,
+        take: historyMonths,
       }),
       prisma.keyword.findMany({
         where: { clientId, currentPosition: { not: null } },
@@ -7333,7 +7337,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
       pos51Plus: number;
     }> = [];
     const hasAnyHistory = historyRows.length > 0;
-    for (let i = 11; i >= 0; i--) {
+    for (let i = historyMonths - 1; i >= 0; i--) {
       const d = new Date(currentYear, currentMonth - 1 - i, 1);
       const y = d.getFullYear();
       const m = d.getMonth() + 1;
@@ -7632,7 +7636,7 @@ router.get("/domain-overview/:clientId", authenticateToken, async (req, res) => 
           }
           return organicKeywordsOverTime.map((m) => ({
             month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-            traffic: Math.round(organicTraffic / 12),
+            traffic: Math.round(organicTraffic / Math.max(1, organicKeywordsOverTime.length)),
           }));
         })();
 
@@ -7800,6 +7804,10 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
     // Direct domain search should return only measured values (no extrapolated fallback math).
     const strictAccuracy = true;
     const forceLive = coerceBoolean(req.query.live);
+    const requestedHistoryMonths = Number.parseInt(String(req.query.historyMonths ?? ""), 10);
+    const historyMonths = Number.isFinite(requestedHistoryMonths)
+      ? Math.max(12, Math.min(120, requestedHistoryMonths))
+      : 12;
     const rawDomain = (req.query.domain as string || "").trim();
     if (!rawDomain) {
       return res.status(400).json({ message: "Domain query parameter is required" });
@@ -7835,11 +7843,11 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
       const matchedClient = candidateClients.find((c) => domainsMatch(c.domain || "", domain));
       matchedClientId = matchedClient?.id ?? null;
       if (matchedClientId && !forceLive) {
-        return res.redirect(307, `${req.baseUrl}/domain-overview/${matchedClientId}`);
+        return res.redirect(307, `${req.baseUrl}/domain-overview/${matchedClientId}?historyMonths=${historyMonths}`);
       }
     }
 
-    const domainOverviewAnyCacheKey = `domain-overview-any:${req.user.userId}:${domain}:live:${forceLive ? 1 : 0}:strict:${strictAccuracy ? 1 : 0}`;
+    const domainOverviewAnyCacheKey = `domain-overview-any:${req.user.userId}:${domain}:history:${historyMonths}:live:${forceLive ? 1 : 0}:strict:${strictAccuracy ? 1 : 0}`;
     const cachedAnyOverview = getCachedResearchResponse<any>(domainOverviewAnyCacheKey);
     if (cachedAnyOverview) {
       return res.json(cachedAnyOverview);
@@ -7954,7 +7962,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
     const organicKeywordsOverTime: Array<{ year: number; month: number; keywords: number }> = [];
     const organicPositionsOverTime: Array<{ year: number; month: number; top3: number; top10: number; top20: number; top100: number; pos21_30: number; pos31_50: number; pos51Plus: number }> = [];
 
-    for (let i = 11; i >= 0; i--) {
+    for (let i = historyMonths - 1; i >= 0; i--) {
       const d = new Date(currentYear, currentMonth - 1 - i, 1);
       const y = d.getFullYear();
       const m = d.getMonth() + 1;
@@ -8119,7 +8127,7 @@ router.get("/domain-overview-any", authenticateToken, async (req, res) => {
           }
           return organicKeywordsOverTime.map((m) => ({
             month: `${m.year}-${String(m.month).padStart(2, "0")}`,
-            traffic: Math.round(scaledTraffic / 12),
+            traffic: Math.round(scaledTraffic / Math.max(1, organicKeywordsOverTime.length)),
           }));
         })();
 
