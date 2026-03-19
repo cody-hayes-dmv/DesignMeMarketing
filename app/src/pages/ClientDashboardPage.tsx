@@ -1953,9 +1953,15 @@ const ClientDashboardPage: React.FC = () => {
     if (user?.role === "USER") return;
     let cancelled = false;
     const q = assignableSearch.trim();
+    const scopedClientId = String(clientId || "").trim();
     setAssignableLoading(true);
     api
-      .get("/tasks/assignable-users", { params: q ? { search: q } : {} })
+      .get("/tasks/assignable-users", {
+        params: {
+          ...(q ? { search: q } : {}),
+          ...(scopedClientId ? { clientId: scopedClientId } : {}),
+        },
+      })
       .then((res) => {
         if (!cancelled) setAssignableUsers(Array.isArray(res.data) ? res.data : []);
       })
@@ -1966,7 +1972,7 @@ const ClientDashboardPage: React.FC = () => {
         if (!cancelled) setAssignableLoading(false);
       });
     return () => { cancelled = true; };
-  }, [workLogModalOpen, workLogRecurringRulesOpen, workLogAssigneesModalOpen, assignableSearch, user?.role]);
+  }, [workLogModalOpen, workLogRecurringRulesOpen, workLogAssigneesModalOpen, assignableSearch, user?.role, clientId]);
 
   useEffect(() => {
     if (!workLogModalOpen && !workLogRecurringRulesOpen && !workLogAssigneesModalOpen) return;
@@ -2035,6 +2041,32 @@ const ClientDashboardPage: React.FC = () => {
   const workLogCommentInputRef = useRef<HTMLTextAreaElement | null>(null);
   const workLogAddMenuRef = useRef<HTMLDivElement | null>(null);
   const lastAutoOpenedWorkLogTaskIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!workLogAssignSelectedOpen) return;
+    if (user?.role === "USER") return;
+    // Bulk-assign dropdown is outside the task modal; fetch assignees when opened.
+    if (assignableUsers.length > 0) return;
+    let cancelled = false;
+    const scopedClientId = String(clientId || "").trim();
+    setAssignableLoading(true);
+    api
+      .get("/tasks/assignable-users", {
+        params: scopedClientId ? { clientId: scopedClientId } : {},
+      })
+      .then((res) => {
+        if (!cancelled) setAssignableUsers(Array.isArray(res.data) ? res.data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignableUsers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAssignableLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workLogAssignSelectedOpen, user?.role, assignableUsers.length, clientId]);
 
 
   // Client portal users (Users tab)
@@ -4108,20 +4140,14 @@ const ClientDashboardPage: React.FC = () => {
       return;
     }
     let isMounted = true;
-    Promise.all([
-      api.get("/clients", { _silent: true } as any),
-      api.get("/web-design/projects", { _silent: true } as any),
-    ])
-      .then(([clientsRes, projectsRes]) => {
+    api
+      .get("/web-design/projects", { _silent: true } as any)
+      .then((projectsRes) => {
         if (!isMounted) return;
-        const clients = Array.isArray(clientsRes?.data) ? clientsRes.data : [];
         const projects = Array.isArray(projectsRes?.data) ? projectsRes.data : [];
-        const currentClient = clients.find((c: any) => String(c?.id) === String(clientId));
-        const isClientActive = String(currentClient?.status || "").toUpperCase() === "ACTIVE";
         const hasProjectForClient = projects.some((p: any) => String(p?.clientId || p?.client?.id || "") === String(clientId));
-        // Client portal should only show Web Design when there is an activated project.
-        // Admin-facing panels keep the ACTIVE-status fallback.
-        setHasWebDesignProjects(clientPortalMode ? hasProjectForClient : (isClientActive || hasProjectForClient));
+        // Web Design tab is visible only after a project exists for this client.
+        setHasWebDesignProjects(hasProjectForClient);
       })
       .catch(() => {
         if (!isMounted) return;
@@ -10718,6 +10744,16 @@ const ClientDashboardPage: React.FC = () => {
                                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                               >
                                 <option value="">Unassigned</option>
+                                {assignableLoading && assignableUsers.length === 0 ? (
+                                  <option value="__loading" disabled>
+                                    Loading assignees...
+                                  </option>
+                                ) : null}
+                                {!assignableLoading && assignableUsers.length === 0 ? (
+                                  <option value="__none" disabled>
+                                    No assignees found
+                                  </option>
+                                ) : null}
                                 {assignableUsers.map((u) => (
                                   <option key={u.id} value={u.id}>
                                     {u.name || u.email} ({assigneeRoleLabel(u.role)})

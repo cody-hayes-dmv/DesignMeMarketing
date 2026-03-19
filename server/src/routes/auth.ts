@@ -67,6 +67,11 @@ const defaultBranding = {
 };
 
 function resolveHost(req: express.Request): string | null {
+  const queryHost = typeof req.query?.host === "string" ? req.query.host : "";
+  if (queryHost.trim()) {
+    const normalizedQueryHost = normalizeDomainHost(queryHost);
+    if (normalizedQueryHost) return normalizedQueryHost;
+  }
   const rawHost = String(req.headers["x-forwarded-host"] || req.headers.host || "")
     .split(",")[0]
     .trim()

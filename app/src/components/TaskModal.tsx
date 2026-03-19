@@ -194,7 +194,13 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         let cancelled = false;
         setAssignableLoading(true);
         const q = assignableSearch.trim();
-        api.get("/tasks/assignable-users", { params: q ? { search: q } : {} })
+        const scopedClientId = String(form.clientId || task?.client?.id || "").trim();
+        api.get("/tasks/assignable-users", {
+            params: {
+                ...(q ? { search: q } : {}),
+                ...(scopedClientId ? { clientId: scopedClientId } : {}),
+            },
+        })
             .then((res) => {
                 if (!cancelled && Array.isArray(res.data)) setAssignableUsers(res.data);
             })
@@ -205,7 +211,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                 if (!cancelled) setAssignableLoading(false);
             });
         return () => { cancelled = true; };
-    }, [open, assignableSearch]);
+    }, [open, assignableSearch, form.clientId, task?.client?.id, user?.role]);
 
     useEffect(() => {
         if (!open) return;

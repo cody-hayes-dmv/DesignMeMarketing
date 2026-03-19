@@ -37,12 +37,19 @@ export async function resolveAgencyDomainContext(req: Request, res: Response, ne
     const host = getRequestHostname(req);
     if (!host) return next();
 
+    const primaryDomain = (normalizeDomainHost(process.env.APP_PRIMARY_DOMAIN || "") || "yourmarketingdashboard.ai").toLowerCase();
     const extraFirstPartyHosts = String(process.env.FIRST_PARTY_HOSTS || "")
       .split(",")
       .map((h) => normalizeDomainHost(h) || h.trim().toLowerCase())
       .filter(Boolean);
-    const firstPartyHosts = new Set([...defaultFirstPartyHosts, ...extraFirstPartyHosts]);
+    const firstPartyHosts = new Set([
+      ...defaultFirstPartyHosts,
+      primaryDomain,
+      `app.${primaryDomain}`,
+      ...extraFirstPartyHosts,
+    ]);
     if (firstPartyHosts.has(host)) return next();
+    if (host.endsWith(`.${primaryDomain}`)) return next();
 
     const agency = await prisma.agency.findFirst({
       where: { customDomain: host },

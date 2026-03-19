@@ -52,15 +52,22 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
 }) => {
   const [templates, setTemplates] = useState<OnboardingTemplate[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
-  const [assignableUsers, setAssignableUsers] = useState<User[]>([]);
-  const [assignableLoading, setAssignableLoading] = useState(false);
-  const [assignableSearch, setAssignableSearch] = useState("");
-  const [assignToOpen, setAssignToOpen] = useState(false);
-  const [assigneeDisplay, setAssigneeDisplay] = useState("");
-  const assignToRef = useRef<HTMLDivElement>(null);
+  const [templateAssignableUsers, setTemplateAssignableUsers] = useState<User[]>([]);
+  const [templateAssignableLoading, setTemplateAssignableLoading] = useState(false);
+  const [templateAssignableSearch, setTemplateAssignableSearch] = useState("");
+  const [templateAssignToOpen, setTemplateAssignToOpen] = useState(false);
+  const [templateAssigneeDisplay, setTemplateAssigneeDisplay] = useState("");
+  const templateAssignToRef = useRef<HTMLDivElement>(null);
+  const [deliverableAssignableUsers, setDeliverableAssignableUsers] = useState<User[]>([]);
+  const [deliverableAssignableLoading, setDeliverableAssignableLoading] = useState(false);
+  const [deliverableAssignableSearch, setDeliverableAssignableSearch] = useState("");
+  const [deliverableAssignToOpen, setDeliverableAssignToOpen] = useState(false);
+  const [deliverableAssigneeDisplay, setDeliverableAssigneeDisplay] = useState("");
+  const deliverableAssignToRef = useRef<HTMLDivElement>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<OnboardingTemplate | null>(null);
   const [selectedClient, setSelectedClient] = useState<string>(initialClientId || "");
-  const [selectedSpecialist, setSelectedSpecialist] = useState<string>("");
+  const [selectedTemplateSpecialist, setSelectedTemplateSpecialist] = useState<string>("");
+  const [selectedDeliverableSpecialist, setSelectedDeliverableSpecialist] = useState<string>("");
   const [selectedTemplateTaskIds, setSelectedTemplateTaskIds] = useState<string[]>([]);
   const [selectedDeliverableTaskIds, setSelectedDeliverableTaskIds] = useState<string[]>([]);
   const [templateTasksExpanded, setTemplateTasksExpanded] = useState(true);
@@ -140,7 +147,7 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
       category: draftTask.category,
       status: "TODO" as const,
       clientId: selectedClient,
-      assigneeId: selectedSpecialist || null,
+      assigneeId: selectedDeliverableSpecialist || null,
       dueDate: draftTask.dueDate,
       priority: draftTask.priority,
     }));
@@ -189,31 +196,61 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setAssignableLoading(true);
+    setTemplateAssignableLoading(true);
     api
-      .get("/tasks/assignable-users", { params: assignableSearch.trim() ? { search: assignableSearch.trim() } : {} })
+      .get("/tasks/assignable-users", {
+        params: templateAssignableSearch.trim() ? { search: templateAssignableSearch.trim() } : {},
+      })
       .then((res) => {
-        if (!cancelled && Array.isArray(res.data)) setAssignableUsers(res.data);
+        if (!cancelled && Array.isArray(res.data)) setTemplateAssignableUsers(res.data);
       })
       .catch(() => {
-        if (!cancelled) setAssignableUsers([]);
+        if (!cancelled) setTemplateAssignableUsers([]);
       })
       .finally(() => {
-        if (!cancelled) setAssignableLoading(false);
+        if (!cancelled) setTemplateAssignableLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, assignableSearch]);
+  }, [open, templateAssignableSearch]);
 
   useEffect(() => {
-    if (!assignToOpen) return;
+    if (!open) return;
+    let cancelled = false;
+    setDeliverableAssignableLoading(true);
+    api
+      .get("/tasks/assignable-users", {
+        params: deliverableAssignableSearch.trim() ? { search: deliverableAssignableSearch.trim() } : {},
+      })
+      .then((res) => {
+        if (!cancelled && Array.isArray(res.data)) setDeliverableAssignableUsers(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setDeliverableAssignableUsers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDeliverableAssignableLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, deliverableAssignableSearch]);
+
+  useEffect(() => {
+    if (!templateAssignToOpen && !deliverableAssignToOpen) return;
     const onDocClick = (e: MouseEvent) => {
-      if (assignToRef.current && !assignToRef.current.contains(e.target as Node)) setAssignToOpen(false);
+      const targetNode = e.target as Node;
+      if (templateAssignToRef.current && !templateAssignToRef.current.contains(targetNode)) {
+        setTemplateAssignToOpen(false);
+      }
+      if (deliverableAssignToRef.current && !deliverableAssignToRef.current.contains(targetNode)) {
+        setDeliverableAssignToOpen(false);
+      }
     };
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
-  }, [assignToOpen]);
+  }, [templateAssignToOpen, deliverableAssignToOpen]);
 
   const fetchTemplates = async () => {
     try {
@@ -263,7 +300,7 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
         category: templateTask.category ?? undefined,
         status: "TODO" as const,
         clientId: selectedClient,
-        assigneeId: selectedSpecialist || null,
+        assigneeId: selectedTemplateSpecialist || null,
         estimatedHours: templateTask.estimatedHours ?? undefined,
         priority: templateTask.priority ?? undefined,
       }));
@@ -292,10 +329,14 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
   const resetForm = () => {
     setSelectedTemplate(null);
     setSelectedClient("");
-    setSelectedSpecialist("");
-    setAssignableSearch("");
-    setAssigneeDisplay("");
-    setAssignToOpen(false);
+    setSelectedTemplateSpecialist("");
+    setSelectedDeliverableSpecialist("");
+    setTemplateAssignableSearch("");
+    setDeliverableAssignableSearch("");
+    setTemplateAssigneeDisplay("");
+    setDeliverableAssigneeDisplay("");
+    setTemplateAssignToOpen(false);
+    setDeliverableAssignToOpen(false);
     setSelectedTemplateTaskIds([]);
     setSelectedDeliverableTaskIds([]);
     setTemplateTasksExpanded(true);
@@ -540,39 +581,43 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
                   <span className="text-sm font-medium text-gray-700">
                     Selected: {selectedTemplateTaskIds.length}
                   </span>
-                  <div ref={assignToRef} className="relative w-56 sm:w-64 shrink-0">
+                  <div ref={templateAssignToRef} className="relative w-56 sm:w-64 shrink-0">
                     <input
                       type="text"
-                      value={selectedSpecialist ? assigneeDisplay : assignableSearch}
+                      value={selectedTemplateSpecialist ? templateAssigneeDisplay : templateAssignableSearch}
                       onChange={(e) => {
-                        setAssignableSearch(e.target.value);
-                        setAssignToOpen(true);
-                        if (selectedSpecialist && e.target.value !== assigneeDisplay) {
-                          setSelectedSpecialist("");
-                          setAssigneeDisplay("");
+                        setTemplateAssignableSearch(e.target.value);
+                        setTemplateAssignToOpen(true);
+                        setDeliverableAssignToOpen(false);
+                        if (selectedTemplateSpecialist && e.target.value !== templateAssigneeDisplay) {
+                          setSelectedTemplateSpecialist("");
+                          setTemplateAssigneeDisplay("");
                         }
                       }}
-                      onFocus={() => setAssignToOpen(true)}
+                      onFocus={() => {
+                        setTemplateAssignToOpen(true);
+                        setDeliverableAssignToOpen(false);
+                      }}
                       placeholder="Assigned selector"
                       className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     />
-                    {assignToOpen && (
+                    {templateAssignToOpen && (
                       <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
-                        {assignableLoading ? (
+                        {templateAssignableLoading ? (
                           <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
-                        ) : assignableUsers.length === 0 ? (
+                        ) : templateAssignableUsers.length === 0 ? (
                           <li className="px-3 py-2 text-sm text-gray-500">No users found. Try a different search.</li>
                         ) : (
-                          assignableUsers.map((u) => (
+                          templateAssignableUsers.map((u) => (
                             <li key={u.id}>
                               <button
                                 type="button"
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center justify-between"
                                 onClick={() => {
-                                  setSelectedSpecialist(u.id);
-                                  setAssigneeDisplay(u.name || u.email);
-                                  setAssignableSearch("");
-                                  setAssignToOpen(false);
+                                  setSelectedTemplateSpecialist(u.id);
+                                  setTemplateAssigneeDisplay(u.name || u.email);
+                                  setTemplateAssignableSearch("");
+                                  setTemplateAssignToOpen(false);
                                 }}
                               >
                                 <span>{u.name || u.email}</span>
@@ -691,39 +736,43 @@ const OnboardingTemplateModal: React.FC<OnboardingTemplateModalProps> = ({
                   <span className="text-sm font-medium text-gray-700">
                     Selected: {selectedDeliverableTaskIds.length}
                   </span>
-                  <div className="relative w-56 sm:w-64 shrink-0">
+                  <div ref={deliverableAssignToRef} className="relative w-56 sm:w-64 shrink-0">
                     <input
                       type="text"
-                      value={selectedSpecialist ? assigneeDisplay : assignableSearch}
+                      value={selectedDeliverableSpecialist ? deliverableAssigneeDisplay : deliverableAssignableSearch}
                       onChange={(e) => {
-                        setAssignableSearch(e.target.value);
-                        setAssignToOpen(true);
-                        if (selectedSpecialist && e.target.value !== assigneeDisplay) {
-                          setSelectedSpecialist("");
-                          setAssigneeDisplay("");
+                        setDeliverableAssignableSearch(e.target.value);
+                        setDeliverableAssignToOpen(true);
+                        setTemplateAssignToOpen(false);
+                        if (selectedDeliverableSpecialist && e.target.value !== deliverableAssigneeDisplay) {
+                          setSelectedDeliverableSpecialist("");
+                          setDeliverableAssigneeDisplay("");
                         }
                       }}
-                      onFocus={() => setAssignToOpen(true)}
+                      onFocus={() => {
+                        setDeliverableAssignToOpen(true);
+                        setTemplateAssignToOpen(false);
+                      }}
                       placeholder="Assigned selector"
                       className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     />
-                    {assignToOpen && (
+                    {deliverableAssignToOpen && (
                       <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
-                        {assignableLoading ? (
+                        {deliverableAssignableLoading ? (
                           <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>
-                        ) : assignableUsers.length === 0 ? (
+                        ) : deliverableAssignableUsers.length === 0 ? (
                           <li className="px-3 py-2 text-sm text-gray-500">No users found. Try a different search.</li>
                         ) : (
-                          assignableUsers.map((u) => (
+                          deliverableAssignableUsers.map((u) => (
                             <li key={u.id}>
                               <button
                                 type="button"
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center justify-between"
                                 onClick={() => {
-                                  setSelectedSpecialist(u.id);
-                                  setAssigneeDisplay(u.name || u.email);
-                                  setAssignableSearch("");
-                                  setAssignToOpen(false);
+                                  setSelectedDeliverableSpecialist(u.id);
+                                  setDeliverableAssigneeDisplay(u.name || u.email);
+                                  setDeliverableAssignableSearch("");
+                                  setDeliverableAssignToOpen(false);
                                 }}
                               >
                                 <span>{u.name || u.email}</span>

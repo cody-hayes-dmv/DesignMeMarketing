@@ -19,6 +19,7 @@ import localMapRoutes from "./routes/localMap.js";
 import webDesignRoutes from "./routes/webDesign.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { resolveAgencyDomainContext } from "./middleware/resolveAgencyDomainContext.js";
+import { prisma } from "./lib/prisma.js";
 
 // Load .env file from server directory
 const __filename = fileURLToPath(import.meta.url);
@@ -63,10 +64,55 @@ const corsOriginsEnv = process.env.CORS_ORIGINS?.trim();
 const corsOrigins = corsOriginsEnv
   ? corsOriginsEnv.split(",").map((o) => o.trim()).filter(Boolean)
   : defaultCorsOrigins;
+const normalizedCorsOrigins = new Set(
+  corsOrigins
+    .map((origin) => {
+      try {
+        return new URL(origin).origin.toLowerCase();
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean)
+);
+const appPrimaryDomain = String(process.env.APP_PRIMARY_DOMAIN || "yourmarketingdashboard.ai")
+  .trim()
+  .toLowerCase();
+
+const allowCorsOrigin = async (origin: string): Promise<boolean> => {
+  try {
+    const parsed = new URL(origin);
+    const normalizedOrigin = parsed.origin.toLowerCase();
+    const hostname = parsed.hostname.toLowerCase();
+
+    if (normalizedCorsOrigins.has(normalizedOrigin)) return true;
+    if (hostname === "localhost" || hostname === "127.0.0.1") return true;
+    if (
+      appPrimaryDomain &&
+      (hostname === appPrimaryDomain || hostname.endsWith(`.${appPrimaryDomain}`))
+    ) {
+      return true;
+    }
+
+    const agencyByCustomDomain = await prisma.agency.findFirst({
+      where: { customDomain: hostname },
+      select: { id: true },
+    });
+    return Boolean(agencyByCustomDomain);
+  } catch {
+    return false;
+  }
+};
 
 app.use(
   cors({
-    origin: corsOrigins,
+    origin: (origin, callback) => {
+      // Allow non-browser tools (curl/Postman/mobile apps) without CORS origin.
+      if (!origin) return callback(null, true);
+      void allowCorsOrigin(origin)
+        .then((allowed) => callback(allowed ? null : new Error("Not allowed by CORS"), allowed))
+        .catch(() => callback(new Error("Not allowed by CORS"), false));
+    },
     credentials: true,
   })
 );

@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { resolve4, resolve6, resolveCname } from 'dns/promises';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { sendEmail } from '../lib/email.js';
@@ -175,6 +176,91 @@ const parseAgencyOnboardingData = (raw: string | null | undefined) => {
     return null;
   }
 };
+
+type AgencyAddressInput = {
+  streetAddress?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string | null;
+};
+
+type GeocodedAgencyLocation = {
+  lat: number;
+  lng: number;
+  formattedAddress: string | null;
+  source: "google_geocoding";
+  geocodedAt: string;
+};
+
+const buildAgencyAddressQuery = (address: AgencyAddressInput): string => {
+  return [
+    address.streetAddress,
+    address.city,
+    address.state,
+    address.zip,
+    address.country,
+  ]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter(Boolean)
+    .join(", ");
+};
+
+async function geocodeAgencyAddress(address: AgencyAddressInput): Promise<GeocodedAgencyLocation | null> {
+  const apiKey = String(
+    process.env.GOOGLE_MAPS_API_KEY
+    || process.env.GOOGLE_PLACES_API_KEY
+    || process.env.GOOGLE_API_KEY
+    || ""
+  ).trim();
+  if (!apiKey) return null;
+
+  const addressQuery = buildAgencyAddressQuery(address);
+  if (!addressQuery) return null;
+
+  try {
+    const geocodeUrl = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+    geocodeUrl.searchParams.set("address", addressQuery);
+    geocodeUrl.searchParams.set("key", apiKey);
+
+    const geocodeRes = await fetch(geocodeUrl.toString(), { method: "GET" });
+    if (!geocodeRes.ok) {
+      console.warn("[agencies] geocode request failed:", geocodeRes.status, geocodeRes.statusText);
+      return null;
+    }
+
+    const geocodeData = await geocodeRes.json() as {
+      status?: string;
+      results?: Array<{
+        formatted_address?: string;
+        geometry?: { location?: { lat?: number; lng?: number } };
+      }>;
+    };
+
+    if (geocodeData?.status !== "OK" || !Array.isArray(geocodeData.results) || geocodeData.results.length === 0) {
+      if (geocodeData?.status && geocodeData.status !== "ZERO_RESULTS") {
+        console.warn("[agencies] geocode returned non-OK status:", geocodeData.status);
+      }
+      return null;
+    }
+
+    const firstResult = geocodeData.results[0];
+    const lat = Number(firstResult?.geometry?.location?.lat);
+    const lng = Number(firstResult?.geometry?.location?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+    return {
+      lat: Number(lat.toFixed(7)),
+      lng: Number(lng.toFixed(7)),
+      formattedAddress: firstResult?.formatted_address?.trim() || null,
+      source: "google_geocoding",
+      geocodedAt: new Date().toISOString(),
+    };
+  } catch (error: any) {
+    console.warn("[agencies] geocode failed:", error?.message || error);
+    return null;
+  }
+}
 
 const markLegacyOnboardingSchema = z
   .object({
@@ -1025,6 +1111,14 @@ router.post('/register', async (req, res) => {
     if (primaryGoals && primaryGoals.length) onboardingPayload.primaryGoals = primaryGoals;
     if (primaryGoalsOther) onboardingPayload.primaryGoalsOther = primaryGoalsOther;
     if (currentTools) onboardingPayload.currentTools = currentTools;
+    const geocodedLocation = await geocodeAgencyAddress({
+      streetAddress,
+      city,
+      state,
+      zip,
+      country,
+    });
+    if (geocodedLocation) onboardingPayload.geocodedLocation = geocodedLocation;
     const onboardingData = Object.keys(onboardingPayload).length ? JSON.stringify(onboardingPayload) : null;
 
     // Create user first (unique email). Prevents double-submit from creating two Stripe customers:
@@ -1324,6 +1418,14 @@ router.post('/', authenticateToken, async (req, res) => {
     if (primaryGoals && primaryGoals.length) onboardingPayload.primaryGoals = primaryGoals;
     if (primaryGoalsOther) onboardingPayload.primaryGoalsOther = primaryGoalsOther;
     if (currentTools) onboardingPayload.currentTools = currentTools;
+    const geocodedLocation = await geocodeAgencyAddress({
+      streetAddress,
+      city,
+      state,
+      zip,
+      country,
+    });
+    if (geocodedLocation) onboardingPayload.geocodedLocation = geocodedLocation;
     // Super Admin "Charge to Card" agencies are already provisioned with billing + plan,
     // so onboarding should be considered complete at first login.
     if (billingOption === 'charge') onboardingPayload.submittedAt = new Date().toISOString();
@@ -1958,6 +2060,44 @@ router.put('/me', authenticateToken, async (req, res) => {
       }
     }
 
+    const existingOnboarding = parseAgencyOnboardingData(membership.agency.onboardingData) ?? {};
+    let nextOnboardingData: Record<string, any> | null = null;
+
+    const addressFieldsTouched =
+      updateData.streetAddress !== undefined ||
+      updateData.city !== undefined ||
+      updateData.state !== undefined ||
+      updateData.zip !== undefined ||
+      updateData.country !== undefined;
+
+    if (addressFieldsTouched) {
+      const addressForGeocoding: AgencyAddressInput = {
+        streetAddress: updateData.streetAddress !== undefined
+          ? (updateData.streetAddress?.trim() || null)
+          : membership.agency.streetAddress,
+        city: updateData.city !== undefined
+          ? (updateData.city?.trim() || null)
+          : membership.agency.city,
+        state: updateData.state !== undefined
+          ? (updateData.state?.trim() || null)
+          : membership.agency.state,
+        zip: updateData.zip !== undefined
+          ? (updateData.zip?.trim() || null)
+          : membership.agency.zip,
+        country: updateData.country !== undefined
+          ? (updateData.country?.trim() || null)
+          : membership.agency.country,
+      };
+      const addressQuery = buildAgencyAddressQuery(addressForGeocoding);
+      nextOnboardingData = { ...existingOnboarding };
+      if (!addressQuery) {
+        delete nextOnboardingData.geocodedLocation;
+      } else {
+        const geocodedLocation = await geocodeAgencyAddress(addressForGeocoding);
+        if (geocodedLocation) nextOnboardingData.geocodedLocation = geocodedLocation;
+      }
+    }
+
     const onboardingPatchRequested =
       updateData.referralSource !== undefined ||
       updateData.referralSourceOther !== undefined ||
@@ -1966,7 +2106,7 @@ router.put('/me', authenticateToken, async (req, res) => {
       updateData.currentTools !== undefined ||
       updateData.onboardingCompleted !== undefined;
     if (onboardingPatchRequested) {
-      const existingOnboarding = parseAgencyOnboardingData(membership.agency.onboardingData) ?? {};
+      const onboardingBase = nextOnboardingData ?? { ...existingOnboarding };
       const referralSourceRaw =
         updateData.referralSource !== undefined
           ? updateData.referralSource
@@ -1993,14 +2133,18 @@ router.put('/me', authenticateToken, async (req, res) => {
       const shouldMarkSubmitted =
         updateData.onboardingCompleted === true || Boolean(existingOnboarding.submittedAt);
 
-      payload.onboardingData = JSON.stringify({
+      nextOnboardingData = {
+        ...onboardingBase,
         referralSource: referralSourceNormalized || undefined,
         referralSourceOther: referralSourceNormalized === "referral" ? (String(referralSourceOther || "").trim() || undefined) : undefined,
         primaryGoals: Array.isArray(primaryGoals) ? primaryGoals.filter(Boolean) : [],
         primaryGoalsOther: String(primaryGoalsOther || "").trim() || undefined,
         currentTools: String(currentTools || "").trim() || undefined,
         submittedAt: shouldMarkSubmitted ? (existingOnboarding.submittedAt || new Date().toISOString()) : undefined,
-      });
+      };
+    }
+    if (nextOnboardingData) {
+      payload.onboardingData = JSON.stringify(nextOnboardingData);
     }
 
     // Update agency
@@ -2054,6 +2198,59 @@ router.put('/me', authenticateToken, async (req, res) => {
     }
     console.error('Update agency error:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Check whether the agency white-label subdomain resolves in DNS.
+router.get('/me/subdomain-dns-status', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role === 'SUPER_ADMIN') {
+      return res.status(403).json({ message: 'SUPER_ADMIN users do not have an agency subdomain context.' });
+    }
+
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: req.user.userId },
+      include: { agency: true },
+    });
+    if (!membership) return res.status(404).json({ message: 'No agency found for user' });
+
+    const subdomain = String(membership.agency.subdomain || '').trim().toLowerCase();
+    const primaryDomain = String(process.env.APP_PRIMARY_DOMAIN || 'yourmarketingdashboard.ai').trim().toLowerCase();
+
+    if (!subdomain) {
+      return res.json({
+        configured: false,
+        host: null,
+        message: 'Set a white-label subdomain first.',
+        records: { cname: [], a: [], aaaa: [] },
+      });
+    }
+
+    const host = `${subdomain}.${primaryDomain}`;
+
+    const [cnameRes, aRes, aaaaRes] = await Promise.allSettled([
+      resolveCname(host),
+      resolve4(host),
+      resolve6(host),
+    ]);
+
+    const cname = cnameRes.status === 'fulfilled' ? cnameRes.value : [];
+    const a = aRes.status === 'fulfilled' ? aRes.value : [];
+    const aaaa = aaaaRes.status === 'fulfilled' ? aaaaRes.value : [];
+    const configured = cname.length > 0 || a.length > 0 || aaaa.length > 0;
+
+    return res.json({
+      configured,
+      host,
+      message: configured
+        ? 'White-label subdomain resolves in DNS.'
+        : `DNS record not found for ${host}. Add a wildcard CNAME (*) or explicit CNAME (${subdomain}) to app.${primaryDomain}.`,
+      records: { cname, a, aaaa },
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Subdomain DNS status check error:', error);
+    return res.status(500).json({ message: error?.message || 'Failed to check subdomain DNS status' });
   }
 });
 
@@ -2804,6 +3001,34 @@ router.put('/:agencyId([a-zA-Z0-9]{16,})', authenticateToken, async (req, res) =
     if (updateData.enterpriseKeywordsTotal !== undefined) payload.enterpriseKeywordsTotal = updateData.enterpriseKeywordsTotal;
     if (updateData.enterpriseCreditsPerMonth !== undefined) payload.enterpriseCreditsPerMonth = updateData.enterpriseCreditsPerMonth;
     if (updateData.enterpriseMaxTeamUsers !== undefined) payload.enterpriseMaxTeamUsers = updateData.enterpriseMaxTeamUsers;
+
+    const addressFieldsTouched =
+      updateData.streetAddress !== undefined ||
+      updateData.city !== undefined ||
+      updateData.state !== undefined ||
+      updateData.zip !== undefined ||
+      updateData.country !== undefined;
+    if (addressFieldsTouched) {
+      const existingOnboarding = parseAgencyOnboardingData(agency.onboardingData) ?? {};
+      const nextOnboardingData: Record<string, unknown> = { ...existingOnboarding };
+      const addressForGeocoding: AgencyAddressInput = {
+        streetAddress: updateData.streetAddress !== undefined ? updateData.streetAddress : agency.streetAddress,
+        city: updateData.city !== undefined ? updateData.city : agency.city,
+        state: updateData.state !== undefined ? updateData.state : agency.state,
+        zip: updateData.zip !== undefined ? updateData.zip : agency.zip,
+        country: updateData.country !== undefined ? updateData.country : agency.country,
+      };
+      const addressQuery = buildAgencyAddressQuery(addressForGeocoding);
+      if (!addressQuery) {
+        delete (nextOnboardingData as Record<string, unknown>).geocodedLocation;
+      } else {
+        const geocodedLocation = await geocodeAgencyAddress(addressForGeocoding);
+        if (geocodedLocation) {
+          (nextOnboardingData as Record<string, unknown>).geocodedLocation = geocodedLocation;
+        }
+      }
+      payload.onboardingData = JSON.stringify(nextOnboardingData);
+    }
 
     const updated = await prisma.agency.update({
       where: { id: agencyId },

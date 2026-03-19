@@ -808,11 +808,8 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
-// List users who can be assigned or mentioned in task/work-log activity.
-// SUPER_ADMIN: can assign to Super Admins, Admins, Specialists (system-wide).
-// ADMIN: can assign ONLY to Admins and Specialists (system-wide).
-// AGENCY: can assign ONLY to users in their own agency (same team).
-// SPECIALIST: mention-only list (admins/super admins + own agency members).
+// List users who can be assigned in task/work-log modals.
+// Supports optional ?clientId=... to include scoped agency/client users.
 router.get("/assignable-users", authenticateToken, async (req, res) => {
   try {
     if (
@@ -824,6 +821,7 @@ router.get("/assignable-users", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const clientId = typeof req.query.clientId === "string" ? req.query.clientId.trim() : "";
     const searchFilter = search
       ? {
           OR: [
@@ -832,77 +830,113 @@ router.get("/assignable-users", authenticateToken, async (req, res) => {
           ],
         }
       : {};
+    const allowedIds = new Set<string>();
+    const addIds = (ids: Array<string | null | undefined>) => {
+      ids.forEach((id) => {
+        const normalized = String(id || "").trim();
+        if (normalized) allowedIds.add(normalized);
+      });
+    };
 
     if (req.user.role === "AGENCY") {
-      // Agency users may only assign to members of their own agency (team).
+      // Agency users may assign to their own team.
       const myMemberships = await prisma.userAgency.findMany({
         where: { userId: req.user.userId },
         select: { agencyId: true },
       });
       const myAgencyIds = myMemberships.map((m) => m.agencyId);
-      if (myAgencyIds.length === 0) {
-        return res.json([]);
+      if (myAgencyIds.length) {
+        const teamUserIds = await prisma.userAgency.findMany({
+          where: { agencyId: { in: myAgencyIds } },
+          select: { userId: true },
+        });
+        addIds(teamUserIds.map((m) => m.userId));
       }
-      const teamUserIds = await prisma.userAgency.findMany({
-        where: { agencyId: { in: myAgencyIds } },
+    } else if (req.user.role === "SPECIALIST") {
+      // Specialists: admins/super admins + own agency team.
+      const coreUsers = await prisma.user.findMany({
+        where: { role: { in: ["SUPER_ADMIN", "ADMIN"] }, verified: true },
+        select: { id: true },
+      });
+      addIds(coreUsers.map((u) => u.id));
+
+      const myMemberships = await prisma.userAgency.findMany({
+        where: { userId: req.user.userId },
+        select: { agencyId: true },
+      });
+      const myAgencyIds = myMemberships.map((m) => m.agencyId);
+      if (myAgencyIds.length) {
+        const teamUserIds = await prisma.userAgency.findMany({
+          where: { agencyId: { in: myAgencyIds } },
+          select: { userId: true },
+        });
+        addIds(teamUserIds.map((m) => m.userId));
+      }
+    } else {
+      // SUPER_ADMIN + ADMIN: system-wide internal pool.
+      const rolesForRequester: Role[] =
+        req.user.role === "SUPER_ADMIN" ? ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] : ["ADMIN", "SPECIALIST"];
+      const users = await prisma.user.findMany({
+        where: { role: { in: rolesForRequester }, verified: true },
+        select: { id: true },
+      });
+      addIds(users.map((u) => u.id));
+    }
+
+    if (clientId) {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId },
+        select: { id: true, belongsToAgencyId: true, user: { select: { memberships: { select: { agencyId: true } } } } },
+      });
+      if (!client) return res.status(404).json({ message: "Client not found" });
+
+      const isRequesterAdmin = req.user.role === "SUPER_ADMIN" || req.user.role === "ADMIN";
+      let hasClientAccess = isRequesterAdmin;
+      if (!hasClientAccess) {
+        const membership = await prisma.clientUser.findFirst({
+          where: { clientId, userId: req.user.userId, status: "ACTIVE" },
+          select: { id: true },
+        });
+        hasClientAccess = Boolean(membership);
+      }
+      if (!hasClientAccess) {
+        const requesterMemberships = await prisma.userAgency.findMany({
+          where: { userId: req.user.userId },
+          select: { agencyId: true },
+        });
+        const requesterAgencyIds = requesterMemberships.map((m) => m.agencyId);
+        const clientAgencyId = client.belongsToAgencyId ?? client.user.memberships[0]?.agencyId ?? null;
+        hasClientAccess = Boolean(clientAgencyId && requesterAgencyIds.includes(clientAgencyId));
+      }
+      if (!hasClientAccess) return res.status(403).json({ message: "Access denied" });
+
+      const clientUsers = await prisma.clientUser.findMany({
+        where: { clientId, status: "ACTIVE" },
         select: { userId: true },
       });
-      const uniqueIds = [...new Set(teamUserIds.map((m) => m.userId))];
-      const users = await prisma.user.findMany({
-        where: {
-          id: { in: uniqueIds },
-          verified: true,
-          ...searchFilter,
-        },
-        select: { id: true, name: true, email: true, role: true },
-        orderBy: [{ name: "asc" }],
-        take: 100,
-      });
-      return res.json(users);
+      addIds(clientUsers.map((cu) => cu.userId));
+
+      const scopedAgencyId = client.belongsToAgencyId ?? client.user.memberships[0]?.agencyId ?? null;
+      if (scopedAgencyId) {
+        const agencyMembers = await prisma.userAgency.findMany({
+          where: { agencyId: scopedAgencyId },
+          select: { userId: true },
+        });
+        addIds(agencyMembers.map((m) => m.userId));
+      }
     }
 
-    if (req.user.role === "SPECIALIST") {
-      const myMemberships = await prisma.userAgency.findMany({
-        where: { userId: req.user.userId },
-        select: { agencyId: true },
-      });
-      const myAgencyIds = myMemberships.map((m) => m.agencyId);
-      const teamUserIds = myAgencyIds.length
-        ? await prisma.userAgency.findMany({
-            where: { agencyId: { in: myAgencyIds } },
-            select: { userId: true },
-          })
-        : [];
-      const scopedIds = [...new Set(teamUserIds.map((m) => m.userId))];
-      const users = await prisma.user.findMany({
-        where: {
-          verified: true,
-          ...searchFilter,
-          OR: [
-            { role: { in: ["SUPER_ADMIN", "ADMIN"] } },
-            ...(scopedIds.length ? [{ id: { in: scopedIds } }] : []),
-          ],
-        },
-        select: { id: true, name: true, email: true, role: true },
-        orderBy: [{ role: "asc" }, { name: "asc" }],
-        take: 150,
-      });
-      return res.json(users);
-    }
-
-    // SUPER_ADMIN and ADMIN: system-wide assignable users.
-    // Admins are intentionally blocked from assigning tasks to Super Admins.
-    const rolesForRequester: Role[] =
-      req.user.role === "SUPER_ADMIN" ? ["SUPER_ADMIN", "ADMIN", "SPECIALIST"] : ["ADMIN", "SPECIALIST"];
+    if (allowedIds.size === 0) return res.json([]);
     const users = await prisma.user.findMany({
       where: {
-        role: { in: rolesForRequester },
+        id: { in: Array.from(allowedIds) },
         verified: true,
+        ...(req.user.role === "ADMIN" ? { role: { not: "SUPER_ADMIN" as Role } } : {}),
         ...searchFilter,
       },
       select: { id: true, name: true, email: true, role: true },
       orderBy: [{ role: "asc" }, { name: "asc" }],
-      take: 100,
+      take: 300,
     });
     return res.json(users);
   } catch (error) {

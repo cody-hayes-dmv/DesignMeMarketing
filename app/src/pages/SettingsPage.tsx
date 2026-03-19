@@ -62,6 +62,14 @@ const SettingsPage = () => {
   const [domainError, setDomainError] = useState<string | null>(null);
   const [domainActionLoading, setDomainActionLoading] = useState<"verify" | "ssl" | null>(null);
   const [domainLastCheckedAt, setDomainLastCheckedAt] = useState<string | null>(null);
+  const [subdomainDnsLoading, setSubdomainDnsLoading] = useState(false);
+  const [subdomainDnsStatus, setSubdomainDnsStatus] = useState<{
+    configured: boolean;
+    host: string | null;
+    message: string;
+    records: { cname: string[]; a: string[]; aaaa: string[] };
+    checkedAt?: string;
+  } | null>(null);
   const [domainInstructions, setDomainInstructions] = useState<{
     txtHost: string;
     txtValue: string;
@@ -263,6 +271,12 @@ const SettingsPage = () => {
       if (response.data) {
         applyAgencyData(response.data);
         setDomainLastCheckedAt(new Date().toISOString());
+        const nextSubdomain = String(response.data?.subdomain || "").trim();
+        if (nextSubdomain) {
+          void fetchSubdomainDnsStatus();
+        } else {
+          setSubdomainDnsStatus(null);
+        }
       }
     } catch (error: any) {
       if (error.response?.status !== 404) {
@@ -270,6 +284,35 @@ const SettingsPage = () => {
       }
     } finally {
       setAgencyLoading(false);
+    }
+  };
+
+  const fetchSubdomainDnsStatus = async () => {
+    try {
+      setSubdomainDnsLoading(true);
+      const response = await api.get("/agencies/me/subdomain-dns-status");
+      if (response?.data) {
+        setSubdomainDnsStatus({
+          configured: Boolean(response.data.configured),
+          host: response.data.host ?? null,
+          message: String(response.data.message || ""),
+          records: {
+            cname: Array.isArray(response.data.records?.cname) ? response.data.records.cname : [],
+            a: Array.isArray(response.data.records?.a) ? response.data.records.a : [],
+            aaaa: Array.isArray(response.data.records?.aaaa) ? response.data.records.aaaa : [],
+          },
+          checkedAt: response.data.checkedAt,
+        });
+      }
+    } catch (error: any) {
+      setSubdomainDnsStatus({
+        configured: false,
+        host: null,
+        message: error?.response?.data?.message || "Unable to check white-label subdomain DNS.",
+        records: { cname: [], a: [], aaaa: [] },
+      });
+    } finally {
+      setSubdomainDnsLoading(false);
     }
   };
 
@@ -349,6 +392,12 @@ const SettingsPage = () => {
       const res = await api.put("/agencies/me", updateData);
       toast.success("Agency settings updated successfully!");
       if (res?.data) applyAgencyData(res.data);
+      const updatedSubdomain = String(res?.data?.subdomain || "").trim();
+      if (updatedSubdomain) {
+        void fetchSubdomainDnsStatus();
+      } else {
+        setSubdomainDnsStatus(null);
+      }
       dispatch(checkAuth() as any);
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to update agency settings");
@@ -713,6 +762,54 @@ const SettingsPage = () => {
                             .yourmarketingdashboard.ai
                           </span>
                         </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={fetchSubdomainDnsStatus}
+                            disabled={subdomainDnsLoading || !agencyForm.subdomain.trim()}
+                            className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {subdomainDnsLoading ? "Checking subdomain DNS..." : "Check white-label DNS"}
+                          </button>
+                          {subdomainDnsStatus?.checkedAt && (
+                            <span className="text-xs text-gray-500">
+                              Last checked: {new Date(subdomainDnsStatus.checkedAt).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                        {subdomainDnsStatus && (
+                          <div
+                            className={`mt-2 rounded-lg border p-3 text-xs ${
+                              subdomainDnsStatus.configured
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                : "border-amber-200 bg-amber-50 text-amber-800"
+                            }`}
+                          >
+                            <p className="font-semibold">
+                              {subdomainDnsStatus.configured ? "White-label DNS configured" : "White-label DNS not configured"}
+                            </p>
+                            <p className="mt-1">{subdomainDnsStatus.message}</p>
+                            {subdomainDnsStatus.host && (
+                              <p className="mt-1">
+                                <strong>Host:</strong> {subdomainDnsStatus.host}
+                              </p>
+                            )}
+                            {!subdomainDnsStatus.configured && subdomainDnsStatus.host && (
+                              <div className="mt-2 rounded-md border border-amber-200 bg-white/80 p-2 text-[11px] text-amber-900 space-y-1">
+                                <p className="font-semibold">DNS records to add</p>
+                                <p>
+                                  <strong>Wildcard (recommended):</strong> CNAME <code>*</code> -&gt;{" "}
+                                  <code>app.yourmarketingdashboard.ai</code>
+                                </p>
+                                <p>
+                                  <strong>Or explicit subdomain:</strong> CNAME{" "}
+                                  <code>{agencyForm.subdomain.trim().toLowerCase() || "(your-subdomain)"}</code> -&gt;{" "}
+                                  <code>app.yourmarketingdashboard.ai</code>
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

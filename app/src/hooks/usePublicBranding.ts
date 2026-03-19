@@ -17,8 +17,9 @@ export function usePublicBranding() {
 
   useEffect(() => {
     let cancelled = false;
+    const hostHint = typeof window !== "undefined" ? window.location.hostname : undefined;
     api
-      .get("/auth/branding")
+      .get("/auth/branding", { params: hostHint ? { host: hostHint } : undefined })
       .then((res) => {
         if (!cancelled) setData(res.data || null);
       })
