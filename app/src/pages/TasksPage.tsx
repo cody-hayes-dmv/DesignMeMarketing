@@ -534,7 +534,12 @@ const TasksPage = () => {
 
     useEffect(() => { dispatch(fetchTasks() as any); }, [dispatch]);
 
-    const canViewRecurring = canCreate || isClientUser;
+    const canViewRecurring = ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"].includes(
+        String(user?.role || "")
+    );
+    const canChangeRecurringStatus = ["SUPER_ADMIN", "ADMIN", "AGENCY"].includes(
+        String(user?.role || "")
+    );
     const fetchRecurringRules = () => {
         if (!canViewRecurring) return;
         api.get("/tasks/recurring")
@@ -867,7 +872,7 @@ const TasksPage = () => {
                     </button>
                     {recurringRulesOpen && (
                         <div className="border-t border-gray-200 overflow-x-auto">
-                            {recurringRules.length === 0 ? (isClientUser ? (
+                            {recurringRules.length === 0 ? (isClientUser || !canCreate ? (
                                 <div className="px-6 py-8 text-sm text-gray-500">No recurring tasks yet.</div>
                             ) :
                                 <div className="px-6 py-8 text-sm text-gray-500">No recurring tasks yet. Use “Add Recurring Task” above to create one.</div>
@@ -881,7 +886,7 @@ const TasksPage = () => {
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Status</th>
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Assignee</th>
                                             <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider border-l-4 border-slate-300">Due Date</th>
-                                            {!isClientUser && <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>}
+                                            {canChangeRecurringStatus && <th className="px-6 py-3.5 text-left text-xs font-semibold text-violet-700 uppercase tracking-wider border-l-4 border-violet-300">Actions</th>}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -923,7 +928,7 @@ const TasksPage = () => {
                                                         {format(new Date(r.nextRunAt), "MMM dd, yyyy")}
                                                     </div>
                                                 </td>
-                                                {!isClientUser && (
+                                                {canChangeRecurringStatus && (
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                     {(user?.role === "SUPER_ADMIN" || (r as any).createdBy?.id === user?.id) ? (
                                                     <div className="flex items-center gap-1">

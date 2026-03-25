@@ -27,6 +27,7 @@ const SuperAdminDashboard = () => {
   const { agencies, loading: agenciesLoading } = useSelector((state: RootState) => state.agency);
   const { clients, loading: clientsLoading } = useSelector((state: RootState) => state.client);
   const { user } = useSelector((state: RootState) => state.auth);
+  const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const [pendingManagedServices, setPendingManagedServices] = useState<PendingManagedService[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -44,11 +45,17 @@ const SuperAdminDashboard = () => {
   const [myTasksLoading, setMyTasksLoading] = useState(true);
 
   const fetchFinancial = async () => {
+    if (!isSuperAdmin) {
+      setMrrData(null);
+      setActivityData(null);
+      setFinancialLoading(false);
+      return;
+    }
     setFinancialLoading(true);
     try {
       const [mrrRes, activityRes] = await Promise.all([
-        api.get("/financial/mrr-breakdown").catch(() => ({ data: null })),
-        api.get("/financial/subscription-activity").catch(() => ({ data: null })),
+        api.get("/financial/mrr-breakdown", { _silent: true } as any).catch(() => ({ data: null })),
+        api.get("/financial/subscription-activity", { _silent: true } as any).catch(() => ({ data: null })),
       ]);
       if (mrrRes.data?.segments) {
         setMrrData({
@@ -77,7 +84,7 @@ const SuperAdminDashboard = () => {
 
   useEffect(() => {
     fetchFinancial();
-  }, []);
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     dispatch(fetchAgencies() as any);

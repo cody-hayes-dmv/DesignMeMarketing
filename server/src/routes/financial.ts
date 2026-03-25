@@ -21,6 +21,14 @@ const requireFinancialAccess = (req: express.Request, res: express.Response, nex
   next();
 };
 
+// Require SUPER_ADMIN only (strict financial controls)
+const requireSuperAdminOnly = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.user?.role !== "SUPER_ADMIN") {
+    return res.status(403).json({ message: "Access denied. Super Admin only." });
+  }
+  next();
+};
+
 // Require SUPER_ADMIN or ADMIN (for DataForSEO account usage / credentials)
 const requireSuperAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (req.user?.role !== "SUPER_ADMIN" && req.user?.role !== "ADMIN") {
@@ -205,7 +213,7 @@ function mrrSegmentLabel(category: string): string {
   return CATEGORY_LABELS[category as MrrCategory] || category;
 }
 
-router.get("/mrr-breakdown", authenticateToken, requireFinancialAccess, async (req, res) => {
+router.get("/mrr-breakdown", authenticateToken, requireSuperAdminOnly, async (req, res) => {
   try {
     const stripe = getStripe();
     if (!stripe || !isStripeConfigured()) {

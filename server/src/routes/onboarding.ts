@@ -251,14 +251,14 @@ async function findTemplatesWithTaskFallback(opts: {
   }
 }
 
-// Get onboarding templates. Client-based: agency/admin see only global template(s). Super admin sees all.
+// Get onboarding templates. Super admin/admin see all. Agency sees only agency templates.
 router.get("/templates", authenticateToken, async (req, res) => {
   try {
     const user = req.user;
 
     await ensureDefaultGlobalTemplate();
 
-    if (user.role === "SUPER_ADMIN") {
+    if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
       let templates = await findTemplatesWithTaskFallback({});
       if ((templates?.length ?? 0) === 0) {
         const firstAgency = await prisma.agency.findFirst({ select: { id: true } });
@@ -270,9 +270,9 @@ router.get("/templates", authenticateToken, async (req, res) => {
       return res.json(templates);
     }
 
-    // Agency/Admin: only templates from their own agency.
+    // Agency: only templates from their own agency.
     // Do not include global templates in the "Use a template" flow.
-    if (user.role === "AGENCY" || user.role === "ADMIN") {
+    if (user.role === "AGENCY") {
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId },
       });
@@ -291,17 +291,17 @@ router.get("/templates", authenticateToken, async (req, res) => {
 });
 
 // Get templates the current user can manage (edit/delete). Used by Settings > Templates.
-// SUPER_ADMIN: all templates. AGENCY/ADMIN: only templates belonging to their agency.
+// SUPER_ADMIN/ADMIN: all templates. AGENCY: only templates belonging to their agency.
 router.get("/templates/manageable", authenticateToken, async (req, res) => {
   try {
     const user = req.user;
 
-    if (user.role === "SUPER_ADMIN") {
+    if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
       const templates = await findTemplatesWithTaskFallback({ includeAgency: true });
       return res.json(templates);
     }
 
-    if (user.role === "AGENCY" || user.role === "ADMIN") {
+    if (user.role === "AGENCY") {
       const userAgency = await prisma.userAgency.findFirst({
         where: { userId: user.userId },
       });
@@ -332,8 +332,8 @@ router.post("/templates", authenticateToken, async (req, res) => {
     const safeTasks = Array.isArray(tasks) ? tasks : [];
 
     let agencyId: string | null;
-    if (user.role === "SUPER_ADMIN") {
-      // Super admin can create global (null) or assign to an agency
+    if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
+      // Super admin/admin can create global (null) or assign to an agency
       if (bodyAgencyId === null || bodyAgencyId === "") {
         agencyId = null;
       } else if (typeof bodyAgencyId === "string") {

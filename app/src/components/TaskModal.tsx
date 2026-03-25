@@ -103,8 +103,10 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         task?.createdBy?.id !== user?.id &&
         task?.assignee?.id === user?.id;
     const formReadOnly = isSpecialistView || isClientUser || isNotOwner;
+    const isStatusOnlyEditor =
+        Number(mode) === 1 && (isSpecialistView || isClientUser || isAdminAssigneeStatusEditor);
     const canEditStatus =
-        !isClientUser && (!formReadOnly || isSpecialistView || isAdminAssigneeStatusEditor);
+        (!formReadOnly || isStatusOnlyEditor);
     const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
     const [activityCollaboratorUsers, setActivityCollaboratorUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
     const [assignableLoading, setAssignableLoading] = useState(false);
@@ -215,12 +217,17 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
 
     useEffect(() => {
         if (!open) return;
+        if (user?.role === "SPECIALIST" || user?.role === "USER") {
+            setActivityCollaboratorUsers([]);
+            return;
+        }
         let cancelled = false;
         const scopedClientId = String(form.clientId || task?.client?.id || "").trim();
         api
             .get("/tasks/activity-collaborators", {
                 params: scopedClientId ? { clientId: scopedClientId } : {},
-            })
+                _silent: true,
+            } as any)
             .then((res) => {
                 if (!cancelled) setActivityCollaboratorUsers(Array.isArray(res.data) ? res.data : []);
             })
@@ -230,7 +237,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
         return () => {
             cancelled = true;
         };
-    }, [open, form.clientId, task?.client?.id]);
+    }, [open, form.clientId, task?.client?.id, user?.role]);
 
     // Close Assign to dropdown on outside click
     useEffect(() => {
@@ -314,7 +321,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                 await dispatch(createTask(payload) as any);
                 toast.success("Task created successfully!");
             } else if (mode === 1 && task) {
-                if (isSpecialistView || isAdminAssigneeStatusEditor) {
+                if (isStatusOnlyEditor) {
                     await dispatch(patchTaskStatus({ id: task.id, status: form.status }) as any);
                     toast.success("Status updated successfully!");
                 } else {
@@ -789,6 +796,11 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
     };
 
     if (!open) return null;
+    const showPrimaryAction =
+        (isClientUser && Number(mode) === 1) || (!isClientUser && (!isNotOwner || isAdminAssigneeStatusEditor));
+    const primaryActionLabel =
+        mode === 0 ? "Create" : isStatusOnlyEditor ? "Save Status" : "Save";
+    const secondaryButtonClass = showPrimaryAction ? "w-full sm:flex-1" : "w-full";
 
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm overflow-y-auto">
@@ -1483,16 +1495,16 @@ const TaskModal: React.FC<TaskModalProps> = ({ open, setOpen, title, mode, task 
                             <button
                                 type="button"
                                 onClick={handleCancel}
-                                className={`${isClientUser || (isNotOwner && !isAdminAssigneeStatusEditor) ? "w-full" : "w-full sm:flex-1"} border border-gray-300 bg-white text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-50 font-medium transition-colors`}
+                                className={`${secondaryButtonClass} border border-gray-300 bg-white text-gray-700 py-3 px-6 rounded-xl hover:bg-gray-50 font-medium transition-colors`}
                             >
                                 {isClientUser || (isNotOwner && !isAdminAssigneeStatusEditor) ? "Close" : "Cancel"}
                             </button>
-                            {!isClientUser && (!isNotOwner || isAdminAssigneeStatusEditor) && (
+                            {showPrimaryAction && (
                                 <button
                                     type="submit"
                                     className="w-full sm:flex-1 py-3 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 shadow-md hover:shadow-lg transition-all"
                                 >
-                                    {mode === 0 ? "Create" : isAdminAssigneeStatusEditor ? "Save Status" : "Save"}
+                                    {primaryActionLabel}
                                 </button>
                             )}
                         </div>

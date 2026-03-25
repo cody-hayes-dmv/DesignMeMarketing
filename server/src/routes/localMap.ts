@@ -25,16 +25,21 @@ const DEFAULT_GRID_SPACING_MILES = 0.5;
 const DEFAULT_MAP_ZOOM = 11;
 const SUPER_ADMIN_EXCLUDED_LABEL_PREFIX = "__SA_EXCLUDED__:";
 
+/** Platform operators: activations do not consume the agency's grid keyword pool (see excludeSuperAdminActivatedKeywordsWhere). */
+function isPlatformGridKeywordCapacityExcludedRole(role: string | undefined): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN";
+}
+
 function normalizeLocationLabelForActivation(
   rawLocationLabel: string | null | undefined,
-  isSuperAdminActivation: boolean
+  excludeFromAgencyKeywordPool: boolean
 ): string | null {
   const base = String(rawLocationLabel ?? "").trim();
   const unmarked = base.startsWith(SUPER_ADMIN_EXCLUDED_LABEL_PREFIX)
     ? base.slice(SUPER_ADMIN_EXCLUDED_LABEL_PREFIX.length).trim()
     : base;
-  if (!unmarked && !isSuperAdminActivation) return null;
-  if (isSuperAdminActivation) return `${SUPER_ADMIN_EXCLUDED_LABEL_PREFIX}${unmarked}`;
+  if (!unmarked && !excludeFromAgencyKeywordPool) return null;
+  if (excludeFromAgencyKeywordPool) return `${SUPER_ADMIN_EXCLUDED_LABEL_PREFIX}${unmarked}`;
   return unmarked || null;
 }
 
@@ -179,6 +184,20 @@ async function resolveAgencyIdForClient(clientId: string, fallbackUserId?: strin
 
   if (client.belongsToAgencyId) return client.belongsToAgencyId;
 
+  const inclusion = await prisma.clientAgencyIncluded.findFirst({
+    where: { clientId },
+    select: { agencyId: true },
+    orderBy: { createdAt: "desc" },
+  });
+  if (inclusion?.agencyId) return inclusion.agencyId;
+
+  const managedActive = await prisma.managedService.findFirst({
+    where: { clientId, status: "ACTIVE" },
+    select: { agencyId: true },
+    orderBy: { startDate: "desc" },
+  });
+  if (managedActive?.agencyId) return managedActive.agencyId;
+
   const ownerAgencyId = await getAgencyIdForUser(client.userId);
   if (ownerAgencyId) return ownerAgencyId;
 
@@ -192,7 +211,48 @@ async function resolveAgencyIdForClient(clientId: string, fallbackUserId?: strin
     select: { agencyId: true },
     orderBy: { createdAt: "desc" },
   });
-  return existingGridKeyword?.agencyId ?? null;
+  if (existingGridKeyword?.agencyId) return existingGridKeyword.agencyId;
+
+  const managedAny = await prisma.managedService.findFirst({
+    where: { clientId },
+    select: { agencyId: true },
+    orderBy: { startDate: "desc" },
+  });
+  if (managedAny?.agencyId) return managedAny.agencyId;
+
+  const taskScoped = await prisma.task.findFirst({
+    where: { clientId, agencyId: { not: null } },
+    select: { agencyId: true },
+    orderBy: { createdAt: "desc" },
+  });
+  return taskScoped?.agencyId ?? null;
+}
+
+/**
+ * Super Admin / Admin often have no UserAgency row, so fallbackUserId alone cannot resolve an agency.
+ * After normal client links are exhausted, allow an explicit agency id (body) or LOCAL_MAP_ORPHAN_DEFAULT_AGENCY_ID.
+ */
+async function resolveAgencyIdForPlatformGridKeywordActivation(
+  clientId: string,
+  fallbackUserId: string | undefined,
+  bodyAgencyId: unknown
+): Promise<string | null> {
+  const base = await resolveAgencyIdForClient(clientId, fallbackUserId);
+  if (base) return base;
+
+  const raw = typeof bodyAgencyId === "string" ? bodyAgencyId.trim() : "";
+  if (raw) {
+    const row = await prisma.agency.findUnique({ where: { id: raw }, select: { id: true } });
+    if (row) return row.id;
+  }
+
+  const envId = String(process.env.LOCAL_MAP_ORPHAN_DEFAULT_AGENCY_ID ?? "").trim();
+  if (envId) {
+    const row = await prisma.agency.findUnique({ where: { id: envId }, select: { id: true } });
+    if (row) return row.id;
+  }
+
+  return null;
 }
 
 async function ensureAgencySnapshotCounters(agencyId: string): Promise<{
@@ -1008,8 +1068,9 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     const canRead = await canReadClient(req.user, clientId);
     if (!canRead) return res.status(403).json({ message: "Access denied" });
 
-    const { keywordId, placeId, businessName, businessAddress, centerLat, centerLng, locationLabel } = req.body ?? {};
-    const isSuperAdminActivation = req.user.role === "SUPER_ADMIN";
+    const { keywordId, placeId, businessName, businessAddress, centerLat, centerLng, locationLabel, agencyId: bodyAgencyId } =
+      req.body ?? {};
+    const excludeFromAgencyKeywordPool = isPlatformGridKeywordCapacityExcludedRole(req.user.role);
     if (!keywordId || !placeId || !businessName || centerLat == null || centerLng == null) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -1022,9 +1083,15 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "Money keyword not found on this dashboard" });
     }
 
-    const agencyId = await resolveAgencyIdForClient(clientId, req.user.userId);
+    const agencyId = excludeFromAgencyKeywordPool
+      ? await resolveAgencyIdForPlatformGridKeywordActivation(clientId, req.user.userId, bodyAgencyId)
+      : await resolveAgencyIdForClient(clientId, req.user.userId);
     if (!agencyId) {
-      return res.status(400).json({ message: "Unable to resolve agency account for this dashboard." });
+      return res.status(400).json({
+        message: excludeFromAgencyKeywordPool
+          ? "Unable to resolve agency account for this dashboard. Link the client to an agency (owner membership, belongs-to agency, agency inclusion, or managed service), or pass agencyId in the activation request, or set LOCAL_MAP_ORPHAN_DEFAULT_AGENCY_ID on the server for fully orphan dashboards."
+          : "Unable to resolve agency account for this dashboard.",
+      });
     }
 
     const normalizedPlaceId = String(placeId);
@@ -1046,7 +1113,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
       }
 
       const capacity = await getMapKeywordCapacity(agencyId);
-      if (!isSuperAdminActivation && capacity.remaining <= 0) {
+      if (!excludeFromAgencyKeywordPool && capacity.remaining <= 0) {
         return res.status(402).json({
           code: "LOCAL_MAP_KEYWORD_CAP_REACHED",
           message: "No grid keyword slots remaining. Upgrade or add Local Map Rankings keyword pack.",
@@ -1064,7 +1131,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
           centerLng: new Prisma.Decimal(Number(centerLng)),
           locationLabel: normalizeLocationLabelForActivation(
             locationLabel ? String(locationLabel) : null,
-            isSuperAdminActivation
+            excludeFromAgencyKeywordPool
           ),
           gridSize: DEFAULT_GRID_SIZE,
           gridSpacingMiles: new Prisma.Decimal(DEFAULT_GRID_SPACING_MILES),
@@ -1080,7 +1147,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
     }
 
     const capacity = await getMapKeywordCapacity(agencyId);
-    if (!isSuperAdminActivation && capacity.remaining <= 0) {
+    if (!excludeFromAgencyKeywordPool && capacity.remaining <= 0) {
       return res.status(402).json({
         code: "LOCAL_MAP_KEYWORD_CAP_REACHED",
         message: "No grid keyword slots remaining. Upgrade or add Local Map Rankings keyword pack.",
@@ -1101,7 +1168,7 @@ router.post("/keywords/:clientId", authenticateToken, async (req, res) => {
           centerLng: new Prisma.Decimal(Number(centerLng)),
           locationLabel: normalizeLocationLabelForActivation(
             locationLabel ? String(locationLabel) : null,
-            isSuperAdminActivation
+            excludeFromAgencyKeywordPool
           ),
           gridSize: DEFAULT_GRID_SIZE,
           gridSpacingMiles: new Prisma.Decimal(DEFAULT_GRID_SPACING_MILES),
@@ -1149,6 +1216,32 @@ router.patch("/keywords/:gridKeywordId", authenticateToken, async (req, res) => 
     if (!["active", "paused", "canceled"].includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
+
+    const existing = await prisma.gridKeyword.findUnique({
+      where: { id: gridKeywordId },
+    });
+    if (!existing) {
+      return res.status(404).json({ message: "Grid keyword not found" });
+    }
+    const canRead = await canReadClient(req.user, existing.clientId);
+    if (!canRead) return res.status(403).json({ message: "Access denied" });
+
+    if (status === "active" && existing.status !== "active") {
+      const rowExcludedFromPool = String(existing.locationLabel ?? "").startsWith(
+        SUPER_ADMIN_EXCLUDED_LABEL_PREFIX
+      );
+      const platform = isPlatformGridKeywordCapacityExcludedRole(req.user.role);
+      if (!rowExcludedFromPool && !platform) {
+        const capacity = await getMapKeywordCapacity(existing.agencyId);
+        if (capacity.remaining <= 0) {
+          return res.status(402).json({
+            code: "LOCAL_MAP_KEYWORD_CAP_REACHED",
+            message: "No grid keyword slots remaining. Upgrade or add Local Map Rankings keyword pack.",
+          });
+        }
+      }
+    }
+
     const updated = await prisma.gridKeyword.update({
       where: { id: gridKeywordId },
       data: { status: status as "active" | "paused" | "canceled" },

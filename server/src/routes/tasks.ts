@@ -1187,10 +1187,59 @@ router.get("/worklog/:clientId/approval-recipients", authenticateToken, async (r
 });
 
 // ---------- Recurring task rules ----------
-// List recurring rules (agency-scoped, or client-scoped for USER role)
+const recurringAllowedRoles: Role[] = ["SUPER_ADMIN", "ADMIN", "AGENCY", "SPECIALIST", "USER"];
+const recurringCreateAllowedRoles: Role[] = ["SUPER_ADMIN", "ADMIN", "AGENCY"];
+const recurringEditAllowedRoles: Role[] = ["SUPER_ADMIN", "ADMIN", "AGENCY"];
+const recurringStatusAllowedRoles: Role[] = ["SUPER_ADMIN", "ADMIN", "AGENCY"];
+const recurringDeleteAllowedRoles: Role[] = ["SUPER_ADMIN", "ADMIN", "AGENCY"];
+
+function canAccessRecurringTasks(role: Role | null | undefined): boolean {
+  return Boolean(role && recurringAllowedRoles.includes(role));
+}
+
+function canCreateRecurringTasks(role: Role | null | undefined): boolean {
+  return Boolean(role && recurringCreateAllowedRoles.includes(role));
+}
+
+function canEditRecurringTasks(role: Role | null | undefined): boolean {
+  return Boolean(role && recurringEditAllowedRoles.includes(role));
+}
+
+function canChangeRecurringStatus(role: Role | null | undefined): boolean {
+  return Boolean(role && recurringStatusAllowedRoles.includes(role));
+}
+
+function canDeleteRecurringTasks(role: Role | null | undefined): boolean {
+  return Boolean(role && recurringDeleteAllowedRoles.includes(role));
+}
+
+async function canAccessRecurringRule(user: { userId: string; role: Role }, rule: { agencyId: string; clientId: string | null }) {
+  if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") return true;
+
+  if (user.role === "AGENCY" || user.role === "SPECIALIST") {
+    const membership = await prisma.userAgency.findFirst({
+      where: { userId: user.userId, agencyId: rule.agencyId },
+      select: { id: true },
+    });
+    return Boolean(membership);
+  }
+
+  if (user.role === "USER") {
+    if (!rule.clientId) return false;
+    const clientMembership = await prisma.clientUser.findFirst({
+      where: { userId: user.userId, clientId: rule.clientId, status: "ACTIVE" },
+      select: { id: true },
+    });
+    return Boolean(clientMembership);
+  }
+
+  return false;
+}
+
+// List recurring rules (agency-scoped; user role is client-scoped)
 router.get("/recurring", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "SPECIALIST") {
+    if (!canAccessRecurringTasks(req.user.role as Role)) {
       return res.status(403).json({ message: "Access denied" });
     }
 
@@ -1254,7 +1303,7 @@ router.get("/recurring", authenticateToken, async (req, res) => {
 // Create recurring rule
 router.post("/recurring", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "SPECIALIST") {
+    if (!canCreateRecurringTasks(req.user.role as Role)) {
       return res.status(403).json({ message: "Access denied" });
     }
     const parsed = createRecurringTaskSchema.parse(req.body);
@@ -1302,20 +1351,16 @@ router.post("/recurring", authenticateToken, async (req, res) => {
 // Update recurring rule
 router.put("/recurring/:id", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "SPECIALIST") {
+    if (!canEditRecurringTasks(req.user.role as Role)) {
       return res.status(403).json({ message: "Access denied" });
     }
     const { id } = req.params;
     const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
     if (!rule) return res.status(404).json({ message: "Resource not found." });
-    let canAccess = false;
-    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
-    else {
-      const membership = await prisma.userAgency.findFirst({
-        where: { userId: req.user.userId, agencyId: rule.agencyId },
-      });
-      canAccess = Boolean(membership);
-    }
+    const canAccess = await canAccessRecurringRule(req.user as { userId: string; role: Role }, {
+      agencyId: rule.agencyId,
+      clientId: rule.clientId,
+    });
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
 
     if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
@@ -1358,20 +1403,16 @@ router.put("/recurring/:id", authenticateToken, async (req, res) => {
 // Stop recurrence (set isActive = false)
 router.patch("/recurring/:id/stop", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "SPECIALIST") {
+    if (!canChangeRecurringStatus(req.user.role as Role)) {
       return res.status(403).json({ message: "Access denied" });
     }
     const { id } = req.params;
     const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
     if (!rule) return res.status(404).json({ message: "Recurring rule not found" });
-    let canAccess = false;
-    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
-    else {
-      const membership = await prisma.userAgency.findFirst({
-        where: { userId: req.user.userId, agencyId: rule.agencyId },
-      });
-      canAccess = Boolean(membership);
-    }
+    const canAccess = await canAccessRecurringRule(req.user as { userId: string; role: Role }, {
+      agencyId: rule.agencyId,
+      clientId: rule.clientId,
+    });
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
     if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
       return res.status(403).json({ message: "You can only manage recurring tasks you created." });
@@ -1390,20 +1431,16 @@ router.patch("/recurring/:id/stop", authenticateToken, async (req, res) => {
 // Resume recurrence (set isActive = true)
 router.patch("/recurring/:id/resume", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "SPECIALIST") {
+    if (!canChangeRecurringStatus(req.user.role as Role)) {
       return res.status(403).json({ message: "Access denied" });
     }
     const { id } = req.params;
     const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
     if (!rule) return res.status(404).json({ message: "Recurring rule not found" });
-    let canAccess = false;
-    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
-    else {
-      const membership = await prisma.userAgency.findFirst({
-        where: { userId: req.user.userId, agencyId: rule.agencyId },
-      });
-      canAccess = Boolean(membership);
-    }
+    const canAccess = await canAccessRecurringRule(req.user as { userId: string; role: Role }, {
+      agencyId: rule.agencyId,
+      clientId: rule.clientId,
+    });
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
     if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
       return res.status(403).json({ message: "You can only manage recurring tasks you created." });
@@ -1422,20 +1459,16 @@ router.patch("/recurring/:id/resume", authenticateToken, async (req, res) => {
 // Delete recurring rule (remove permanently)
 router.delete("/recurring/:id", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role === "SPECIALIST") {
+    if (!canDeleteRecurringTasks(req.user.role as Role)) {
       return res.status(403).json({ message: "Access denied" });
     }
     const { id } = req.params;
     const rule = await prisma.recurringTaskRule.findUnique({ where: { id } });
     if (!rule) return res.status(404).json({ message: "Recurring rule not found" });
-    let canAccess = false;
-    if (req.user.role === "ADMIN" || req.user.role === "SUPER_ADMIN") canAccess = true;
-    else {
-      const membership = await prisma.userAgency.findFirst({
-        where: { userId: req.user.userId, agencyId: rule.agencyId },
-      });
-      canAccess = Boolean(membership);
-    }
+    const canAccess = await canAccessRecurringRule(req.user as { userId: string; role: Role }, {
+      agencyId: rule.agencyId,
+      clientId: rule.clientId,
+    });
     if (!canAccess) return res.status(403).json({ message: "Access denied" });
     if ((req.user.role === "ADMIN" || req.user.role === "AGENCY") && rule.createdById !== req.user.userId) {
       return res.status(403).json({ message: "You can only delete recurring tasks you created." });
