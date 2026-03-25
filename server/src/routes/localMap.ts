@@ -246,13 +246,53 @@ async function resolveAgencyIdForPlatformGridKeywordActivation(
     if (row) return row.id;
   }
 
+  // Prefer persisted platform config if present (no env required after first provision).
+  const ORPHAN_DEFAULT_AGENCY_CONFIG_KEY = "local_map_orphan_default_agency_id";
+  try {
+    await ensurePlatformConfigTable();
+    const rows = await prisma.$queryRaw<Array<{ configValue: string }>>`
+      SELECT configValue
+      FROM platform_configs
+      WHERE configKey = ${ORPHAN_DEFAULT_AGENCY_CONFIG_KEY}
+      LIMIT 1
+    `;
+    const cfg = String(rows?.[0]?.configValue ?? "").trim();
+    if (cfg) {
+      const row = await prisma.agency.findUnique({ where: { id: cfg }, select: { id: true } });
+      if (row) return row.id;
+    }
+  } catch {
+    // ignore config lookup errors; fall through to env / auto-provision
+  }
+
   const envId = String(process.env.LOCAL_MAP_ORPHAN_DEFAULT_AGENCY_ID ?? "").trim();
   if (envId) {
     const row = await prisma.agency.findUnique({ where: { id: envId }, select: { id: true } });
     if (row) return row.id;
   }
 
-  return null;
+  // Last resort: auto-provision a hidden "platform" agency to satisfy GridKeyword.agencyId FK.
+  try {
+    const created = await prisma.agency.create({
+      data: {
+        name: "Platform (Local Map Orphans)",
+        billingType: "paid",
+        subscriptionTier: null,
+        internalNotes: "Auto-created fallback agency for Super Admin Local Map keyword activations on orphan dashboards.",
+      },
+      select: { id: true },
+    });
+    await ensurePlatformConfigTable();
+    await prisma.$executeRaw`
+      INSERT INTO platform_configs (configKey, configValue)
+      VALUES (${ORPHAN_DEFAULT_AGENCY_CONFIG_KEY}, ${created.id})
+      ON DUPLICATE KEY UPDATE configValue = VALUES(configValue)
+    `;
+    return created.id;
+  } catch (e) {
+    console.error("[LocalMap] Failed to auto-provision orphan agency", e);
+    return null;
+  }
 }
 
 async function ensureAgencySnapshotCounters(agencyId: string): Promise<{
